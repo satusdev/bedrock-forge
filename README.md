@@ -4,6 +4,52 @@
     <!-- <img src="./assets/images/icon.png" alt="logo"/> -->
 </div>
 
+## Modular Workflow 🚀
+
+This project now uses a modular script workflow for all local, deployment, sync,
+and provisioning tasks:
+
+- `scripts/local/site-init.sh` — Create a new local Bedrock site
+- `scripts/local/env-switch.sh` — Switch active .env for a site
+- `scripts/provision/provision-cyberpanel.sh` — Provision CyberPanel/Hetzner
+  server
+- `scripts/deploy/deploy.sh` — Deploy code to remote server
+- `scripts/sync/sync-db.sh` — Sync database (push/pull)
+- `scripts/sync/sync-uploads.sh` — Sync uploads (push/pull)
+- `scripts/sync/rclone-gui.sh` — Launch rclone web GUI
+- `scripts/provision/kuma-monitor.sh` — Kuma monitoring integration
+- `scripts/deploy/jenkins/Jenkinsfile` — Jenkins CI/CD pipeline
+
+**Usage Examples:**
+
+```sh
+# Create a new local site
+./scripts/local/site-init.sh mysite --port=8001
+
+# Switch environment
+./scripts/local/env-switch.sh mysite staging
+
+# Provision server
+./scripts/provision/provision-cyberpanel.sh mysite.com
+
+# Deploy code
+./scripts/deploy/deploy.sh mysite staging
+
+# Sync database
+./scripts/sync/sync-db.sh mysite staging push   # push local → remote
+./scripts/sync/sync-db.sh mysite staging pull   # pull remote → local
+
+# Sync uploads
+./scripts/sync/sync-uploads.sh mysite staging push
+./scripts/sync/sync-uploads.sh mysite staging pull
+
+# Launch rclone GUI
+./scripts/sync/rclone-gui.sh
+
+# Kuma monitoring
+./scripts/provision/kuma-monitor.sh add mysite.com
+```
+
 ## Overview ⏩️
 
 This project provides a Docker-based development environment designed to manage
