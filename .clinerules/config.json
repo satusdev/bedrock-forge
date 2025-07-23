@@ -1,0 +1,5 @@
+{
+  "defaultRules": ["rules/base.md", "rules/cli-safha.json"],
+  "defaultWorkflow": "workflows/feature-flow.md",
+  "enforceRules": true
+}

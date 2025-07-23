@@ -1,0 +1,65 @@
+{
+  "project": {
+    "name": "Safha",
+    "description": "Safha is a modern, mobile-first platform for creating single-page digital hubs that empowers individuals and brands to showcase links, profiles, galleries, social icons, analytics, QR/NFC sharing, and customizable themes.",
+    "techStack": [
+      "Next.js",
+      "React",
+      "Mantine UI",
+      "NestJS",
+      "TypeScript",
+      "PostgreSQL",
+      "Prisma",
+      "AWS S3",
+      "Stripe",
+      "GraphQL",
+      "Docker",
+      "GitHub Actions",
+      "Jest",
+      "Playwright"
+    ],
+    "coreFeatures": [
+      "Links Management",
+      "User Profiles",
+      "Theming & Customization",
+      "Image Gallery",
+      "Analytics & Reporting",
+      "NFC & QR Code Integration",
+      "Privacy & Security",
+      "Link Categories",
+      "Social Interactions",
+      "Subscriptions & Billing",
+      "Notifications",
+      "Multilingual Support",
+      "Testing & QA",
+      "DevOps & Deployment"
+    ],
+    "configFileFormat": "JSON"
+  },
+  "cli": {
+    "defaultPackageManager": "npm",
+    "monorepo": "nx",
+    "nxWorkspace": "safha",
+    "apiProject": "apps/api",
+    "frontendProject": "apps/frontend"
+  },
+  "rules": [
+    {
+      "when": "generation",
+      "context": [
+        "project.name",
+        "project.description",
+        "cli.monorepo",
+        "cli.defaultPackageManager"
+      ],
+      "applyTo": ["cline.exec", "templates"],
+      "priority": 1
+    },
+    {
+      "when": "scaffold",
+      "context": ["coreFeatures", "techStack"],
+      "applyTo": ["nx generate", "npm install"],
+      "priority": 2
+    }
+  ]
+}
