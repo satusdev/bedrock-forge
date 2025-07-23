@@ -1,0 +1,30 @@
+# Ignore root .env file (if any)
+.env
+
+
+
+# Ignore core .env file (contains DB root password)
+core/.env
+
+# Ignore site-specific active .env files
+websites/*/.env
+
+# Ignore Composer dependencies within each site
+websites/*/www/vendor/
+
+# Ignore WordPress core within each site
+websites/*/www/web/wp/
+
+# Ignore Bedrock environment configs (usually committed, but can be ignored if desired)
+# websites/*/www/config/environments/
+
+# Ignore shared database volume data (if mapped locally, though usually managed by Docker)
+# dbdata/
+
+# Ignore sync configuration with potentially sensitive details
+scripts/sync-config.json
+scripts/site-defaults.env
+
+# Ignore local DB dump directory
+scripts/db_sync/
+scripts/.env.provision
