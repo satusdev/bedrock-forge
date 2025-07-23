@@ -2,8 +2,9 @@ pipeline {
     agent any
 
     environment {
-        // Example: Set environment variables for deployment
-        // DEPLOY_ENV = 'production'
+        // Set these in Jenkins or pass as parameters
+        KUMA_NOTIFY_URL = credentials('KUMA_NOTIFY_URL') // e.g. http://kuma-server:3001/api/push/<monitor-id>
+        KUMA_PUSH_TOKEN = credentials('KUMA_PUSH_TOKEN') // if needed
     }
 
     stages {
@@ -25,6 +26,17 @@ pipeline {
         stage('Deploy') {
             steps {
                 sh 'echo "Deploy step (call scripts/deploy/deploy.sh or similar)"'
+            }
+        }
+        stage('Notify Kuma') {
+            steps {
+                sh '''
+                if [ -n "$KUMA_NOTIFY_URL" ]; then
+                  curl -X POST "$KUMA_NOTIFY_URL" -H "Authorization: $KUMA_PUSH_TOKEN" || echo "Kuma notify failed"
+                else
+                  echo "KUMA_NOTIFY_URL not set, skipping Kuma notification"
+                fi
+                '''
             }
         }
     }
