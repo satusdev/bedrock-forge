@@ -1,5 +1,12 @@
 # Full Example Workflow: Bedrock Site Creation to Production
 
+**Important:**  
+After cloning the repo, make all scripts executable (run once):
+
+```sh
+find scripts -type f -name "*.sh" -exec chmod +x {} \;
+```
+
 This guide walks you through the entire process of creating, provisioning,
 deploying, syncing, backing up, and monitoring a new Bedrock-based WordPress
 site using the modular scripts.

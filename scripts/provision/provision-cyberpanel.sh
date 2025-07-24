@@ -10,19 +10,30 @@ source "$COMMON_DIR/utils.sh"
 
 usage() {
   echo "Usage: $0 <domain>"
+  echo "If arguments are omitted, you will be prompted interactively."
   exit 1
 }
 
-parse_arguments() {
-  if [ -z "$1" ]; then
-    log_error "Missing domain argument."
-    usage
+prompt_if_missing() {
+  if [ -z "$DOMAIN" ]; then
+    read -rp "Enter domain (e.g., mysite.com): " DOMAIN
   fi
+}
+
+parse_arguments() {
+  # Help flag
+  for arg in "$@"; do
+    case $arg in
+      -h|--help) usage ;;
+    esac
+  done
+
   DOMAIN="$1"
 }
 
 main() {
   parse_arguments "$@"
+  prompt_if_missing
   "$PROVISION_DIR/cloudflare-dns.sh" "$DOMAIN" || error_exit "Cloudflare DNS step failed."
   "$PROVISION_DIR/cyberpanel-site.sh" "$DOMAIN" || error_exit "CyberPanel site step failed."
   "$PROVISION_DIR/cyberpanel-db.sh" "$DOMAIN" || error_exit "CyberPanel DB step failed."

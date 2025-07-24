@@ -9,20 +9,34 @@ source "$COMMON_DIR/utils.sh"
 
 usage() {
   echo "Usage: $0 <site_name> <github_repo_url>"
+  echo "If arguments are omitted, you will be prompted interactively."
   exit 1
 }
 
-parse_arguments() {
-  if [ -z "$1" ] || [ -z "$2" ]; then
-    log_error "Missing arguments: site_name, github_repo_url."
-    usage
+prompt_if_missing() {
+  if [ -z "$SITE_NAME" ]; then
+    read -rp "Enter site name: " SITE_NAME
   fi
+  if [ -z "$REPO_URL" ]; then
+    read -rp "Enter GitHub repo URL (e.g., git@github.com:user/repo.git): " REPO_URL
+  fi
+}
+
+parse_arguments() {
+  # Help flag
+  for arg in "$@"; do
+    case $arg in
+      -h|--help) usage ;;
+    esac
+  done
+
   SITE_NAME="$1"
   REPO_URL="$2"
 }
 
 main() {
   parse_arguments "$@"
+  prompt_if_missing
   SITE_DIR="websites/$SITE_NAME"
   [ -d "$SITE_DIR" ] || error_exit "Site directory $SITE_DIR not found."
   cd "$SITE_DIR" || error_exit "Failed to cd into $SITE_DIR"

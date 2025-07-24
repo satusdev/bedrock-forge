@@ -13,11 +13,28 @@ WEBSITES_DIR="websites"
 
 usage() {
   echo "Usage: $0 <new_site_name> --port=<port>"
+  echo "If arguments are omitted, you will be prompted interactively."
   exit 1
 }
 
+prompt_if_missing() {
+  if [ -z "$NEW_SITE_NAME" ]; then
+    read -rp "Enter new site name: " NEW_SITE_NAME
+  fi
+  if [ -z "$APP_PORT" ]; then
+    read -rp "Enter port for the site [8005]: " APP_PORT
+    APP_PORT="${APP_PORT:-8005}"
+  fi
+}
+
 parse_arguments() {
-  if [ -z "$1" ]; then usage; fi
+  # Help flag
+  for arg in "$@"; do
+    case $arg in
+      -h|--help) usage ;;
+    esac
+  done
+
   NEW_SITE_NAME="$1"
   shift
   for arg in "$@"; do
@@ -26,10 +43,6 @@ parse_arguments() {
       *) usage ;;
     esac
   done
-  if [ -z "$APP_PORT" ]; then
-    log_error "Missing required --port argument."
-    usage
-  fi
 }
 
 create_site_directory() {
@@ -123,6 +136,7 @@ handle_salts() {
 
 main() {
   parse_arguments "$@"
+  prompt_if_missing
   create_site_directory
   rename_template_files
   replace_common_placeholders
