@@ -18,7 +18,8 @@ multi-site environment.
 
 ### Shared DB (`bedrock_shared_db_1`) Fails to Start
 
-- **Symptom:** `make start-db` fails, or the container exits immediately.
+- **Symptom:** Starting the shared DB container fails, or the container exits
+  immediately.
 - **Possible Causes:**
   - **Port Conflict:** Another service (like a local MySQL server) might be
     using port 3306 on your host machine.
@@ -31,39 +32,65 @@ multi-site environment.
   - **Volume Issues:** Docker might have issues accessing or creating the
     `dbdata` volume. Check Docker daemon logs for errors. Try
     `docker volume rm dbdata` ( **Warning:** This deletes local database data!)
-    and `make start-db` again.
+    and then run:
+    ```bash
+    docker-compose -f core/docker-compose-db.yml up -d
+    ```
   - **Insufficient Resources:** Docker might not have enough RAM/CPU allocated.
     Check Docker Desktop settings.
 
 ### Site Containers (`<site_name>_app_1`, `<site_name>_webserver_1`) Fail to Start
 
-- **Symptom:** `make start site=<name>` fails, or containers exit.
+- **Symptom:** Starting site containers fails, or containers exit.
 - **Possible Causes:**
   - **Port Conflict:** The Nginx port specified (`port=<number>` during creation
     or in `docker-compose.yml`) might be in use by another site container or
     local service.
     - **Solution:** Stop the conflicting service or choose a different port for
-      the site (`make stop site=<name>`, edit
-      `websites/<name>/docker-compose.yml`, `make start site=<name>`).
+      the site:
+      ```bash
+      cd websites/<name> && docker-compose down
+      ```
+      Edit `websites/<name>/docker-compose.yml`, then:
+      ```bash
+      cd websites/<name> && docker-compose up -d
+      ```
   - **Shared DB Not Running:** Site containers depend on the shared DB. Ensure
-    `make start-db` was successful and the `bedrock_shared_db_1` container is
-    running (`docker ps`).
+    the shared DB container is running:
+    ```bash
+    docker-compose -f core/docker-compose-db.yml up -d
+    ```
+    and the `bedrock_shared_db_1` container is running (`docker ps`).
   - **Network Issues:** The `bedrock_shared_network` might not exist or have
     problems. Try `docker network inspect bedrock_shared_network`. If missing,
-    `make stop-db && make start-db` might recreate it.
+    run:
+    ```bash
+    docker-compose -f core/docker-compose-db.yml down
+    docker-compose -f core/docker-compose-db.yml up -d
+    ```
+    to recreate it.
   - **Missing `.env` File:** The site needs an active `.env` file (usually a
-    copy of `.env.development`). Use
-    `make switch-env site=<name> env=development` if needed.
+    copy of `.env.development`). Use:
+    ```bash
+    ./scripts/local/env-switch.sh <name> development
+    ```
+    if needed.
   - **Syntax Errors:** Check `docker-compose.yml` or `nginx.conf` for syntax
     errors. Run `docker-compose config` within the site directory
     (`cd websites/<name> && docker-compose config`) to validate.
   - **Build Issues:** If you modified `core/Dockerfile`, the image build might
-    have failed. Try rebuilding: `make build-core`.
+    have failed. Try rebuilding:
+    ```bash
+    docker-compose -f core/docker-compose-db.yml build
+    ```
 
-### Logs Show Errors (`make logs site=<name>`)
+### Logs Show Errors
 
 - **Analyze Logs:** Carefully read the output from the `app` and `webserver`
-  containers for specific PHP, Nginx, or WordPress errors.
+  containers for specific PHP, Nginx, or WordPress errors. To view logs, run:
+  ```bash
+  cd websites/<name> && docker-compose logs
+  ```
 
 ---
 
@@ -80,9 +107,12 @@ multi-site environment.
 - **Network:** Confirm site containers and the DB container are on the
   `bedrock_shared_network`.
 - **User/DB Exists?** If you used `create-db=yes`, the script should have
-  created them. You can verify by connecting to the DB container:
-  `make shell-db` then `mysql -u root -p` (use root password from `core/.env`),
-  then `SHOW DATABASES;` and `SELECT user, host FROM mysql.user;`.
+  created them. You can verify by connecting to the DB container: Run:
+  ```bash
+  docker-compose -f core/docker-compose-db.yml exec db bash
+  ```
+  then `mysql -u root -p` (use root password from `core/.env`), then
+  `SHOW DATABASES;` and `SELECT user, host FROM mysql.user;`.
 - **Credentials Correct?** Double-check the password in `.env` against the one
   set for the user.
 

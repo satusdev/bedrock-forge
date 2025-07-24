@@ -19,7 +19,7 @@ site using the modular scripts.
 ./scripts/local/env-switch.sh myblog development
 
 # Start containers
-make start site=myblog
+cd websites/myblog && docker-compose up -d
 
 # Access at http://localhost:8005
 ```

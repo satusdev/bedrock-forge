@@ -1,9 +1,5 @@
 # Local Development 💻
 
-> **Migration Note:** If you previously used `create-site.sh`, `switch-env.sh`,
-> or `manage-site.sh`, see [docs/migration.md](./migration.md) for how to use
-> the new modular scripts.
-
 This document covers setting up the project locally and managing your local
 WordPress sites. ------- ADD AFTER
 
@@ -22,7 +18,7 @@ WordPress sites. ------- ADD AFTER
 ./scripts/local/env-switch.sh myblog development
 
 # Start containers
-make start site=myblog
+cd websites/myblog && docker-compose up -d
 
 # Access at http://localhost:8005
 ```
@@ -41,7 +37,7 @@ nano websites/myblog-staging/.env.staging  # Update URLs and DB creds
 ./scripts/local/env-switch.sh myblog-staging staging
 
 # Start containers
-make start site=myblog-staging
+cd websites/myblog-staging && docker-compose up -d
 ```
 
 ## Troubleshooting Tips
@@ -51,7 +47,9 @@ make start site=myblog-staging
 - **Port already in use:** Choose a different port with `--port=XXXX` when
   creating the site.
 - **.env not switching:** Make sure to restart containers after switching env:
-  `make restart site=mysite`.
+  ```bash
+  cd websites/mysite && docker-compose restart
+  ```
 - **Composer errors:** Run `composer install` manually in `websites/<site>/www/`
   to debug.
 - **Database connection issues:** Check DB credentials in `.env.*` files and
@@ -156,75 +154,40 @@ graph TD
     style Q fill:#fff
 ```
 
-**Example using Make:**
+**Example using the script:**
 
 ```bash
 # Create 'myblog', access at http://localhost:8005
-# Automatically: create local DB, install WP locally, run composer, switch to dev env
-make create-site site=myblog port=8005 create-db=yes install-wp=yes run-composer=yes switch-dev=yes wp-admin-pass=securepassword
+./scripts/local/site-init.sh myblog --port=8005 --create-db --install-wp --run-composer --switch-dev --wp-admin-pass=securepassword
 ```
 
-**Explanation of Common Options (for `make create-site` or
-`./create-site.sh`):**
+**Explanation of Common Options (for `./scripts/local/site-init.sh`):**
 
-- `site=<name>` / `<name>`: (Required) Name for the site directory (e.g.,
-  `myblog`).
-- `port=<number>` / `--port=<number>`: (Required) Local port for Nginx (e.g.,
-  `8005`).
-- `create-db=yes` / `--create-db`: Auto-create local database & user (uses root
-  pass from `core/.env`).
-- `install-wp=yes` / `--install-wp`: Auto-run `wp core install` locally
-  (requires `create-db=yes`).
-- `run-composer=yes` / `--run-composer`: Auto-run `composer install` locally.
-- `switch-dev=yes` / `--switch-dev`: Auto-switch to `.env.development`.
-- `wp-admin-pass=<pass>` / `--wp-admin-pass=<pass>`: Set local WP admin password
-  if `install-wp=yes`.
+- `<name>`: (Required) Name for the site directory (e.g., `myblog`).
+- `--port=<number>`: (Required) Local port for Nginx (e.g., `8005`).
+- `--create-db`: Auto-create local database & user (uses root pass from
+  `core/.env`).
+- `--install-wp`: Auto-run `wp core install` locally (requires `--create-db`).
+- `--run-composer`: Auto-run `composer install` locally.
+- `--switch-dev`: Auto-switch to `.env.development`.
+- `--wp-admin-pass=<pass>`: Set local WP admin password if `--install-wp`.
 
-_Run `make help` or `./create-site.sh --help` for all options._ _The script
+_Run `./scripts/local/site-init.sh --help` for all options._ The script
 generates unique salts for `.env.development`, `.env.staging`,
-`.env.production`._
+`.env.production`.
 
 **After Local Site Creation:**
 
 1.  **Review `.env.*` Files:** Check `websites/<new_site_name>/.env.*`. You'll
     need accurate DB credentials and URLs for staging/production before using
-    `manage-site.sh` to set up or deploy remotely.
+    deployment or sync scripts.
 2.  **Start Containers (if needed):** If you didn't use options that start
-    containers, run: `make start site=<new_site_name>`.
+    containers, run:
+    ```bash
+    cd websites/<new_site_name> && docker-compose up -d
+    ```
 3.  **Access Site:** Visit `http://localhost:<port>` and
     `http://localhost:<port>/wp-admin`.
 4.  **Update `sync-config.json`:** Add entries for your new site and its remote
     environments if you plan to deploy/sync it. See
     [Deployment Configuration](../docs/deployment.md#configuration-scriptssync-configjson).
-
-## Local Development Usage (Makefile) 💻
-
-The `Makefile` provides shortcuts for **local development tasks only**. Run
-`make help` for a full list.
-
-```bash
-# Start/Stop Core DB (Run 'start-db' once initially)
-make start-db
-make stop-db
-
-# Create a new LOCAL site (interactive prompts if needed)
-./scripts/local/site-init.sh mysite --port=8001
-
-# Manage LOCAL Site Containers (site=testsite default)
-make start site=mysite       # Start mysite's app & webserver containers
-make stop site=mysite        # Stop mysite's containers
-make restart site=mysite     # Restart mysite's containers
-make logs site=mysite        # View logs for mysite's containers
-make shell site=mysite       # Get a shell inside mysite's 'app' container
-
-# Manage LOCAL Environment (site=mysite default, env=development default)
-./scripts/local/env-switch.sh mysite staging # Switch to .env.staging
-make restart site=mysite                    # IMPORTANT: Restart after switching env
-
-# Run Commands in LOCAL Containers (site=mysite default)
-make composer cmd="update" site=mysite # Runs 'composer update' in mysite's app container
-make wp cmd="plugin list" site=mysite  # Runs 'wp plugin list' in mysite's app container
-
-# Cleanup (Local)
-make clean-dumps # Removes local DB dump files from scripts/logs/
-```
