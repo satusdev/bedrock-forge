@@ -17,7 +17,7 @@ project.
   `MYSQL_ROOT_PASSWORD` for the shared database. Remember to add `core/.env` to
   your `.gitignore`.
 
-## Site Template (`websites/template/`)
+## Site Template (`core/template/`)
 
 This directory serves as the foundation for new local sites created using the
 `create-site.sh` script.
@@ -26,7 +26,7 @@ This directory serves as the foundation for new local sites created using the
 
 ```mermaid
 graph LR
-    subgraph Template Files [websites/template/]
+    subgraph Template Files [core/template/]
         A[docker-compose.yml.tpl]
         B[nginx.conf.tpl]
         C[.env.*.tpl]
@@ -73,7 +73,7 @@ graph LR
   site's `.env` file (e.g., `DB_NAME`, `DB_USER`, `WP_HOME`, `WP_SITEURL`).
 - **`www/`:** Contains the base Bedrock installation structure.
   - `composer.json`: Defines the default WordPress version, plugins, and themes
-    for new sites. Run `composer install` within `websites/template/www/` after
+    for new sites. Run `composer install` within `core/template/www/` after
     cloning the main project repository or whenever you update these defaults.
   - `config/`: Bedrock's configuration directory, including `application.php`
     and environment-specific files (`environments/development.php`, etc.).
