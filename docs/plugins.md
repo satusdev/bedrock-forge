@@ -1,6 +1,6 @@
 # Default Installed Plugins (Template) ⚙️
 
-The `websites/template/www/composer.json` file defines the default plugins and
+The `core/template/www/composer.json` file defines the default plugins and
 themes that will be included when a new site is created using the
 `create-site.sh` script.
 
@@ -36,8 +36,7 @@ These plugins are only installed when running `composer install` without the
   doesn't install dependencies with known security vulnerabilities.
 
 **Note:** To change these defaults for _future_ sites created with
-`create-site.sh`, modify `websites/template/www/composer.json` and then run
-`composer update` within the `websites/template/www/` directory _before_
-creating new sites. Existing sites will not be affected; manage their
-dependencies via their own `composer.json` file
-(`websites/<site_name>/www/composer.json`).
+`create-site.sh`, modify `core/template/www/composer.json` and then run
+`composer update` within the `core/template/www/` directory _before_ creating
+new sites. Existing sites will not be affected; manage their dependencies via
+their own `composer.json` file (`websites/<site_name>/www/composer.json`).

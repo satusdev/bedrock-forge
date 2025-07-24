@@ -70,7 +70,7 @@ graph TD
     your code (`web/app/`).
   - **Composer:** Manages WordPress core, plugins, and themes.
   - **`.env` Files:** Manages configuration (database, URLs, salts) outside
-    version control. See `websites/template/.env.example`.
+    version control. See `core/template/.env.example`.
   - **Environment Config:** Loads specific PHP settings (e.g.,
     `www/config/environments/development.php`) based on `WP_ENV` in the `.env`
     file.
@@ -118,7 +118,7 @@ graph TD
 - **Composer:** Manages PHP dependencies. Bedrock uses it for WordPress core,
   plugins (via [WPackagist](https://wpackagist.org/)), themes, and libraries.
 - **`composer.json`:** Defines project dependencies. Template defaults:
-  `websites/template/www/composer.json`.
+  `core/template/www/composer.json`.
 - **`composer.lock`:** Records exact installed versions for consistency.
 - **`vendor/`:** Where dependency code is downloaded (usually ignored by git).
 - **Commands:**
@@ -155,8 +155,8 @@ graph TD
 ## Project Scripts
 
 - **`create-site.sh`:** (Local Use) Automates creating a new site directory and
-  configuration files from the `websites/template/`. Includes options for local
-  DB creation, WP installation, etc. See
+  configuration files from the `core/template/`. Includes options for local DB
+  creation, WP installation, etc. See
   [Creating a New Local Site](../docs/local-development.md#creating-a-new-local-site-🚀).
 - **`switch-env.sh`:** (Local Use) Copies the appropriate environment file
   (e.g., `.env.development`) to `.env` for a local site, allowing easy

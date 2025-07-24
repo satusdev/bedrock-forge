@@ -8,7 +8,7 @@ source "$COMMON_DIR/logging.sh"
 source "$COMMON_DIR/config.sh"
 source "$COMMON_DIR/utils.sh"
 
-TEMPLATE_DIR="websites/template"
+TEMPLATE_DIR="core/template"
 WEBSITES_DIR="websites"
 
 usage() {
