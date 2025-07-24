@@ -1,7 +1,59 @@
 # Deployment & Remote Management ☁️🌍
 
-This document covers preparing remote servers and using the `manage-site.sh`
-script for deployment and data synchronization.
+> **Migration Note:** If you previously used `manage-site.sh`, see
+> [docs/migration.md](./migration.md) for how to use the new modular deployment
+> and sync scripts.
+
+This document covers preparing remote servers and using the modular scripts for
+deployment and data synchronization. ------- ADD AFTER
+
+## Real-World Usage Examples
+
+### Example: Deploy a Site to Staging
+
+```sh
+# Deploy code to staging
+./scripts/deploy/deploy.sh mysite staging
+
+# Sync database from local to staging
+./scripts/sync/sync-db.sh mysite staging push
+
+# Sync uploads from local to staging
+./scripts/sync/sync-uploads.sh mysite staging push
+```
+
+### Example: Restore Production Backup
+
+```sh
+# List available backups (using rclone or backup.sh output)
+rclone lsf gdrive:backups/mysite/production/
+
+# Restore a specific backup
+./scripts/sync/restore.sh mysite production --date=20250723-120000
+```
+
+### Example: Pull Production Data for Local Debugging
+
+```sh
+# Pull production DB to local
+./scripts/sync/sync-db.sh mysite production pull
+
+# Pull production uploads to local
+./scripts/sync/sync-uploads.sh mysite production pull
+```
+
+## Troubleshooting Tips
+
+- **SSH errors:** Ensure your SSH key is set up and the remote server allows
+  your user.
+- **Permission denied:** The SSH user may need sudo or write permissions to the
+  site directory.
+- **rclone errors:** Check your rclone config and remote names; test with
+  `rclone lsf <remote>:`.
+- **Database import/export errors:** Check DB credentials in
+  `config/sync-config.json` and ensure the DB server is running.
+- **File sync issues:** Ensure rsync and rclone are installed on both local and
+  remote.
 
 ## Remote Server Setup (One-Time) ✈️
 
@@ -259,292 +311,127 @@ in your GitHub repository settings (`Settings` > `Secrets and variables` >
 This automated workflow helps ensure code quality through linting and
 streamlines the deployment process to your production server.
 
-## The `manage-site.sh` Script (Deployment & Sync) 🛠️
+## Modular Deployment & Sync Scripts 🛠️
 
-This is the core script for managing interactions between your local environment
-and remote servers (staging, production). **Run this script from your local
-project root.**
+Deployment and synchronization between your local environment and remote servers
+(staging, production) are handled by modular scripts in `scripts/deploy/` and
+`scripts/sync/`.
 
-### Configuration (`scripts/sync-config.json`)
+### Configuration (`config/sync-config.json`)
 
-This file is **essential** for `manage-site.sh`. It stores all connection
+This file is **essential** for all modular scripts. It stores all connection
 details, paths, and credentials needed to interact with your remote
 environments.
 
-- **Create:** Copy `scripts/sync-config.sample.json` to
-  `scripts/sync-config.json`.
-- **Security:** **Add `scripts/sync-config.json` to your `.gitignore` file.**
+- **Create:** Create `config/sync-config.json` and fill in your site and
+  environment details.
+- **Security:** **Add `config/sync-config.json` to your `.gitignore` file.**
   Never commit sensitive credentials.
-- **Structure:**
-  ```json
-  {
-  	"my_site_name": {
-  		// Top-level key is the site name (must match websites/my_site_name)
-  		"local": {
-  			// Settings specific to the local environment
-  			"uploads_path": "websites/my_site_name/www/web/app/uploads/", // Relative path to local uploads
-  			"db_dump_path": "scripts/dumps/" // Directory for temporary DB dumps
-  		},
-  		"staging": {
-  			// Settings for the 'staging' environment
-  			"ssh_host": "your_staging_server_ip_or_hostname", // SSH Hostname or IP
-  			"ssh_user": "ssh_username", // User for SSH connection (needs sudo NOPASSWD for web_user often)
-  			"web_user": "www-data", // The user the web server runs as (e.g., www-data, nobody, lsadm)
-  			"remote_path": "/var/www/staging.mysite.com", // Absolute path to Bedrock root on remote server
-  			"domain": "staging.mysite.com", // Domain used for WP URLs and .env setup
-  			"db_name": "staging_db_name",
-  			"db_user": "staging_db_user",
-  			"db_pass": "staging_db_password",
-  			"db_host": "localhost", // Usually localhost if DB is on the same server
-  			"rclone_remote": "myCloudStorage:", // Name of rclone remote (e.g., s3_backup:)
-  			"rclone_uploads_path": "staging/my_site_name/uploads" // Path *within* the rclone remote
-  		},
-  		"production": {
-  			// Settings for the 'production' environment
-  			"ssh_host": "your_prod_server_ip_or_hostname",
-  			"ssh_user": "ssh_username",
-  			"web_user": "www-data",
-  			"remote_path": "/var/www/mysite.com",
-  			"domain": "mysite.com",
-  			"db_name": "prod_db_name",
-  			"db_user": "prod_db_user",
-  			"db_pass": "prod_db_password",
-  			"db_host": "localhost",
-  			"rclone_remote": "myCloudStorage:",
-  			"rclone_uploads_path": "production/my_site_name/uploads"
-  		}
-  		// Add more environments if needed (e.g., "development_remote")
-  	}
-  	// Add more sites as top-level keys
-  }
-  ```
-- **`ssh_user` Permissions:** This user needs to be able to connect via SSH,
-  write to the `remote_path`, and ideally run commands as the `web_user` via
-  `sudo` (often without a password prompt for script automation). Configure
-  `sudoers` carefully on the remote server (e.g.,
-  `ssh_user ALL=(web_user) NOPASSWD: /usr/local/bin/wp *`,
-  `ssh_user ALL=(ALL) NOPASSWD: /usr/bin/chown *`, etc. - consult security best
-  practices).
+- **Structure:** See the sample in the README or above.
 
 ### Actions Overview
 
 **Usage Format:**
 
 ```bash
-./scripts/manage-site.sh <site_name> <action> <environment> [additional_args...]
+# Deploy code
+./scripts/deploy/deploy.sh <site_name> <environment>
+
+# Sync database (push/pull)
+./scripts/sync/sync-db.sh <site_name> <environment> push
+./scripts/sync/sync-db.sh <site_name> <environment> pull
+
+# Sync uploads (push/pull)
+./scripts/sync/sync-uploads.sh <site_name> <environment> push
+./scripts/sync/sync-uploads.sh <site_name> <environment> pull
+
+# Backup/restore
+./scripts/sync/backup.sh <site_name> <environment>
+./scripts/sync/restore.sh <site_name> <environment> --date=YYYYMMDD-HHMMSS
 ```
 
-- **`setup-new-site`**: Performs the initial setup on a remote server.
-
-  **`setup-new-site` Flowchart:**
-
-  ```mermaid
-  graph TD
-      A[Start: ./manage-site.sh site setup-new-site env user email pass] --> B{Read sync-config.json for site/env};
-      B --> C[Run 'composer install --no-dev' locally];
-      C --> D[Generate WP Salts locally];
-      D --> E[rsync code to remote_path - exclude .env, .git-];
-      E --> F[Create remote .env content - DB creds, domain, salts];
-      F --> G[Upload remote .env via scp];
-      G --> H[SSH: Set file permissions/ownership on remote];
-      H --> I{SSH: Check if WP installed?};
-      I -- No --> J[SSH: Run 'wp core install' with args];
-      J --> K{SSH: Activate default theme? - optional flag};
-      K -- Yes --> L[SSH: Run 'wp theme activate ...'];
-      I -- Yes --> M[End];
-      L --> M;
-      K -- No --> M;
-  ```
-
-  - Builds local production composer dependencies.
-  - Syncs project files (excluding `.env`, `.git`, etc.) using `rsync`.
-  - Generates salts locally.
-  - Creates and uploads a `.env` file configured with remote DB credentials,
-    domain, and salts from `sync-config.json`.
-  - Sets appropriate file/directory permissions remotely via SSH.
-  - Checks if WordPress is installed; if not, runs `wp core install` remotely
-    using credentials provided as arguments.
-  - Optionally activates a default theme.
-  - **Required Args:** `<admin_user> <admin_email> <admin_password>`
-  - **Optional Args:** `--site-title="Your Title"` `--activate-defaults`
-
-- **`deploy`**: Deploys code changes from local to remote.
-
-  **`deploy` Flowchart:**
-
-  ```mermaid
-  graph TD
-      A[Start: ./manage-site.sh site deploy env] --> B{Read sync-config.json for site/env};
-      B --> C[Run 'composer install --no-dev' locally];
-      C --> D[rsync code to remote_path - exclude .env, .git];
-      D --> E[SSH: Set file permissions/ownership on remote];
-      E --> F[End];
-  ```
-
-  - Builds local production composer dependencies (`composer install --no-dev`).
-  - Syncs project files using `rsync` (respecting excludes like `.env`).
-  - Sets file/directory permissions remotely.
-
-- **`push-db`**: Exports local Docker DB and imports it on the remote server.
-  **(DANGEROUS - Overwrites remote DB)**.
-
-- **`pull-db`**: Exports remote DB and imports it into the local Docker
-  container. **(Overwrites local DB)**.
-
-  **Database Sync Data Flow (`push-db` / `pull-db`):**
-
-  ```mermaid
-  graph LR
-      subgraph Local Machine
-          A[Local Docker DB - bedrock_shared_db_1]
-          B(Local Dump File - scripts/dumps/*.sql)
-      end
-      subgraph Remote Server
-          C[Remote DB - e.g., staging_db]
-          D(Remote Temp Dump File - /tmp/*.sql)
-      end
-
-      subgraph Push DB Action
-          direction TB
-          A -- 1. wp db export (local) --> B;
-          B -- 2. scp --> D;
-          D -- 3. wp db import (remote) --> C;
-      end
-      subgraph Pull DB Action
-          direction TB
-          C -- 1. wp db export (remote) --> D;
-          D -- 2. scp --> B;
-          B -- 3. wp db import (local) --> A;
-      end
-
-      style Push DB Action fill:#f9f,stroke:#333,stroke-width:1px,color:#000
-      style Pull DB Action fill:#ccf,stroke:#333,stroke-width:1px,color:#000
-  ```
-
-  - Requires confirmation for production (`push-db`).
-  - Uses `wp db export`, `scp`, and `wp db import` via Docker exec (local) and
-    SSH (remote).
-
-- **`push-uploads`**: Syncs local uploads directory to the configured `rclone`
-  cloud remote path. **(Overwrites cloud files)**.
-
-- **`pull-uploads`**: Syncs the `rclone` cloud remote path _to_ your local
-  uploads directory. **(Overwrites local files)**.
-
-  **Uploads Sync Data Flow (`push-uploads` / `pull-uploads`):**
-
-  ```mermaid
-  graph TD
-      A[Local Uploads Directory - websites/site/www/web/app/uploads/]
-      B[Cloud Storage - rclone Remote Path - e.g., myCloud:env/site/uploads]
-
-      subgraph Push Uploads Action
-          A -- "rclone copy local cloud:path" --> B
-      end
-      subgraph Pull Uploads Action
-          B -- "rclone copy cloud:path local" --> A
-      end
-
-      style Push Uploads Action fill:#f9f,stroke:#333,stroke-width:1px,color:#000
-      style Pull Uploads Action fill:#ccf,stroke:#333,stroke-width:1px,color:#000
-  ```
-
-  - Requires confirmation for production (`push-uploads`).
-  - Uses `rclone copy`.
-  - **Note:** This syncs between the **local machine** and **cloud storage**. It
-    does _not_ automatically sync between cloud storage and the remote server's
-    filesystem. That requires separate server-side `rclone` commands or
-    configuration if needed.
+- **deploy.sh**: Deploys code changes from local to remote.
+- **sync-db.sh**: Pushes or pulls the database between local and remote.
+- **sync-uploads.sh**: Pushes or pulls uploads between local and remote/cloud.
+- **backup.sh**: Backs up DB and uploads to rclone remote with retention policy.
+- **restore.sh**: Restores DB and uploads from a selected backup.
 
 ### Usage Examples & Scenarios
 
 **(Remember to replace placeholders like `myblog`, `staging`, `production`, etc.
-with your actual values from `sync-config.json`)**
+with your actual values from `config/sync-config.json`)**
 
-1.  **Scenario: Initial Setup of 'myblog' on Staging Server**
+1.  **Scenario: Initial Deployment of 'myblog' to Staging Server**
 
-    - **Prerequisites:** Remote server prepared, `sync-config.json` filled for
-      `myblog`/`staging`, local site `myblog` created.
+    - **Prerequisites:** Remote server prepared, `config/sync-config.json`
+      filled for `myblog`/`staging`, local site `myblog` created.
     - **Command:**
       ```bash
-      # Example: Setup 'myblog' on staging server
-      ./scripts/manage-site.sh myblog setup-new-site staging stage_admin stage_admin@example.com StrongP@ssw0rd --site-title="My Blog (Staging)" --activate-defaults
+      ./scripts/deploy/deploy.sh myblog staging
       ```
     - **Outcome:** Code synced to `/var/www/staging.myblog.com` (as per
-      `sync-config.json`), remote `.env` created, permissions set (e.g.,
-      `chown www-data:www-data`), WordPress installed with user `stage_admin`,
-      default theme activated on `staging.myblog.com`.
+      `config/sync-config.json`), remote permissions set.
 
 2.  **Scenario: Deploying Latest Code Changes for 'myblog' to Production**
 
-    - **Prerequisites:** `sync-config.json` configured for
+    - **Prerequisites:** `config/sync-config.json` configured for
       `myblog`/`production`. Code changes committed locally.
     - **Command:**
       ```bash
-      # Example: Deploy 'myblog' to production
-      ./scripts/manage-site.sh myblog deploy production
+      ./scripts/deploy/deploy.sh myblog production
       ```
     - **Outcome:** Local `composer install --no-dev` runs in
       `websites/myblog/www`, code changes are synced via `rsync` to
-      `/var/www/myblog.com` (as per `sync-config.json`), remote file permissions
-      are updated (e.g., `chown www-data:www-data`).
+      `/var/www/myblog.com` (as per `config/sync-config.json`), remote file
+      permissions are updated.
 
 3.  **Scenario: Pulling Production Database & Uploads to Local 'myblog' for
     Debugging**
 
-    - **Prerequisites:** `sync-config.json` configured for `myblog`/`production`
-      and `myblog`/`local`. `rclone` configured locally. Local Docker containers
-      for `myblog` are running (`make start site=myblog`).
+    - **Prerequisites:** `config/sync-config.json` configured for
+      `myblog`/`production` and `myblog`/`local`. `rclone` configured locally.
+      Local Docker containers for `myblog` are running
+      (`make start site=myblog`).
     - **Commands:**
 
       ```bash
-      # Example: Pull production DB for 'myblog' to local Docker DB
-      # (Overwrites local 'myblog_db' database!)
-      ./scripts/manage-site.sh myblog pull-db production
-
-      # Example: Pull production uploads for 'myblog' from cloud to local
-      # (Overwrites local 'websites/myblog/www/web/app/uploads/'!)
-      ./scripts/manage-site.sh myblog pull-uploads production
+      ./scripts/sync/sync-db.sh myblog production pull
+      ./scripts/sync/sync-uploads.sh myblog production pull
       ```
 
-    - **Outcome:** Local `myblog` database (in the `bedrock_shared_db_1`
-      container) and `websites/myblog/www/web/app/uploads/` directory now mirror
-      the production environment's data (DB from server, uploads from cloud
-      storage defined in `sync-config.json`).
+    - **Outcome:** Local `myblog` database and uploads now mirror the production
+      environment's data.
 
 4.  **Scenario: Pushing Local Database Changes from 'myblog' to Staging for
     Review**
 
-    - **Prerequisites:** `sync-config.json` configured for `myblog`/`staging`.
-      Local changes made. **Understand this overwrites the staging DB.**
+    - **Prerequisites:** `config/sync-config.json` configured for
+      `myblog`/`staging`. Local changes made. **Understand this overwrites the
+      staging DB.**
     - **Command:**
       ```bash
-      # Example: Push local 'myblog' DB to staging
-      # (Overwrites staging DB!)
-      ./scripts/manage-site.sh myblog push-db staging
+      ./scripts/sync/sync-db.sh myblog staging push
       ```
     - **Outcome:** The database `staging_db_name` on the staging server is
-      replaced with the content from the local `myblog_db` database (in the
-      `bedrock_shared_db_1` container).
+      replaced with the content from the local `myblog_db` database.
 
 5.  **Scenario: Pushing Local Uploads for 'myblog' to Cloud Storage (Staging)**
-    - **Prerequisites:** `sync-config.json` configured for `myblog`/`staging`.
-      `rclone` configured locally. New uploads added locally.
+    - **Prerequisites:** `config/sync-config.json` configured for
+      `myblog`/`staging`. `rclone` configured locally. New uploads added
+      locally.
     - **Command:**
       ```bash
-      # Example: Push local 'myblog' uploads to staging cloud path
-      # (Overwrites files in cloud storage!)
-      ./scripts/manage-site.sh myblog push-uploads staging
+      ./scripts/sync/sync-uploads.sh myblog staging push
       ```
-    - **Outcome:** Files from the local `websites/myblog/www/web/app/uploads/`
-      directory are copied to the `rclone` remote path defined for staging in
-      `sync-config.json` (e.g., `myCloudStorage:staging/myblog/uploads`).
+    - **Outcome:** Files from the local uploads directory are copied to the
+      `rclone` remote path defined for staging in `config/sync-config.json`.
 
 **Important Warnings:**
 
-- **`push-db` and `push-uploads` are destructive operations on the target
-  environment.** Use extreme caution, especially with `production`. Double-check
-  the site name and environment before running.
-- Ensure your `sync-config.json` is accurate and kept secure (use `.gitignore`).
+- **push and pull operations are destructive on the target environment.** Use
+  extreme caution, especially with `production`. Double-check the site name and
+  environment before running.
+- Ensure your `config/sync-config.json` is accurate and kept secure (use
+  `.gitignore`).
 - Verify SSH user permissions and `sudoers` configuration on the remote server
   for reliable script execution.

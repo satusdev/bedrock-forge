@@ -1,7 +1,61 @@
 # Local Development 💻
 
+> **Migration Note:** If you previously used `create-site.sh`, `switch-env.sh`,
+> or `manage-site.sh`, see [docs/migration.md](./migration.md) for how to use
+> the new modular scripts.
+
 This document covers setting up the project locally and managing your local
-WordPress sites.
+WordPress sites. ------- ADD AFTER
+
+## Real-World Usage Examples
+
+### Example: Create, Configure, and Start a New Site
+
+```sh
+# Create a new site 'myblog' on port 8005
+./scripts/local/site-init.sh myblog --port=8005
+
+# Generate .env files (if needed)
+./scripts/local/generate-env.sh myblog
+
+# Switch to development environment
+./scripts/local/env-switch.sh myblog development
+
+# Start containers
+make start site=myblog
+
+# Access at http://localhost:8005
+```
+
+### Example: Clone a Site for Staging
+
+```sh
+# Create a new site 'myblog-staging' on port 8006
+./scripts/local/site-init.sh myblog-staging --port=8006
+
+# Copy .env.production to .env.staging and adjust URLs
+cp websites/myblog/.env.production websites/myblog-staging/.env.staging
+nano websites/myblog-staging/.env.staging  # Update URLs and DB creds
+
+# Switch to staging environment
+./scripts/local/env-switch.sh myblog-staging staging
+
+# Start containers
+make start site=myblog-staging
+```
+
+## Troubleshooting Tips
+
+- **Containers won't start:** Check `docker ps -a` and `docker logs <container>`
+  for errors.
+- **Port already in use:** Choose a different port with `--port=XXXX` when
+  creating the site.
+- **.env not switching:** Make sure to restart containers after switching env:
+  `make restart site=mysite`.
+- **Composer errors:** Run `composer install` manually in `websites/<site>/www/`
+  to debug.
+- **Database connection issues:** Check DB credentials in `.env.*` files and
+  ensure the shared DB container is running.
 
 ## Initial Setup ☣️
 
@@ -154,23 +208,23 @@ make start-db
 make stop-db
 
 # Create a new LOCAL site (interactive prompts if needed)
-make create-site site=site2 port=8002 create-db=yes install-wp=yes
+./scripts/local/site-init.sh mysite --port=8001
 
 # Manage LOCAL Site Containers (site=testsite default)
-make start site=site2       # Start site2's app & webserver containers
-make stop site=site2        # Stop site2's containers
-make restart site=site2     # Restart site2's containers
-make logs site=site2        # View logs for site2's containers
-make shell site=site2       # Get a shell inside site2's 'app' container
+make start site=mysite       # Start mysite's app & webserver containers
+make stop site=mysite        # Stop mysite's containers
+make restart site=mysite     # Restart mysite's containers
+make logs site=mysite        # View logs for mysite's containers
+make shell site=mysite       # Get a shell inside mysite's 'app' container
 
-# Manage LOCAL Environment (site=testsite default, env=development default)
-make switch-env site=site2 env=staging # Copies .env.staging to .env
-make restart site=site2               # IMPORTANT: Restart after switching env
+# Manage LOCAL Environment (site=mysite default, env=development default)
+./scripts/local/env-switch.sh mysite staging # Switch to .env.staging
+make restart site=mysite                    # IMPORTANT: Restart after switching env
 
-# Run Commands in LOCAL Containers (site=testsite default)
-make composer cmd="update" site=site2 # Runs 'composer update' in site2's app container
-make wp cmd="plugin list" site=site2  # Runs 'wp plugin list' in site2's app container
+# Run Commands in LOCAL Containers (site=mysite default)
+make composer cmd="update" site=mysite # Runs 'composer update' in mysite's app container
+make wp cmd="plugin list" site=mysite  # Runs 'wp plugin list' in mysite's app container
 
 # Cleanup (Local)
-make clean-dumps # Removes local DB dump files from scripts/dumps/
+make clean-dumps # Removes local DB dump files from scripts/logs/
 ```
