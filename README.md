@@ -1,5 +1,5 @@
 <div align="center">
-    <h1>Multi-Site WordPress Docker/Bedrock Environment</h1>
+    <h1>Site WordPress Docker/Bedrock Environment</h1>
     <!-- Add a relevant logo/icon if available, otherwise omit or use a generic one -->
     <!-- <img src="./assets/images/icon.png" alt="logo"/> -->
 </div>
@@ -99,8 +99,38 @@ underlying concepts.
 - [Project Structure](#project-structure-)
 - [Requirements](#requirements-%EF%B8%8F)
 - [Documentation](#documentation-)
+- [Migration from Legacy Scripts](#migration-from-legacy-scripts)
 - [Further Automation Ideas](#further-automation-ideas-)
-- [Getting Help](#getting-help-)
+- [Getting Help](#getting-help-) ------- ADD AFTER
+
+## Documentation 📖
+
+Detailed documentation is available in the `docs/` directory:
+
+## Migration from Legacy Scripts
+
+If you previously used this project with monolithic scripts (e.g.,
+`manage-site.sh`, `create-site.sh`, `switch-env.sh`), please note:
+
+**Legacy scripts removed:**
+
+- `manage-site.sh` → replaced by modular scripts in `scripts/local/`,
+  `scripts/provision/`, `scripts/deploy/`, `scripts/sync/`
+- `create-site.sh` → replaced by `scripts/local/site-init.sh`
+- `switch-env.sh` → replaced by `scripts/local/env-switch.sh`
+- `sync-config.sample.json` → replaced by `config/sync-config.json`
+
+**Migration checklist:**
+
+1. Use the new modular scripts for all local, provisioning, deployment, sync,
+   and backup tasks.
+2. Update any automation or CI/CD jobs to use the modular scripts.
+3. Review and update your `config/sync-config.json` as needed.
+4. Remove any custom scripts based on the old monolithic workflow.
+5. Refer to the updated docs and usage examples below.
+
+For a full mapping of old commands to new modular equivalents, see the
+[docs/migration.md](docs/migration.md) (to be created).
 
 ## Documentation 📖
 
@@ -201,43 +231,10 @@ Detailed documentation is available in the `docs/` directory:
   (document root should be `<remote_path>/web/`)
 - Database server (MySQL/MariaDB)
 
-## Further Automation Ideas 💡
-
-- **CI/CD Integration:** Trigger `manage-site.sh deploy staging` on pushes to a
-  `develop` branch, and `deploy production` on merges to `main`.
-- **Automated Testing:** Integrate PHPUnit/Codeception tests into the `Makefile`
-  or CI/CD.
-- **Deployment Hooks:** Enhance `manage-site.sh` with explicit
-  pre/post-deployment hooks for tasks like cache clearing (`wp cache flush`),
-  database migrations, or service restarts (PHP-FPM).
-- **Theme/Plugin Scaffolding:** Create scripts or Make targets for quickly
-  setting up new custom themes or plugins based on starters.
-- **Enhanced Local Setup Script:** A master script or Make target to automate
-  the entire initial local setup (cloning, core composer install, DB setup,
-  first site creation).
-- **Local Health Checks:** Add a `make health-check site=<name>` target to
-  verify local container status, site responsiveness, and DB connectivity.
-- **Automated Backups:** Implement a `make backup site=<name> env=<environment>`
-  target using `manage-site.sh` to pull data and sync uploads to a backup
-  location (local or cloud). Could be scheduled with `cron`.
-- **Dependency Update Checker:** A script/target
-  (`make check-updates site=<name>`) to report available
-  Composer/WordPress/plugin updates using `composer outdated` and WP-CLI
-  commands.
-- **Staging Cloning:** Add a `manage-site.sh <site> clone-production-to-staging`
-  action to replicate the production database and uploads to the staging
-  environment, including URL updates via `wp search-replace`.
-- **WP-CLI Alias Generation:** A script to generate a `wp-cli.yml` with aliases
-  based on `scripts/sync-config.json` for easier remote command execution.
-- **Secrets Management Integration:** (Advanced) Explore integrating tools like
-  HashiCorp Vault or cloud provider secrets managers for handling sensitive
-  credentials instead of plain text files.
-
 ## Getting Help 🆘
 
 - Run `make help` for local Makefile commands.
-- Run `./create-site.sh --help` for local site creation options.
-- Run `./scripts/manage-site.sh` (no args) or check its comments for usage.
-- Consult the `sync-config.sample.json` for configuration guidance.
+- Run `./scripts/local/site-init.sh --help` for local site creation options.
+- Run `./scripts/local/env-switch.sh --help` for environment switching.
 - Refer to documentation for Bedrock, Docker, WP-CLI, rclone, jq.
 - Check the Roots Discourse for Bedrock questions: https://discourse.roots.io/
