@@ -1,9 +1,5 @@
 # Deployment & Remote Management ☁️🌍
 
-> **Migration Note:** If you previously used `manage-site.sh`, see
-> [docs/migration.md](./migration.md) for how to use the new modular deployment
-> and sync scripts.
-
 This document covers preparing remote servers and using the modular scripts for
 deployment and data synchronization. ------- ADD AFTER
 
@@ -156,11 +152,11 @@ _(Verify tools are installed remotely via SSH:
 
 1.  **Create Local Site:**
 
-    - Use `create-site.sh` or `make create-site` to generate the local site
-      directory, configuration, and optionally install WordPress locally.
+    - Use `./scripts/local/site-init.sh` to generate the local site directory
+      and configuration.
     - Example:
       ```bash
-      make create-site site=mynewsite port=8010 create-db=yes install-wp=yes run-composer=yes switch-dev=yes wp-admin-pass=localpassword
+      ./scripts/local/site-init.sh mynewsite --port=8010
       ```
     - This creates `websites/mynewsite` and sets it up for local development at
       `http://localhost:8010`. See
@@ -390,8 +386,10 @@ with your actual values from `config/sync-config.json`)**
 
     - **Prerequisites:** `config/sync-config.json` configured for
       `myblog`/`production` and `myblog`/`local`. `rclone` configured locally.
-      Local Docker containers for `myblog` are running
-      (`make start site=myblog`).
+      Local Docker containers for `myblog` are running:
+      ```bash
+      cd websites/myblog && docker-compose up -d
+      ```
     - **Commands:**
 
       ```bash

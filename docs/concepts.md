@@ -24,7 +24,7 @@ Understanding these tools is key to using this environment effectively.
 ```mermaid
 graph TD
     subgraph Local Machine
-        A[Developer] --> B{Makefile / Scripts}
+        A[Developer] --> B(Scripts)
         B --> C(Docker Compose)
     end
 
@@ -132,20 +132,10 @@ graph TD
 
 - **WP-CLI:** Manages WordPress installations via the command line.
 - **Usage Here:** Installed in the `app` container. Run commands via
-  `make wp site=... cmd="..."` or `docker-compose ... exec app wp ...`. Used
-  extensively by `manage-site.sh` for remote database operations and
-  installation checks.
+  `docker-compose ... exec app wp ...`. Used extensively by deployment and sync
+  scripts for remote database operations and installation checks.
 - **Examples:** `wp core install`, `wp plugin activate`, `wp db export/import`,
   `wp search-replace`.
-
-## Make & Makefile
-
-- **Make:** Build automation tool using instructions from a `Makefile`.
-- **Makefile:** Defines **targets** (tasks) like `start-db`, `create-site`,
-  `wp`. Running `make <target>` executes associated commands.
-- **Purpose Here:** Provides simple shortcuts (`make start site=site1`) for
-  complex Docker Compose or script commands for local development. Run
-  `make help` for options.
 
 ## rsync, rclone & jq (Sync/Utility Tools)
 
