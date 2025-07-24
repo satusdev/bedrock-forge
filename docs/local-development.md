@@ -113,7 +113,10 @@ _(Customize `core/template/www/composer.json` first if needed)._
     - Configure `rclone` locally (`rclone config`) so the remote name(s) match
       those used in `sync-config.json`. See
       [rclone docs](https://rclone.org/docs/).
-    - Ensure scripts are executable: `chmod +x scripts/*.sh *.sh`.
+    - Ensure all scripts are executable (run once after cloning):
+      ```bash
+      find scripts -type f -name "*.sh" -exec chmod +x {} \;
+      ```
     - (Highly Recommended) Set up SSH key-based authentication from your local
       machine to your remote servers for passwordless script execution. See
       [Security Best Practices](../docs/security.md#ssh-hardening-).

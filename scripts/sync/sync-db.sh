@@ -10,14 +10,32 @@ source "$COMMON_DIR/utils.sh"
 
 usage() {
   echo "Usage: $0 <site_name> <environment> <push|pull>"
+  echo "If arguments are omitted, you will be prompted interactively."
   exit 1
 }
 
-parse_arguments() {
-  if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ]; then
-    log_error "Missing arguments: site_name, environment, direction."
-    usage
+prompt_if_missing() {
+  if [ -z "$SITE_NAME" ]; then
+    read -rp "Enter site name: " SITE_NAME
   fi
+  if [ -z "$TARGET_ENV" ]; then
+    read -rp "Enter environment [development]: " TARGET_ENV
+    TARGET_ENV="${TARGET_ENV:-development}"
+  fi
+  if [ -z "$DIRECTION" ]; then
+    read -rp "Direction (push or pull) [pull]: " DIRECTION
+    DIRECTION="${DIRECTION:-pull}"
+  fi
+}
+
+parse_arguments() {
+  # Help flag
+  for arg in "$@"; do
+    case $arg in
+      -h|--help) usage ;;
+    esac
+  done
+
   SITE_NAME="$1"
   TARGET_ENV="$2"
   DIRECTION="$3"
@@ -98,6 +116,7 @@ sync_db_pull() {
 
 main() {
   parse_arguments "$@"
+  prompt_if_missing
   if [ "$DIRECTION" = "push" ]; then
     sync_db_push
   elif [ "$DIRECTION" = "pull" ]; then

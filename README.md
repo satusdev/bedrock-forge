@@ -229,7 +229,6 @@ Detailed documentation is available in the `docs/` directory:
 
 ## Getting Help 🆘
 
-- Run `make help` for local Makefile commands.
 - Run `./scripts/local/site-init.sh --help` for local site creation options.
 - Run `./scripts/local/env-switch.sh --help` for environment switching.
 - Refer to documentation for Bedrock, Docker, WP-CLI, rclone, jq.

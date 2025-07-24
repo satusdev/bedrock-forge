@@ -13,14 +13,28 @@ usage() {
   echo "Usage: $0 <site_name> <environment>"
   echo "  site_name: The name of the directory in websites/ (e.g., site1)"
   echo "  environment: One of ${ENVS[*]}"
+  echo "If arguments are omitted, you will be prompted interactively."
   exit 1
 }
 
-parse_arguments() {
-  if [ -z "$1" ] || [ -z "$2" ]; then
-    log_error "Missing arguments."
-    usage
+prompt_if_missing() {
+  if [ -z "$SITE_NAME" ]; then
+    read -rp "Enter site name: " SITE_NAME
   fi
+  if [ -z "$TARGET_ENV" ]; then
+    read -rp "Enter environment [development]: " TARGET_ENV
+    TARGET_ENV="${TARGET_ENV:-development}"
+  fi
+}
+
+parse_arguments() {
+  # Help flag
+  for arg in "$@"; do
+    case $arg in
+      -h|--help) usage ;;
+    esac
+  done
+
   SITE_NAME="$1"
   TARGET_ENV="$2"
 }
@@ -71,6 +85,7 @@ switch_env() {
 
 main() {
   parse_arguments "$@"
+  prompt_if_missing
   validate_env
   switch_env
 }

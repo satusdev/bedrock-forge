@@ -17,22 +17,49 @@ if [[ -z "$HETZNER_TOKEN" ]]; then
   exit 1
 fi
 
-SERVER_NAME="$1"
-SERVER_TYPE="cx21"
-IMAGE="ubuntu-22.04"
+usage() {
+  echo "Usage: $0 <server_name> [--type=<server_type>] [--image=<image>] [--ssh-key=<ssh_key_name>]"
+  echo "If arguments are omitted, you will be prompted interactively."
+  exit 1
+}
+
+prompt_if_missing() {
+  if [[ -z "$SERVER_NAME" ]]; then
+    read -rp "Enter server name: " SERVER_NAME
+  fi
+  if [[ -z "$SERVER_TYPE" ]]; then
+    read -rp "Enter server type [cx21]: " SERVER_TYPE
+    SERVER_TYPE="${SERVER_TYPE:-cx21}"
+  fi
+  if [[ -z "$IMAGE" ]]; then
+    read -rp "Enter image [ubuntu-22.04]: " IMAGE
+    IMAGE="${IMAGE:-ubuntu-22.04}"
+  fi
+  if [[ -z "$SSH_KEY_NAME" ]]; then
+    read -rp "Enter SSH key name (must exist in Hetzner Cloud): " SSH_KEY_NAME
+  fi
+}
+
+# Help flag and argument parsing
+SERVER_NAME=""
+SERVER_TYPE=""
+IMAGE=""
 SSH_KEY_NAME=""
 for arg in "$@"; do
   case $arg in
+    -h|--help) usage ;;
     --type=*) SERVER_TYPE="${arg#*=}" ;;
     --image=*) IMAGE="${arg#*=}" ;;
     --ssh-key=*) SSH_KEY_NAME="${arg#*=}" ;;
+    *)
+      if [[ -z "$SERVER_NAME" ]]; then
+        SERVER_NAME="$arg"
+      fi
+      ;;
   esac
 done
 
-if [[ -z "$SERVER_NAME" ]]; then
-  echo "Usage: $0 <server_name> [--type=<server_type>] [--image=<image>] [--ssh-key=<ssh_key_name>]" >&2
-  exit 1
-fi
+prompt_if_missing
 
 echo "Provisioning Hetzner server: $SERVER_NAME"
 echo "Type: $SERVER_TYPE, Image: $IMAGE, SSH Key: $SSH_KEY_NAME"
