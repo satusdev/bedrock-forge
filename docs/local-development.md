@@ -85,13 +85,11 @@ _(You can check if most tools are installed by running `toolname --version` or
     git clone <your-repo-url> wordpress-with-docker-bedrock
     cd wordpress-with-docker-bedrock
     ```
-2.  **Install Bedrock Dependencies in Template:**
-    ```bash
-    cd websites/template/www
-    composer install
-    cd ../../..
-    ```
-    _(Customize `websites/template/www/composer.json` first if needed)._
+2.  **Install Bedrock Dependencies in Template:** ```bash cd core/template/www
+    composer install cd ../../..
+
+````
+_(Customize `core/template/www/composer.json` first if needed)._
 3.  **Configure Core DB Password:**
     ```bash
     cp core/.env.example core/.env
@@ -131,7 +129,7 @@ new site directory locally based on the template.
 graph TD
     A[Start: ./create-site.sh site port flags...] --> B{Parse Arguments};
     B --> C[Create Directory: websites/site];
-    C --> D[Copy files from websites/template/ to websites/site/];
+    C --> D[Copy files from core/template/ to websites/site/];
     D --> E[Replace placeholders in .tpl files - site, port];
     E --> F[Generate WP Salts];
     F --> G[Populate .env.* files with salts, defaults];
@@ -152,7 +150,7 @@ graph TD
 
     style A fill:#fff
     style Q fill:#fff
-```
+````
 
 **Example using the script:**
 
