@@ -43,10 +43,25 @@ git push -u origin main
 
 ## 3. Provision the Remote Server
 
+### a. Provision Hetzner VPS
+
 ```sh
-# Provision CyberPanel/Hetzner server, DNS, DB, OLS, hardening, rclone, logrotate
+# Provision a new Hetzner VPS (requires HETZNER_TOKEN env variable)
+./scripts/provision/provision-hetzner.sh myblog-server --ssh-key=<your_ssh_key_name>
+```
+
+- This script will create a new server and output its public IP.
+- You can SSH into the server once it's ready.
+
+### b. Provision CyberPanel and Services
+
+```sh
+# Provision CyberPanel, DNS, DB, OLS, hardening, rclone, logrotate on the new server
 ./scripts/provision/provision-cyberpanel.sh myblog.com
 ```
+
+- This script will set up CyberPanel and all required services on the Hetzner
+  VPS.
 
 ---
 
@@ -121,16 +136,73 @@ git push -u origin main
 ```mermaid
 graph TD
     A[Local Site Creation] --> B[GitHub Repo Init & Push]
-    B --> C[Provision Remote Server]
-    C --> D[Update config/sync-config.json]
-    D --> E[Deploy Code to Remote]
-    E --> F[Sync DB & Uploads]
-    F --> G[Set Up Backups]
-    G --> H[CI/CD & Monitoring]
-    H --> I[Troubleshooting]
+    B --> C[Provision Hetzner VPS]
+    C --> D[Provision CyberPanel & Services]
+    D --> E[Update config/sync-config.json]
+    E --> F[Deploy Code to Remote]
+    F --> G[Sync DB & Uploads]
+    G --> H[Set Up Backups]
+    H --> I[CI/CD & Monitoring]
+    I --> J[Troubleshooting]
 ```
 
 ---
 
 **You now have a fully automated, modular workflow from local development to
 production, with backups and monitoring!**
+
+---
+
+## Step-by-Step Usage Explanation
+
+### 1. Local Site Creation
+
+- Run `./scripts/local/site-init.sh myblog --port=8005` to scaffold a new site.
+- Generate .env files and switch to the desired environment.
+- Start containers with `cd websites/myblog && docker-compose up -d`.
+
+### 2. GitHub Setup
+
+- Initialize a git repo, commit, and push to GitHub.
+
+### 3. Provision Hetzner VPS
+
+- Run
+  `./scripts/provision/provision-hetzner.sh myblog-server --ssh-key=<your_ssh_key_name>`.
+- The script will create a VPS and print its IP.
+- SSH to the server using the printed IP.
+
+### 4. Provision CyberPanel & Services
+
+- Run `./scripts/provision/provision-cyberpanel.sh myblog.com`.
+- This sets up CyberPanel, DNS, DB, OLS, rclone, logrotate, and hardening on the
+  Hetzner server.
+- The script may prompt for required info (domain, credentials, etc.).
+
+### 5. Update Sync Config
+
+- Edit `config/sync-config.json` with the new site and remote environment
+  details (SSH, DB, rclone, paths).
+
+### 6. Deploy Code to Remote
+
+- Deploy to staging or production using
+  `./scripts/deploy/deploy.sh myblog staging` or `production`.
+
+### 7. Sync Database and Uploads
+
+- Use the sync scripts to push/pull DB and uploads between local and
+  remote/cloud.
+
+### 8. Set Up Backups
+
+- Use `./scripts/sync/backup.sh` and `./scripts/sync/restore.sh` for backups and
+  restores.
+
+### 9. Set Up CI/CD and Monitoring
+
+- Register Jenkins and Kuma monitoring as needed.
+
+### 10. Troubleshooting
+
+- Refer to `docs/troubleshooting.md` for common issues and solutions.
