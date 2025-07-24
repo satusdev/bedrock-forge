@@ -10,21 +10,42 @@ source "$COMMON_DIR/utils.sh"
 usage() {
   echo "Usage: $0 <repo_name> [--private] [--org=orgname]"
   echo "Requires GITHUB_TOKEN env variable."
+  echo "If arguments are omitted, you will be prompted interactively."
   exit 1
 }
 
+prompt_if_missing() {
+  if [ -z "$REPO_NAME" ]; then
+    read -rp "Enter repository name: " REPO_NAME
+  fi
+  if [ -z "$PRIVATE_SET" ]; then
+    read -rp "Should the repo be private? [Y/n]: " PRIVATE_ANSWER
+    case "$PRIVATE_ANSWER" in
+      [Nn]*) PRIVATE=false ;;
+      *) PRIVATE=true ;;
+    esac
+  fi
+  if [ -z "$ORG" ]; then
+    read -rp "Enter organization (leave blank for personal account): " ORG
+  fi
+}
+
 parse_arguments() {
+  # Help flag
+  for arg in "$@"; do
+    case $arg in
+      -h|--help) usage ;;
+    esac
+  done
+
+  PRIVATE_SET=""
   PRIVATE=false
   ORG=""
-  if [ -z "$1" ]; then
-    log_error "Missing repo_name argument."
-    usage
-  fi
   REPO_NAME="$1"
   shift
   for arg in "$@"; do
     case $arg in
-      --private) PRIVATE=true ;;
+      --private) PRIVATE=true; PRIVATE_SET=1 ;;
       --org=*) ORG="${arg#*=}" ;;
     esac
   done
@@ -32,6 +53,7 @@ parse_arguments() {
 
 main() {
   parse_arguments "$@"
+  prompt_if_missing
   [ -z "$GITHUB_TOKEN" ] && error_exit "GITHUB_TOKEN env variable required."
   API_URL="https://api.github.com/user/repos"
   if [ -n "$ORG" ]; then

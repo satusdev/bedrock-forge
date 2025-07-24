@@ -9,17 +9,32 @@ source "$COMMON_DIR/utils.sh"
 
 usage() {
   echo "Usage: $0 <site_name> <environment> [--db-name=...] [--db-user=...] [--db-pass=...]"
+  echo "If arguments are omitted, you will be prompted interactively."
   exit 1
 }
 
-parse_arguments() {
-  if [ -z "$1" ] || [ -z "$2" ]; then
-    log_error "Missing arguments: site_name, environment."
-    usage
+prompt_if_missing() {
+  if [ -z "$SITE_NAME" ]; then
+    read -rp "Enter site name: " SITE_NAME
   fi
+  if [ -z "$ENV" ]; then
+    read -rp "Enter environment [development]: " ENV
+    ENV="${ENV:-development}"
+  fi
+}
+
+parse_arguments() {
+  # Help flag
+  for arg in "$@"; do
+    case $arg in
+      -h|--help) usage ;;
+    esac
+  done
+
   SITE_NAME="$1"
   ENV="$2"
-  shift 2
+  shift $(( $# > 0 ? 1 : 0 ))
+  shift $(( $# > 0 ? 1 : 0 ))
   for arg in "$@"; do
     case $arg in
       --db-name=*) DB_NAME="${arg#*=}" ;;
@@ -35,6 +50,7 @@ generate_random() {
 
 main() {
   parse_arguments "$@"
+  prompt_if_missing
   SITE_DIR="websites/$SITE_NAME"
   ENV_FILE="$SITE_DIR/.env.$ENV"
   TEMPLATE_FILE="$SITE_DIR/.env.$ENV.tpl"
