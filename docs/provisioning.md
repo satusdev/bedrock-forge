@@ -54,7 +54,7 @@ graph LR
 
 ## Prerequisites
 
-Before running the script, ensure the following are configured and available:
+Before running the scripts, ensure the following are configured and available:
 
 **Remote Server:**
 
@@ -73,7 +73,7 @@ _(Verify tools are installed: `curl --version`, `jq --version`, `ssh -V`)_
 - SSH client installed and configured for passwordless access to the remote
   server (using keys). See
   [Security Best Practices](../docs/security.md#ssh-hardening-).
-- Script is executable: `chmod +x scripts/provision-cyberpanel-bedrock.sh`.
+- Scripts are executable: `chmod +x scripts/**/*.sh *.sh`.
 
 **Cloudflare:**
 
@@ -105,32 +105,31 @@ _(Verify tools are installed: `curl --version`, `jq --version`, `ssh -V`)_
 
 ## Usage
 
-Run the script from your local project root, providing the domain name as the
-argument:
+Run the orchestrator script from your local project root, providing the domain
+name as the argument:
 
 ```bash
-./scripts/provision-cyberpanel-bedrock.sh yourdomain.com
+./scripts/provision/provision-cyberpanel.sh yourdomain.com
 ```
 
 **Example within Workflow:**
 
 This script is typically run after creating the local site files but before the
-initial deployment using `manage-site.sh setup-new-site`.
+initial deployment using the modular deployment scripts.
 
-1.  `make create-site site=mysite ...` (Create local site)
-2.  `./scripts/provision-cyberpanel-bedrock.sh mysite.com` (Provision remote
+1.  `./scripts/local/site-init.sh mysite --port=8001` (Create local site)
+2.  `./scripts/provision/provision-cyberpanel.sh mysite.com` (Provision remote
     infrastructure)
-3.  Update `scripts/sync-config.json` with DB credentials output by the script.
-4.  `./scripts/manage-site.sh mysite setup-new-site production ...` (Deploy code
-    and install WP)
+3.  Update `config/sync-config.json` with DB credentials output by the script.
+4.  `./scripts/deploy/deploy.sh mysite production` (Deploy code and install WP)
 
 **Important Notes:**
 
-- The script assumes standard CyberPanel API endpoints and behavior.
+- The scripts assume standard CyberPanel API endpoints and behavior.
 - Carefully review the prerequisites and ensure all details in
   `scripts/.env.provision` are correct.
-- If the script encounters errors, check the output messages and review the
-  CyberPanel/Cloudflare configurations manually.
+- If any script encounters errors, check the output messages and review the
+  CyberPanel/Cloudflare/server configurations manually.
 - **Record the database credentials** (name, user, password) output by the
   script if the database is newly created, as you will need them for
-  `scripts/sync-config.json`.
+  `config/sync-config.json`.
