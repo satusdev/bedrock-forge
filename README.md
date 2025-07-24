@@ -162,41 +162,37 @@ Detailed documentation is available in the `docs/` directory:
 
 ```
 .
-├── core/                     # Shared Docker configurations (DB, Base Image)
-│   ├── .env.example          # Example for core DB password
-│   ├── docker-compose-db.yml # Defines shared DB service & network
-│   └── Dockerfile            # Base PHP/Nginx image for all sites
-├── scripts/                  # Utility and deployment scripts
-│   ├── manage-site.sh        # Unified deploy, sync & setup script (Run Locally)
-│   ├── sync-config.sample.json # Sample config for manage-site.sh
-│   └── dumps/                # Default location for temporary DB dumps
-├── websites/                 # Contains individual site directories
-│   ├── testsite/             # Example site created by create-site.sh
-│   │   ├── .env              # Active environment file (managed by switch-env.sh)
-│   │   ├── .env.development  # Dev settings (DB points to shared Docker DB)
-│   │   ├── .env.production   # Prod settings (DB points to remote DB)
-│   │   ├── .env.staging      # Staging settings (DB points to remote DB)
-│   │   ├── docker-compose.yml # Site-specific Docker services (app, webserver)
-│   │   ├── nginx.conf        # Nginx config for the site's webserver container
-│   │   ├── uploads.ini       # PHP upload settings for the site's app container
-│   │   └── www/              # Bedrock installation for this site
-│   │       ├── composer.json
-│   │       ├── config/
-│   │       └── web/          # Public web root (contains index.php, app/, wp/)
+├── core/                     # Shared Docker configs (DB, Base Image)
+│   ├── .env.example
+│   ├── docker-compose-db.yml
+│   └── Dockerfile
+├── config/                   # Central config (sync-config.json, envs)
+│   ├── .env.local
+│   ├── .env.production
+│   └── sync-config.json
+├── scripts/
+│   ├── local/                # Local site management (site-init, env-switch, etc.)
+│   ├── provision/            # Provisioning (server, DNS, hardening, rclone, etc.)
+│   ├── deploy/               # Deployment (deploy.sh, Jenkinsfile, etc.)
+│   ├── sync/                 # Sync/backup (db, uploads, backup, restore, rclone GUI)
+│   ├── ci/                   # Jenkins pipeline registration
+│   ├── monitoring/           # Kuma monitor registration
+│   ├── common/               # Shared helpers (logging, config, utils)
+│   └── logs/                 # Log files (rotated by logrotate)
+├── docs/                     # Documentation (concepts, usage, migration, workflow)
+├── websites/
 │   └── template/             # Template for creating new sites
-│       ├── .env.*.tpl        # Template environment files
-│       ├── .env.example      # Explains site .env variables
+│       ├── .env.*.tpl        # Template env files
+│       ├── .env.example
 │       ├── docker-compose.yml.tpl
 │       ├── nginx.conf.tpl
 │       ├── uploads.ini
-│       └── www/              # Base Bedrock installation (run composer install here first)
-├── .env.example              # Top-level example (not typically used)
+│       └── www/              # Base Bedrock install (run composer install here first)
+├── .env.example
 ├── .gitignore
-├── create-site.sh            # Script to create & initialize NEW LOCAL sites
-├── Makefile                  # Shortcuts for LOCAL development tasks
+├── Makefile                  # Shortcuts for local Docker tasks
 ├── nginx.conf                # Default Nginx config (referenced by site configs)
-├── README.md
-└── switch-env.sh             # Script to switch active LOCAL .env for a site
+└── README.md
 ```
 
 ## Requirements ⏸️
