@@ -39,7 +39,7 @@
 		},
 		{
 			"type": "vcs",
-			"url": "https://github.com/lamah-co/composer-monorepo-installer"
+			"url": "https://github.com/satusdev/monorepo-fetcher"
 		}
 	],
 	"require": {
@@ -60,7 +60,7 @@
 		"wpackagist-plugin/worker": "*",
 		"wpackagist-plugin/contact-form-7": "*",
 		"wpackagist-plugin/elementor": "*",
-		"lamah-co/monorepo-installer": "^1.0"
+		"satusdev/monorepo-fetcher": "dev-main"
 	},
 	"require-dev": {
 		"roave/security-advisories": "dev-latest",

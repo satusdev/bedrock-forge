@@ -141,6 +141,18 @@ main() {
   rename_template_files
   replace_common_placeholders
   handle_salts
+
+  # Install Bedrock/WordPress core files
+  if [ -d "${NEW_SITE_DIR}/www" ]; then
+    log_info "Running composer install in ${NEW_SITE_DIR}/www..."
+    (cd "${NEW_SITE_DIR}/www" && composer install)
+    if [ $? -ne 0 ]; then
+      log_warn "composer install failed in ${NEW_SITE_DIR}/www"
+    fi
+  else
+    log_warn "Directory ${NEW_SITE_DIR}/www does not exist, skipping composer install."
+  fi
+
   log_success "Site '$NEW_SITE_NAME' initialized at '$NEW_SITE_DIR'."
 }
 

@@ -8,6 +8,7 @@ core/.env
 
 # Ignore site-specific active .env files
 websites/*/.env
+websites/myblog
 
 # Ignore Composer dependencies within each site
 websites/*/www/vendor/
