@@ -52,12 +52,38 @@ git push -u origin main
 
 ### a. Provision Hetzner VPS
 
+#### Prerequisite: Configure hcloud CLI Context
+
+Before provisioning, you must create an API token in the
+[Hetzner Cloud Console](https://console.hetzner.cloud/projects) (go to
+"Security" → "API Tokens", create a token with write permissions).
+
+Then configure your hcloud CLI context:
+
 ```sh
-# Provision a new Hetzner VPS (requires HETZNER_TOKEN env variable)
-./scripts/provision/provision-hetzner.sh myblog-server --ssh-key=<your_ssh_key_name>
+hcloud context create my-hcloud
+# Paste your API token when prompted
+hcloud context use my-hcloud
 ```
 
-- This script will create a new server and output its public IP.
+You must have an active context for all hcloud CLI operations.
+
+#### Provision Hetzner VPS (Interactive, with sensible defaults)
+
+Use the provided script for a fully interactive, CLI-driven provisioning flow:
+
+```sh
+# Provision a new Hetzner VPS (defaults: location=fsn1/Nuremberg, type=cx22, image=ubuntu-22.04)
+./scripts/provision/provision-hetzner.sh myblog-server
+```
+
+- The script will prompt you to select SSH key, and will show defaults for image
+  (`ubuntu-22.04`), server type (`cx22`), and location (`fsn1`/Nuremberg). Press
+  Enter to accept defaults.
+- Requires an active hcloud context (`hcloud context create <name>` with your
+  API token) before running.
+- Once the server is created, use `hcloud server describe myblog-server` to get
+  its public IP.
 - You can SSH into the server once it's ready.
 
 ### b. Provision CyberPanel and Services

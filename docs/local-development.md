@@ -11,6 +11,11 @@ WordPress sites. ------- ADD AFTER
 # Create a new site 'myblog' on port 8005
 ./scripts/local/site-init.sh myblog --port=8005
 
+# Install Bedrock/WordPress core files (required for web/wp)
+cd websites/myblog/www
+composer install
+cd ../../..
+
 # Generate .env files (if needed)
 ./scripts/local/generate-env.sh myblog
 
@@ -18,7 +23,7 @@ WordPress sites. ------- ADD AFTER
 ./scripts/local/env-switch.sh myblog development
 
 # Start containers
-cd websites/myblog && docker-compose up -d
+cd websites/myblog && docker compose up -d
 
 # Access at http://localhost:8005
 ```
@@ -37,10 +42,22 @@ nano websites/myblog-staging/.env.staging  # Update URLs and DB creds
 ./scripts/local/env-switch.sh myblog-staging staging
 
 # Start containers
-cd websites/myblog-staging && docker-compose up -d
+cd websites/myblog-staging && docker compose up -d
 ```
 
 ## Troubleshooting Tips
+
+- **Missing WordPress/Bedrock files:**  
+  If you see errors like `wp-blog-header.php not found`, make sure `www/web/wp/`
+  exists in your site directory and contains WordPress core files.  
+  Run:
+
+  ```bash
+  cd websites/<site>/www
+  composer install
+  ```
+
+  to install Bedrock/WordPress files.
 
 - **Containers won't start:** Check `docker ps -a` and `docker logs <container>`
   for errors.
@@ -48,7 +65,7 @@ cd websites/myblog-staging && docker-compose up -d
   creating the site.
 - **.env not switching:** Make sure to restart containers after switching env:
   ```bash
-  cd websites/mysite && docker-compose restart
+  cd websites/mysite && docker compose restart
   ```
 - **Composer errors:** Run `composer install` manually in `websites/<site>/www/`
   to debug.
@@ -58,6 +75,15 @@ cd websites/myblog-staging && docker-compose up -d
 ## Initial Setup ☣️
 
 **Prerequisites (Local Machine):**
+
+**Docker Network:**  
+Before starting any site, ensure the shared Docker network exists:
+
+```sh
+docker network create bedrock_shared_network || true
+```
+
+This is required for all site containers to communicate.
 
 _(You can check if most tools are installed by running `toolname --version` or
 `which toolname` in your terminal, e.g., `git --version`, `docker --version`,
@@ -85,11 +111,13 @@ _(You can check if most tools are installed by running `toolname --version` or
     git clone <your-repo-url> wordpress-with-docker-bedrock
     cd wordpress-with-docker-bedrock
     ```
-2.  **Install Bedrock Dependencies in Template:** ```bash cd core/template/www
-    composer install cd ../../..
-
-````
-_(Customize `core/template/www/composer.json` first if needed)._
+2.  **Install Bedrock Dependencies in Template:**
+    ```bash
+    cd core/template/www
+    composer install
+    cd ../../..
+    ```
+    _(Customize `core/template/www/composer.json` first if needed)._
 3.  **Configure Core DB Password:**
     ```bash
     cp core/.env.example core/.env
@@ -153,7 +181,7 @@ graph TD
 
     style A fill:#fff
     style Q fill:#fff
-````
+```
 
 **Example using the script:**
 
@@ -178,6 +206,13 @@ generates unique salts for `.env.development`, `.env.staging`,
 `.env.production`.
 
 **After Local Site Creation:**
+
+- The `.env.development`, `.env.staging`, and `.env.production` files are
+  generated directly in your site directory (e.g., `websites/myblog/`).
+- You do **not** need to use or keep `.tpl` files after site creation.
+- To update DB credentials or other values, use
+  `./scripts/local/generate-env.sh` to update the actual `.env.<environment>`
+  files.
 
 1.  **Review `.env.*` Files:** Check `websites/<new_site_name>/.env.*`. You'll
     need accurate DB credentials and URLs for staging/production before using

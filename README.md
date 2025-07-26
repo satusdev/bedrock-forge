@@ -202,6 +202,8 @@ Detailed documentation is available in the `docs/` directory:
 - [Docker](https://docs.docker.com/get-docker/) &
   [Docker Compose](https://docs.docker.com/compose/install/)
 - [Composer](https://getcomposer.org/)
+- [Hetzner hcloud CLI](https://github.com/hetznercloud/cli) (required for server
+  provisioning, see below)
 - `git`
 - `curl` (Used by `create-site.sh` for salts)
 - `openssl` (Used by `create-site.sh` for passwords/salts)
@@ -211,6 +213,28 @@ Detailed documentation is available in the `docs/` directory:
 - `rsync` (Required by `manage-site.sh` for deployment)
 - `ssh` & `scp` clients (Required by `manage-site.sh`)
 - Scripts should be executable: `chmod +x *.sh scripts/*.sh`
+
+### Install hcloud CLI
+
+The Hetzner Cloud CLI (`hcloud`) is required for all server provisioning tasks.
+
+**Install on Linux/macOS:**
+
+```sh
+curl -O https://github.com/hetznercloud/cli/releases/latest/download/hcloud-linux-amd64.tar.gz
+tar -xzf hcloud-linux-amd64.tar.gz
+sudo mv hcloud /usr/local/bin/
+hcloud version
+```
+
+**Install on macOS (Homebrew):**
+
+```sh
+brew install hcloud
+```
+
+See [hcloud CLI releases](https://github.com/hetznercloud/cli/releases) for
+other platforms and details.
 
 **Remote Server (for Deployment/Sync):**
 

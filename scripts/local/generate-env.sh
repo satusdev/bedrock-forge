@@ -1,5 +1,5 @@
 #!/bin/bash
-# generate-env.sh - Generate a .env file for a Bedrock site with secure credentials
+# generate-env.sh - Update a .env file for a Bedrock site with secure credentials
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMMON_DIR="$SCRIPT_DIR/../common"
@@ -10,6 +10,7 @@ source "$COMMON_DIR/utils.sh"
 usage() {
   echo "Usage: $0 <site_name> <environment> [--db-name=...] [--db-user=...] [--db-pass=...]"
   echo "If arguments are omitted, you will be prompted interactively."
+  echo "This script now works directly with .env.<environment> files (not .tpl)."
   exit 1
 }
 
@@ -53,18 +54,16 @@ main() {
   prompt_if_missing
   SITE_DIR="websites/$SITE_NAME"
   ENV_FILE="$SITE_DIR/.env.$ENV"
-  TEMPLATE_FILE="$SITE_DIR/.env.$ENV.tpl"
-  [ -f "$TEMPLATE_FILE" ] || error_exit "Template file $TEMPLATE_FILE not found."
+  [ -f "$ENV_FILE" ] || error_exit "Env file $ENV_FILE not found. (Did you run site-init.sh?)"
   DB_NAME="${DB_NAME:-${SITE_NAME}_db}"
   DB_USER="${DB_USER:-${SITE_NAME}_user}"
   DB_PASS="${DB_PASS:-$(generate_random)}"
-  log_info "Generating .env file for $SITE_NAME ($ENV)..."
-  cp "$TEMPLATE_FILE" "$ENV_FILE"
-  sed -i "s|%%DB_NAME%%|$DB_NAME|g" "$ENV_FILE"
-  sed -i "s|%%DB_USER%%|$DB_USER|g" "$ENV_FILE"
-  sed -i "s|%%DB_PASSWORD%%|$DB_PASS|g" "$ENV_FILE"
+  log_info "Updating .env file for $SITE_NAME ($ENV)..."
+  sed -i "s|^DB_NAME=.*$|DB_NAME=$DB_NAME|" "$ENV_FILE"
+  sed -i "s|^DB_USER=.*$|DB_USER=$DB_USER|" "$ENV_FILE"
+  sed -i "s|^DB_PASSWORD=.*$|DB_PASSWORD=$DB_PASS|" "$ENV_FILE"
   chmod 600 "$ENV_FILE"
-  log_success ".env file generated at $ENV_FILE"
+  log_success ".env file updated at $ENV_FILE"
 }
 
 main "$@"
