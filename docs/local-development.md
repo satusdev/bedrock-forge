@@ -47,6 +47,19 @@ cd websites/myblog-staging && docker compose up -d
 
 ## Troubleshooting Tips
 
+- **Database connection errors:**
+
+  - Make sure the shared DB container is running
+    (`docker compose -f core/docker-compose-db.yml --env-file core/.env up -d`).
+  - The site-init script will attempt to create the DB/user automatically if
+    possible.
+  - If you see "Access denied" errors, check your `.env` for correct DB
+    credentials and that the user/database exist in MySQL.
+  - You can manually create the DB/user with:
+    ```sh
+    docker exec -i bedrock_shared_db mysql -uroot -p<your_root_pw> -e "CREATE DATABASE IF NOT EXISTS <dbname>; CREATE USER IF NOT EXISTS '<dbuser>'@'%' IDENTIFIED BY '<dbpass>'; GRANT ALL PRIVILEGES ON <dbname>.* TO '<dbuser>'@'%'; FLUSH PRIVILEGES;"
+    ```
+
 - **Missing WordPress/Bedrock files:**  
   If you see errors like `wp-blog-header.php not found`, make sure `www/web/wp/`
   exists in your site directory and contains WordPress core files.  
@@ -151,6 +164,12 @@ _(You can check if most tools are installed by running `toolname --version` or
 
 ## Creating a New Local Site 🚀
 
+**Before creating a site, make sure the shared DB container is running:**
+
+```sh
+docker compose -f core/docker-compose-db.yml --env-file core/.env up -d
+```
+
 Use the `create-site.sh` script (or the `make create-site` shortcut) to set up a
 new site directory locally based on the template.
 
@@ -186,6 +205,9 @@ graph TD
 **Example using the script:**
 
 ```bash
+# Make sure the DB container is running first!
+docker compose -f core/docker-compose-db.yml --env-file core/.env up -d
+
 # Create 'myblog', access at http://localhost:8005
 ./scripts/local/site-init.sh myblog --port=8005 --create-db --install-wp --run-composer --switch-dev --wp-admin-pass=securepassword
 ```
