@@ -8,11 +8,10 @@ services:
     volumes:
       - dbdata:/var/lib/mysql
     networks:
-      - app-network
+      - bedrock_shared_network
 volumes:
   dbdata:
     driver: local
 networks:
-  app-network:
-    driver: bridge
-    name: bedrock_shared_network
+  bedrock_shared_network:
+    external: true

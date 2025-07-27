@@ -59,14 +59,24 @@ rename_template_files() {
 }
 
 replace_common_placeholders() {
+  log_info "Replacing common placeholders in config files and all .env* files..."
   local target_files=("${NEW_SITE_DIR}/docker-compose.yml" "${NEW_SITE_DIR}/nginx.conf")
-  log_info "Replacing common placeholders..."
+  # Add all .env* files in the site directory
+  for envfile in "${NEW_SITE_DIR}"/.env*; do
+    [ -f "$envfile" ] && target_files+=("$envfile")
+  done
   for file in "${target_files[@]}"; do
     if [ -f "$file" ]; then
       sed -i \
         -e "s|%%SITE_NAME%%|${NEW_SITE_NAME}|g" \
         -e "s|%%APP_PORT%%|${APP_PORT}|g" \
+        -e "s|%%WP_HOME%%|http://localhost:${APP_PORT}|g" \
+        -e "s|%%WP_SITEURL%%|http://localhost:${APP_PORT}/wp|g" \
         "$file" || log_warn "Placeholder replacement failed in $file"
+      # Warn if any %%...%% placeholders remain
+      if grep -q '%%.*%%' "$file"; then
+        log_warn "Unreplaced placeholder(s) found in $file"
+      fi
     else
       log_warn "Expected file '$file' not found."
     fi
