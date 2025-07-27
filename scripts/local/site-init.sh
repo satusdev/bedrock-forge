@@ -57,6 +57,11 @@ create_site_directory() {
   log_info "Creating site '$NEW_SITE_NAME' in '$NEW_SITE_DIR'..."
   mkdir -p "$(dirname "$NEW_SITE_DIR")"
   cp -r "$TEMPLATE_DIR" "$NEW_SITE_DIR" || error_exit "Failed to copy template directory."
+
+  # Copy support scripts
+  log_info "Copying support scripts into new project..."
+  cp -r scripts "$PARENT_DIR/" || error_exit "Failed to copy scripts directory."
+  find "$PARENT_DIR/scripts" -type f -name "*.sh" -exec chmod +x {} \;
 }
 
 rename_template_files() {
