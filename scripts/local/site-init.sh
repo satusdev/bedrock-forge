@@ -37,19 +37,25 @@ parse_arguments() {
 
   NEW_SITE_NAME="$1"
   shift
+  PARENT_DIR="."
   for arg in "$@"; do
     case $arg in
       --port=*) APP_PORT="${arg#*=}" ;;
+      --parent-dir=*) PARENT_DIR="${arg#*=}" ;;
       *) usage ;;
     esac
   done
 }
 
 create_site_directory() {
-  NEW_SITE_DIR="${WEBSITES_DIR}/${NEW_SITE_NAME}"
+  # Validate parent dir
+  if [ ! -d "$PARENT_DIR" ]; then error_exit "Parent directory '$PARENT_DIR' does not exist."; fi
+  if [ ! -w "$PARENT_DIR" ]; then error_exit "Parent directory '$PARENT_DIR' is not writable."; fi
+  NEW_SITE_DIR="${PARENT_DIR%/}/${WEBSITES_DIR}/${NEW_SITE_NAME}"
   if [ ! -d "$TEMPLATE_DIR" ]; then error_exit "Template directory '$TEMPLATE_DIR' not found."; fi
   if [ -d "$NEW_SITE_DIR" ]; then error_exit "Site directory '$NEW_SITE_DIR' already exists."; fi
   log_info "Creating site '$NEW_SITE_NAME' in '$NEW_SITE_DIR'..."
+  mkdir -p "$(dirname "$NEW_SITE_DIR")"
   cp -r "$TEMPLATE_DIR" "$NEW_SITE_DIR" || error_exit "Failed to copy template directory."
 }
 
