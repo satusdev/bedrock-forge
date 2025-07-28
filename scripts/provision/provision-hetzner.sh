@@ -68,7 +68,17 @@ hcloud server create --name "$SERVER_NAME" \
   --type "$SERVER_TYPE" \
   --location "$LOCATION"
 
-echo "Server creation initiated. Use 'hcloud server list' to check status."
-echo "Once ready, use 'hcloud server describe $SERVER_NAME' to get the public IP."
+echo "Server creation initiated. Fetching server info..."
+
+# Wait for server to be ready and fetch info
+sleep 5
+SERVER_JSON=$(hcloud server describe "$SERVER_NAME" --output json)
+echo "$SERVER_JSON" > "server-info.json"
+echo "Server info saved to server-info.json"
+
+SERVER_IP=$(echo "$SERVER_JSON" | jq -r '.public_net.ipv4')
+SERVER_ID=$(echo "$SERVER_JSON" | jq -r '.id')
+echo "Server ID: $SERVER_ID"
+echo "Server IP: $SERVER_IP"
 echo "You can SSH to the server when ready:"
-echo "  ssh root@<server_ip>"
+echo "  ssh root@$SERVER_IP"
