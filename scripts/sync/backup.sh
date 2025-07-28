@@ -4,6 +4,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMMON_DIR="$SCRIPT_DIR/../common"
 CONFIG_FILE="config/sync-config.json"
+PROJECT_INFO_FILE="project-info.json"
 
 source "$COMMON_DIR/logging.sh"
 source "$COMMON_DIR/utils.sh"
@@ -45,7 +46,14 @@ main() {
   LOCAL_UPLOADS_PATH=$(get_jq_config_value "$SITE_NAME" "local" "uploads_path")
   RCLONE_REMOTE=$(get_jq_config_value "$SITE_NAME" "$TARGET_ENV" "rclone_remote")
   RCLONE_UPLOADS_PATH=$(get_jq_config_value "$SITE_NAME" "$TARGET_ENV" "rclone_uploads_path")
-  DB_NAME=$(get_jq_config_value "$SITE_NAME" "$TARGET_ENV" "db_name")
+  DB_NAME=$(jq -r '.database.name // empty' "$PROJECT_INFO_FILE")
+  DB_HOST=$(jq -r '.database.host // empty' "$PROJECT_INFO_FILE")
+  DB_USER=$(jq -r '.database.user // empty' "$PROJECT_INFO_FILE")
+  DB_PASS=$(jq -r '.database.password // empty' "$PROJECT_INFO_FILE")
+
+  if [ -z "$DB_NAME" ] || [ -z "$DB_HOST" ] || [ -z "$DB_USER" ] || [ -z "$DB_PASS" ]; then
+    error_exit "Missing database info in project-info.json. Please provision first."
+  fi
 
   [ -d "$LOCAL_DB_DUMP_DIR" ] || mkdir -p "$LOCAL_DB_DUMP_DIR"
   [ -d "$LOCAL_UPLOADS_PATH" ] || error_exit "Uploads path $LOCAL_UPLOADS_PATH not found."
