@@ -75,7 +75,8 @@ hcloud ssh-key list
 hcloud server create --name myblog-server --type cx22 --image ubuntu-22.04 --location nbg1 --ssh-key mykey
 ```
 
-- The command will output the server's ID and IP address.
+- **Expected Output:** Server ID and IP address (e.g.,
+  `ID: 123456, IP: 95.217.XX.XX`)
 - You can SSH into the server once it's ready:
 
 ```sh
@@ -109,8 +110,10 @@ hcloud server describe myblog-server
 
 - This script will set up CyberPanel and all required services on the Hetzner
   VPS.
+- **Expected Output:** Success message, service status, and credentials for
+  CyberPanel.
 
-### c. Set Up Domain and Subdomain DNS (Cloudflare)
+### c. Set Up Domain and Subdomain DNS (Cloudflare CLI)
 
 After your server is provisioned and you have its public IP, set up your domain
 and subdomains using the Cloudflare CLI automation script.
@@ -120,12 +123,15 @@ and subdomains using the Cloudflare CLI automation script.
 ```sh
 # Add an A record for www.example.com pointing to your server IP
 ./scripts/provision/cloudflare-dns.sh add --zone example.com --type A --name www --content <server-ip>
+# Output: "A record for www.example.com added successfully."
 
 # Add a CNAME record for blog.example.com pointing to target.example.com
 ./scripts/provision/cloudflare-dns.sh add --zone example.com --type CNAME --name blog --content target.example.com
+# Output: "CNAME record for blog.example.com added successfully."
 
 # Remove an A record
 ./scripts/provision/cloudflare-dns.sh remove --zone example.com --type A --name www
+# Output: "A record for www.example.com removed."
 ```
 
 #### Interactive Mode
@@ -180,6 +186,8 @@ See [docs/cloudflare.md](./cloudflare.md) for full usage and options.
 ---
 
 ## 7. Set Up Backups
+
+See [Backup & Restore Usage](./usage-backup.md) for full details.
 
 ```sh
 # Backup DB and uploads to rclone remote
