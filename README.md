@@ -4,6 +4,31 @@
     <!-- <img src="./assets/images/icon.png" alt="logo"/> -->
 </div>
 
+## Quick Start ⚡
+
+Clone the repo, make scripts executable, and create your first site:
+
+```sh
+git clone git@github.com:satusdev/bedrock-forge.git
+cd bedrock-forge
+find scripts -type f -name "*.sh" -exec chmod +x {} \;
+
+# Create a new site
+./scripts/local/site-init.sh mysite --port=8001
+
+# Provision Hetzner server (requires hcloud CLI)
+hcloud context create my-hcloud
+hcloud context use my-hcloud
+hcloud server create --name mysite-server --type cx22 --image ubuntu-22.04 --location nbg1 --ssh-key mykey
+
+# Setup CyberPanel and DNS (requires Cloudflare CLI)
+./scripts/provision/provision-cyberpanel.sh mysite.com
+./scripts/provision/cloudflare-dns.sh add --zone mysite.com --type A --name www --content <server-ip>
+```
+
+See [docs/example-workflow.md](docs/example-workflow.md) for a full step-by-step
+guide.
+
 ## Modular Workflow 🚀
 
 This project now uses a modular script workflow for all local, deployment, sync,
@@ -101,11 +126,15 @@ underlying concepts.
 - [Documentation](#documentation-)
 - [Migration from Legacy Scripts](#migration-from-legacy-scripts)
 - [Further Automation Ideas](#further-automation-ideas-)
-- [Getting Help](#getting-help-) ------- ADD AFTER
+- [Getting Help](#getting-help-)
+- [Quick Start](#quick-start-)
 
 ## Documentation 📖
 
 Detailed documentation is available in the `docs/` directory:
+
+- **[Backup & Restore Usage](./docs/usage-backup.md):** How to use backup and
+  restore scripts.
 
 ## Migration from Legacy Scripts
 
@@ -204,6 +233,8 @@ Detailed documentation is available in the `docs/` directory:
 - [Composer](https://getcomposer.org/)
 - [Hetzner hcloud CLI](https://github.com/hetznercloud/cli) (required for server
   provisioning, see below)
+- [Cloudflare CLI](https://github.com/cloudflare/cloudflare-go) (required for
+  DNS automation, see below)
 - `git`
 - `curl` (Used by `create-site.sh` for salts)
 - `openssl` (Used by `create-site.sh` for passwords/salts)
@@ -235,6 +266,18 @@ brew install hcloud
 
 See [hcloud CLI releases](https://github.com/hetznercloud/cli/releases) for
 other platforms and details.
+
+### Install Cloudflare CLI
+
+The Cloudflare CLI is required for DNS automation tasks.
+
+**Install via Go:**
+
+```sh
+go install github.com/cloudflare/cloudflare-go/cmd/cf@latest
+```
+
+See [docs/cloudflare.md](docs/cloudflare.md) for setup and usage details.
 
 **Remote Server (for Deployment/Sync):**
 

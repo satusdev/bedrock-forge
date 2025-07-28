@@ -228,3 +228,52 @@ multi-site environment.
 - **Specific WP-CLI Error:** Look at the exact error message provided by WP-CLI
   for clues (e.g., "Error establishing a database connection", "Table doesn't
   exist", specific plugin/theme errors).
+
+---
+
+# FAQ ❓
+
+## How do I reset a site and start over?
+
+- Remove the site directory under `websites/`, clean up related DB entries, and
+  re-run `./scripts/local/site-init.sh`.
+- See [Docker Issues](#docker-issues-) and
+  [Database Connection Errors](#database-connection-errors-) for cleanup tips.
+
+## What if my DB password changes?
+
+- Update the `.env` file for your site and the relevant config in `core/.env` or
+  remote `.env`.
+- Restart containers to apply changes. See
+  [Database Connection Errors](#database-connection-errors-).
+
+## How do I update Cloudflare DNS records?
+
+- Use `./scripts/provision/cloudflare-dns.sh` with `add` or `remove` commands.
+- See
+  [Set Up Domain and Subdomain DNS (Cloudflare CLI)](../docs/example-workflow.md#c-set-up-domain-and-subdomain-dns-cloudflare-cli).
+
+## How do I backup and restore my site?
+
+- Use `./scripts/sync/backup.sh` to backup and `./scripts/sync/restore.sh` to
+  restore.
+- See [Set Up Backups](../docs/example-workflow.md#7-set-up-backups).
+
+## What if my server IP changes?
+
+- Update DNS records using Cloudflare CLI and update `config/sync-config.json`
+  with the new IP.
+- See [SSH Connection Issues](#ssh-connection-issues-manage-sitesh-) and
+  [Remote Server Permission Errors](#remote-server-permission-errors-).
+
+## How do I troubleshoot failed deployments?
+
+- Check logs in `scripts/local/scripts/logs/bedrock-workflow.log` and container
+  logs.
+- See [Deployment & Remote Management](../docs/deployment.md) and
+  [Troubleshooting Guide](#troubleshooting-guide-).
+
+## How do I update or reinstall hcloud/Cloudflare CLI?
+
+- Follow install instructions in [README.md](../README.md#requirements-) and
+  [docs/cloudflare.md](../docs/cloudflare.md).
