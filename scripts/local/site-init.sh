@@ -160,6 +160,46 @@ main() {
   prompt_if_missing
   create_site_directory
   rename_template_files
+
+  # Generate per-site DB credentials
+  DB_NAME="${NEW_SITE_NAME}_db"
+  DB_USER="${NEW_SITE_NAME}_user"
+  DB_PASSWORD="$(openssl rand -base64 16 | tr -dc 'a-zA-Z0-9' | head -c 16)"
+
+  # Update .env files with per-site DB creds
+  for envfile in "${NEW_SITE_DIR}"/.env*; do
+    [ -f "$envfile" ] && sed -i \
+      -e "s|%%DB_NAME%%|${DB_NAME}|g" \
+      -e "s|%%DB_USER%%|${DB_USER}|g" \
+      -e "s|%%DB_PASSWORD%%|${DB_PASSWORD}|g" \
+      "$envfile"
+  done
+
+  # Add DB service to docker-compose.yml if not present
+  COMPOSE_FILE="${NEW_SITE_DIR}/docker-compose.yml"
+  if ! grep -q "db:" "$COMPOSE_FILE"; then
+    cat <<EOF >> "$COMPOSE_FILE"
+
+  db:
+    image: mysql:8.0
+    container_name: ${NEW_SITE_NAME}_db
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: rootpw_${NEW_SITE_NAME}
+    volumes:
+      - dbdata:/var/lib/mysql
+    networks:
+      - bedrock_shared_network
+
+volumes:
+  dbdata:
+    driver: local
+EOF
+  fi
+
   replace_common_placeholders
   handle_salts
 
