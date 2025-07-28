@@ -1,77 +1,52 @@
-#!/bin/bash
-# cloudflare-dns.sh - Manage Cloudflare DNS A records for a domain
+#!/usr/bin/env bash
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COMMON_DIR="$SCRIPT_DIR/../common"
+# cloudflare-dns.sh
+# Add or remove DNS records (A, CNAME) using cloudflared CLI.
+# Usage:
+#   ./cloudflare-dns.sh add --zone <zone> --type <A|CNAME> --name <subdomain> --content <ip-or-target>
+#   ./cloudflare-dns.sh remove --zone <zone> --type <A|CNAME> --name <subdomain>
+# Or run interactively with no arguments.
 
-source "$COMMON_DIR/logging.sh"
-source "$COMMON_DIR/utils.sh"
+set -e
 
-ENV_FILE="scripts/.env.provision"
+ACTION="$1"
+shift
 
-usage() {
-  echo "Usage: $0 <domain>"
+prompt() {
+  read -rp "Zone (example.com): " ZONE
+  read -rp "Record type (A/CNAME): " TYPE
+  read -rp "Name (subdomain): " NAME
+  if [[ "$ACTION" == "add" ]]; then
+    read -rp "Content (IP for A, target for CNAME): " CONTENT
+  fi
+}
+
+if [[ -z "$ACTION" ]]; then
+  echo "No action specified. Choose: add or remove"
+  read -rp "Action (add/remove): " ACTION
+fi
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --zone) ZONE="$2"; shift 2 ;;
+    --type) TYPE="$2"; shift 2 ;;
+    --name) NAME="$2"; shift 2 ;;
+    --content) CONTENT="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+
+if [[ -z "$ZONE" || -z "$TYPE" || -z "$NAME" || ( "$ACTION" == "add" && -z "$CONTENT" ) ]]; then
+  prompt
+fi
+
+if [[ "$ACTION" == "add" ]]; then
+  echo "Adding $TYPE record: $NAME.$ZONE -> $CONTENT"
+  cloudflared dns create --zone "$ZONE" --type "$TYPE" --name "$NAME" --content "$CONTENT"
+elif [[ "$ACTION" == "remove" ]]; then
+  echo "Removing $TYPE record: $NAME.$ZONE"
+  cloudflared dns delete --zone "$ZONE" --name "$NAME"
+else
+  echo "Unknown action: $ACTION"
   exit 1
-}
-
-parse_arguments() {
-  if [ -z "$1" ]; then
-    log_error "Missing domain argument."
-    usage
-  fi
-  DOMAIN="$1"
-}
-
-load_env() {
-  if [ -f "$ENV_FILE" ]; then
-    log_info "Loading environment variables from $ENV_FILE"
-    set -o allexport
-    source "$ENV_FILE"
-    set +o allexport
-  else
-    error_exit "$ENV_FILE not found. Please create it from $ENV_FILE.example and fill in the details."
-  fi
-}
-
-check_var() {
-  local var_value=$1
-  local var_name=$2
-  if [ -z "$var_value" ]; then
-    error_exit "$var_name is not set in $ENV_FILE or passed correctly. Please define it."
-  fi
-}
-
-setup_cloudflare_dns() {
-  local domain=$1
-  log_info "Setting up Cloudflare DNS A record for $domain..."
-  local api_response
-  api_response=$(curl -s -X POST "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records" \
-    -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-    -H "Content-Type: application/json" \
-    --data "{\"type\":\"A\",\"name\":\"${domain}\",\"content\":\"${SERVER_IP}\",\"ttl\":120,\"proxied\":false}")
-
-  local success_status error_code error_message
-  success_status=$(echo "$api_response" | jq -r '.success')
-  error_code=$(echo "$api_response" | jq -r '.errors[0].code // empty')
-
-  if [[ "$success_status" == "true" ]]; then
-    log_success "Cloudflare DNS record created successfully."
-  elif [[ "$error_code" == "81057" || "$error_code" == "81058" ]]; then
-    log_info "Cloudflare DNS record already exists (Code: $error_code). Continuing..."
-  else
-    error_message=$(echo "$api_response" | jq -r '.errors[0].message // "Unknown error"')
-    log_error "Cloudflare API Response: $api_response"
-    error_exit "Failed to create Cloudflare DNS record. Code: $error_code, Message: $error_message. Check API token, Zone ID, and response."
-  fi
-}
-
-main() {
-  parse_arguments "$@"
-  load_env
-  check_var "$SERVER_IP" "SERVER_IP"
-  check_var "$CLOUDFLARE_API_TOKEN" "CLOUDFLARE_API_TOKEN"
-  check_var "$CF_ZONE_ID" "CF_ZONE_ID"
-  setup_cloudflare_dns "$DOMAIN"
-}
-
-main "$@"
+fi
