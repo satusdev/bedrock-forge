@@ -133,6 +133,9 @@ underlying concepts.
 
 Detailed documentation is available in the `docs/` directory:
 
+- **[Project Info Display](./scripts/show-project-info.sh):** Print all
+  collected project metadata in a readable format.
+
 - **[Backup & Restore Usage](./docs/usage-backup.md):** How to use backup and
   restore scripts.
 

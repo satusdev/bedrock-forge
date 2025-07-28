@@ -50,6 +50,12 @@ git push -u origin main
 
 ## 3. Provision the Remote Server
 
+After provisioning, view collected project metadata:
+
+```sh
+./scripts/show-project-info.sh
+```
+
 ### a. Provision Hetzner VPS
 
 #### Prerequisite: Configure hcloud CLI Context
