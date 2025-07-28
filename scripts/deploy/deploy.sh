@@ -4,6 +4,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMMON_DIR="$SCRIPT_DIR/../common"
 CONFIG_FILE="config/sync-config.json"
+PROJECT_INFO_FILE="project-info.json"
 
 source "$COMMON_DIR/logging.sh"
 source "$COMMON_DIR/utils.sh"
@@ -32,13 +33,13 @@ get_jq_config_value() {
 deploy_code() {
   SITE_DIR="websites/$SITE_NAME"
   LOCAL_WEB_ROOT="${SITE_DIR}/www"
-  REMOTE_HOST=$(get_jq_config_value "$SITE_NAME" "$TARGET_ENV" "ssh_host")
-  SSH_USER=$(get_jq_config_value "$SITE_NAME" "$TARGET_ENV" "ssh_user")
+  REMOTE_HOST=$(jq -r '.server.ip // empty' "$PROJECT_INFO_FILE")
+  SSH_USER=$(jq -r '.site.admin_user // empty' "$PROJECT_INFO_FILE")
   WEB_USER=$(get_jq_config_value "$SITE_NAME" "$TARGET_ENV" "web_user")
-  REMOTE_PATH=$(get_jq_config_value "$SITE_NAME" "$TARGET_ENV" "remote_path")
+  REMOTE_PATH=$(jq -r '.site.url // empty' "$PROJECT_INFO_FILE")
 
   if [ -z "$REMOTE_HOST" ] || [ -z "$SSH_USER" ] || [ -z "$WEB_USER" ] || [ -z "$REMOTE_PATH" ]; then
-    error_exit "Could not parse remote config for site '$SITE_NAME' and environment '$TARGET_ENV'."
+    error_exit "Missing remote info in project-info.json. Please provision first."
   fi
 
   SSH_CONNECTION_STRING="$SSH_USER@$REMOTE_HOST"

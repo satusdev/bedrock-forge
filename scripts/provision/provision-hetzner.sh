@@ -78,6 +78,22 @@ echo "Server info saved to server-info.json"
 
 SERVER_IP=$(echo "$SERVER_JSON" | jq -r '.public_net.ipv4')
 SERVER_ID=$(echo "$SERVER_JSON" | jq -r '.id')
+SERVER_HOSTNAME=$(echo "$SERVER_JSON" | jq -r '.name')
+SERVER_OS=$(echo "$SERVER_JSON" | jq -r '.image.os_flavor')
+SERVER_PROVIDER="hetzner"
+
+# Update project-info.json
+jq \
+  --arg ip "$SERVER_IP" \
+  --arg hostname "$SERVER_HOSTNAME" \
+  --arg provider "$SERVER_PROVIDER" \
+  --arg os "$SERVER_OS" \
+  --arg date "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+  '.server.ip = $ip | .server.hostname = $hostname | .server.provider = $provider | .server.os = $os | .provisioned_at = $date' \
+  project-info.json > project-info.json.tmp && mv project-info.json.tmp project-info.json
+
+echo "Project info updated in project-info.json"
+
 echo "Server ID: $SERVER_ID"
 echo "Server IP: $SERVER_IP"
 echo "You can SSH to the server when ready:"
