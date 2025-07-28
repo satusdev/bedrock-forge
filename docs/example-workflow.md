@@ -63,22 +63,10 @@ After provisioning, view collected project metadata:
 See [docs/hcloud.md](./hcloud.md) for full installation and setup instructions.
 
 ```sh
-hcloud context create my-hcloud
-# Paste your API token when prompted
-hcloud context use my-hcloud
-```
-
-#### Create or Import SSH Key
-
-```sh
-hcloud ssh-key create --name mykey --public-key-from-file ~/.ssh/id_rsa.pub
-hcloud ssh-key list
-```
-
-#### Provision Server
-
-```sh
-hcloud server create --name myblog-server --type cx22 --image ubuntu-22.04 --location nbg1 --ssh-key mykey
+./scripts/provision/provision-hetzner.sh
+# You will be prompted to:
+#   1) Create a new server (interactive)
+#   2) Select an existing server (lists all available, then prompts for name)
 ```
 
 - **Expected Output:** Server ID and IP address (e.g.,

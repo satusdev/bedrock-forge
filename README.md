@@ -17,9 +17,12 @@ find scripts -type f -name "*.sh" -exec chmod +x {} \;
 ./scripts/local/site-init.sh mysite --port=8001
 
 # Provision Hetzner server (requires hcloud CLI)
-hcloud context create my-hcloud
-hcloud context use my-hcloud
-hcloud server create --name mysite-server --type cx22 --image ubuntu-22.04 --location nbg1 --ssh-key mykey
+./scripts/provision/provision-hetzner.sh
+
+# (You will be prompted to create a new server or select an existing one)
+# For new: hcloud context create my-hcloud
+#          hcloud context use my-hcloud
+#          hcloud server create --name mysite-server --type cx22 --image ubuntu-22.04 --location nbg1 --ssh-key mykey
 
 # Setup CyberPanel and DNS (requires Cloudflare CLI)
 ./scripts/provision/provision-cyberpanel.sh mysite.com
