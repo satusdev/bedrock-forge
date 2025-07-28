@@ -1,4 +1,4 @@
-# Full Example Workflow: Bedrock Site Creation to Production
+Full Example Workflow: Bedrock Site Creation to Production
 
 **Important:**  
 After cloning the repo, make all scripts executable (run once):
@@ -54,11 +54,7 @@ git push -u origin main
 
 #### Prerequisite: Configure hcloud CLI Context
 
-Before provisioning, you must create an API token in the
-[Hetzner Cloud Console](https://console.hetzner.cloud/projects) (go to
-"Security" → "API Tokens", create a token with write permissions).
-
-Then configure your hcloud CLI context:
+See [docs/hcloud.md](./hcloud.md) for full installation and setup instructions.
 
 ```sh
 hcloud context create my-hcloud
@@ -66,25 +62,43 @@ hcloud context create my-hcloud
 hcloud context use my-hcloud
 ```
 
-You must have an active context for all hcloud CLI operations.
-
-#### Provision Hetzner VPS (Interactive, with sensible defaults)
-
-Use the provided script for a fully interactive, CLI-driven provisioning flow:
+#### Create or Import SSH Key
 
 ```sh
-# Provision a new Hetzner VPS (defaults: location=fsn1/Nuremberg, type=cx22, image=ubuntu-22.04)
-./scripts/provision/provision-hetzner.sh myblog-server
+hcloud ssh-key create --name mykey --public-key-from-file ~/.ssh/id_rsa.pub
+hcloud ssh-key list
 ```
 
-- The script will prompt you to select SSH key, and will show defaults for image
-  (`ubuntu-22.04`), server type (`cx22`), and location (`fsn1`/Nuremberg). Press
-  Enter to accept defaults.
-- Requires an active hcloud context (`hcloud context create <name>` with your
-  API token) before running.
-- Once the server is created, use `hcloud server describe myblog-server` to get
-  its public IP.
-- You can SSH into the server once it's ready.
+#### Provision Server
+
+```sh
+hcloud server create --name myblog-server --type cx22 --image ubuntu-22.04 --location nbg1 --ssh-key mykey
+```
+
+- The command will output the server's ID and IP address.
+- You can SSH into the server once it's ready:
+
+```sh
+ssh root@<server-ip>
+```
+
+#### Fetch Server Info
+
+```sh
+hcloud server describe myblog-server
+```
+
+#### Troubleshooting
+
+- If you get "context not set", run `hcloud context use my-hcloud`.
+- If you get "invalid token", check your API token and context.
+- See [docs/hcloud.md](./hcloud.md) for full CLI usage and troubleshooting.
+
+#### Screenshots
+
+![Hetzner Cloud API Token Screenshot](https://docs.hetzner.com/_images/api-token.png)
+
+---
 
 ### b. Provision CyberPanel and Services
 
