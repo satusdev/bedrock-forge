@@ -110,6 +110,34 @@ hcloud server describe myblog-server
 - This script will set up CyberPanel and all required services on the Hetzner
   VPS.
 
+### c. Set Up Domain and Subdomain DNS (Cloudflare)
+
+After your server is provisioned and you have its public IP, set up your domain
+and subdomains using the Cloudflare CLI automation script.
+
+#### Using CLI Arguments
+
+```sh
+# Add an A record for www.example.com pointing to your server IP
+./scripts/provision/cloudflare-dns.sh add --zone example.com --type A --name www --content <server-ip>
+
+# Add a CNAME record for blog.example.com pointing to target.example.com
+./scripts/provision/cloudflare-dns.sh add --zone example.com --type CNAME --name blog --content target.example.com
+
+# Remove an A record
+./scripts/provision/cloudflare-dns.sh remove --zone example.com --type A --name www
+```
+
+#### Interactive Mode
+
+Just run without arguments and follow the prompts:
+
+```sh
+./scripts/provision/cloudflare-dns.sh
+```
+
+See [docs/cloudflare.md](./cloudflare.md) for full usage and options.
+
 ---
 
 ## 4. Update Sync Config
