@@ -1,135 +1,29 @@
-# Automated Provisioning with `provision-cyberpanel-bedrock.sh` 🤖
+...
 
-This script helps automate the setup of the necessary infrastructure on a remote
-server running CyberPanel with OpenLiteSpeed, including Cloudflare DNS
-integration.
+**Cloudflare CLI:**
 
-## Overview
+- Install the official Cloudflare CLI (`cloudflared`) for DNS automation and
+  management.
+- See [docs/cloudflare.md](./cloudflare.md) for full installation,
+  authentication, and usage instructions.
+- Typical install (Linux/macOS):
 
-The `scripts/provision-cyberpanel-bedrock.sh` script performs the following
-actions:
-
-- **Cloudflare DNS:** Creates or verifies the A record for the specified domain,
-  pointing to the server IP defined in the configuration.
-- **CyberPanel Website:** Creates the website within CyberPanel.
-- **CyberPanel Database:** Creates a database and user within CyberPanel. It
-  will output the credentials if they are newly created.
-- **OpenLiteSpeed Configuration:** Adjusts the virtual host configuration for
-  Bedrock compatibility:
-  - Sets the document root to `<site_root>/web`.
-  - Adds necessary rewrite rules for WordPress permalinks.
-- **Restart OpenLiteSpeed:** Applies the configuration changes.
-
-**Provisioning Script Interaction Diagram:**
-
-```mermaid
-graph LR
-    subgraph Local Machine
-        A[Developer] -- Runs --> B(./provision-cyberpanel-bedrock.sh domain.com)
-        B -- Reads --> C(scripts/.env.provision - API Keys, Server IP, SSH User)
-    end
-
-    subgraph External Services
-        D[Cloudflare API]
-        E[CyberPanel API - on Remote Server]
-    end
-
-    subgraph Remote Server
-        F[SSH Connection]
-        G[OpenLiteSpeed Config Files]
-        H[CyberPanel Backend]
-    end
-
-    B -- 1. API Call (Create/Verify DNS) --> D
-    B -- 2. API Call (Create Site, DB, User) --> E
-    B -- 3. SSH Commands (Modify OLS vHost, Restart OLS) --> F
-
-    E --> H
-    F --> G
-
-    style Local Machine fill:#ccf,stroke:#333,stroke-width:1px
-    style External Services fill:#f9f,stroke:#333,stroke-width:1px
-    style Remote Server fill:#eef,stroke:#333,stroke-width:1px
-```
-
-## Prerequisites
-
-Before running the scripts, ensure the following are configured and available:
-
-**Remote Server:**
-
-- CyberPanel and OpenLiteSpeed installed and running.
-- Correct PHP version (e.g., 8.1+) available and configurable via CyberPanel.
-- SSH access enabled for the `SSH_USER` defined below (key-based authentication
-  highly recommended).
-- `sudo` access for the `SSH_USER`.
-
-**Local Machine:**
-
-_(Verify tools are installed: `curl --version`, `jq --version`, `ssh -V`)_
-
-- `curl` installed (for interacting with APIs).
-- `jq` installed (for parsing JSON responses).
-- SSH client installed and configured for passwordless access to the remote
-  server (using keys). See
-  [Security Best Practices](../docs/security.md#ssh-hardening-).
-- Scripts are executable: `chmod +x scripts/**/*.sh *.sh`.
-
-**Cloudflare:**
-
-- An active Cloudflare account managing the domain's DNS.
-- A Cloudflare API Token with permissions:
-  - `Zone - DNS - Edit` for the relevant zone.
-- The Zone ID for the domain.
-
-**Configuration File (`scripts/.env.provision`):**
-
-- Create this file by copying `scripts/.env.provision.example`.
-  ```bash
-  cp scripts/.env.provision.example scripts/.env.provision
+  ```sh
+  curl -LO https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+  sudo mv cloudflared-linux-amd64 /usr/local/bin/cloudflared
+  sudo chmod +x /usr/local/bin/cloudflared
+  cloudflared --version
   ```
-- Fill in the required variables:
-  - `CLOUDFLARE_API_TOKEN`: Your Cloudflare API token (keep this secure!).
-  - `CLOUDFLARE_ZONE_ID`: The Zone ID for your domain on Cloudflare.
-  - `SERVER_IP`: The public IP address of your CyberPanel server.
-  - `SSH_USER`: The username for SSH access to the server (must have `sudo`
-    access).
-  - `SSH_PORT`: The SSH port (usually 22).
-  - `CYBERPANEL_ADMIN_USER`: CyberPanel admin username (usually 'admin').
-  - `CYBERPANEL_ADMIN_PASS`: CyberPanel admin password (keep this secure!).
-  - `DEFAULT_ADMIN_EMAIL`: Email address for the CyberPanel site owner.
-  - `DEFAULT_PHP_VERSION`: Desired PHP version string as seen in CyberPanel
-    (e.g., 'PHP 8.1').
-- **Security:** **Add `scripts/.env.provision` to your main `.gitignore` file.**
-  Never commit this file.
 
-## Usage
+- Create a Cloudflare API token with DNS edit permissions
+  ([screenshot](https://developers.cloudflare.com/api/images/api-token-create.png)).
+- Authenticate by setting `CLOUDFLARE_API_TOKEN` as an environment variable:
 
-Run the orchestrator script from your local project root, providing the domain
-name as the argument:
+  ```sh
+  export CLOUDFLARE_API_TOKEN=<your_token>
+  ```
 
-```bash
-./scripts/provision/provision-cyberpanel.sh yourdomain.com
-```
+- Use `cloudflared dns` commands for DNS record management (see
+  [docs/cloudflare.md](./cloudflare.md) for examples).
 
-**Example within Workflow:**
-
-This script is typically run after creating the local site files but before the
-initial deployment using the modular deployment scripts.
-
-1.  `./scripts/local/site-init.sh mysite --port=8001` (Create local site)
-2.  `./scripts/provision/provision-cyberpanel.sh mysite.com` (Provision remote
-    infrastructure)
-3.  Update `config/sync-config.json` with DB credentials output by the script.
-4.  `./scripts/deploy/deploy.sh mysite production` (Deploy code and install WP)
-
-**Important Notes:**
-
-- The scripts assume standard CyberPanel API endpoints and behavior.
-- Carefully review the prerequisites and ensure all details in
-  `scripts/.env.provision` are correct.
-- If any script encounters errors, check the output messages and review the
-  CyberPanel/Cloudflare/server configurations manually.
-- **Record the database credentials** (name, user, password) output by the
-  script if the database is newly created, as you will need them for
-  `config/sync-config.json`.
+...
