@@ -1,62 +1,54 @@
-# Hetzner hcloud CLI Usage & Setup
+...
 
-## Installation
+## Server Management with hcloud CLI
 
-### Linux/macOS
-
-```sh
-curl -O https://github.com/hetznercloud/cli/releases/latest/download/hcloud-linux-amd64.tar.gz
-tar -xzf hcloud-linux-amd64.tar.gz
-sudo mv hcloud /usr/local/bin/
-hcloud version
-```
-
-Or via Homebrew (macOS/Linux):
+### List Servers
 
 ```sh
-brew install hcloud
+hcloud server list
 ```
 
-### Windows
-
-Download the latest release from
-[Hetzner Cloud CLI Releases](https://github.com/hetznercloud/cli/releases).
-
-## API Token Creation
-
-1. Go to [Hetzner Cloud Console](https://console.hetzner.cloud/projects).
-2. Navigate to **Security > API Tokens**.
-3. Click **Generate API Token**.
-4. Copy and save the token securely.
-
-![Hetzner Cloud API Token Screenshot](https://docs.hetzner.com/_images/api-token.png)
-
-## hcloud Context Setup
+### Describe a Server
 
 ```sh
-hcloud context create my-hcloud
-# Paste your API token when prompted
-hcloud context use my-hcloud
+hcloud server describe <server-name>
 ```
 
-You can list contexts with:
+### Delete a Server
 
 ```sh
-hcloud context list
+hcloud server delete <server-name>
 ```
 
-## Common Usage
+### Power Actions
 
-- List servers: `hcloud server list`
-- Describe server: `hcloud server describe <name>`
-- Delete server: `hcloud server delete <name>`
-- List SSH keys: `hcloud ssh-key list`
+```sh
+hcloud server poweron <server-name>
+hcloud server poweroff <server-name>
+hcloud server reboot <server-name>
+```
 
-## Troubleshooting
+### SSH Key Management
 
-- **Invalid token:** Double-check your API token and context.
-- **Context not set:** Run `hcloud context use <name>`.
-- **Network issues:** Check your internet connection and firewall.
-- **Permission errors:** Ensure your API token has write permissions.
+```sh
+hcloud ssh-key list
+hcloud ssh-key describe <key-name>
+hcloud ssh-key delete <key-name>
+```
 
-See [Hetzner Cloud CLI Docs](https://github.com/hetznercloud/cli) for more.
+### Resize Server
+
+```sh
+hcloud server resize <server-name> --type <new-type>
+```
+
+### Change Server Name
+
+```sh
+hcloud server update <server-name> --name <new-name>
+```
+
+### More
+
+See [Hetzner Cloud CLI Docs](https://github.com/hetznercloud/cli) for full
+command reference and advanced usage.
