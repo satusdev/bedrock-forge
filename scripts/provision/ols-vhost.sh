@@ -2,12 +2,13 @@
 # ols-vhost.sh - Configure OpenLiteSpeed vHost for a domain
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(realpath "$SCRIPT_DIR/../..")"
 COMMON_DIR="$SCRIPT_DIR/../common"
 
 source "$COMMON_DIR/logging.sh"
 source "$COMMON_DIR/utils.sh"
 
-ENV_FILE="scripts/.env.provision"
+ENV_FILE="$PROJECT_ROOT/scripts/.env.provision"
 
 usage() {
   echo "Usage: $0 <domain>"

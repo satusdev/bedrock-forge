@@ -1,7 +1,9 @@
 #!/bin/bash
 # config.sh - Shared configuration loader for Bedrock workflow scripts
 
-CONFIG_DIR="$(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/config"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(realpath "$SCRIPT_DIR/../..")"
+CONFIG_DIR="$PROJECT_ROOT/config"
 CONFIG_FILE="$CONFIG_DIR/sync-config.json"
 ENV_LOCAL="$CONFIG_DIR/.env.local"
 ENV_PROD="$CONFIG_DIR/.env.production"

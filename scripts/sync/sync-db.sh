@@ -2,8 +2,9 @@
 # sync-db.sh - Sync Bedrock database between local and remote (modular)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(realpath "$SCRIPT_DIR/../..")"
 COMMON_DIR="$SCRIPT_DIR/../common"
-CONFIG_FILE="config/sync-config.json"
+CONFIG_FILE="$PROJECT_ROOT/config/sync-config.json"
 
 source "$COMMON_DIR/logging.sh"
 source "$COMMON_DIR/utils.sh"
@@ -49,7 +50,7 @@ get_jq_config_value() {
 }
 
 sync_db_push() {
-  SITE_DIR="websites/$SITE_NAME"
+  SITE_DIR="$PROJECT_ROOT/websites/$SITE_NAME"
   SITE_COMPOSE_FILE="${SITE_DIR}/docker-compose.yml"
   REMOTE_HOST=$(get_jq_config_value "$SITE_NAME" "$TARGET_ENV" "ssh_host")
   SSH_USER=$(get_jq_config_value "$SITE_NAME" "$TARGET_ENV" "ssh_user")
