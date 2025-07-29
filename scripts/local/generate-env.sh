@@ -2,6 +2,7 @@
 # generate-env.sh - Update a .env file for a Bedrock site with secure credentials
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(realpath "$SCRIPT_DIR/../..")"
 COMMON_DIR="$SCRIPT_DIR/../common"
 
 source "$COMMON_DIR/logging.sh"
@@ -52,7 +53,7 @@ generate_random() {
 main() {
   parse_arguments "$@"
   prompt_if_missing
-  SITE_DIR="websites/$SITE_NAME"
+  SITE_DIR="$PROJECT_ROOT/websites/$SITE_NAME"
   ENV_FILE="$SITE_DIR/.env.$ENV"
   [ -f "$ENV_FILE" ] || error_exit "Env file $ENV_FILE not found. (Did you run site-init.sh?)"
   DB_NAME="${DB_NAME:-${SITE_NAME}_db}"

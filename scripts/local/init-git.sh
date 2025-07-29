@@ -2,6 +2,7 @@
 # init-git.sh - Initialize git repo, add remote, and push for a Bedrock site
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(realpath "$SCRIPT_DIR/../..")"
 COMMON_DIR="$SCRIPT_DIR/../common"
 
 source "$COMMON_DIR/logging.sh"
@@ -37,7 +38,7 @@ parse_arguments() {
 main() {
   parse_arguments "$@"
   prompt_if_missing
-  SITE_DIR="websites/$SITE_NAME"
+  SITE_DIR="$PROJECT_ROOT/websites/$SITE_NAME"
   [ -d "$SITE_DIR" ] || error_exit "Site directory $SITE_DIR not found."
   cd "$SITE_DIR" || error_exit "Failed to cd into $SITE_DIR"
   if [ -d ".git" ]; then
