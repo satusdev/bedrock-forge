@@ -1,5 +1,9 @@
 Full Example Workflow: Bedrock Site Creation to Production
 
+**Note:** All scripts now automatically resolve the project root, so you can run
+them from any directory. You no longer need to `cd` into the project root before
+running scripts.
+
 **Important:**  
 After cloning the repo, make all scripts executable (run once):
 
@@ -16,17 +20,17 @@ site using the modular scripts.
 ## 1. Create a New Local Site
 
 ```sh
-# Create a new site 'myblog' on port 8005
+# Create a new site 'myblog' on port 8005 (choose directory interactively)
 ./scripts/local/site-init.sh myblog --port=8005
 
 # Generate .env files (if needed)
-./scripts/local/generate-env.sh myblog
+./scripts/local/generate-env.sh <site_dir_name>
 
 # Switch to development environment
-./scripts/local/env-switch.sh myblog development
+./scripts/local/env-switch.sh <site_dir_name> development
 
 # Start containers
-cd websites/myblog && docker-compose up -d
+cd <parent_dir>/<site_dir_name> && docker-compose up -d
 
 # Access at http://localhost:8005
 ```
@@ -36,12 +40,12 @@ cd websites/myblog && docker-compose up -d
 ## 2. Initialize Git and Push to GitHub
 
 ```sh
-cd websites/myblog
+cd <parent_dir>/<site_dir_name>
 git init
 git add .
 git commit -m "Initial commit"
 # Create a new repo on GitHub (manually or with script)
-../../scripts/local/create-github-repo.sh myblog
+../../scripts/local/create-github-repo.sh <site_dir_name>
 git remote add origin <github-repo-url>
 git push -u origin main
 ```
@@ -99,7 +103,7 @@ hcloud server describe myblog-server
 
 ```sh
 # Provision CyberPanel, DNS, DB, OLS, hardening, rclone, logrotate on the new server
-./scripts/provision/provision-cyberpanel.sh myblog.com
+./scripts/provision/provision-cyberpanel.sh <your_domain>
 ```
 
 - This script will set up CyberPanel and all required services on the Hetzner
@@ -153,10 +157,10 @@ See [docs/cloudflare.md](./cloudflare.md) for full usage and options.
 
 ```sh
 # Deploy code to staging
-./scripts/deploy/deploy.sh myblog staging
+./scripts/deploy/deploy.sh <site_dir_name> staging
 
 # Or to production
-./scripts/deploy/deploy.sh myblog production
+./scripts/deploy/deploy.sh <site_dir_name> production
 ```
 
 ---
@@ -165,16 +169,16 @@ See [docs/cloudflare.md](./cloudflare.md) for full usage and options.
 
 ```sh
 # Push local DB to remote
-./scripts/sync/sync-db.sh myblog staging push
+./scripts/sync/sync-db.sh <site_dir_name> staging push
 
 # Pull remote DB to local
-./scripts/sync/sync-db.sh myblog staging pull
+./scripts/sync/sync-db.sh <site_dir_name> staging pull
 
 # Push uploads to remote/cloud
-./scripts/sync/sync-uploads.sh myblog staging push
+./scripts/sync/sync-uploads.sh <site_dir_name> staging push
 
 # Pull uploads from remote/cloud
-./scripts/sync/sync-uploads.sh myblog staging pull
+./scripts/sync/sync-uploads.sh <site_dir_name> staging pull
 ```
 
 ---
@@ -185,10 +189,10 @@ See [Backup & Restore Usage](./usage-backup.md) for full details.
 
 ```sh
 # Backup DB and uploads to rclone remote
-./scripts/sync/backup.sh myblog production
+./scripts/sync/backup.sh <site_dir_name> production
 
 # Restore from backup
-./scripts/sync/restore.sh myblog production --date=YYYYMMDD-HHMMSS
+./scripts/sync/restore.sh <site_dir_name> production --date=YYYYMMDD-HHMMSS
 ```
 
 ---
