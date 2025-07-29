@@ -1,7 +1,9 @@
 #!/bin/bash
 # logging.sh - Shared logging utility for Bedrock workflow scripts
 
-LOG_DIR="$(dirname "$(dirname "$(dirname "${BASH_SOURCE[0]}")")")/scripts/logs"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(realpath "$SCRIPT_DIR/../..")"
+LOG_DIR="$PROJECT_ROOT/scripts/logs"
 LOG_FILE="$LOG_DIR/bedrock-workflow.log"
 
 mkdir -p "$LOG_DIR"

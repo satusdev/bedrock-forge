@@ -2,8 +2,9 @@
 # sync-uploads.sh - Sync Bedrock uploads between local and remote/cloud (modular)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(realpath "$SCRIPT_DIR/../..")"
 COMMON_DIR="$SCRIPT_DIR/../common"
-CONFIG_FILE="config/sync-config.json"
+CONFIG_FILE="$PROJECT_ROOT/config/sync-config.json"
 
 source "$COMMON_DIR/logging.sh"
 source "$COMMON_DIR/utils.sh"

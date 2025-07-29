@@ -2,9 +2,10 @@
 # deploy.sh - Deploy Bedrock code to remote server (modular)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(realpath "$SCRIPT_DIR/../..")"
 COMMON_DIR="$SCRIPT_DIR/../common"
-CONFIG_FILE="config/sync-config.json"
-PROJECT_INFO_FILE="project-info.json"
+CONFIG_FILE="$PROJECT_ROOT/config/sync-config.json"
+PROJECT_INFO_FILE="$PROJECT_ROOT/project-info.json"
 
 source "$COMMON_DIR/logging.sh"
 source "$COMMON_DIR/utils.sh"
@@ -31,7 +32,7 @@ get_jq_config_value() {
 }
 
 deploy_code() {
-  SITE_DIR="websites/$SITE_NAME"
+  SITE_DIR="$PROJECT_ROOT/websites/$SITE_NAME"
   LOCAL_WEB_ROOT="${SITE_DIR}/www"
   REMOTE_HOST=$(jq -r '.server.ip // empty' "$PROJECT_INFO_FILE")
   SSH_USER=$(jq -r '.site.admin_user // empty' "$PROJECT_INFO_FILE")
