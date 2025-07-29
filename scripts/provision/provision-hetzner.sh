@@ -52,7 +52,7 @@ if [[ "$SERVER_MODE" == "2" ]]; then
     --arg os "$SERVER_OS" \
     --arg date "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
     '.server.ip = $ip | .server.hostname = $hostname | .server.provider = $provider | .server.os = $os | .provisioned_at = $date' \
-    project-info.json > project-info.json.tmp && mv project-info.json.tmp project-info.json
+    "$PROJECT_ROOT/project-info.json" > "$PROJECT_ROOT/project-info.json.tmp" && mv "$PROJECT_ROOT/project-info.json.tmp" "$PROJECT_ROOT/project-info.json"
   echo "Project info updated in project-info.json"
   echo "Server ID: $SERVER_ID"
   echo "Server IP: $SERVER_IP"
@@ -123,7 +123,7 @@ jq \
   --arg os "$SERVER_OS" \
   --arg date "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
   '.server.ip = $ip | .server.hostname = $hostname | .server.provider = $provider | .server.os = $os | .provisioned_at = $date' \
-  project-info.json > project-info.json.tmp && mv project-info.json.tmp project-info.json
+  "$PROJECT_ROOT/project-info.json" > "$PROJECT_ROOT/project-info.json.tmp" && mv "$PROJECT_ROOT/project-info.json.tmp" "$PROJECT_ROOT/project-info.json"
 
 echo "Project info updated in project-info.json"
 

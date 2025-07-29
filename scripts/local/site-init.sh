@@ -2,14 +2,15 @@
 # site-init.sh - Initialize a new Bedrock-based WordPress site (local development, modular)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(realpath "$SCRIPT_DIR/../..")"
 COMMON_DIR="$SCRIPT_DIR/../common"
 
 source "$COMMON_DIR/logging.sh"
 source "$COMMON_DIR/config.sh"
 source "$COMMON_DIR/utils.sh"
 
-TEMPLATE_DIR="core/template"
-WEBSITES_DIR="websites"
+TEMPLATE_DIR="$PROJECT_ROOT/core/template"
+WEBSITES_DIR="$PROJECT_ROOT/websites"
 
 usage() {
   echo "Usage: $0 <new_site_name> --port=<port>"
@@ -24,6 +25,46 @@ prompt_if_missing() {
   if [ -z "$APP_PORT" ]; then
     read -rp "Enter port for the site [8005]: " APP_PORT
     APP_PORT="${APP_PORT:-8005}"
+  fi
+  if [ -z "$PARENT_DIR" ] || [ "$PARENT_DIR" = "." ]; then
+    read -rp "Do you want to use a different parent directory? [y/N]: " USE_PARENT
+    if [[ "$USE_PARENT" =~ ^[Yy]$ ]]; then
+      while true; do
+        read -rp "Enter parent directory path [..]: " PARENT_DIR
+        PARENT_DIR="${PARENT_DIR:-..}"
+        # Expand ~ to $HOME
+        if [[ "$PARENT_DIR" == ~* ]]; then
+          PARENT_DIR="${HOME}${PARENT_DIR:1}"
+        fi
+        if [ ! -d "$PARENT_DIR" ]; then
+          read -rp "Directory '$PARENT_DIR' does not exist. Create it? [y/N]: " CREATE_DIR
+          if [[ "$CREATE_DIR" =~ ^[Yy]$ ]]; then
+            mkdir -p "$PARENT_DIR" && break
+            echo "Created directory '$PARENT_DIR'."
+          else
+            echo "Please enter a valid parent directory."
+          fi
+        else
+          break
+        fi
+      done
+    else
+      PARENT_DIR="."
+    fi
+  fi
+  if [ -z "$SITE_DIR_NAME" ]; then
+    read -rp "Enter directory name for the new site [$NEW_SITE_NAME]: " SITE_DIR_NAME
+    SITE_DIR_NAME="${SITE_DIR_NAME:-$NEW_SITE_NAME}"
+  fi
+  echo "Summary:"
+  echo "  Site name: $NEW_SITE_NAME"
+  echo "  Port: $APP_PORT"
+  echo "  Parent directory: $PARENT_DIR"
+  echo "  Site directory: $SITE_DIR_NAME"
+  read -rp "Proceed with these settings? [Y/n]: " CONFIRM
+  if [[ "$CONFIRM" =~ ^[Nn]$ ]]; then
+    echo "Aborted."
+    exit 1
   fi
 }
 
@@ -51,17 +92,19 @@ create_site_directory() {
   # Validate parent dir
   if [ ! -d "$PARENT_DIR" ]; then error_exit "Parent directory '$PARENT_DIR' does not exist."; fi
   if [ ! -w "$PARENT_DIR" ]; then error_exit "Parent directory '$PARENT_DIR' is not writable."; fi
-  NEW_SITE_DIR="${PARENT_DIR%/}/${WEBSITES_DIR}/${NEW_SITE_NAME}"
+  NEW_SITE_DIR="${PARENT_DIR%/}/${SITE_DIR_NAME}"
   if [ ! -d "$TEMPLATE_DIR" ]; then error_exit "Template directory '$TEMPLATE_DIR' not found."; fi
   if [ -d "$NEW_SITE_DIR" ]; then error_exit "Site directory '$NEW_SITE_DIR' already exists."; fi
   log_info "Creating site '$NEW_SITE_NAME' in '$NEW_SITE_DIR'..."
-  mkdir -p "$(dirname "$NEW_SITE_DIR")"
-  cp -r "$TEMPLATE_DIR" "$NEW_SITE_DIR" || error_exit "Failed to copy template directory."
+  mkdir -p "$NEW_SITE_DIR"
+  cp -r "$TEMPLATE_DIR"/. "$NEW_SITE_DIR"/ || error_exit "Failed to copy template directory."
 
   # Copy support scripts
   log_info "Copying support scripts into new project..."
-  cp -r scripts "$PARENT_DIR/" || error_exit "Failed to copy scripts directory."
-  find "$PARENT_DIR/scripts" -type f -name "*.sh" -exec chmod +x {} \;
+  if [ "$(realpath "$PROJECT_ROOT/scripts")" != "$(realpath "$NEW_SITE_DIR/scripts")" ]; then
+    cp -r "$PROJECT_ROOT/scripts" "$NEW_SITE_DIR/" || error_exit "Failed to copy scripts directory."
+  fi
+  find "$NEW_SITE_DIR/scripts" -type f -name "*.sh" -exec chmod +x {} \;
 }
 
 rename_template_files() {

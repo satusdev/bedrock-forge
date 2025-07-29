@@ -2,9 +2,10 @@
 # backup.sh - Backup DB and uploads to rclone remote with retention policy
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(realpath "$SCRIPT_DIR/../..")"
 COMMON_DIR="$SCRIPT_DIR/../common"
-CONFIG_FILE="config/sync-config.json"
-PROJECT_INFO_FILE="project-info.json"
+CONFIG_FILE="$PROJECT_ROOT/config/sync-config.json"
+PROJECT_INFO_FILE="$PROJECT_ROOT/project-info.json"
 
 source "$COMMON_DIR/logging.sh"
 source "$COMMON_DIR/utils.sh"
@@ -40,7 +41,7 @@ get_jq_config_value() {
 main() {
   parse_arguments "$@"
   TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
-  SITE_DIR="websites/$SITE_NAME"
+  SITE_DIR="$PROJECT_ROOT/websites/$SITE_NAME"
   SITE_COMPOSE_FILE="${SITE_DIR}/docker-compose.yml"
   LOCAL_DB_DUMP_DIR=$(get_jq_config_value "$SITE_NAME" "local" "db_dump_path")
   LOCAL_UPLOADS_PATH=$(get_jq_config_value "$SITE_NAME" "local" "uploads_path")
