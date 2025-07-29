@@ -2,6 +2,7 @@
 # env-switch.sh - Switch the active .env file for a Bedrock site (modular)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(realpath "$SCRIPT_DIR/../..")"
 COMMON_DIR="$SCRIPT_DIR/../common"
 
 source "$COMMON_DIR/logging.sh"
@@ -54,7 +55,7 @@ validate_env() {
 }
 
 switch_env() {
-  SITE_DIR="websites/$SITE_NAME"
+  SITE_DIR="$PROJECT_ROOT/websites/$SITE_NAME"
   ENV_TEMPLATE_FILE="${SITE_DIR}/.env.${TARGET_ENV}.tpl"
   ENV_FILE_TO_COPY="${SITE_DIR}/.env.${TARGET_ENV}"
   ACTIVE_ENV_FILE="${SITE_DIR}/.env"
