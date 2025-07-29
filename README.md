@@ -6,6 +6,10 @@
 
 ## Quick Start ⚡
 
+**Note:** All scripts now automatically resolve the project root, so you can run
+them from any directory. You no longer need to `cd` into the project root before
+running scripts.
+
 Clone the repo, make scripts executable, and create your first site:
 
 ```sh

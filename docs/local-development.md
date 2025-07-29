@@ -1,7 +1,11 @@
 # Local Development 💻
 
 This document covers setting up the project locally and managing your local
-WordPress sites. ------- ADD AFTER
+WordPress sites.
+
+**Note:** All scripts now automatically resolve the project root, so you can run
+them from any directory. You no longer need to `cd` into the project root before
+running scripts.
 
 ## Real-World Usage Examples
 
