@@ -41,7 +41,16 @@ get_jq_config_value() {
 main() {
   parse_arguments "$@"
   TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
-  SITE_DIR="$PROJECT_ROOT/websites/$SITE_NAME"
+  # Expand ~ to $HOME if present
+  if [[ "$SITE_NAME" == ~* ]]; then
+    SITE_NAME="${HOME}${SITE_NAME:1}"
+  fi
+  # Determine if SITE_NAME is a path or just a name
+  if [[ "$SITE_NAME" == /* || "$SITE_NAME" == ./* ]]; then
+    SITE_DIR="$(realpath -m "$SITE_NAME")"
+  else
+    SITE_DIR="$PROJECT_ROOT/websites/$SITE_NAME"
+  fi
   SITE_COMPOSE_FILE="${SITE_DIR}/docker-compose.yml"
   LOCAL_DB_DUMP_DIR=$(get_jq_config_value "$SITE_NAME" "local" "db_dump_path")
   LOCAL_UPLOADS_PATH=$(get_jq_config_value "$SITE_NAME" "local" "uploads_path")

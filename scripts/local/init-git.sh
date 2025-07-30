@@ -38,7 +38,16 @@ parse_arguments() {
 main() {
   parse_arguments "$@"
   prompt_if_missing
-  SITE_DIR="$PROJECT_ROOT/websites/$SITE_NAME"
+  # Expand ~ to $HOME if present
+  if [[ "$SITE_NAME" == ~* ]]; then
+    SITE_NAME="${HOME}${SITE_NAME:1}"
+  fi
+  # Determine if SITE_NAME is a path or just a name
+  if [[ "$SITE_NAME" == /* || "$SITE_NAME" == ./* ]]; then
+    SITE_DIR="$(realpath -m "$SITE_NAME")"
+  else
+    SITE_DIR="$PROJECT_ROOT/websites/$SITE_NAME"
+  fi
   [ -d "$SITE_DIR" ] || error_exit "Site directory $SITE_DIR not found."
   cd "$SITE_DIR" || error_exit "Failed to cd into $SITE_DIR"
   if [ -d ".git" ]; then

@@ -55,7 +55,16 @@ validate_env() {
 }
 
 switch_env() {
-  SITE_DIR="$PROJECT_ROOT/websites/$SITE_NAME"
+  # Expand ~ to $HOME if present
+  if [[ "$SITE_NAME" == ~* ]]; then
+    SITE_NAME="${HOME}${SITE_NAME:1}"
+  fi
+  # Determine if SITE_NAME is a path or just a name
+  if [[ "$SITE_NAME" == /* || "$SITE_NAME" == ./* ]]; then
+    SITE_DIR="$(realpath -m "$SITE_NAME")"
+  else
+    SITE_DIR="$PROJECT_ROOT/websites/$SITE_NAME"
+  fi
   ENV_TEMPLATE_FILE="${SITE_DIR}/.env.${TARGET_ENV}.tpl"
   ENV_FILE_TO_COPY="${SITE_DIR}/.env.${TARGET_ENV}"
   ACTIVE_ENV_FILE="${SITE_DIR}/.env"
