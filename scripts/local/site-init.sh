@@ -82,7 +82,13 @@ parse_arguments() {
   for arg in "$@"; do
     case $arg in
       --port=*) APP_PORT="${arg#*=}" ;;
-      --parent-dir=*) PARENT_DIR="${arg#*=}" ;;
+      --parent-dir=*) 
+        PARENT_DIR="${arg#*=}"
+        # Expand ~ to $HOME if present
+        if [[ "$PARENT_DIR" == ~* ]]; then
+          PARENT_DIR="${HOME}${PARENT_DIR:1}"
+        fi
+        ;;
       *) usage ;;
     esac
   done
@@ -221,26 +227,26 @@ main() {
   # Add DB service to docker-compose.yml if not present
   COMPOSE_FILE="${NEW_SITE_DIR}/docker-compose.yml"
   if ! grep -q "db:" "$COMPOSE_FILE"; then
-    cat <<EOF >> "$COMPOSE_FILE"
+    # Insert db service before networks: section
+    awk '
+      BEGIN {in_services=0}
+      /^services:/ {in_services=1; print; next}
+      /^networks:/ && in_services {
+        print "  db:\n    image: mysql:8.0\n    container_name: '"${NEW_SITE_NAME}_db"'\n    restart: unless-stopped\n    environment:\n      MYSQL_DATABASE: '"${DB_NAME}"'\n      MYSQL_USER: '"${DB_USER}"'\n      MYSQL_PASSWORD: '"${DB_PASSWORD}"'\n      MYSQL_ROOT_PASSWORD: rootpw_'"${NEW_SITE_NAME}"'\n    volumes:\n      - dbdata:/var/lib/mysql\n    networks:\n      - bedrock_shared_network\n";
+        in_services=0
+      }
+      {print}
+    ' "$COMPOSE_FILE" > "${COMPOSE_FILE}.tmp" && mv "${COMPOSE_FILE}.tmp" "$COMPOSE_FILE"
 
-  db:
-    image: mysql:8.0
-    container_name: ${NEW_SITE_NAME}_db
-    restart: unless-stopped
-    environment:
-      MYSQL_DATABASE: ${DB_NAME}
-      MYSQL_USER: ${DB_USER}
-      MYSQL_PASSWORD: ${DB_PASSWORD}
-      MYSQL_ROOT_PASSWORD: rootpw_${NEW_SITE_NAME}
-    volumes:
-      - dbdata:/var/lib/mysql
-    networks:
-      - bedrock_shared_network
+    # Add volumes: section if not present
+    if ! grep -q "^volumes:" "$COMPOSE_FILE"; then
+      cat <<EOF >> "$COMPOSE_FILE"
 
 volumes:
   dbdata:
     driver: local
 EOF
+    fi
   fi
 
   replace_common_placeholders
