@@ -50,7 +50,16 @@ get_jq_config_value() {
 }
 
 sync_db_push() {
-  SITE_DIR="$PROJECT_ROOT/websites/$SITE_NAME"
+  # Expand ~ to $HOME if present
+  if [[ "$SITE_NAME" == ~* ]]; then
+    SITE_NAME="${HOME}${SITE_NAME:1}"
+  fi
+  # Determine if SITE_NAME is a path or just a name
+  if [[ "$SITE_NAME" == /* || "$SITE_NAME" == ./* ]]; then
+    SITE_DIR="$(realpath -m "$SITE_NAME")"
+  else
+    SITE_DIR="$PROJECT_ROOT/websites/$SITE_NAME"
+  fi
   SITE_COMPOSE_FILE="${SITE_DIR}/docker-compose.yml"
   REMOTE_HOST=$(get_jq_config_value "$SITE_NAME" "$TARGET_ENV" "ssh_host")
   SSH_USER=$(get_jq_config_value "$SITE_NAME" "$TARGET_ENV" "ssh_user")
@@ -83,7 +92,16 @@ sync_db_push() {
 }
 
 sync_db_pull() {
-  SITE_DIR="websites/$SITE_NAME"
+  # Expand ~ to $HOME if present
+  if [[ "$SITE_NAME" == ~* ]]; then
+    SITE_NAME="${HOME}${SITE_NAME:1}"
+  fi
+  # Determine if SITE_NAME is a path or just a name
+  if [[ "$SITE_NAME" == /* || "$SITE_NAME" == ./* ]]; then
+    SITE_DIR="$(realpath -m "$SITE_NAME")"
+  else
+    SITE_DIR="$PROJECT_ROOT/websites/$SITE_NAME"
+  fi
   SITE_COMPOSE_FILE="${SITE_DIR}/docker-compose.yml"
   REMOTE_HOST=$(get_jq_config_value "$SITE_NAME" "$TARGET_ENV" "ssh_host")
   SSH_USER=$(get_jq_config_value "$SITE_NAME" "$TARGET_ENV" "ssh_user")

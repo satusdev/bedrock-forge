@@ -32,7 +32,16 @@ get_jq_config_value() {
 }
 
 deploy_code() {
-  SITE_DIR="$PROJECT_ROOT/websites/$SITE_NAME"
+  # Expand ~ to $HOME if present
+  if [[ "$SITE_NAME" == ~* ]]; then
+    SITE_NAME="${HOME}${SITE_NAME:1}"
+  fi
+  # Determine if SITE_NAME is a path or just a name
+  if [[ "$SITE_NAME" == /* || "$SITE_NAME" == ./* ]]; then
+    SITE_DIR="$(realpath -m "$SITE_NAME")"
+  else
+    SITE_DIR="$PROJECT_ROOT/websites/$SITE_NAME"
+  fi
   LOCAL_WEB_ROOT="${SITE_DIR}/www"
   REMOTE_HOST=$(jq -r '.server.ip // empty' "$PROJECT_INFO_FILE")
   SSH_USER=$(jq -r '.site.admin_user // empty' "$PROJECT_INFO_FILE")

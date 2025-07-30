@@ -72,7 +72,8 @@
 		"preferred-install": "dist",
 		"allow-plugins": {
 			"composer/installers": true,
-			"roots/wordpress-core-installer": true
+			"roots/wordpress-core-installer": true,
+			"satusdev/monorepo-fetcher": true
 		}
 	},
 	"minimum-stability": "dev",
@@ -98,8 +99,6 @@
 			"target-dir": "web/app/plugins"
 		},
 		"monorepo-require": [
-			"bulk-image-importer",
-			"media-sync",
 			"code-snippets"
 		]
 	},

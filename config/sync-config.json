@@ -1,0 +1,10 @@
+{
+	"sites": {
+		"myblog": {
+			"dir": "/absolute/or/relative/path/to/myblog"
+		},
+		"jaam": {
+			"dir": "/absolute/or/relative/path/to/jaam"
+		}
+	}
+}

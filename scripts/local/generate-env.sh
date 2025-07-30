@@ -53,7 +53,16 @@ generate_random() {
 main() {
   parse_arguments "$@"
   prompt_if_missing
-  SITE_DIR="$PROJECT_ROOT/websites/$SITE_NAME"
+  # Expand ~ to $HOME if present
+  if [[ "$SITE_NAME" == ~* ]]; then
+    SITE_NAME="${HOME}${SITE_NAME:1}"
+  fi
+  # Determine if SITE_NAME is a path or just a name
+  if [[ "$SITE_NAME" == /* || "$SITE_NAME" == ./* ]]; then
+    SITE_DIR="$(realpath -m "$SITE_NAME")"
+  else
+    SITE_DIR="$PROJECT_ROOT/websites/$SITE_NAME"
+  fi
   ENV_FILE="$SITE_DIR/.env.$ENV"
   [ -f "$ENV_FILE" ] || error_exit "Env file $ENV_FILE not found. (Did you run site-init.sh?)"
   DB_NAME="${DB_NAME:-${SITE_NAME}_db}"
