@@ -2,7 +2,6 @@ version: '3.8'
 services:
   app:
     build:
-      context: ../../core
       dockerfile: Dockerfile
     container_name: %%SITE_NAME%%_app
     restart: unless-stopped
