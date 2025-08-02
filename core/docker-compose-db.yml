@@ -7,6 +7,7 @@ services:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
     volumes:
       - dbdata:/var/lib/mysql
+      - ../../init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - bedrock_shared_network
 volumes:

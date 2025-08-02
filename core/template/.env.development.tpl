@@ -9,6 +9,7 @@ DB_NAME=%%DB_NAME%%          # Example: site1_db
 DB_USER=%%DB_USER%%          # Example: site1_user
 DB_PASSWORD=%%DB_PASSWORD%%    # Example: site1_pass
 DB_HOST=db                   # Connects to the shared db service named 'db'
+DB_CONTAINER=%%DB_CONTAINER%%
 
 # Root password for the shared DB service (used internally by Docker Compose, not Bedrock directly)
 # This value in the site's .env doesn't override the one used by the core DB service.
@@ -19,6 +20,12 @@ DB_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-default_insecure_root_password}
 WP_ENV=development
 WP_HOME=%%WP_HOME%%          # Example: http://localhost:%%APP_PORT%%
 WP_SITEURL=%%WP_SITEURL%%      # Example: http://localhost:%%APP_PORT%%/wp
+
+SITE_TITLE='%%SITE_TITLE%%'
+ADMIN_USER='%%ADMIN_USER%%'
+ADMIN_PASSWORD='%%ADMIN_PASSWORD%%'
+ADMIN_EMAIL='%%ADMIN_EMAIL%%'
+WP_ALLOW_ROOT='%%WP_ALLOW_ROOT%%'
 
 # Generate unique salts for each site using: https://roots.io/salts.html
 # The create-site.sh script should prompt to generate these.
