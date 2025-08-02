@@ -1,5 +1,6 @@
 #!/bin/bash
-# site-init.sh - Initialize a new Bedrock-based WordPress site (local development, modular)
+set -e
+
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(realpath "$SCRIPT_DIR/../..")"
@@ -18,6 +19,15 @@ usage() {
   exit 1
 }
 
+# Load environment variables
+set -a
+if [ -f config/.env.local ]; then
+  source config/.env.local
+elif [ -f config/.env.production ]; then
+  source config/.env.production
+fi
+set +a
+
 prompt_if_missing() {
   if [ -z "$NEW_SITE_NAME" ]; then
     read -rp "Enter new site name: " NEW_SITE_NAME
@@ -30,8 +40,8 @@ prompt_if_missing() {
     read -rp "Do you want to use a different parent directory? [y/N]: " USE_PARENT
     if [[ "$USE_PARENT" =~ ^[Yy]$ ]]; then
       while true; do
-        read -rp "Enter parent directory path [..]: " PARENT_DIR
-        PARENT_DIR="${PARENT_DIR:-..}"
+        read -rp "Enter parent directory path [~/Work/Wordpress]: " PARENT_DIR
+        PARENT_DIR="${PARENT_DIR:-~/Work/Wordpress}"
         # Expand ~ to $HOME
         if [[ "$PARENT_DIR" == ~* ]]; then
           PARENT_DIR="${HOME}${PARENT_DIR:1}"
@@ -104,6 +114,24 @@ create_site_directory() {
   log_info "Creating site '$NEW_SITE_NAME' in '$NEW_SITE_DIR'..."
   mkdir -p "$NEW_SITE_DIR"
   cp -r "$TEMPLATE_DIR"/. "$NEW_SITE_DIR"/ || error_exit "Failed to copy template directory."
+
+  # Ensure Dockerfile is next to docker-compose.yml in the new site directory
+  DOCKERFILE_SRC="$PROJECT_ROOT/core/Dockerfile"
+  DOCKERFILE_DEST="$NEW_SITE_DIR/Dockerfile"
+  if [ -f "$DOCKERFILE_SRC" ]; then
+    cp "$DOCKERFILE_SRC" "$DOCKERFILE_DEST" || log_warn "Failed to copy Dockerfile to site directory."
+  else
+    log_warn "Core Dockerfile not found at $DOCKERFILE_SRC"
+  fi
+
+  # Update build context in docker-compose.yml to '.'
+  COMPOSE_FILE="$NEW_SITE_DIR/docker-compose.yml"
+  if [ -f "$COMPOSE_FILE" ]; then
+    sed -i 's|context: ../../core|context: .|' "$COMPOSE_FILE"
+    sed -i 's|dockerfile: Dockerfile|dockerfile: ./Dockerfile|' "$COMPOSE_FILE"
+  else
+    log_warn "docker-compose.yml not found in $NEW_SITE_DIR"
+  fi
 
   # Copy support scripts
   log_info "Copying support scripts into new project..."
@@ -215,13 +243,32 @@ main() {
   DB_USER="${NEW_SITE_NAME}_user"
   DB_PASSWORD="$(openssl rand -base64 16 | tr -dc 'a-zA-Z0-9' | head -c 16)"
 
-  # Update .env files with per-site DB creds
+  # Generate dynamic init.sql for MySQL user/db creation
+  INIT_SQL="${NEW_SITE_DIR}/init.sql"
+  cat > "$INIT_SQL" <<EOF
+CREATE DATABASE IF NOT EXISTS ${DB_NAME};
+CREATE USER IF NOT EXISTS '${DB_USER}'@'%' IDENTIFIED BY '${DB_PASSWORD}';
+GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO '${DB_USER}'@'%';
+FLUSH PRIVILEGES;
+EOF
+
+  # Update .env files with per-site DB creds and WP_CONTAINER
   for envfile in "${NEW_SITE_DIR}"/.env*; do
     [ -f "$envfile" ] && sed -i \
       -e "s|%%DB_NAME%%|${DB_NAME}|g" \
       -e "s|%%DB_USER%%|${DB_USER}|g" \
       -e "s|%%DB_PASSWORD%%|${DB_PASSWORD}|g" \
+      -e "s|%%DB_CONTAINER%%|${NEW_SITE_NAME}_db|g" \
+      -e "s|%%SITE_TITLE%%|${NEW_SITE_NAME}|g" \
+      -e "s|%%ADMIN_USER%%|admin|g" \
+      -e "s|%%ADMIN_PASSWORD%%|$(openssl rand -base64 16 | tr -dc 'a-zA-Z0-9' | head -c 16)|g" \
+      -e "s|%%ADMIN_EMAIL%%|admin@${NEW_SITE_NAME}.local|g" \
+      -e "s|%%WP_ALLOW_ROOT%%|true|g" \
       "$envfile"
+    # Add WP_CONTAINER if not present
+    if ! grep -q "^WP_CONTAINER=" "$envfile"; then
+      echo "WP_CONTAINER=${NEW_SITE_NAME}_app" >> "$envfile"
+    fi
   done
 
   # Add DB service to docker-compose.yml if not present

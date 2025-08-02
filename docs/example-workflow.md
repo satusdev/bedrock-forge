@@ -29,11 +29,24 @@ site using the modular scripts.
 # Switch to development environment
 ./scripts/local/env-switch.sh <site_dir_name> development
 
+# Run in dir of project to copy env
+cp .env.development .env
+
 # Start containers
 cd <parent_dir>/<site_dir_name> && docker-compose up -d
 
+# Install wp
+./scripts/local/site-provision.sh
+
 # Access at http://localhost:8005
 ```
+
+**New:**
+
+- DB_CONTAINER is now dynamic and written to your env files by site-init.sh
+  (e.g., `DB_CONTAINER=myblog_db`).
+- All provisioning scripts (site-provision.sh, etc.) use DB_CONTAINER from env
+  for MySQL and WP-CLI commands.
 
 ---
 
@@ -239,6 +252,10 @@ production, with backups and monitoring!**
 ### 1. Local Site Creation
 
 - Run `./scripts/local/site-init.sh myblog --port=8005` to scaffold a new site.
+- DB_CONTAINER will be set dynamically in your env files (e.g.,
+  `DB_CONTAINER=myblog_db`).
+- All provisioning scripts use DB_CONTAINER from env for MySQL and WP-CLI
+  commands.
 - Generate .env files and switch to the desired environment.
 - Start containers with `cd websites/myblog && docker-compose up -d`.
 
