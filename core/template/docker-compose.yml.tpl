@@ -1,4 +1,3 @@
-version: '3.8'
 services:
   app:
     build:
@@ -7,8 +6,12 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      - HOST_UID=${HOST_UID}
+      - HOST_GID=${HOST_GID}
     volumes:
-      - ./www:/var/www/html
+      - .:/var/www/html
+      - uploads-data:/var/www/html/web/app/uploads
       - ./uploads.ini:/usr/local/etc/php/conf.d/uploads.ini
     networks:
       - bedrock_shared_network
@@ -20,7 +23,7 @@ services:
     ports:
       - "%%APP_PORT%%:80"
     volumes:
-      - ./www:/var/www/html
+      - uploads-data:/var/www/html/web/app/uploads
       - ./nginx.conf:/etc/nginx/conf.d/default.conf
     depends_on:
       - app
@@ -30,3 +33,7 @@ services:
 networks:
   bedrock_shared_network:
     external: true
+
+volumes:
+  dbdata:
+  uploads-data:

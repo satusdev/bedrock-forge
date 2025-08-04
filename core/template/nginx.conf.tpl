@@ -1,7 +1,7 @@
 server {
     listen 80;
     server_name %%SERVER_NAME%%;
-    root /var/www/html/web;
+    root /var/www/html/www/web;
     index index.php index.html;
 
     # Add trailing slash to */wp-admin requests.

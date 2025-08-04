@@ -1,4 +1,0 @@
-CREATE DATABASE IF NOT EXISTS wp-jaam_db;
-CREATE USER IF NOT EXISTS 'wp-jaam_user'@'%' IDENTIFIED BY 'UkeZOmohJ0bWN87D';
-GRANT ALL PRIVILEGES ON wp-jaam_db.* TO 'wp-jaam_user'@'%';
-FLUSH PRIVILEGES;
