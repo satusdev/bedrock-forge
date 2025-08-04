@@ -29,3 +29,6 @@ scripts/site-defaults.env
 # Ignore local DB dump directory
 scripts/db_sync/
 scripts/.env.provision
+www/web/app/uploads/
+
+/logs/*
