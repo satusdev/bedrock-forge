@@ -5,11 +5,12 @@
 APP_PORT=%%APP_PORT%% # Example: 8001 for site1, 8002 for site2 etc.
 
 # Database Credentials (unique per site, connecting to shared 'db' service)
-DB_NAME=%%DB_NAME%%          # Example: site1_db
-DB_USER=%%DB_USER%%          # Example: site1_user
-DB_PASSWORD=%%DB_PASSWORD%%    # Example: site1_pass
-DB_HOST=db                   # Connects to the shared db service named 'db'
+DB_NAME=%%DB_NAME%%
+DB_USER=%%DB_USER%%
+DB_PASSWORD=%%DB_PASSWORD%%
+DB_HOST=db
 DB_CONTAINER=%%DB_CONTAINER%%
+MYSQL_ROOT_PASSWORD=%%MYSQL_ROOT_PASSWORD%%
 
 # Root password for the shared DB service (used internally by Docker Compose, not Bedrock directly)
 # This value in the site's .env doesn't override the one used by the core DB service.
@@ -38,3 +39,7 @@ AUTH_SALT='generateme' # <<< GENERATE SALTS MANUALLY!
 SECURE_AUTH_SALT='generateme' # <<< GENERATE SALTS MANUALLY!
 LOGGED_IN_SALT='generateme' # <<< GENERATE SALTS MANUALLY!
 NONCE_SALT='generateme' # <<< GENERATE SALTS MANUALLY!
+
+# Host UID/GID for Docker user mapping (set dynamically by site-init)
+HOST_UID=1000
+HOST_GID=1000

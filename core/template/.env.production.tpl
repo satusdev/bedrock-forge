@@ -1,28 +1,32 @@
 # Production Environment Variables Template
-# Placeholders like %%DB_NAME%% will be replaced by create-site.sh
-# You will need to manually update the actual values after site creation.
 
-# Docker specific (usually not applicable for production)
-# APP_PORT=80
+APP_PORT=80
 
-# Database Credentials (UPDATE THESE FOR PRODUCTION SERVER)
-DB_NAME=%%DB_NAME%%_production # Example: site1_db_production
-DB_USER=%%DB_USER%%_production # Example: site1_user_production
-DB_PASSWORD=%%DB_PASSWORD%%    # Needs secure password
-DB_HOST=%%DB_HOST%%            # Example: production-db.internal.host
+DB_NAME=prod_db
+DB_USER=prod_user
+DB_PASSWORD=prod_password
+DB_HOST=db
+DB_CONTAINER=prod_db
 
-# Bedrock specific (UPDATE THESE FOR PRODUCTION SERVER)
 WP_ENV=production
-WP_HOME=%%WP_HOME%%            # Example: https://www.%%SITE_NAME%%.com
-WP_SITEURL=%%WP_SITEURL%%        # Example: https://www.%%SITE_NAME%%.com/wp
+WP_HOME=https://example.com
+WP_SITEURL=https://example.com/wp
 
-# Generate DIFFERENT salts for production using: https://roots.io/salts.html
-# The create-site.sh script should prompt to generate these.
-AUTH_KEY='generateme' # <<< GENERATE SALTS MANUALLY!
-SECURE_AUTH_KEY='generateme' # <<< GENERATE SALTS MANUALLY!
-LOGGED_IN_KEY='generateme' # <<< GENERATE SALTS MANUALLY!
-NONCE_KEY='generateme' # <<< GENERATE SALTS MANUALLY!
-AUTH_SALT='generateme' # <<< GENERATE SALTS MANUALLY!
-SECURE_AUTH_SALT='generateme' # <<< GENERATE SALTS MANUALLY!
-LOGGED_IN_SALT='generateme' # <<< GENERATE SALTS MANUALLY!
-NONCE_SALT='generateme' # <<< GENERATE SALTS MANUALLY!
+SITE_TITLE='Production Site'
+ADMIN_USER='admin'
+ADMIN_PASSWORD='securepassword'
+ADMIN_EMAIL='admin@example.com'
+WP_ALLOW_ROOT='false'
+
+AUTH_KEY='generateme'
+SECURE_AUTH_KEY='generateme'
+LOGGED_IN_KEY='generateme'
+NONCE_KEY='generateme'
+AUTH_SALT='generateme'
+SECURE_AUTH_SALT='generateme'
+LOGGED_IN_SALT='generateme'
+NONCE_SALT='generateme'
+
+# Host UID/GID for Docker user mapping (set dynamically by site-init)
+HOST_UID=1000
+HOST_GID=1000

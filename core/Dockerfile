@@ -26,6 +26,15 @@ RUN curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli
 # Set working directory
 WORKDIR /var/www/html
 
+# Set www-data UID/GID from build args (default to 33 if not provided)
+ARG HOST_UID=33
+ARG HOST_GID=33
+RUN usermod -u $HOST_UID www-data && groupmod -g $HOST_GID www-data
+
+# Copy entrypoint script
+COPY template/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 # Ensure PHP-FPM runs as www-data
 RUN sed -i 's/user = www-data/user = www-data/' /usr/local/etc/php-fpm.d/www.conf && \
     sed -i 's/group = www-data/group = www-data/' /usr/local/etc/php-fpm.d/www.conf && \
@@ -35,5 +44,6 @@ RUN sed -i 's/user = www-data/user = www-data/' /usr/local/etc/php-fpm.d/www.con
 # Expose port 9000 for PHP-FPM
 EXPOSE 9000
 
-# Start PHP-FPM
+# Use entrypoint script
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["php-fpm"]
