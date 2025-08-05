@@ -1,5 +1,5 @@
 #!/bin/bash
-# sync-db.sh - Sync Bedrock database between local and remote (modular)
+# sync-db.sh - Sync Bedrock database between local and remote (DDEV-based)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(realpath "$SCRIPT_DIR/../..")"
@@ -11,7 +11,6 @@ source "$COMMON_DIR/utils.sh"
 
 usage() {
   echo "Usage: $0 <site_name> <environment> <push|pull>"
-  echo "If arguments are omitted, you will be prompted interactively."
   exit 1
 }
 
@@ -30,13 +29,11 @@ prompt_if_missing() {
 }
 
 parse_arguments() {
-  # Help flag
   for arg in "$@"; do
     case $arg in
       -h|--help) usage ;;
     esac
   done
-
   SITE_NAME="$1"
   TARGET_ENV="$2"
   DIRECTION="$3"
@@ -50,30 +47,19 @@ get_jq_config_value() {
 }
 
 sync_db_push() {
-  # Expand ~ to $HOME if present
-  if [[ "$SITE_NAME" == ~* ]]; then
-    SITE_NAME="${HOME}${SITE_NAME:1}"
-  fi
-  # Determine if SITE_NAME is a path or just a name
-  if [[ "$SITE_NAME" == /* || "$SITE_NAME" == ./* ]]; then
-    SITE_DIR="$(realpath -m "$SITE_NAME")"
-  else
-    SITE_DIR="$PROJECT_ROOT/websites/$SITE_NAME"
-  fi
-  SITE_COMPOSE_FILE="${SITE_DIR}/docker-compose.yml"
+  LOCAL_DB_DUMP_DIR=$(get_jq_config_value "$SITE_NAME" "local" "db_dump_path")
   REMOTE_HOST=$(get_jq_config_value "$SITE_NAME" "$TARGET_ENV" "ssh_host")
   SSH_USER=$(get_jq_config_value "$SITE_NAME" "$TARGET_ENV" "ssh_user")
   WEB_USER=$(get_jq_config_value "$SITE_NAME" "$TARGET_ENV" "web_user")
   REMOTE_PATH=$(get_jq_config_value "$SITE_NAME" "$TARGET_ENV" "remote_path")
-  LOCAL_DB_DUMP_DIR=$(get_jq_config_value "$SITE_NAME" "local" "db_dump_path")
 
   TIMESTAMP=$(date +"%Y%m%d%H%M%S")
   LOCAL_DUMP_FILE_NAME="db_dump_${SITE_NAME}_local_${TIMESTAMP}.sql"
   LOCAL_DUMP_FILE_PATH="${LOCAL_DB_DUMP_DIR}${LOCAL_DUMP_FILE_NAME}"
   REMOTE_DUMP_FILE_PATH="/tmp/${LOCAL_DUMP_FILE_NAME}"
 
-  log_info "Exporting local database from Docker..."
-  docker-compose -f "$SITE_COMPOSE_FILE" exec -T app wp db export "$LOCAL_DUMP_FILE_PATH" --allow-root || error_exit "Local DB export failed."
+  log_info "Exporting local database using DDEV..."
+  ddev export-db --file="$LOCAL_DUMP_FILE_PATH" || error_exit "Local DB export failed."
 
   log_info "Copying database dump to remote via SCP..."
   SSH_CONNECTION_STRING="$SSH_USER@$REMOTE_HOST"
@@ -92,22 +78,11 @@ sync_db_push() {
 }
 
 sync_db_pull() {
-  # Expand ~ to $HOME if present
-  if [[ "$SITE_NAME" == ~* ]]; then
-    SITE_NAME="${HOME}${SITE_NAME:1}"
-  fi
-  # Determine if SITE_NAME is a path or just a name
-  if [[ "$SITE_NAME" == /* || "$SITE_NAME" == ./* ]]; then
-    SITE_DIR="$(realpath -m "$SITE_NAME")"
-  else
-    SITE_DIR="$PROJECT_ROOT/websites/$SITE_NAME"
-  fi
-  SITE_COMPOSE_FILE="${SITE_DIR}/docker-compose.yml"
+  LOCAL_DB_DUMP_DIR=$(get_jq_config_value "$SITE_NAME" "local" "db_dump_path")
   REMOTE_HOST=$(get_jq_config_value "$SITE_NAME" "$TARGET_ENV" "ssh_host")
   SSH_USER=$(get_jq_config_value "$SITE_NAME" "$TARGET_ENV" "ssh_user")
   WEB_USER=$(get_jq_config_value "$SITE_NAME" "$TARGET_ENV" "web_user")
   REMOTE_PATH=$(get_jq_config_value "$SITE_NAME" "$TARGET_ENV" "remote_path")
-  LOCAL_DB_DUMP_DIR=$(get_jq_config_value "$SITE_NAME" "local" "db_dump_path")
 
   TIMESTAMP=$(date +"%Y%m%d%H%M%S")
   REMOTE_DUMP_FILE_NAME="db_dump_${SITE_NAME}_${TARGET_ENV}_${TIMESTAMP}.sql"
@@ -124,8 +99,8 @@ sync_db_pull() {
   log_info "Removing remote database dump via SSH..."
   ssh "$SSH_CONNECTION_STRING" "sudo rm '$REMOTE_DUMP_FILE_PATH'" || log_warn "Failed to remove remote dump file."
 
-  log_info "Importing database into local Docker container..."
-  docker-compose -f "$SITE_COMPOSE_FILE" exec -T app wp db import "$LOCAL_DUMP_FILE_PATH" --allow-root || error_exit "Local DB import failed."
+  log_info "Importing database into local DDEV project..."
+  ddev import-db --file="$LOCAL_DUMP_FILE_PATH" || error_exit "Local DB import failed."
 
   log_info "Cleaning up local database dump..."
   rm "$LOCAL_DUMP_FILE_PATH" || log_warn "Failed to remove local dump file."
