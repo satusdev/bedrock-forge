@@ -1,5 +1,5 @@
 #!/bin/bash
-# restore.sh - Restore DB and uploads from rclone remote backup
+# restore.sh - Restore DB and uploads from rclone remote backup (DDEV-based)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(realpath "$SCRIPT_DIR/../..")"
@@ -47,13 +47,6 @@ main() {
   if [[ "$SITE_NAME" == ~* ]]; then
     SITE_NAME="${HOME}${SITE_NAME:1}"
   fi
-  # Determine if SITE_NAME is a path or just a name
-  if [[ "$SITE_NAME" == /* || "$SITE_NAME" == ./* ]]; then
-    SITE_DIR="$(realpath -m "$SITE_NAME")"
-  else
-    SITE_DIR="$PROJECT_ROOT/websites/$SITE_NAME"
-  fi
-  SITE_COMPOSE_FILE="${SITE_DIR}/docker-compose.yml"
   LOCAL_DB_DUMP_DIR=$(get_jq_config_value "$SITE_NAME" "local" "db_dump_path")
   LOCAL_UPLOADS_PATH=$(get_jq_config_value "$SITE_NAME" "local" "uploads_path")
   RCLONE_REMOTE=$(get_jq_config_value "$SITE_NAME" "$TARGET_ENV" "rclone_remote")
@@ -71,9 +64,9 @@ main() {
   [ -f "$DB_DUMP_FILE" ] || error_exit "DB dump not found in backup"
   [ -f "$UPLOADS_ARCHIVE" ] || error_exit "Uploads archive not found in backup"
 
-  # 2. Restore DB
-  log_info "Restoring DB from $DB_DUMP_FILE"
-  docker-compose -f "$SITE_COMPOSE_FILE" exec -T app wp db import "$DB_DUMP_FILE" --allow-root || error_exit "DB restore failed"
+  # 2. Restore DB using DDEV
+  log_info "Restoring DB from $DB_DUMP_FILE using DDEV"
+  ddev import-db --file="$DB_DUMP_FILE" || error_exit "DB restore failed"
 
   # 3. Restore uploads
   log_info "Restoring uploads from $UPLOADS_ARCHIVE"

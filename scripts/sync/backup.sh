@@ -1,5 +1,5 @@
 #!/bin/bash
-# backup.sh - Backup DB and uploads to rclone remote with retention policy
+# backup.sh - Backup DB and uploads to rclone remote with retention policy (DDEV-based)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(realpath "$SCRIPT_DIR/../..")"
@@ -45,33 +45,18 @@ main() {
   if [[ "$SITE_NAME" == ~* ]]; then
     SITE_NAME="${HOME}${SITE_NAME:1}"
   fi
-  # Determine if SITE_NAME is a path or just a name
-  if [[ "$SITE_NAME" == /* || "$SITE_NAME" == ./* ]]; then
-    SITE_DIR="$(realpath -m "$SITE_NAME")"
-  else
-    SITE_DIR="$PROJECT_ROOT/websites/$SITE_NAME"
-  fi
-  SITE_COMPOSE_FILE="${SITE_DIR}/docker-compose.yml"
   LOCAL_DB_DUMP_DIR=$(get_jq_config_value "$SITE_NAME" "local" "db_dump_path")
   LOCAL_UPLOADS_PATH=$(get_jq_config_value "$SITE_NAME" "local" "uploads_path")
   RCLONE_REMOTE=$(get_jq_config_value "$SITE_NAME" "$TARGET_ENV" "rclone_remote")
   RCLONE_UPLOADS_PATH=$(get_jq_config_value "$SITE_NAME" "$TARGET_ENV" "rclone_uploads_path")
-  DB_NAME=$(jq -r '.database.name // empty' "$PROJECT_INFO_FILE")
-  DB_HOST=$(jq -r '.database.host // empty' "$PROJECT_INFO_FILE")
-  DB_USER=$(jq -r '.database.user // empty' "$PROJECT_INFO_FILE")
-  DB_PASS=$(jq -r '.database.password // empty' "$PROJECT_INFO_FILE")
-
-  if [ -z "$DB_NAME" ] || [ -z "$DB_HOST" ] || [ -z "$DB_USER" ] || [ -z "$DB_PASS" ]; then
-    error_exit "Missing database info in project-info.json. Please provision first."
-  fi
 
   [ -d "$LOCAL_DB_DUMP_DIR" ] || mkdir -p "$LOCAL_DB_DUMP_DIR"
   [ -d "$LOCAL_UPLOADS_PATH" ] || error_exit "Uploads path $LOCAL_UPLOADS_PATH not found."
 
-  # 1. Dump DB
+  # 1. Dump DB using DDEV
   DB_DUMP_FILE="${LOCAL_DB_DUMP_DIR}db_${SITE_NAME}_${TARGET_ENV}_${TIMESTAMP}.sql"
-  log_info "Dumping DB to $DB_DUMP_FILE"
-  docker-compose -f "$SITE_COMPOSE_FILE" exec -T app wp db export "$DB_DUMP_FILE" --allow-root || error_exit "DB export failed"
+  log_info "Dumping DB to $DB_DUMP_FILE using DDEV"
+  ddev export-db --file="$DB_DUMP_FILE" || error_exit "DB export failed"
 
   # 2. Zip uploads
   UPLOADS_ARCHIVE="${LOCAL_DB_DUMP_DIR}uploads_${SITE_NAME}_${TARGET_ENV}_${TIMESTAMP}.zip"

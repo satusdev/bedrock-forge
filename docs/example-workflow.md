@@ -1,7 +1,7 @@
 # Full Example Workflow: Bedrock Site Creation to Production (DDEV Edition)
 
-**Note:** All local site creation and provisioning now use
-[DDEV](https://ddev.readthedocs.io/en/latest/). DDEV manages Docker containers,
+**Note:** All local site creation, provisioning, and automation now use
+[DDEV](https://ddev.readthedocs.io/en/latest/). DDEV manages containers,
 networking, and environment settings for you. Remote provisioning, deployment,
 sync, backup, and monitoring workflows remain unchanged.
 
@@ -35,6 +35,9 @@ ddev wp core install --url=https://site.ddev.site --title="My Site" --admin_user
 ddev launch
 
 # Access WP-Admin at https://site.ddev.site/wp/wp-admin
+
+# 7. Copy automation scripts, Jenkinsfile, and config files into your project
+bash ../scripts/local/ddev-post-create-setup.sh $PWD
 ```
 
 ---
@@ -46,7 +49,6 @@ cd /home/nadbad/Work/Wordpress/site
 git init
 git add .
 git commit -m "Initial commit"
-# Create a new repo on GitHub (manually or with script)
 ../../scripts/local/create-github-repo.sh site
 git remote add origin <github-repo-url>
 git push -u origin main
@@ -139,10 +141,12 @@ See [Backup & Restore Usage](./usage-backup.md) for full details.
 - See [docs/troubleshooting.md](./troubleshooting.md) for common issues and
   solutions.
 - **DDEV Tips:**
-  - If port conflicts occur, use `ddev config --webserver-port=8010`.
-  - DDEV manages .env settings internally; customize in `.ddev/config.yaml` if
-    needed.
   - Use `ddev import-db` and `ddev export-db` for database syncs.
+  - Use `ddev wp <command>` for all WP-CLI operations.
+  - Use `ddev composer install` for dependency management.
+  - Use `ddev exec <command>` for running CLI tools inside the container.
+  - Use `ddev launch` to open your site in the browser.
+  - Use `ddev launch -d` for database admin tools.
 
 ---
 
