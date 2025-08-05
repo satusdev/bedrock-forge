@@ -1,10 +1,24 @@
 {
-	"sites": {
-		"myblog": {
-			"dir": "/absolute/or/relative/path/to/myblog"
+	"site": {
+		"local": {
+			"db_dump_path": "./db_dumps/",
+			"uploads_path": "./web/app/uploads/"
 		},
-		"jaam": {
-			"dir": "/absolute/or/relative/path/to/jaam"
+		"staging": {
+			"ssh_host": "staging.example.com",
+			"ssh_user": "staginguser",
+			"web_user": "www-data",
+			"remote_path": "/home/staginguser/public_html",
+			"rclone_remote": "remote:",
+			"rclone_uploads_path": "/backups/site/staging/uploads/"
+		},
+		"production": {
+			"ssh_host": "production.example.com",
+			"ssh_user": "produser",
+			"web_user": "www-data",
+			"remote_path": "/home/produser/public_html",
+			"rclone_remote": "remote:",
+			"rclone_uploads_path": "/backups/site/production/uploads/"
 		}
 	}
 }

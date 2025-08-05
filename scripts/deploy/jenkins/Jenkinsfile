@@ -1,52 +1,71 @@
 pipeline {
     agent any
-
     environment {
-        // Set these in Jenkins or pass as parameters
-        KUMA_NOTIFY_URL = credentials('KUMA_NOTIFY_URL') // e.g. http://kuma-server:3001/api/push/<monitor-id>
-        KUMA_PUSH_TOKEN = credentials('KUMA_PUSH_TOKEN') // if needed
+        REMOTE_USER = 'your_cyberpanel_user'
+        REMOTE_HOST = 'your.cyberpanel.server'
+        REMOTE_PATH = '/home/your_cyberpanel_user/public_html'
+        SITE_NAME = 'bedrock-site'
+        SLACK_WEBHOOK = 'your_slack_webhook_id'
     }
-
     stages {
-        stage('Checkout') {
-            steps {
-                checkout scm
-            }
-        }
         stage('Build') {
             steps {
-                sh 'echo "Build step (composer install, lint, etc.)"'
+                sh 'ddev composer install --no-dev --optimize-autoloader'
             }
         }
         stage('Test') {
             steps {
-                sh 'echo "Test step (unit/integration tests)"'
+                sh 'ddev exec vendor/bin/phpunit'
             }
         }
         stage('Deploy') {
             steps {
-                sh 'echo "Deploy step (call scripts/deploy/deploy.sh or similar)"'
-            }
-        }
-        stage('Notify Kuma') {
-            steps {
-                sh '''
-                if [ -n "$KUMA_NOTIFY_URL" ]; then
-                  curl -X POST "$KUMA_NOTIFY_URL" -H "Authorization: $KUMA_PUSH_TOKEN" || echo "Kuma notify failed"
-                else
-                  echo "KUMA_NOTIFY_URL not set, skipping Kuma notification"
-                fi
-                '''
+                withCredentials([sshUserPrivateKey(credentialsId: 'jenkins-cyberpanel', keyFileVariable: 'SSH_KEY', usernameVariable: 'SSH_USR')]) {
+                    sh '''
+                        echo "Sync Bedrock files to CyberPanel server..."
+                        rsync -az --delete --exclude ".env" --exclude ".git/" --exclude "node_modules/" --exclude ".DS_Store" \
+                          -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no" ./web/ $REMOTE_USER@$REMOTE_HOST:$REMOTE_PATH/
+
+                        echo "Run WP-CLI commands remotely (optional)..."
+                        ssh -i $SSH_KEY -o StrictHostKeyChecking=no $REMOTE_USER@$REMOTE_HOST "cd $REMOTE_PATH && wp core update && wp plugin update --all"
+                    '''
+                }
             }
         }
     }
-
     post {
+        always {
+            cleanWs()
+        }
         success {
-            echo 'Pipeline completed successfully.'
+            script {
+                slackSend(
+                    webhookCredentialId: env.SLACK_WEBHOOK,
+                    channel: '#ci-cd',
+                    color: 'good',
+                    message: "✅ SUCCESS: `${env.JOB_NAME}` #${env.BUILD_NUMBER} deployed Bedrock to CyberPanel.\n🔗 <${env.BUILD_URL}|Open Build>"
+                )
+            }
         }
         failure {
-            echo 'Pipeline failed.'
+            script {
+                slackSend(
+                    webhookCredentialId: env.SLACK_WEBHOOK,
+                    channel: '#ci-cd',
+                    color: 'danger',
+                    message: "❌ FAILED: `${env.JOB_NAME}` #${env.BUILD_NUMBER} failed Bedrock deployment.\n🔗 <${env.BUILD_URL}|Open Build>"
+                )
+            }
+        }
+        unstable {
+            script {
+                slackSend(
+                    webhookCredentialId: env.SLACK_WEBHOOK,
+                    channel: '#ci-cd',
+                    color: 'warning',
+                    message: "⚠️ UNSTABLE: `${env.JOB_NAME}` #${env.BUILD_NUMBER} unstable Bedrock deployment.\n🔗 <${env.BUILD_URL}|Open Build>"
+                )
+            }
         }
     }
 }
