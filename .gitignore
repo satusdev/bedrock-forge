@@ -32,3 +32,6 @@ scripts/.env.provision
 www/web/app/uploads/
 
 /logs/*
+
+.venv/
+__pycache__/
