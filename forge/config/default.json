@@ -1,0 +1,29 @@
+{
+	"sites": {
+		"example-site": {
+			"local": {
+				"db_dump_path": "/path/to/dumps",
+				"uploads_path": "/path/to/uploads"
+			},
+			"production": {
+				"rclone_remote": "gdrive:",
+				"ssh_host": "1.2.3.4",
+				"ssh_user": "root",
+				"web_user": "www-data",
+				"remote_path": "/home/example-site/public_html"
+			}
+		}
+	},
+	"backup": {
+		"retention": {
+			"max_backups": 7,
+			"retention_days": 30
+		}
+	},
+	"server": {
+		"ip": "1.2.3.4",
+		"hostname": "server1",
+		"provider": "hetzner",
+		"os": "ubuntu"
+	}
+}
