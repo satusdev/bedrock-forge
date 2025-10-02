@@ -1,215 +1,291 @@
 # Bedrock Forge CLI Usage Guide
 
-This guide explains how to use the **Bedrock Forge** CLI to manage Bedrock-based WordPress projects. It’s designed for beginners and focuses on the `local` subcommand for creating and managing local projects with DDEV on macOS or Linux. The setup is fully automated, including secure WordPress salt generation, database configuration, and robust error handling, using HTTP for site access.
+This guide explains how to use the **Bedrock Forge** CLI to manage Bedrock-based
+WordPress projects locally with DDEV on Linux or macOS. The `local` subcommand
+is interactive, prompting for missing arguments, and includes commands to
+create, manage, remove, and open projects in VS Code, using HTTP for site
+access.
 
 ## Prerequisites
 
-- **Python 3.10+**: Ensure Python is installed. Use a virtual environment for dependency isolation.
-- **DDEV**: Required for WordPress project management. Install via `sudo apt install ddev` (Linux) or `brew install ddev/ddev/ddev` (macOS).
-- **Docker**: Required for DDEV. Install via your package manager or Docker’s official site.
+- **Python 3.10+**: Install Python and use a virtual environment.
+- **DDEV**: Install via `sudo apt install ddev` (Linux) or
+  `brew install ddev/ddev/ddev` (macOS).
+- **Docker**: Required for DDEV. Install via your package manager or
+  [Docker’s site](https://docs.docker.com/get-docker/).
 - **Git**: For version control and GitHub integration.
-- **GitHub Personal Access Token** (optional): For creating repositories, needed for `--repo` option.
+- **VS Code**: Optional, for `open-vscode` command. Install via
+  `sudo snap install code --classic` (Linux) or
+  `brew install --cask visual-studio-code` (macOS).
+- **GitHub Personal Access Token**: Required for `--repo` option (needs `repo`
+  scope).
 
 ## Setup
 
 1. **Clone the Repository**:
-   Clone the Bedrock Forge repository to your local machine:
+
    ```bash
    git clone https://github.com/your-org/bedrock-forge.git
    cd bedrock-forge
    ```
 
 2. **Set Up Virtual Environment**:
-   Activate the virtual environment to isolate dependencies:
+
    ```bash
    python3 -m venv .venv
    source .venv/bin/activate
    ```
 
 3. **Install Dependencies**:
-   Install required Python packages:
+
    ```bash
    pip install -r forge/requirements.txt
    ```
 
 4. **Configure Environment**:
-   - Copy example configuration files:
+
+   - Copy example configs:
      ```bash
      cp forge/config/example.default.json forge/config/default.json
      cp forge/config/example.env.local forge/config/.env.local
      ```
-   - For GitHub repository creation, add your GitHub Personal Access Token (with `repo` scope) to `forge/config/.env.local`:
+   - Add `GITHUB_TOKEN` to `forge/config/.env.local`:
      ```env
      GITHUB_TOKEN=your-actual-github-token
      ```
-   - Optionally, customize `forge/config/default.json` to override defaults:
+   - Update `forge/config/default.json` with your GitHub username:
      ```json
      {
-         "admin_user": "myadmin",
-         "admin_email": "me@example.com",
-         "github_user": "your-username"
+     	"admin_user": "myadmin",
+     	"admin_email": "me@example.com",
+     	"github_user": "your-username",
+     	"hetzner_token": null,
+     	"cloudflare_token": null,
+     	"server_type": "cx11",
+     	"region": "fsn1"
      }
      ```
 
 5. **Install DDEV**:
-   - On **Linux** (e.g., Ubuntu):
+   - Linux:
      ```bash
      curl -fsSL https://apt.fury.io/drud/gpg.key | sudo apt-key add -
      echo "deb https://apt.fury.io/drud/ * *" | sudo tee /etc/apt/sources.list.d/ddev.list
      sudo apt update
      sudo apt install ddev
      ```
-   - On **macOS**:
+   - macOS:
      ```bash
      brew install ddev/ddev/ddev
      ```
-   - Verify installation: `ddev --version`.
-   - Ensure Docker is running: `docker --version`.
+   - Verify: `ddev --version`, `docker --version`.
 
 ## Using the `local` Subcommand
 
-The `local` subcommand manages Bedrock-based WordPress projects locally using DDEV. It automates project creation, database setup, WordPress installation with secure salts, and retries for Composer commands, using HTTP for site access.
+The `local` subcommand manages local Bedrock projects with DDEV. It’s
+interactive, prompting for missing arguments, and supports creating, managing,
+removing, and opening projects in VS Code.
 
 ### Create a New Project
 
-The `create-project` command sets up a new Bedrock project with DDEV, configures the database, installs WordPress with secure salts, and optionally creates a GitHub repository.
+The `create-project` command sets up a Bedrock project, configures the database,
+installs WordPress with secure salts, and optionally creates a GitHub
+repository. It prompts for missing arguments.
 
 ```bash
-python3 -m forge local create-project myproject
+python3 -m forge local create-project
 ```
 
 - **What it does**:
-  - Creates and cleans a directory at `~/Work/Wordpress/myproject`.
-  - Configures a DDEV WordPress project with `web` docroot.
-  - Installs Bedrock via Composer (`roots/bedrock`) with retries for reliability.
-  - Creates a `.env` file with DDEV’s default database credentials (`db:db:db:db`) and auto-generated secure WordPress salts.
-  - Installs WordPress with customizable admin credentials and site title.
+
+  - Prompts for `project_name`, `admin_user`, `admin_email`, `admin_password`,
+    `site_title`, `db_name`, `db_user`, `db_password`, `db_host`, and `repo`.
+  - If `--repo`, prompts for `github_org`, `github_user`, and `GITHUB_TOKEN`,
+    with options to save to `default.json` and `.env.local`.
+  - Creates and cleans `~/Work/Wordpress/<project_name>`.
+  - Configures DDEV for WordPress.
+  - Installs Bedrock via Composer with retries.
+  - Writes `.env` with DDEV credentials and secure salts.
+  - Installs WordPress with specified admin settings.
   - Starts the DDEV project.
-  - Outputs the site URL (e.g., `http://myproject.ddev.site`) and admin details.
+  - Initializes a Git repository and pushes to GitHub if `--repo`.
 
 - **Options**:
-  - `--repo`: Creates a private GitHub repository and initializes Git:
+
+  - `--repo`: Creates a private GitHub repository:
     ```bash
     python3 -m forge local create-project myproject --repo
     ```
-  - `--github-org <org>`: Creates the repository under a GitHub organization:
+  - `--github-org <org>`: Uses a GitHub organization:
     ```bash
     python3 -m forge local create-project myproject --repo --github-org my-org
     ```
-  - `--admin-user <user>`: Sets the WordPress admin username (default: `admin` or `default.json`):
+  - `--admin-user <user>`: WordPress admin username (default: `myadmin` from
+    `default.json` or `admin`):
     ```bash
     python3 -m forge local create-project myproject --admin-user myadmin
     ```
-  - `--admin-email <email>`: Sets the WordPress admin email (default: `admin@example.com` or `default.json`):
+  - `--admin-email <email>`: WordPress admin email (default: `me@example.com`
+    from `default.json` or `admin@example.com`):
     ```bash
     python3 -m forge local create-project myproject --admin-email me@example.com
     ```
-  - `--admin-password <pass>`: Sets the WordPress admin password (default: `admin`):
+  - `--admin-password <pass>`: WordPress admin password (default: `admin`):
     ```bash
     python3 -m forge local create-project myproject --admin-password securepass
     ```
-  - `--site-title <title>`: Sets the WordPress site title (default: project name):
+  - `--site-title <title>`: WordPress site title (default: project name):
     ```bash
     python3 -m forge local create-project myproject --site-title "My Site"
     ```
-  - `--db-name <name>`: Sets the database name (default: `db`):
+  - `--db-name <name>`, `--db-user <user>`, `--db-password <pass>`,
+    `--db-host <host>`: Database settings (default: `db`):
     ```bash
     python3 -m forge local create-project myproject --db-name mydb
     ```
-  - `--db-user <user>`: Sets the database username (default: `db`):
-    ```bash
-    python3 -m forge local create-project myproject --db-user myuser
-    ```
-  - `--db-password <pass>`: Sets the database password (default: `db`):
-    ```bash
-    python3 -m forge local create-project myproject --db-password mypass
-    ```
-  - `--db-host <host>`: Sets the database host (default: `db`):
-    ```bash
-    python3 -m forge local create-project myproject --db-host db
-    ```
-  - `--dry-run`: Previews commands without executing them:
+  - `--dry-run`: Previews commands:
     ```bash
     python3 -m forge local create-project myproject --dry-run
     ```
-  - `--verbose`: Shows detailed output for each command:
+  - `--verbose`: Shows detailed output:
     ```bash
     python3 -m forge local create-project myproject --verbose
     ```
 
-- **Example** (full setup):
-  ```bash
-  python3 -m forge local create-project myproject --admin-user myadmin --admin-email me@example.com --admin-password securepass --site-title "My Site" --repo
-  ```
+- **Interactive Example**:
 
-- **Example Output** (dry-run):
-  ```
-  Running in local mode (dry-run: True)
-  Dry run: cd ~/Work/Wordpress/myproject && ddev config --project-type=wordpress --docroot=web --project-name=myproject --auto
-  Dry run: cd ~/Work/Wordpress/myproject && ddev composer create-project roots/bedrock --no-interaction
-  Dry run: Would write .env to ~/Work/Wordpress/myproject/.env
-  DB_NAME=db
-  DB_USER=db
-  DB_PASSWORD=db
-  DB_HOST=db
-  WP_ENV=development
-  WP_HOME=http://myproject.ddev.site
-  WP_SITEURL=${WP_HOME}/wp
-  AUTH_KEY=[random-salt]
-  SECURE_AUTH_KEY=[random-salt]
-  LOGGED_IN_KEY=[random-salt]
-  NONCE_KEY=[random-salt]
-  AUTH_SALT=[random-salt]
-  SECURE_AUTH_SALT=[random-salt]
-  LOGGED_IN_SALT=[random-salt]
-  NONCE_SALT=[random-salt]
-  Dry run: cd ~/Work/Wordpress/myproject && ddev wp core install --url=http://myproject.ddev.site --title='myproject' --admin_user=admin --admin_password=admin --admin_email=admin@example.com --skip-email
-  Dry run: cd ~/Work/Wordpress/myproject && ddev start
+  ```bash
+  python3 -m forge local create-project
+  Project name [myproject]: myproject
+  WordPress admin username [admin]: myadmin
+  WordPress admin email [admin@example.com]: me@example.com
+  WordPress admin password [admin]: securepass
+  WordPress site title [myproject]: My Site
+  Database name [db]: db
+  Database username [db]: db
+  Database password [db]: db
+  Database host [db]: db
+  Create GitHub repository? [y/N]: y
+  GitHub organization (leave empty for personal account) []:
+  GitHub username [your-username]: myuser
+  GitHub Personal Access Token (with repo scope): ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  Save GITHUB_TOKEN to forge/config/.env.local? [y/N]: y
+  Update github_user to myuser in forge/config/default.json? [y/N]: y
   ```
 
 - **Accessing the Site**:
-  - Open `http://myproject.ddev.site` in your browser.
-  - Log in to WordPress at `http://myproject.ddev.site/wp/wp-admin` with your specified admin user and password.
+  - Open `http://myproject.ddev.site`.
+  - Log in to WordPress at `http://myproject.ddev.site/wp/wp-admin`.
 
 ### Manage a DDEV Project
 
-The `manage` command starts, stops, or checks the status of a DDEV project.
+The `manage` command starts, stops, or checks the status of a DDEV project,
+prompting for missing arguments.
 
 ```bash
-python3 -m forge local manage myproject start
+python3 -m forge local manage
 ```
 
-- **Actions**:
-  - `start`: Starts the DDEV project.
-  - `stop`: Stops the DDEV project.
-  - `status`: Displays the project’s status.
+- **Prompts**:
 
-- **Options**:
-  - `--dry-run`: Previews the command.
-  - `--verbose`: Shows detailed output.
+  - `project_name`: Defaults to `myproject`.
+  - `action`: Defaults to `status`.
 
 - **Example**:
   ```bash
-  python3 -m forge local manage myproject status
+  python3 -m forge local manage
+  Project name [myproject]: myproject
+  Action (start/stop/status) [status]: start
+  ```
+
+### Remove a Project
+
+The `remove-project` command deletes a project’s directory and DDEV
+configuration.
+
+```bash
+python3 -m forge local remove-project
+```
+
+- **Prompts**:
+
+  - `project_name`: Defaults to `myproject`.
+
+- **Example**:
+  ```bash
+  python3 -m forge local remove-project
+  Project name to remove [myproject]: myproject
+  ```
+
+### Open in VS Code
+
+The `open-vscode` command opens a project in VS Code.
+
+```bash
+python3 -m forge local open-vscode
+```
+
+- **Prompts**:
+
+  - `project_name`: Defaults to `myproject`.
+
+- **Example**:
+  ```bash
+  python3 -m forge local open-vscode
+  Project name to open in VS Code [myproject]: myproject
   ```
 
 ## Troubleshooting
 
-- **Command Not Found**: Ensure the virtual environment is active (`source .venv/bin/activate`).
-- **DDEV/Docker/Git Not Found**: Install DDEV (`sudo apt install ddev` or `brew install ddev`), Docker, and Git. Verify with `ddev --version`, `docker --version`, `git --version`.
-- **Composer Errors**: Ensure the project directory (`~/Work/Wordpress/myproject`) is clean before running `ddev composer create-project`. Run `rm -rf ~/Work/Wordpress/myproject` to start fresh if needed.
-- **Database Not Found**: Verify `~/Work/Wordpress/myproject/.env` has correct credentials (`DB_NAME=db`, `DB_USER=db`, `DB_PASSWORD=db`, `DB_HOST=db`).
-- **Dotenv Parsing Errors**: Ensure `.env` file salts do not contain single quotes, double quotes, or whitespace. Delete and recreate the project if needed.
-- **GitHub Errors**: Ensure `GITHUB_TOKEN` in `forge/config/.env.local` is valid with `repo` scope.
-- **Permission Issues**: Run `chmod +r forge/*.py forge/*/*.py`.
-- **Logs**: Check `forge/logs/forge.log` for errors.
-- **ModuleNotFoundError**: Verify `forge/main.py` exists (`ls forge/main.py`).
+- **ModuleNotFoundError**: Ensure `requirements.txt` includes `typer==0.12.5`,
+  `hcloud==1.18.2`, `cloudflare>=4.3.1`, `paramiko==3.4.0` and run
+  `pip install -r forge/requirements.txt`.
+- **GitHub 401 Error**: Verify `GITHUB_TOKEN` has `repo` scope. Use interactive
+  prompts to update.
+- **DDEV/Docker/Git Not Found**: Install and verify: `ddev --version`,
+  `docker --version`, `git --version`.
+- **VS Code Not Found**: Install VS Code and ensure `code` is in PATH.
+- **Composer Errors**: Run `rm -rf ~/Work/Wordpress/myproject` to start fresh.
+- **Logs**: Check `forge/logs/forge.log`.
+
+## Plugin & Monorepo-Fetcher Defaults
+
+### Default Plugins
+
+When you create a new project, the CLI will automatically install and activate
+plugins listed in `forge/config/default.json` under the `"default_plugins"` key.
+Example:
+
+```json
+"default_plugins": [
+  "wp-worker",
+  "woocommerce",
+  "advanced-access-manager",
+  "delete-all-products",
+  "online-active-users",
+  "woo-order-export-lite"
+]
+```
+
+To customize, edit the list in `default.json`.
+
+### Monorepo-Fetcher
+
+The CLI supports a `"monorepo_fetcher"` config in `default.json`:
+
+```json
+"monorepo_fetcher": {
+  "require": []
+}
+```
+
+This section is reserved for future automation of plugin/theme fetching from
+monorepos.
 
 ## Next Steps
 
-- Explore other subcommands (`provision`, `sync`, etc.) as implemented.
-- Customize `forge/config/default.json` for project settings (e.g., admin user).
-- Update admin credentials and database settings in production for security.
-- Provide feedback to improve this guide!
+- Test `provision` subcommands for remote deployment (Phase 3).
+- Customize `default.json` for defaults.
+- Secure admin credentials for production.
 
-For advanced usage, see `forge/docs/cli-architecture.md` or contact the project maintainer.
+For advanced usage, see `forge/docs/cli-architecture.md`.
