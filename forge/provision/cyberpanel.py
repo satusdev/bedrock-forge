@@ -21,18 +21,48 @@ def run_ssh_command(client: paramiko.SSHClient, command: str, dry_run: bool = Fa
     except Exception as e:
         raise ForgeError(f"SSH command failed: {command}\nError: {str(e)}")
 
-def install_cyberpanel(server_ip: str, ssh_user: str, ssh_key: str, dry_run: bool, verbose: bool) -> None:
-    """Install CyberPanel on the server via SSH."""
+def provision_ssl_via_certbot(client: paramiko.SSHClient, domain: str, dry_run: bool = False, verbose: bool = False) -> None:
+    """Provision SSL using Certbot via SSH."""
     if verbose:
-        logger.info(f"Installing CyberPanel on {server_ip}")
+        logger.info(f"Provisioning SSL for {domain} via Certbot")
+    # Install Certbot and request certificate
+    commands = [
+        "sudo apt update && sudo apt install -y certbot",
+        f"sudo certbot certonly --standalone -d {domain} --non-interactive --agree-tos -m admin@{domain} --register-unsafely-without-email"
+    ]
+    for cmd in commands:
+        run_ssh_command(client, cmd, dry_run, verbose)
+    if verbose:
+        logger.info(f"SSL certificate provisioned for {domain}")
+
+def provision_hardening(client: paramiko.SSHClient, dry_run: bool = False, verbose: bool = False) -> None:
+    """Provision server hardening: firewall (ufw) and fail2ban via SSH."""
+    if verbose:
+        logger.info("Provisioning server hardening (firewall, fail2ban)")
+    commands = [
+        "sudo apt update && sudo apt install -y ufw fail2ban",
+        "sudo ufw allow OpenSSH",
+        "sudo ufw allow 'Nginx Full' || sudo ufw allow 80/tcp && sudo ufw allow 443/tcp",
+        "sudo ufw --force enable",
+        "sudo systemctl enable fail2ban && sudo systemctl start fail2ban"
+    ]
+    for cmd in commands:
+        run_ssh_command(client, cmd, dry_run, verbose)
+    if verbose:
+        logger.info("Server hardening applied (firewall, fail2ban)")
+
+def install_cyberpanel(server_ip: str, ssh_user: str, ssh_key: str, dry_run: bool, verbose: bool, ssh_port: int = 22) -> None:
+    """Install CyberPanel on the server via SSH (supports custom host/user/port)."""
+    if verbose:
+        logger.info(f"Installing CyberPanel on {server_ip}:{ssh_port} as {ssh_user}")
     
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     try:
         if dry_run:
-            logger.info(f"Dry run: Would connect to {server_ip} as {ssh_user} and install CyberPanel")
+            logger.info(f"Dry run: Would connect to {server_ip}:{ssh_port} as {ssh_user} and install CyberPanel")
             return
-        client.connect(server_ip, username=ssh_user, key_filename=os.path.expanduser(ssh_key), timeout=10)
+        client.connect(server_ip, username=ssh_user, key_filename=os.path.expanduser(ssh_key), port=ssh_port, timeout=10)
         
         commands = [
             "apt update && apt install -y wget",
