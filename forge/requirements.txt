@@ -6,3 +6,8 @@ structlog>=23.0
 requests>=2.28
 pytest>=7.0
 pytest-mock>=3.10
+hcloud>=1.18.2
+cloudflare>=4.3.1
+paramiko>=3.4.0
+sqlalchemy
+keyring

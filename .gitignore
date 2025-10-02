@@ -35,3 +35,4 @@ www/web/app/uploads/
 
 .venv/
 __pycache__/
+.env.local

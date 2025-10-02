@@ -1,6 +1,11 @@
 # Bedrock CLI Implementation Plan
 
-This document outlines the step-by-step plan to build the **Bedrock CLI**, a Python command-line interface for orchestrating Bedrock-based WordPress workflows. It covers local project setup with DDEV, server provisioning, synchronization/backups, deployment, monitoring, CI/CD, and workflow orchestration. The plan is divided into phases for gradual implementation, with a checklist to track progress.
+This document outlines the step-by-step plan to build the **Bedrock CLI**, a
+Python command-line interface for orchestrating Bedrock-based WordPress
+workflows. It covers local project setup with DDEV, server provisioning,
+synchronization/backups, deployment, monitoring, CI/CD, and workflow
+orchestration. The plan is divided into phases for gradual implementation, with
+a checklist to track progress.
 
 ## Table of Contents
 
@@ -19,12 +24,19 @@ This document outlines the step-by-step plan to build the **Bedrock CLI**, a Pyt
 
 ## Overview
 
-The Bedrock CLI consolidates tasks for Bedrock WordPress projects into a single Python CLI (`python -m cli`). It replaces legacy Bash scripts with modular, cross-platform Python code, supporting local development (DDEV), server provisioning (Hetzner, CyberPanel), sync/backups (`rclone`), deployment (`rsync`), monitoring (Uptime Kuma), and CI/CD (Jenkins). This plan ensures a maintainable, extensible solution with clear steps for implementation.
+The Bedrock CLI consolidates tasks for Bedrock WordPress projects into a single
+Python CLI (`python -m cli`). It replaces legacy Bash scripts with modular,
+cross-platform Python code, supporting local development (DDEV), server
+provisioning (Hetzner, CyberPanel), sync/backups (`rclone`), deployment
+(`rsync`), monitoring (Uptime Kuma), and CI/CD (Jenkins). This plan ensures a
+maintainable, extensible solution with clear steps for implementation.
 
 ## Goals and Principles
 
 ### Goals
-- Create a unified CLI with subcommands: `local`, `provision`, `sync`, `deploy`, `monitor`, `ci`, `workflow`.
+
+- Create a unified CLI with subcommands: `local`, `provision`, `sync`, `deploy`,
+  `monitor`, `ci`, `workflow`.
 - Support local project creation/management with DDEV.
 - Automate server provisioning, deployment, backups, and monitoring.
 - Ensure cross-platform compatibility (Windows/Linux/macOS).
@@ -33,9 +45,13 @@ The Bedrock CLI consolidates tasks for Bedrock WordPress projects into a single 
 - Include tests and documentation.
 
 ### Principles
-- **Modularity**: Organize commands in `commands/` (e.g., `local.py`, `sync.py`).
-- **Phased Approach**: Start with core structure, then add commands incrementally.
-- **Security**: Use `pydantic` for config validation, `python-dotenv` for env vars.
+
+- **Modularity**: Organize commands in `commands/` (e.g., `local.py`,
+  `sync.py`).
+- **Phased Approach**: Start with core structure, then add commands
+  incrementally.
+- **Security**: Use `pydantic` for config validation, `python-dotenv` for env
+  vars.
 - **User-Friendly**: Support `--dry-run`, `--verbose`, interactive prompts.
 - **Maintainability**: Use `pytest` for testing, `structlog` for logging.
 
@@ -86,12 +102,16 @@ bedrock-cli/
 
 ### Phase 1: Setup and Core Structure
 
-**Goal**: Establish foundation with CLI entrypoint, utilities, and configuration.
+**Goal**: Establish foundation with CLI entrypoint, utilities, and
+configuration.
 
 **Steps**:
+
 - Create directory structure (see [Project Structure](#project-structure)).
-- Set up `pyproject.toml` and `requirements.txt` (install deps with `pip install -r requirements.txt`).
-- Implement `main.py`, `utils/logging.py`, `utils/errors.py`, `utils/config.py`, `utils/shell.py`.
+- Set up `pyproject.toml` and `requirements.txt` (install deps with
+  `pip install -r requirements.txt`).
+- Implement `main.py`, `utils/logging.py`, `utils/errors.py`, `utils/config.py`,
+  `utils/shell.py`.
 - Create `config/example.default.json` and env examples.
 - Test: `python -m cli --help`.
 
@@ -100,6 +120,7 @@ bedrock-cli/
 **Goal**: Implement `local` subcommand for DDEV project creation/management.
 
 **Steps**:
+
 - Implement `commands/local.py` (create-project, manage).
 - Add `utils/api.py` for GitHub repo creation (using `requests`).
 - Test: `python -m cli local create-project myproject --dry-run`.
@@ -109,8 +130,11 @@ bedrock-cli/
 **Goal**: Implement `provision` subcommand for server setup.
 
 **Steps**:
-- Implement `commands/provision.py` (hetzner-create, cyberpanel-provision, dns-add, etc.).
-- Use `utils/api.py` for Hetzner/Cloudflare APIs; `utils/ssh.py` for SSH operations.
+
+- Implement `commands/provision.py` (hetzner-create, cyberpanel-provision,
+  dns-add, etc.).
+- Use `utils/api.py` for Hetzner/Cloudflare APIs; `utils/ssh.py` for SSH
+  operations.
 - Test: `python -m cli provision hetzner-create myserver --dry-run`.
 
 ### Phase 4: Sync and Backup Commands
@@ -118,6 +142,7 @@ bedrock-cli/
 **Goal**: Implement `sync` subcommand for backups, restores, DB/uploads sync.
 
 **Steps**:
+
 - Implement `commands/sync.py` (backup, restore, db, uploads, pull).
 - Use `subprocess` for DDEV/`rclone`; `utils/ssh.py` for remote operations.
 - Test: `python -m cli sync backup myproject production --dry-run`.
@@ -127,6 +152,7 @@ bedrock-cli/
 **Goal**: Implement `deploy` and `ci` subcommands.
 
 **Steps**:
+
 - Implement `commands/deploy.py` (deploy code via SSH/rsync).
 - Implement `commands/ci.py` (Jenkins integration with `requests`).
 - Test: `python -m cli deploy myproject production --dry-run`.
@@ -136,63 +162,55 @@ bedrock-cli/
 **Goal**: Implement `monitor` and `workflow` subcommands.
 
 **Steps**:
+
 - Implement `commands/monitor.py` (kuma-monitor, logrotate-setup).
 - Implement `commands/workflow.py` (full-project, etc.).
-- Test: `python -m cli workflow full-project myproject production example.com --dry-run`.
+- Test:
+  `python -m cli workflow full-project myproject production example.com --dry-run`.
 
 ### Phase 7: Testing and Optimization
 
 **Goal**: Add tests and polish the CLI.
 
 **Steps**:
+
 - Implement tests in `tests/` (use `pytest-mock` for APIs/SSH).
 - Add plugins in `plugins/custom.py`.
 - Update `docs/cli-usage.md` with examples.
 - Optimize performance and security (e.g., `keyring` for tokens).
 
-## Checklist
+## Roadmap & Next Features
 
-Use this checklist to track progress. Copy it to a tracking tool or Markdown file.
+### Upcoming Features & Missing Work
 
-### Phase 1: Setup and Core Structure
-- [ ] Create directory structure
-- [ ] Set up `pyproject.toml` and `requirements.txt`
-- [ ] Implement `main.py`
-- [ ] Implement `utils/logging.py`
-- [ ] Implement `utils/errors.py`
-- [ ] Implement `utils/config.py`
-- [ ] Implement `utils/shell.py`
-- [ ] Create `config/example.default.json` and env examples
-- [ ] Test CLI help
+- Project discovery/import: Find and migrate existing WordPress/Bedrock projects
+  into Forge for unified management.
+- Default composer/monorepo-fetcher: Use monorepo-fetcher as default Composer
+  source; ensure manage-wp plugin is default.
+- Enhanced local dev: Improve project switching, environment management,
+  automation, and error handling.
+- Google Drive backup/restore: CLI/GUI for backup/restore to Google Drive, with
+  configurable folders and retention.
+- Deployment: Add deployment commands, CI/CD integration, remote provisioners.
+- Kuma monitoring: Integrate Kuma for uptime/health checks and alerts.
+- Dashboard: Unified dashboard (web/CLI) for managing all projects, backups,
+  deployments, monitoring, and more—even for imported projects.
+- Documentation: Update docs for all new features.
 
-### Phase 2: Local Project Management
-- [ ] Implement `commands/local.py` (create-project, manage)
-- [ ] Implement `utils/api.py` (GitHub repo creation)
-- [ ] Test local subcommands
+### Updated Actionable Todo List
 
-### Phase 3: Provisioning Commands
-- [ ] Implement `commands/provision.py`
-- [ ] Enhance `utils/api.py` (Hetzner, Cloudflare)
-- [ ] Implement `utils/ssh.py`
-- [ ] Test provision subcommands
-
-### Phase 4: Sync and Backup Commands
-- [ ] Implement `commands/sync.py`
-- [ ] Integrate DDEV and `rclone`
-- [ ] Test sync subcommands
-
-### Phase 5: Deployment and CI/CD
-- [ ] Implement `commands/deploy.py`
-- [ ] Implement `commands/ci.py`
-- [ ] Test deploy and ci subcommands
-
-### Phase 6: Monitoring and Workflows
-- [ ] Implement `commands/monitor.py`
-- [ ] Implement `commands/workflow.py`
-- [ ] Test monitor and workflow subcommands
-
-### Phase 7: Testing and Optimization
-- [ ] Implement tests in `tests/`
-- [ ] Enhance plugins
-- [ ] Update docs
-- [ ] Optimize performance/security
+- [ ] Add CLI/GUI to discover and import existing WordPress/Bedrock projects
+      into Forge
+- [ ] Implement migration logic to convert imported projects for Forge
+      management
+- [ ] Set monorepo-fetcher as default Composer source in config and CLI
+- [ ] Ensure manage-wp plugin is installed/activated by default
+- [ ] Enhance local dev commands (project switching, environment management,
+      automation, error handling)
+- [ ] Implement backup/restore to Google Drive (configurable folders, retention,
+      scheduling)
+- [ ] Add deployment commands (push, rollback, CI/CD integration)
+- [ ] Integrate Kuma monitoring (uptime, health checks, alerts)
+- [ ] Build unified dashboard (web/CLI) for managing all projects, backups,
+      deployments, monitoring, etc.
+- [ ] Update documentation for all new features
