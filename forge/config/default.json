@@ -25,5 +25,17 @@
 		"hostname": "server1",
 		"provider": "hetzner",
 		"os": "ubuntu"
-	}
+	},
+	"github_user": "nadbad",
+	"monorepo_fetcher": {
+		"require": []
+	},
+	"default_plugins": [
+		"wp-worker",
+		"woocommerce",
+		"advanced-access-manager",
+		"delete-all-products",
+		"online-active-users",
+		"woo-order-export-lite"
+	]
 }
