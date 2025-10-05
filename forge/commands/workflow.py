@@ -1,5 +1,5 @@
 import typer
-from typing import List, Optional
+from typing import Optional
 from forge.commands.local import create_project
 from forge.commands.provision import provision
 from forge.commands.deploy import push
@@ -23,7 +23,7 @@ def full_project_workflow(
     monitor_url: str,
     dry_run: bool = False,
     verbose: bool = False,
-    skip_steps: Optional[List[str]] = None
+    skip_steps: str = ""
 ) -> None:
     """Run full workflow: create → provision → deploy → backup → monitor."""
     steps = {
@@ -34,7 +34,8 @@ def full_project_workflow(
         "monitor": add_monitor
     }
     if skip_steps:
-        for skip in skip_steps:
+        skip_list = [s.strip() for s in skip_steps.split(",") if s.strip()]
+        for skip in skip_list:
             steps.pop(skip, None)
     logger.info(_("Starting full-project workflow..."))
     for step_name, func in tqdm(steps.items(), desc=_("Workflow steps"), disable=not verbose):
@@ -59,7 +60,7 @@ def full_project(
     ssh_key: str = typer.Argument(..., help=_("SSH private key")),
     domain: str = typer.Argument(..., help=_("Domain")),
     monitor_url: str = typer.Argument(..., help=_("URL to monitor")),
-    skip: List[str] = typer.Option([], "--skip", help=_("Skip steps (create, provision, deploy, backup, monitor)")),
+    skip: str = typer.Option("", "--skip", help=_("Skip steps (create, provision, deploy, backup, monitor) - comma separated")),
     dry_run: bool = typer.Option(False, "--dry-run"),
     verbose: bool = typer.Option(False, "--verbose")
 ):
