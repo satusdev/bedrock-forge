@@ -1,5 +1,5 @@
 import typer
-from .commands import local, provision, sync, deploy, ci, monitor, info, workflow
+from .commands import local, provision, sync, deploy, ci, monitor, info, workflow, config
 from .utils.logging import logger
 
 app = typer.Typer(rich_markup_mode="rich", help="Unified CLI for Bedrock WordPress workflows")
@@ -12,6 +12,7 @@ app.add_typer(ci.app, name="ci", help="CI/CD integrations")
 app.add_typer(monitor.app, name="monitor", help="Monitoring and logging setup")
 app.add_typer(info.app, name="info", help="Display project/server info")
 app.add_typer(workflow.app, name="workflow", help="Run chained workflows")
+app.add_typer(config.app, name="config", help="Manage Forge configuration")
 
 @app.callback()
 def main(

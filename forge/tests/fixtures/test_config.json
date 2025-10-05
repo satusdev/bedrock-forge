@@ -1,0 +1,24 @@
+{
+  "admin_user": "test_admin",
+  "admin_email": "test@example.com",
+  "site_name": "test_site",
+  "php_version": "8.1",
+  "mysql_version": "8.0",
+  "github_token": "fake_test_token",
+  "providers": {
+    "hetzner": {
+      "api_token": "fake_hetzner_token",
+      "server_type": "cpx11",
+      "location": "nbg1"
+    },
+    "cloudflare": {
+      "api_token": "fake_cloudflare_token",
+      "zone_id": "fake_zone_id"
+    }
+  },
+  "backup": {
+    "rclone_config_path": "/tmp/test_rclone.conf",
+    "remote_name": "test_remote",
+    "bucket_name": "test-backups"
+  }
+}
