@@ -1,0 +1,144 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.9, 3.10, 3.11]
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: testpass
+          MYSQL_DATABASE: test_db
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r forge/requirements.txt
+        pip install pytest-xdist pytest-cov pytest-mock
+
+    - name: Set up test environment
+      run: |
+        cp forge/tests/fixtures/test_config.json forge/tests/fixtures/config_override.json
+        echo "FORGE_ENV=test" >> $GITHUB_ENV
+        echo "FORGE_LOG_LEVEL=DEBUG" >> $GITHUB_ENV
+
+    - name: Run unit tests
+      run: |
+        cd forge
+        python -m pytest tests/unit/ -v --cov=forge --cov-report=xml --cov-report=term-missing --cov-fail-under=80 -m "not integration and not external"
+
+    - name: Run integration tests
+      run: |
+        cd forge
+        python -m pytest tests/integration/ -v --cov=forge --cov-report=xml --cov-report=term-missing --cov-append -m "integration" --timeout=60
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./forge/coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+    - name: Run CLI tests
+      run: |
+        cd forge
+        python -m pytest tests/ -v -k "cli" --tb=short
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install linting tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 black isort mypy
+
+    - name: Run flake8
+      run: |
+        cd forge
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+    - name: Run black
+      run: |
+        cd forge
+        black --check --diff .
+
+    - name: Run isort
+      run: |
+        cd forge
+        isort --check-only --diff .
+
+    - name: Run mypy
+      run: |
+        cd forge
+        mypy --ignore-missing-imports --show-error-codes --strict .
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install security tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install bandit safety
+
+    - name: Run bandit
+      run: |
+        cd forge
+        bandit -r . -f json -o bandit-report.json || true
+
+    - name: Run safety
+      run: |
+        cd forge
+        safety check --json --output safety-report.json || true
+
+    - name: Upload security reports
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-reports
+        path: |
+          forge/bandit-report.json
+          forge/safety-report.json

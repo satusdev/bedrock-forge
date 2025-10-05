@@ -1,0 +1,92 @@
+{
+  "hetzner": {
+    "create_server": {
+      "server": {
+        "id": 12345,
+        "name": "test-server",
+        "status": "running",
+        "public_net": {
+          "ipv4": {
+            "ip": "192.168.1.100"
+          }
+        },
+        "server_type": {
+          "name": "cpx11"
+        },
+        "datacenter": {
+          "location": {
+            "name": "Nuremberg 1 DC 3"
+          }
+        }
+      },
+      "action": {
+        "id": 67890,
+        "command": "create_server",
+        "status": "success",
+        "started": "2024-01-01T12:00:00Z",
+        "finished": "2024-01-01T12:05:00Z"
+      }
+    },
+    "server_details": {
+      "id": 12345,
+      "name": "test-server",
+      "status": "running",
+      "created": "2024-01-01T12:00:00Z",
+      "public_net": {
+        "ipv4": {
+          "ip": "192.168.1.100"
+        },
+        "ipv6": "2001:db8::1"
+      },
+      "server_type": {
+        "id": 1,
+        "name": "cpx11",
+        "cores": 4,
+        "memory": 8,
+        "disk": 80
+      },
+      "image": {
+        "id": 1,
+        "name": "ubuntu-22.04",
+        "description": "Ubuntu 22.04"
+      }
+    }
+  },
+  "cloudflare": {
+    "list_zones": {
+      "result": [
+        {
+          "id": "zone123",
+          "name": "example.com",
+          "status": "active",
+          "name_servers": [
+            "ns1.cloudflare.com",
+            "ns2.cloudflare.com"
+          ]
+        }
+      ]
+    },
+    "create_dns_record": {
+      "result": {
+        "id": "record123",
+        "type": "A",
+        "name": "test",
+        "content": "192.168.1.100",
+        "ttl": 300,
+        "proxied": false
+      }
+    },
+    "list_dns_records": {
+      "result": [
+        {
+          "id": "record123",
+          "type": "A",
+          "name": "test",
+          "content": "192.168.1.100",
+          "ttl": 300,
+          "proxied": false
+        }
+      ]
+    }
+  }
+}
