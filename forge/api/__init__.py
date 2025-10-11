@@ -2,8 +2,6 @@ from fastapi import FastAPI, BackgroundTasks
 from pydantic import BaseModel
 from forge.provision.cyberpanel import (
     install_cyberpanel,
-    provision_ssl_via_certbot,
-    provision_hardening,
 )
 from forge.api.celery_worker import celery_app
 import paramiko
@@ -44,10 +42,11 @@ def celery_provision_task(req_dict):
         install_cyberpanel(
             req.server_ip, req.ssh_user, req.ssh_key, req.dry_run, req.verbose, req.ssh_port
         )
-        if req.ssl:
-            provision_ssl_via_certbot(client, req.domain, req.dry_run, req.verbose)
-        if req.hardening:
-            provision_hardening(client, req.dry_run, req.verbose)
+        # TODO: Implement SSL and hardening functions
+        # if req.ssl:
+        #     provision_ssl_via_certbot(client, req.domain, req.dry_run, req.verbose)
+        # if req.hardening:
+        #     provision_hardening(client, req.dry_run, req.verbose)
     finally:
         client.close()
     return "provisioning complete"
