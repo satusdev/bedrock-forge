@@ -33,6 +33,9 @@ www/web/app/uploads/
 
 /logs/*
 
-.venv/
+.venv/*
+venv/*
+bedrock-forge-env
 __pycache__/
 .env.local
+node_modules
