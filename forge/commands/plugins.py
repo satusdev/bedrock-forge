@@ -3,8 +3,11 @@ from typing import Optional, Dict, Any
 from pathlib import Path
 import json
 from ..plugins.base import get_plugin_manager, PluginInfo
+from ..utils.plugin_manager import PluginManager, PluginInfo as WPPluginInfo, PluginPreset
 from ..utils.logging import logger
 from ..utils.errors import ForgeError
+from ..utils.local_config import LocalConfigManager
+from ..utils.project_helpers import ProjectSelector
 from tqdm import tqdm
 import gettext
 
@@ -248,6 +251,375 @@ def config_clear(
         logger.info(f"✅ Cleared configuration for '{plugin_name}'")
     else:
         logger.warning(f"No configuration file found for '{plugin_name}'")
+
+@app.command()
+def presets(
+    verbose: bool = typer.Option(False, "--verbose")
+):
+    """List available plugin presets for different site types."""
+    manager = PluginManager()
+    available_presets = manager.list_presets()
+
+    logger.info("=== Available Plugin Presets ===")
+    for preset in available_presets:
+        logger.info(f"\n📦 {preset.name} ({preset.id})")
+        logger.info(f"   Description: {preset.description}")
+        logger.info(f"   Categories: {', '.join(preset.categories)}")
+        logger.info(f"   Plugins: {len(preset.plugins)}")
+
+        if verbose:
+            logger.info("   Plugins included:")
+            for plugin_slug in preset.plugins:
+                plugin_info = manager._get_plugin_info(plugin_slug)
+                if plugin_info:
+                    logger.info(f"     • {plugin_info.name} ({plugin_info.type}) - {plugin_info.description[:60]}...")
+                else:
+                    logger.info(f"     • {plugin_slug}")
+
+@app.command()
+def install_category(
+    category: str = typer.Argument(..., help=_("Plugin category to install")),
+    project_name: Optional[str] = typer.Option(None, "--project", help=_("Target project name")),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    verbose: bool = typer.Option(False, "--verbose")
+):
+    """Install all plugins from a specific category."""
+    # Get project
+    config_manager = LocalConfigManager()
+    project_selector = ProjectSelector(config_manager)
+
+    if project_name:
+        selected_project_name = project_name
+    else:
+        selected_project_name = project_selector.select_project()
+
+    if not selected_project_name:
+        raise ForgeError(_("No project selected"))
+
+    project = config_manager.get_project(selected_project_name)
+    if not project:
+        raise ForgeError(f"Project '{selected_project_name}' not found")
+
+    # Get plugins for category
+    plugin_manager = PluginManager()
+    category_plugins = plugin_manager.get_category_plugins(category)
+
+    if not category_plugins:
+        logger.info(f"No plugins found in category '{category}'")
+        return
+
+    logger.info(f"Installing {len(category_plugins)} plugins from category '{category}'")
+
+    # Install plugins
+    plugin_slugs = [p.slug for p in category_plugins]
+    results = plugin_manager.install_plugins(
+        project_path=project.directory,
+        plugins=plugin_slugs,
+        dry_run=dry_run,
+        verbose=verbose
+    )
+
+    # Show results
+    successful = sum(1 for success in results.values() if success)
+    total = len(results)
+
+    logger.info(f"\nInstallation complete: {successful}/{total} plugins installed successfully")
+
+    if verbose:
+        for plugin, success in results.items():
+            status = "✅" if success else "❌"
+            logger.info(f"  {status} {plugin}")
+
+@app.command()
+def recommend(
+    site_type: str = typer.Option("business", "--type", help=_("Site type (blog, business, ecommerce, portfolio, minimal, performance)")),
+    categories: Optional[str] = typer.Option(None, "--categories", help=_("Additional categories (comma-separated)")),
+    project_name: Optional[str] = typer.Option(None, "--project", help=_("Target project name")),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    verbose: bool = typer.Option(False, "--verbose")
+):
+    """Get and install recommended plugins based on site type."""
+    # Parse categories
+    custom_categories = []
+    if categories:
+        custom_categories = [cat.strip() for cat in categories.split(",")]
+
+    # Get recommended plugins
+    plugin_manager = PluginManager()
+    recommended_plugins = plugin_manager.get_recommended_plugins(site_type, custom_categories)
+
+    logger.info(f"\n🎯 Recommended plugins for {site_type} site:")
+    logger.info(f"Found {len(recommended_plugins)} recommended plugins")
+
+    if verbose:
+        for plugin in recommended_plugins:
+            logger.info(f"\n📦 {plugin.name} ({plugin.type})")
+            logger.info(f"   Category: {plugin.category}")
+            logger.info(f"   Description: {plugin.description}")
+            logger.info(f"   Priority: {plugin.priority}")
+
+    # Get project for installation
+    config_manager = LocalConfigManager()
+    project_selector = ProjectSelector(config_manager)
+
+    if project_name:
+        selected_project_name = project_name
+    else:
+        selected_project_name = project_selector.select_project()
+
+    if not selected_project_name:
+        logger.info("No project selected - recommendations only")
+        return
+
+    project = config_manager.get_project(selected_project_name)
+    if not project:
+        raise ForgeError(f"Project '{selected_project_name}' not found")
+
+    # Install recommended plugins
+    plugin_slugs = [p.slug for p in recommended_plugins]
+    logger.info(f"\nInstalling recommended plugins to project '{selected_project_name}'...")
+
+    results = plugin_manager.install_plugins(
+        project_path=project.directory,
+        plugins=plugin_slugs,
+        dry_run=dry_run,
+        verbose=verbose
+    )
+
+    # Show results
+    successful = sum(1 for success in results.values() if success)
+    total = len(results)
+
+    logger.info(f"\nInstallation complete: {successful}/{total} plugins installed successfully")
+
+@app.command()
+def install_preset(
+    preset_name: str = typer.Argument(..., help=_("Plugin preset to install")),
+    project_name: Optional[str] = typer.Option(None, "--project", help=_("Target project name")),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    verbose: bool = typer.Option(False, "--verbose")
+):
+    """Install a complete plugin preset to a project."""
+    # Get project
+    config_manager = LocalConfigManager()
+    project_selector = ProjectSelector(config_manager)
+
+    if project_name:
+        selected_project_name = project_name
+    else:
+        selected_project_name = project_selector.select_project()
+
+    if not selected_project_name:
+        raise ForgeError(_("No project selected"))
+
+    project = config_manager.get_project(selected_project_name)
+    if not project:
+        raise ForgeError(f"Project '{selected_project_name}' not found")
+
+    # Get preset
+    plugin_manager = PluginManager()
+    preset = plugin_manager.get_preset(preset_name)
+
+    if not preset:
+        available_presets = list(plugin_manager.presets.keys())
+        raise ForgeError(f"Preset '{preset_name}' not found. Available presets: {available_presets}")
+
+    logger.info(f"Installing preset '{preset.name}' to project '{selected_project_name}'")
+    logger.info(f"Description: {preset.description}")
+    logger.info(f"Plugins to install: {len(preset.plugins)}")
+
+    # Check for conflicts
+    conflicts = plugin_manager.check_conflicts(preset.plugins)
+    if conflicts:
+        logger.warning("⚠️  Plugin conflicts detected:")
+        for plugin, conflicting in conflicts:
+            logger.warning(f"   • {plugin} conflicts with {conflicting}")
+
+    # Install plugins
+    results = plugin_manager.install_plugins(
+        project_path=project.directory,
+        plugins=preset.plugins,
+        dry_run=dry_run,
+        verbose=verbose
+    )
+
+    # Show results
+    successful = sum(1 for success in results.values() if success)
+    total = len(results)
+
+    logger.info(f"\nPreset installation complete: {successful}/{total} plugins installed successfully")
+
+@app.command()
+def status(
+    project_name: Optional[str] = typer.Option(None, "--project", help=_("Project name to check")),
+    category: Optional[str] = typer.Option(None, "--category", help=_("Filter by category")),
+    verbose: bool = typer.Option(False, "--verbose")
+):
+    """Show status of installed plugins in a project."""
+    # Get project
+    config_manager = LocalConfigManager()
+    project_selector = ProjectSelector(config_manager)
+
+    if project_name:
+        selected_project_name = project_name
+    else:
+        selected_project_name = project_selector.select_project()
+
+    if not selected_project_name:
+        raise ForgeError(_("No project selected"))
+
+    project = config_manager.get_project(selected_project_name)
+    if not project:
+        raise ForgeError(f"Project '{selected_project_name}' not found")
+
+    # Get installed plugins
+    plugin_manager = PluginManager()
+    installed_plugins = plugin_manager.get_installed_plugins(project.directory, active_only=False)
+
+    if not installed_plugins:
+        logger.info(f"No plugins found in project '{selected_project_name}'")
+        return
+
+    logger.info(f"\n=== Plugin Status for '{selected_project_name}' ===")
+
+    # Group by status
+    active_plugins = [p for p in installed_plugins if p.active]
+    inactive_plugins = [p for p in installed_plugins if p.installed and not p.active]
+
+    logger.info(f"\n🟢 Active Plugins ({len(active_plugins)}):")
+    for plugin in active_plugins:
+        if category and plugin.category != category:
+            continue
+        logger.info(f"  • {plugin.name} ({plugin.type}) - {plugin.category}")
+
+    if inactive_plugins:
+        logger.info(f"\n⚪ Inactive Plugins ({len(inactive_plugins)}):")
+        for plugin in inactive_plugins:
+            if category and plugin.category != category:
+                continue
+            logger.info(f"  • {plugin.name} ({plugin.type}) - {plugin.category}")
+
+    if verbose:
+        logger.info(f"\n📊 Plugin Summary:")
+        logger.info(f"  Total installed: {len(installed_plugins)}")
+        logger.info(f"  Active: {len(active_plugins)}")
+        logger.info(f"  Inactive: {len(inactive_plugins)}")
+
+        # Show categories breakdown
+        categories = {}
+        for plugin in installed_plugins:
+            cat = plugin.category
+            categories[cat] = categories.get(cat, 0) + 1
+
+        logger.info(f"\n📂 By Category:")
+        for cat, count in sorted(categories.items()):
+            logger.info(f"  {cat}: {count} plugins")
+
+@app.command()
+def update(
+    project_name: Optional[str] = typer.Option(None, "--project", help=_("Project name")),
+    plugins: Optional[str] = typer.Option(None, "--plugins", help=_("Specific plugins to update (comma-separated)")),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    verbose: bool = typer.Option(False, "--verbose")
+):
+    """Update plugins in a project."""
+    # Get project
+    config_manager = LocalConfigManager()
+    project_selector = ProjectSelector(config_manager)
+
+    if project_name:
+        selected_project_name = project_name
+    else:
+        selected_project_name = project_selector.select_project()
+
+    if not selected_project_name:
+        raise ForgeError(_("No project selected"))
+
+    project = config_manager.get_project(selected_project_name)
+    if not project:
+        raise ForgeError(f"Project '{selected_project_name}' not found")
+
+    # Parse plugins to update
+    plugin_list = None
+    if plugins:
+        plugin_list = [p.strip() for p in plugins.split(",")]
+
+    # Update plugins
+    plugin_manager = PluginManager()
+    logger.info(f"Updating plugins in project '{selected_project_name}'...")
+
+    if plugin_list:
+        logger.info(f"Updating specific plugins: {plugin_list}")
+    else:
+        logger.info("Updating all installed plugins")
+
+    results = plugin_manager.update_plugins(
+        project_path=project.directory,
+        plugins=plugin_list,
+        dry_run=dry_run,
+        verbose=verbose
+    )
+
+    # Show results
+    successful = sum(1 for success in results.values() if success)
+    total = len(results)
+
+    logger.info(f"\nUpdate complete: {successful}/{total} plugins updated successfully")
+
+    if verbose:
+        for plugin, success in results.items():
+            status = "✅" if success else "❌"
+            logger.info(f"  {status} {plugin}")
+
+@app.command()
+def uninstall(
+    plugins: str = typer.Argument(..., help=_("Plugins to uninstall (comma-separated)")),
+    project_name: Optional[str] = typer.Option(None, "--project", help=_("Target project name")),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    verbose: bool = typer.Option(False, "--verbose")
+):
+    """Uninstall plugins from a project."""
+    # Parse plugins
+    plugin_list = [p.strip() for p in plugins.split(",")]
+
+    # Get project
+    config_manager = LocalConfigManager()
+    project_selector = ProjectSelector(config_manager)
+
+    if project_name:
+        selected_project_name = project_name
+    else:
+        selected_project_name = project_selector.select_project()
+
+    if not selected_project_name:
+        raise ForgeError(_("No project selected"))
+
+    project = config_manager.get_project(selected_project_name)
+    if not project:
+        raise ForgeError(f"Project '{selected_project_name}' not found")
+
+    # Uninstall plugins
+    plugin_manager = PluginManager()
+    logger.info(f"Uninstalling {len(plugin_list)} plugins from project '{selected_project_name}'...")
+
+    results = plugin_manager.uninstall_plugins(
+        project_path=project.directory,
+        plugins=plugin_list,
+        dry_run=dry_run,
+        verbose=verbose
+    )
+
+    # Show results
+    successful = sum(1 for success in results.values() if success)
+    total = len(results)
+
+    logger.info(f"\nUninstall complete: {successful}/{total} plugins uninstalled successfully")
+
+    if verbose:
+        for plugin, success in results.items():
+            status = "✅" if success else "❌"
+            logger.info(f"  {status} {plugin}")
+
 
 if __name__ == "__main__":
     app()
