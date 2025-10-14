@@ -2,7 +2,7 @@ import typer
 import json
 from forge.utils.logging import logger
 
-app = typer.Typer()
+app = typer.Typer(help="Display project/server info")
 
 def show_project_info(
     project_name: str,
@@ -21,7 +21,7 @@ def show_project_info(
             else:
                 logger.debug(json.dumps(v, indent=2))
 
-@app.command()
+@app.command(help="Show detailed project and server information")
 def show(
     project_name: str = typer.Argument(..., help="Project name"),
     output: str = typer.Option("text", "--output", help="Output format: text or json"),
