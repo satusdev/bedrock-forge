@@ -5,7 +5,7 @@ from forge.utils.logging import logger
 from forge.utils.errors import ForgeError
 from retrying import retry  # pip install retrying for retries
 
-app = typer.Typer()
+app = typer.Typer(help="CI/CD integrations")
 
 @retry(stop_max_attempt_number=3, wait_fixed=2000)  # Retry 3 times with 2s wait
 def trigger_jenkins_api(url, params, auth, timeout):
@@ -47,7 +47,7 @@ def trigger_jenkins(
     except Exception as e:
         raise ForgeError(f"Failed to trigger Jenkins: {str(e)}")
 
-@app.command()
+@app.command(help="Trigger Jenkins job via API")
 def jenkins_trigger(
     job: str = typer.Argument(..., help="Jenkins job name"),
     branch: str = typer.Option("main", "--branch", help="Git branch"),

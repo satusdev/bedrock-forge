@@ -12,7 +12,7 @@ import gettext
 
 _ = gettext.gettext
 
-app = typer.Typer()
+app = typer.Typer(help="Monitoring and logging setup")
 
 @retry(stop_max_attempt_number=3, wait_fixed=2000)
 def _make_request(method: str, url: str, **kwargs):
