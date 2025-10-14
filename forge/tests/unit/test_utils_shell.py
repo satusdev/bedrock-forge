@@ -10,7 +10,7 @@ import subprocess
 from unittest.mock import Mock, patch, call
 from pathlib import Path
 
-from forge.utils.shell import run_shell, run_shell_async, ShellCommandResult
+from forge.utils.shell import run_shell, run_shell_async
 
 
 class TestShellCommandResult:
