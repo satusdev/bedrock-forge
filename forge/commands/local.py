@@ -64,6 +64,9 @@ def create_project(
     db_user: Optional[str] = typer.Option(None, "--db-user", help=_("Database username (default: db for DDEV)")),
     db_password: Optional[str] = typer.Option(None, "--db-password", help=_("Database password (default: db for DDEV)")),
     db_host: Optional[str] = typer.Option(None, "--db-host", help=_("Database host (default: db for DDEV)")),
+    plugin_preset: str = typer.Option(DEFAULT_PLUGIN_PRESET, "--plugin-preset", help=_("Plugin preset to install (blog, business, ecommerce, portfolio, minimal, performance)")),
+    plugins: Optional[str] = typer.Option(None, "--plugins", help=_("Additional plugins to install (comma-separated)")),
+    skip_plugins: bool = typer.Option(False, "--skip-plugins", help=_("Skip plugin installation")),
     dry_run: bool = typer.Option(False, "--dry-run"),
     verbose: bool = typer.Option(False, "--verbose")
 ):
@@ -81,6 +84,9 @@ def create_project(
             db_user=db_user,
             db_password=db_password,
             db_host=db_host,
+            plugin_preset=plugin_preset,
+            plugins=plugins,
+            skip_plugins=skip_plugins,
             dry_run=dry_run,
             verbose=verbose
         )
