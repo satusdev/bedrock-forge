@@ -1,0 +1,367 @@
+{
+  "presets": {
+    "blog": {
+      "name": "Blog/Content Site",
+      "description": "Essential plugins for blogging and content-focused websites",
+      "categories": ["essential", "seo", "performance", "security"],
+      "plugins": [
+        "jetpack",
+        "wordpress-seo",
+        "w3-total-cache",
+        "wordfence",
+        "akismet",
+        "google-site-kit",
+        "wp-statistics",
+        "duplicate-post"
+      ]
+    },
+    "business": {
+      "name": "Business Website",
+      "description": "Complete plugin set for professional business websites",
+      "categories": ["essential", "seo", "performance", "security", "forms"],
+      "plugins": [
+        "wordpress-seo",
+        "w3-total-cache",
+        "wordfence",
+        "contact-form-7",
+        "google-site-kit",
+        "smush",
+        "redirection",
+        "duplicate-page",
+        "really-simple-ssl"
+      ]
+    },
+    "ecommerce": {
+      "name": "E-commerce Store",
+      "description": "Plugins optimized for online stores and e-commerce",
+      "categories": ["essential", "ecommerce", "performance", "security", "forms"],
+      "plugins": [
+        "woocommerce",
+        "wordpress-seo",
+        "w3-total-cache",
+        "wordfence",
+        "contact-form-7",
+        "google-site-kit",
+        "woocommerce-gateway-stripe",
+        "pdf-invoices-packing-slips",
+        "wp-mail-smtp",
+        "really-simple-ssl"
+      ]
+    },
+    "portfolio": {
+      "name": "Portfolio/Creative",
+      "description": "Plugins for portfolio, photography, and creative websites",
+      "categories": ["essential", "performance", "forms", "media"],
+      "plugins": [
+        "wordpress-seo",
+        "w3-total-cache",
+        "wordfence",
+        "contact-form-7",
+        "smush",
+        "envira-gallery",
+        "google-site-kit",
+        "really-simple-ssl"
+      ]
+    },
+    "minimal": {
+      "name": "Minimal Setup",
+      "description": "Basic essential plugins only",
+      "categories": ["essential", "security"],
+      "plugins": [
+        "akismet",
+        "wordfence",
+        "really-simple-ssl"
+      ]
+    },
+    "performance": {
+      "name": "Performance Optimized",
+      "description": "Maximum performance and speed optimization",
+      "categories": ["performance", "seo", "caching", "optimization"],
+      "plugins": [
+        "w3-total-cache",
+        "smush",
+        "autoptimize",
+        "query-monitor",
+        "wordpress-seo",
+        "google-site-kit",
+        "lazy-load-by-wp-anatomy",
+        "wp-super-minify"
+      ]
+    }
+  },
+  "categories": {
+    "essential": {
+      "name": "Essential",
+      "description": "Core plugins required for most WordPress sites",
+      "plugins": {
+        "akismet": {
+          "name": "Akismet Anti-Spam",
+          "description": "Protects your site from spam comments",
+          "type": "free",
+          "priority": 1
+        },
+        "jetpack": {
+          "name": "Jetpack",
+          "description": "Comprehensive site security, performance, and marketing tools",
+          "type": "freemium",
+          "priority": 2
+        }
+      }
+    },
+    "seo": {
+      "name": "SEO & Marketing",
+      "description": "Search engine optimization and marketing tools",
+      "plugins": {
+        "wordpress-seo": {
+          "name": "Yoast SEO",
+          "description": "Complete SEO solution with content analysis",
+          "type": "freemium",
+          "priority": 1,
+          "alternative": "rank-math"
+        },
+        "rank-math": {
+          "name": "Rank Math",
+          "description": "Advanced SEO plugin with rich snippets",
+          "type": "freemium",
+          "priority": 2
+        },
+        "google-site-kit": {
+          "name": "Google Site Kit",
+          "description": "Connect your WordPress site to Google services",
+          "type": "free",
+          "priority": 3
+        },
+        "redirection": {
+          "name": "Redirection",
+          "description": "Manage 301 redirects and monitor 404 errors",
+          "type": "free",
+          "priority": 4
+        }
+      }
+    },
+    "performance": {
+      "name": "Performance & Caching",
+      "description": "Speed optimization and caching solutions",
+      "plugins": {
+        "w3-total-cache": {
+          "name": "W3 Total Cache",
+          "description": "Comprehensive caching and performance optimization",
+          "type": "free",
+          "priority": 1
+        },
+        "wp-rocket": {
+          "name": "WP Rocket",
+          "description": "Premium caching and performance optimization",
+          "type": "premium",
+          "priority": 2
+        },
+        "smush": {
+          "name": "Smush Image Optimization",
+          "description": "Compress and optimize images automatically",
+          "type": "freemium",
+          "priority": 3
+        },
+        "autoptimize": {
+          "name": "Autoptimize",
+          "description": "Optimize CSS, JavaScript, and HTML",
+          "type": "free",
+          "priority": 4
+        },
+        "query-monitor": {
+          "name": "Query Monitor",
+          "description": "Database queries, hooks, and debugging tool",
+          "type": "free",
+          "priority": 5
+        }
+      }
+    },
+    "security": {
+      "name": "Security",
+      "description": "Security and protection plugins",
+      "plugins": {
+        "wordfence": {
+          "name": "Wordfence Security",
+          "description": "Comprehensive security suite with firewall",
+          "type": "freemium",
+          "priority": 1
+        },
+        "sucuri-scanner": {
+          "name": "Sucuri Security",
+          "description": "Security auditing, malware scanning and hardening",
+          "type": "free",
+          "priority": 2
+        },
+        "really-simple-ssl": {
+          "name": "Really Simple SSL",
+          "description": "Automatic SSL detection and configuration",
+          "type": "freemium",
+          "priority": 3
+        },
+        "updraftplus": {
+          "name": "UpdraftPlus WordPress Backup",
+          "description": "Backup and restoration plugin",
+          "type": "freemium",
+          "priority": 4
+        }
+      }
+    },
+    "forms": {
+      "name": "Forms & Contact",
+      "description": "Contact forms and user interaction tools",
+      "plugins": {
+        "contact-form-7": {
+          "name": "Contact Form 7",
+          "description": "Simple and flexible contact form plugin",
+          "type": "free",
+          "priority": 1
+        },
+        "wpforms-lite": {
+          "name": "WPForms Lite",
+          "description": "Drag and drop form builder",
+          "type": "freemium",
+          "priority": 2
+        },
+        "elementor-pro": {
+          "name": "Elementor Pro",
+          "description": "Advanced form builder with Elementor integration",
+          "type": "premium",
+          "priority": 3
+        },
+        "fluentform": {
+          "name": "Fluent Forms",
+          "description": "Advanced form builder with conditional logic",
+          "type": "freemium",
+          "priority": 4
+        },
+        "wp-mail-smtp": {
+          "name": "WP Mail SMTP",
+          "description": "Improve email deliverability",
+          "type": "freemium",
+          "priority": 5
+        }
+      }
+    },
+    "ecommerce": {
+      "name": "E-commerce",
+      "description": "Online store and e-commerce functionality",
+      "plugins": {
+        "woocommerce": {
+          "name": "WooCommerce",
+          "description": "Complete e-commerce platform",
+          "type": "free",
+          "priority": 1
+        },
+        "woocommerce-gateway-stripe": {
+          "name": "WooCommerce Stripe Gateway",
+          "description": "Accept credit card payments via Stripe",
+          "type": "free",
+          "priority": 2
+        },
+        "pdf-invoices-packing-slips": {
+          "name": "PDF Invoices & Packing Slips",
+          "description": "Generate PDF invoices for WooCommerce orders",
+          "type": "freemium",
+          "priority": 3
+        }
+      }
+    },
+    "media": {
+      "name": "Media & Gallery",
+      "description": "Image galleries and media management",
+      "plugins": {
+        "envira-gallery": {
+          "name": "Envira Gallery",
+          "description": "Responsive image gallery plugin",
+          "type": "freemium",
+          "priority": 1
+        },
+        "modula-best-grid-gallery": {
+          "name": "Modula - Best Grid Gallery",
+          "description": "Creative image and video galleries",
+          "type": "freemium",
+          "priority": 2
+        }
+      }
+    },
+    "optimization": {
+      "name": "Optimization",
+      "description": "Additional optimization tools",
+      "plugins": {
+        "lazy-load-by-wp-anatomy": {
+          "name": "Lazy Load by WP Anatomy",
+          "description": "Lazy load images for better performance",
+          "type": "free",
+          "priority": 1
+        },
+        "wp-super-minify": {
+          "name": "WP Super Minify",
+          "description": "Minify HTML, CSS, and JavaScript",
+          "type": "free",
+          "priority": 2
+        },
+        "wp-statistics": {
+          "name": "WP Statistics",
+          "description": "Analytics and visitor statistics",
+          "type": "free",
+          "priority": 3
+        }
+      }
+    }
+  },
+  "plugin_settings": {
+    "wordpress-seo": {
+      "enabled": true,
+      "auto_configure": true,
+      "settings": {
+        "site_type": "blog",
+        "company_or_person": "person",
+        "separator": "sc-dash",
+        "homepage_title": "%%sitename%% %%page%% %%sep%% %%sitedesc%%",
+        "admin_email": "admin@example.com"
+      }
+    },
+    "w3-total-cache": {
+      "enabled": true,
+      "auto_configure": true,
+      "settings": {
+        "pgcache_enabled": true,
+        "minify_enabled": true,
+        "objectcache_enabled": true,
+        "browsercache_enabled": true
+      }
+    },
+    "wordfence": {
+      "enabled": true,
+      "auto_configure": true,
+      "settings": {
+        "firewall_enabled": true,
+        "scan_enabled": true,
+        "login_protection_enabled": true
+      }
+    },
+    "contact-form-7": {
+      "enabled": true,
+      "auto_configure": false,
+      "sample_forms": ["contact", "newsletter"]
+    },
+    "woocommerce": {
+      "enabled": true,
+      "auto_configure": true,
+      "settings": {
+        "enable_coupons": "yes",
+        "enable_calc_shipping": "yes",
+        "woocommerce_enable_myaccount_registration": "yes"
+      }
+    }
+  },
+  "dependencies": {
+    "elementor-pro": ["elementor"],
+    "woocommerce-gateway-stripe": ["woocommerce"],
+    "pdf-invoices-packing-slips": ["woocommerce"]
+  },
+  "conflicts": {
+    "wp-rocket": ["w3-total-cache", "wp-super-cache"],
+    "rank-math": ["wordpress-seo", "all-in-one-seo-pack"],
+    "elementor-pro": ["divi-builder", "avada-builder"]
+  }
+}

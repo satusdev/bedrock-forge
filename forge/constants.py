@@ -60,6 +60,27 @@ DDEV_INFO_WAIT_TIMEOUT = 30
 # Default plugins
 DEFAULT_PLUGIN_MANAGE_WP = "manage-wp"
 
+# Plugin system
+PLUGIN_PRESETS_CONFIG_PATH = "forge/config/plugin-presets.json"
+DEFAULT_PLUGIN_PRESET = "business"
+PLUGIN_CATEGORIES = ["essential", "seo", "performance", "security", "forms", "ecommerce", "media", "optimization"]
+PLUGIN_TYPES = ["free", "freemium", "premium"]
+
+# Plugin commands
+PLUGIN_INSTALL_PATTERN = "ddev wp plugin install {plugin} --activate"
+PLUGIN_UNINSTALL_PATTERN = "ddev wp plugin uninstall {plugin} --deactivate"
+PLUGIN_LIST_PATTERN = "ddev wp plugin list --status=active"
+PLUGIN_INFO_PATTERN = "ddev wp plugin info {plugin}"
+PLUGIN_UPDATE_PATTERN = "ddev wp plugin update {plugin}"
+
+# Plugin presets
+PRESET_BLOG = "blog"
+PRESET_BUSINESS = "business"
+PRESET_ECOMMERCE = "ecommerce"
+PRESET_PORTFOLIO = "portfolio"
+PRESET_MINIMAL = "minimal"
+PRESET_PERFORMANCE = "performance"
+
 # Allowed paths for clean directory check
 ALLOWED_PROJECT_PATHS = {
     "web",
