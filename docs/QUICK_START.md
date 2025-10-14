@@ -107,6 +107,11 @@ python3 -m forge local create-project my-awesome-site
 
 # With custom template
 python3 -m forge local create-project my-awesome-site --template=agency
+
+# With plugin preset for specific use cases
+python3 -m forge local create-project myblog --plugin-preset=blog
+python3 -m forge local create-project mystore --plugin-preset=ecommerce
+python3 -m forge local create-project mybusiness --plugin-preset=business
 ```
 
 ### Step 2: Configure Your Project
@@ -135,6 +140,33 @@ ddev exec wp core install --url=https://my-awesome-site.ddev.site --title="My Aw
 # Access your site
 open https://my-awesome-site.ddev.site
 ```
+
+**Plugin Preset Examples:**
+
+If you created a project with a plugin preset, your site will come with pre-configured plugins:
+
+```bash
+# Blog project example
+python3 -m forge local create-project myblog --plugin-preset=blog --admin-user=admin --admin-email=admin@myblog.com
+
+# Expected output
+Creating Bedrock project: myblog
+Project directory: ~/Work/Wordpress/myblog
+Installing blog plugin preset...
+✅ Successfully installed: jetpack, wordpress-seo, w3-total-cache, wordfence, akismet, google-site-kit, wp-statistics, duplicate-post
+
+🚀 Project created successfully!
+🌐 Local URL: https://myblog.ddev.site
+👤 Admin URL: https://myblog.ddev.site/wp/wp-admin
+```
+
+**Available Plugin Presets:**
+- **blog** - Content sites with SEO and engagement plugins
+- **business** - Professional sites with forms and marketing
+- **ecommerce** - Online stores with WooCommerce and payments
+- **portfolio** - Creative sites with galleries and media
+- **minimal** - Basic setup for custom development
+- **performance** - Maximum speed optimization
 
 ## 🛠️ Local Development
 
@@ -172,6 +204,23 @@ ddev ssh
 
 # Composer operations
 ddev composer require some/package
+```
+
+### Plugin Management
+
+```bash
+# Check installed plugins
+ddev wp plugin list --status=active
+
+# Install additional plugins
+ddev wp plugin install elementor --activate
+
+# Update plugins
+ddev wp plugin update --all
+
+# Manage plugin presets
+python3 -m forge plugins status --project=myblog
+python3 -m forge plugins install-preset business --project=mybusiness
 ```
 
 ## 🚀 Deploy to Production
@@ -260,10 +309,12 @@ python3 -m forge provision add-user my-server --email=team@example.com --role=de
 
 ### Explore More Features
 
-1. **[Configuration Guide](CONFIGURATION.md)** - Advanced configuration options
-2. **[Command Reference](COMMANDS.md)** - Complete command documentation
-3. **[Deployment Guide](DEPLOYMENT_GUIDE.md)** - Advanced deployment strategies
-4. **[Backup Guide](BACKUP_GUIDE.md)** - Complete backup and restore procedures
+1. **[Plugin System Guide](PLUGIN_SYSTEM.md)** - Complete plugin management
+2. **[Configuration Guide](CONFIGURATION.md)** - Advanced configuration options
+3. **[Command Reference](COMMANDS.md)** - Complete command documentation
+4. **[Deployment Guide](DEPLOYMENT_GUIDE.md)** - Advanced deployment strategies
+5. **[Backup Guide](BACKUP_GUIDE.md)** - Complete backup and restore procedures
+6. **[Workflow Tutorials](workflows/)** - Step-by-step site creation guides
 
 ### Common Next Steps
 
@@ -277,7 +328,25 @@ python3 -m forge monitor setup-alerts my-awesome-site --email=admin@example.com
 # Explore workflows
 python3 -m forge workflow list
 python3 -m forge workflow run full-project my-awesome-site production
+
+# Try different project types
+python3 -m forge local create-project portfolio-site --plugin-preset=portfolio
+python3 -m forge local create-project speed-demo --plugin-preset=performance
 ```
+
+### Complete Site Tutorials
+
+Ready to build specific types of websites? Check out our comprehensive tutorials:
+
+- **[Blog Site Tutorial](workflows/BLOG_SITE_TUTORIAL.md)** - Create a professional blog
+- **[E-commerce Site Tutorial](workflows/ECOMMERCE_SITE_TUTORIAL.md)** - Build an online store
+- **[Business Site Tutorial](workflows/BUSINESS_SITE_TUTORIAL.md)** - Launch a business website
+
+Each tutorial includes:
+- Step-by-step instructions
+- Real command examples with expected outputs
+- Best practices and optimization tips
+- Complete setup from development to production
 
 ### Join the Community
 
