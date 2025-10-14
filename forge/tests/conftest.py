@@ -21,7 +21,7 @@ import paramiko
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from forge.provision.core import ServerConfig, DeploymentMethod, ServerType, WebServer
-from forge.utils.config import ForgeConfig
+from forge.utils.config import Config as ForgeConfig
 
 
 @pytest.fixture(scope="session")
