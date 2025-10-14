@@ -31,11 +31,22 @@
 		"require": []
 	},
 	"default_plugins": [
-		"wp-worker",
-		"woocommerce",
-		"advanced-access-manager",
-		"delete-all-products",
-		"online-active-users",
-		"woo-order-export-lite"
-	]
+		"wordpress-seo",
+		"w3-total-cache",
+		"wordfence",
+		"contact-form-7",
+		"google-site-kit",
+		"smush",
+		"akismet",
+		"really-simple-ssl"
+	],
+	"default_plugin_preset": "business",
+	"plugin_categories": {
+		"essential": ["akismet", "really-simple-ssl"],
+		"performance": ["w3-total-cache", "smush"],
+		"security": ["wordfence", "really-simple-ssl"],
+		"seo": ["wordpress-seo", "google-site-kit"],
+		"forms": ["contact-form-7"],
+		"ecommerce": ["woocommerce"]
+	}
 }

@@ -33,6 +33,7 @@ from forge.constants import (
     DEFAULT_CONFIG_PATH,
     DEFAULT_ENV_LOCAL_PATH,
     DEFAULT_PLUGIN_MANAGE_WP,
+    DEFAULT_PLUGIN_PRESET,
     SUCCESS_PROJECT_CREATED,
     SUCCESS_WP_ADMIN_INFO,
     SUCCESS_DDEV_COMMANDS,
@@ -62,6 +63,9 @@ class ProjectCreationWorkflow:
         db_user: Optional[str] = None,
         db_password: Optional[str] = None,
         db_host: Optional[str] = None,
+        plugin_preset: str = DEFAULT_PLUGIN_PRESET,
+        plugins: Optional[str] = None,
+        skip_plugins: bool = False,
         dry_run: bool = False,
         verbose: bool = False
     ) -> None:
@@ -80,6 +84,9 @@ class ProjectCreationWorkflow:
             db_user: Database username.
             db_password: Database password.
             db_host: Database host.
+            plugin_preset: Plugin preset to install.
+            plugins: Additional plugins to install (comma-separated).
+            skip_plugins: Skip plugin installation.
             dry_run: If True, only show what would be done.
             verbose: Enable verbose logging.
         """
@@ -108,7 +115,7 @@ class ProjectCreationWorkflow:
         self._execute_project_setup(project, project_params, github_info, dry_run, verbose)
 
         # Install plugins
-        self._install_plugins(project, dry_run, verbose)
+        self._install_plugins(project, plugin_preset, plugins, skip_plugins, dry_run, verbose)
 
         # Final verification and success message
         self._finalize_project(project, project_params, github_info, dry_run)
@@ -417,26 +424,68 @@ class ProjectCreationWorkflow:
             logger.warning(f"Warning: {e}. Skipping GitHub repo creation.")
             return None
 
-    def _install_plugins(self, project: Project, dry_run: bool, verbose: bool) -> None:
-        """Install default plugins for the project."""
-        if dry_run:
+    def _install_plugins(self, project: Project, plugin_preset: str = DEFAULT_PLUGIN_PRESET,
+                         additional_plugins: Optional[str] = None, skip_plugins: bool = False,
+                         dry_run: bool = False, verbose: bool = False) -> None:
+        """Install plugins for the project using the enhanced plugin manager."""
+        if skip_plugins or dry_run:
+            if not skip_plugins and verbose:
+                logger.info("Skipping plugin installation in dry-run mode")
             return
 
-        # Install manage-wp plugin
         try:
-            project.install_plugins([DEFAULT_PLUGIN_MANAGE_WP], dry_run, verbose)
-        except Exception as e:
-            logger.error(f"Failed to install {DEFAULT_PLUGIN_MANAGE_WP} plugin: {e}")
+            from ..utils.plugin_manager import PluginManager
+            plugin_manager = PluginManager()
 
-        # Install default plugins from config
-        try:
-            with open(DEFAULT_CONFIG_PATH, "r") as config_file:
-                config_data = json.load(config_file)
-            default_plugins = config_data.get("default_plugins", [])
-            if default_plugins:
-                project.install_plugins(default_plugins, dry_run, verbose)
+            # Get plugins from preset
+            preset = plugin_manager.get_preset(plugin_preset)
+            if not preset:
+                logger.warning(f"Plugin preset '{plugin_preset}' not found, using default plugins")
+                # Fallback to basic plugins
+                plugins_to_install = [DEFAULT_PLUGIN_MANAGE_WP, "wordpress-seo", "wordfence", "contact-form-7"]
+            else:
+                plugins_to_install = preset.plugins.copy()
+                logger.info(f"Installing plugin preset '{preset.name}' with {len(plugins_to_install)} plugins")
+
+            # Add additional plugins if specified
+            if additional_plugins:
+                extra_plugins = [p.strip() for p in additional_plugins.split(",")]
+                plugins_to_install.extend(extra_plugins)
+                logger.info(f"Adding {len(extra_plugins)} additional plugins")
+
+            # Always include manage-wp plugin
+            if DEFAULT_PLUGIN_MANAGE_WP not in plugins_to_install:
+                plugins_to_install.append(DEFAULT_PLUGIN_MANAGE_WP)
+
+            # Install plugins using the enhanced plugin manager
+            results = plugin_manager.install_plugins(
+                project_path=project.directory,
+                plugins=plugins_to_install,
+                dry_run=dry_run,
+                verbose=verbose
+            )
+
+            # Show results
+            successful = sum(1 for success in results.values() if success)
+            total = len(results)
+
+            logger.info(f"Plugin installation complete: {successful}/{total} plugins installed successfully")
+
+            if verbose:
+                for plugin, success in results.items():
+                    status = "✅" if success else "❌"
+                    logger.info(f"  {status} {plugin}")
+
         except Exception as e:
-            logger.error(f"Failed to install default plugins: {e}")
+            logger.error(f"Failed to install plugins: {e}")
+            # Fallback to basic installation
+            if verbose:
+                logger.info("Falling back to basic plugin installation")
+            try:
+                basic_plugins = [DEFAULT_PLUGIN_MANAGE_WP, "wordpress-seo", "wordfence"]
+                project.install_plugins(basic_plugins, dry_run, verbose)
+            except Exception as fallback_error:
+                logger.error(f"Failed to install basic plugins: {fallback_error}")
 
     def _finalize_project(
         self,
