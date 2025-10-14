@@ -13,6 +13,7 @@ Complete reference for all Bedrock Forge commands, organized by module.
 - [Monitoring Commands](#monitoring-commands)
 - [Info Commands](#info-commands)
 - [Workflow Commands](#workflow-commands)
+- [Plugin Commands](#plugin-commands)
 - [Configuration Commands](#configuration-commands)
 
 ## 🌍 Global Options
@@ -72,26 +73,38 @@ python3 -m forge local create-project <name> [options]
 - `--php-version <version>` - PHP version (default: 8.2)
 - `--wordpress-version <version>` - WordPress version (default: latest)
 - `--database-type <type>` - Database type (default: mysql)
+- `--plugin-preset <preset>` - Plugin preset to install (blog, business, ecommerce, portfolio, minimal, performance) [default: business]
+- `--plugins <plugins>` - Additional plugins to install (comma-separated)
+- `--skip-plugins` - Skip plugin installation
 - `--no-github` - Skip GitHub repository creation
 - `--github-private` - Create private GitHub repository
 - `--github-org <org>` - Create repository in organization
 
 **Examples:**
 ```bash
-# Basic project
+# Basic project (with default business plugin preset)
 python3 -m forge local create-project mysite
 
-# With custom template
-python3 -m forge local create-project agency-site --template=agency
+# Create with specific plugin preset
+python3 -m forge local create-project mystore --plugin-preset=ecommerce
 
-# With specific PHP version
-python3 -m forge local create-project mysite --php-version=8.1
+# Create with additional plugins
+python3 -m forge local create-project myblog --plugin-preset=blog --plugins="jetpack,wp-statistics"
 
-# Skip GitHub
-python3 -m forge local create-project mysite --no-github
+# Create without plugins
+python3 -m forge local create-project devsite --skip-plugins
 
-# Private repository
-python3 -m forge local create-project mysite --github-private
+# With custom template and plugin preset
+python3 -m forge local create-project agency-site --template=agency --plugin-preset=business
+
+# With specific PHP version and plugin preset
+python3 -m forge local create-project mysite --php-version=8.1 --plugin-preset=performance
+
+# Skip GitHub but install plugins
+python3 -m forge local create-project mysite --no-github --plugin-preset=minimal
+
+# Private repository with business preset
+python3 -m forge local create-project mysite --github-private --plugin-preset=business
 ```
 
 #### `list`
@@ -887,6 +900,327 @@ python3 -m forge workflow create <name> [options]
 **Options:**
 - `--description <desc>` - Workflow description
 - `--template <template>` - Start from template
+
+## 🔌 Plugin Commands
+
+### `forge plugins`
+
+Manage WordPress plugins with intelligent presets and categories.
+
+#### `presets`
+
+List available plugin presets for different site types.
+
+```bash
+python3 -m forge plugins presets [options]
+```
+
+**Options:**
+- `--verbose` - Show detailed plugin information
+
+**Examples:**
+```bash
+# List all available presets
+python3 -m forge plugins presets
+
+# Show detailed information about presets
+python3 -m forge plugins presets --verbose
+```
+
+**Output:**
+```
+=== Available Plugin Presets ===
+
+📦 Blog/Content Site (blog)
+   Description: Essential plugins for blogging and content-focused websites
+   Categories: essential, seo, performance, security
+   Plugins: 8
+
+📦 Business Website (business)
+   Description: Complete plugin set for professional business websites
+   Categories: essential, seo, performance, security, forms
+   Plugins: 9
+```
+
+#### `install-preset`
+
+Install a complete plugin preset to a project.
+
+```bash
+python3 -m forge plugins install-preset <preset_name> [options]
+```
+
+**Arguments:**
+- `preset_name` - Plugin preset to install (blog, business, ecommerce, portfolio, minimal, performance)
+
+**Options:**
+- `--project <name>` - Target project name
+- `--dry-run` - Show what would be installed without executing
+- `--verbose` - Show detailed installation output
+
+**Examples:**
+```bash
+# Install business preset to project
+python3 -m forge plugins install-preset business --project mysite
+
+# Install ecommerce preset with verbose output
+python3 -m forge plugins install-preset ecommerce --project mystore --verbose
+
+# Dry run to preview installation
+python3 -m forge plugins install-preset blog --project myblog --dry-run
+```
+
+#### `install-category`
+
+Install all plugins from a specific category.
+
+```bash
+python3 -m forge plugins install-category <category> [options]
+```
+
+**Arguments:**
+- `category` - Plugin category to install (essential, seo, performance, security, forms, ecommerce, media, optimization)
+
+**Options:**
+- `--project <name>` - Target project name
+- `--dry-run` - Show what would be installed without executing
+- `--verbose` - Show detailed installation output
+
+**Examples:**
+```bash
+# Install all performance plugins
+python3 -m forge plugins install-category performance --project mysite
+
+# Install security plugins with verbose output
+python3 -m forge plugins install-category security --project mysite --verbose
+
+# Preview installation
+python3 -m forge plugins install-category seo --project mysite --dry-run
+```
+
+#### `recommend`
+
+Get and install recommended plugins based on site type.
+
+```bash
+python3 -m forge plugins recommend [options]
+```
+
+**Options:**
+- `--type <type>` - Site type (blog, business, ecommerce, portfolio, minimal, performance) [default: business]
+- `--categories <categories>` - Additional categories (comma-separated)
+- `--project <name>` - Target project name
+- `--dry-run` - Show recommendations without installing
+- `--verbose` - Show detailed recommendations
+
+**Examples:**
+```bash
+# Get recommendations for blog site
+python3 -m forge plugins recommend --type=blog
+
+# Get business recommendations with additional performance plugins
+python3 -m forge plugins recommend --type=business --categories=performance,security
+
+# Install recommendations to project
+python3 -m forge plugins recommend --type=ecommerce --project mystore
+
+# Preview recommendations only
+python3 -m forge plugins recommend --type=blog --dry-run --verbose
+```
+
+#### `status`
+
+Show status of installed plugins in a project.
+
+```bash
+python3 -m forge plugins status [options]
+```
+
+**Options:**
+- `--project <name>` - Project name to check
+- `--category <category>` - Filter by category
+- `--verbose` - Show detailed plugin information
+
+**Examples:**
+```bash
+# Check plugin status for project
+python3 -m forge plugins status --project mysite
+
+# Filter by category
+python3 -m forge plugins status --project mysite --category=seo
+
+# Show detailed information
+python3 -m forge plugins status --project mysite --verbose
+```
+
+**Output:**
+```
+=== Plugin Status for 'mysite' ===
+
+🟢 Active Plugins (7):
+  • WordPress SEO (free) - seo
+  • W3 Total Cache (free) - performance
+  • Wordfence Security (freemium) - security
+  • Contact Form 7 (free) - forms
+  • Smush (freemium) - performance
+  • Really Simple SSL (freemium) - security
+  • Google Site Kit (free) - seo
+
+📊 Plugin Summary:
+  Total installed: 7
+  Active: 7
+  Inactive: 0
+
+📂 By Category:
+  performance: 2 plugins
+  security: 2 plugins
+  seo: 2 plugins
+  forms: 1 plugin
+```
+
+#### `update`
+
+Update plugins in a project.
+
+```bash
+python3 -m forge plugins update [options]
+```
+
+**Options:**
+- `--project <name>` - Project name
+- `--plugins <plugins>` - Specific plugins to update (comma-separated)
+- `--dry-run` - Show what would be updated without executing
+- `--verbose` - Show detailed update information
+
+**Examples:**
+```bash
+# Update all plugins in project
+python3 -m forge plugins update --project mysite
+
+# Update specific plugins
+python3 -m forge plugins update --project mysite --plugins="wordpress-seo,wordfence"
+
+# Preview updates
+python3 -m forge plugins update --project mysite --dry-run
+```
+
+#### `uninstall`
+
+Uninstall plugins from a project.
+
+```bash
+python3 -m forge plugins uninstall <plugins> [options]
+```
+
+**Arguments:**
+- `plugins` - Plugins to uninstall (comma-separated)
+
+**Options:**
+- `--project <name>` - Target project name
+- `--dry-run` - Show what would be uninstalled without executing
+- `--verbose` - Show detailed uninstall information
+
+**Examples:**
+```bash
+# Uninstall specific plugins
+python3 -m forge plugins uninstall "akismet,jetpack" --project mysite
+
+# Preview uninstallation
+python3 -m forge plugins uninstall "wordpress-seo" --project mysite --dry-run
+
+# Uninstall with verbose output
+python3 -m forge plugins uninstall "heavy-plugin" --project mysite --verbose
+```
+
+#### `list`
+
+List available and loaded plugins (Forge system plugins).
+
+```bash
+python3 -m forge plugins list [options]
+```
+
+**Options:**
+- `--type <type>` - Filter by plugin type
+- `--verbose` - Show detailed plugin information
+
+#### `load`
+
+Load a plugin into the Forge system.
+
+```bash
+python3 -m forge plugins load <plugin_name> [options]
+```
+
+**Options:**
+- `--config <file>` - Configuration file path
+- `--verbose` - Show detailed loading information
+
+#### `unload`
+
+Unload a plugin from the Forge system.
+
+```bash
+python3 -m forge plugins unload <plugin_name>
+```
+
+#### `reload`
+
+Reload a plugin with updated configuration.
+
+```bash
+python3 -m forge plugins reload <plugin_name> [options]
+```
+
+**Options:**
+- `--config <file>` - Configuration file path
+
+#### `info`
+
+Show detailed information about a plugin.
+
+```bash
+python3 -m forge plugins info <plugin_name> [options]
+```
+
+**Options:**
+- `--verbose` - Show detailed plugin information
+
+#### `execute`
+
+Execute a method on a loaded plugin.
+
+```bash
+python3 -m forge plugins execute <plugin_name> <method> [options]
+```
+
+**Options:**
+- `--args <args>` - Arguments as JSON string
+- `--kwargs <kwargs>` - Keyword arguments as JSON string
+
+#### `configure`
+
+Set a configuration value for a plugin.
+
+```bash
+python3 -m forge plugins configure <plugin_name> <key> <value>
+```
+
+#### `config-show`
+
+Show configuration for a plugin.
+
+```bash
+python3 -m forge plugins config-show <plugin_name>
+```
+
+#### `config-clear`
+
+Clear configuration for a plugin.
+
+```bash
+python3 -m forge plugins config-clear <plugin_name>
+```
 
 ## ⚙️ Configuration Commands
 

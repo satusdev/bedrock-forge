@@ -61,25 +61,42 @@ pip install -r forge/requirements.txt
 python3 -m forge --help
 ```
 
-### 5-Minute Setup
+### 5-Minute Setup with Plugins
 
 ```bash
-# 1. Create a new Bedrock project
-python3 -m forge local create-project myproject
+# 1. Create a new blog project with optimized plugins
+python3 -m forge local create-project myblog --plugin-preset=blog
 
-# 2. Start local development
+# 2. Create an e-commerce store
+python3 -m forge local create-project mystore --plugin-preset=ecommerce
+
+# 3. Create a business website
+python3 -m forge local create-project mybusiness --plugin-preset=business
+
+# 4. Start local development
 cd myproject
 ddev start
 
-# 3. Provision a server (optional)
+# 5. Check installed plugins
+python3 -m forge plugins status --project myproject
+
+# 6. Provision a server (optional)
 python3 -m forge provision hetzner-create myserver
 
-# 4. Deploy to production
+# 7. Deploy to production
 python3 -m forge deploy myproject production
 
-# 5. Backup your project
+# 8. Backup your project
 python3 -m forge sync backup myproject production
 ```
+
+**Plugin Presets Available:**
+- **blog** - Blog/content sites with SEO and engagement plugins
+- **business** - Professional business websites with forms and marketing
+- **ecommerce** - Complete e-commerce stores with WooCommerce and payments
+- **portfolio** - Creative sites with galleries and media optimization
+- **minimal** - Basic setup for development or custom builds
+- **performance** - Maximum speed optimization
 
 ---
 
