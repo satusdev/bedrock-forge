@@ -49,45 +49,83 @@
 
 ### Installation
 
+#### 🎯 Super Easy Installation (Recommended)
+
+```bash
+# One-command installation
+curl -sSL https://raw.githubusercontent.com/bedrock-forge/bedrock-forge/main/install.sh | bash
+
+# Start using immediately
+forge --help
+```
+
+#### 📦 Alternative Installation Methods
+
+**Method 1: Direct pip install from GitHub**
+```bash
+pip install git+https://github.com/bedrock-forge/bedrock-forge.git
+```
+
+**Method 2: Clone and install manually**
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/bedrock-forge.git
+git clone https://github.com/bedrock-forge/bedrock-forge.git
 cd bedrock-forge
 
-# Install dependencies
-pip install -r forge/requirements.txt
+# Create virtual environment and install
+python3 -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+pip install -e .
 
-# Run the CLI
-python3 -m forge --help
+# Create global command (optional)
+ln -sf $(pwd)/.venv/bin/forge ~/.local/bin/forge
+
+# Verify installation
+forge --help
+```
+
+> 💡 **Tip**: After installation, you can use either `forge` or `python -m forge` to run commands.
+
+### 🔧 Installation Management
+
+```bash
+# Check installation health
+forge config doctor
+
+# Update to latest version
+forge update
+
+# Uninstall completely
+forge uninstall
 ```
 
 ### 5-Minute Setup with Plugins
 
 ```bash
 # 1. Create a new blog project with optimized plugins
-python3 -m forge local create-project myblog --plugin-preset=blog
+forge local create-project myblog --plugin-preset=blog
 
 # 2. Create an e-commerce store
-python3 -m forge local create-project mystore --plugin-preset=ecommerce
+forge local create-project mystore --plugin-preset=ecommerce
 
 # 3. Create a business website
-python3 -m forge local create-project mybusiness --plugin-preset=business
+forge local create-project mybusiness --plugin-preset=business
 
 # 4. Start local development
 cd myproject
 ddev start
 
 # 5. Check installed plugins
-python3 -m forge plugins status --project myproject
+forge plugins status --project myproject
 
 # 6. Provision a server (optional)
-python3 -m forge provision hetzner-create myserver
+forge provision hetzner-create myserver
 
 # 7. Deploy to production
-python3 -m forge deploy myproject production
+forge deploy myproject production
 
 # 8. Backup your project
-python3 -m forge sync backup myproject production
+forge sync backup myproject production
 ```
 
 **Plugin Presets Available:**
@@ -148,61 +186,61 @@ python3 -m forge sync backup myproject production
 ### Local Development
 ```bash
 # Create new project
-python3 -m forge local create-project mysite
+forge local create-project mysite
 
 # List projects
-python3 -m forge local list
+forge local list-projects
 
 # Switch to project
-python3 -m forge local switch mysite
+forge local switch mysite
 ```
 
 ### Server Provisioning
 ```bash
 # Create Hetzner server
-python3 -m forge provision hetzner-create myserver
+forge provision hetzner-create myserver
 
 # Setup CyberPanel
-python3 -m forge provision cyberpanel myserver
+forge provision cyberpanel myserver
 
 # Configure SSL
-python3 -m forge provision ssl-cert myserver example.com
+forge provision ssl-cert myserver example.com
 ```
 
 ### Deployment
 ```bash
 # Deploy to production
-python3 -m forge deploy mysite production
+forge deploy mysite production
 
 # Deploy with rollback
-python3 -m forge deploy mysite staging --rollback
+forge deploy mysite staging --rollback
 
 # Check deployment status
-python3 -m forge deploy status mysite
+forge deploy status mysite
 ```
 
 ### Backup & Sync
 ```bash
 # Backup project
-python3 -m forge sync backup mysite production
+forge sync backup mysite production
 
 # Restore backup
-python3 -m forge sync restore mysite production --version=2024-01-15
+forge sync restore mysite production --version=2024-01-15
 
 # Sync database
-python3 -m forge sync db mysite production --pull
+forge sync db mysite production --pull
 ```
 
 ### Monitoring
 ```bash
 # List monitored sites
-python3 -m forge monitor list-sites
+forge monitor list-monitors
 
 # Add site monitoring
-python3 -m forge monitor add mysite https://mysite.com
+forge monitor add mysite https://mysite.com
 
 # Check site health
-python3 -m forge monitor health mysite
+forge monitor health mysite
 ```
 
 ---
@@ -210,6 +248,7 @@ python3 -m forge monitor health mysite
 ## 📚 Documentation
 
 ### User Guides
+- **[Installation Guide](docs/INSTALLATION.md)** - Detailed installation instructions
 - **[Quick Start Guide](docs/QUICK_START.md)** - Get started in 5 minutes
 - **[Configuration Guide](docs/CONFIGURATION.md)** - Setup and configuration
 - **[Command Reference](docs/COMMANDS.md)** - Complete command documentation
