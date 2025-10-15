@@ -175,3 +175,191 @@ WEB_INDEX_PHP_PATH = "web/index.php"
 ENV_FILE_PATH = ".env"
 COMPOSER_JSON_PATH = "composer.json"
 PROJECT_CONFIG_PATH = ".forge/project.json"
+
+# Performance testing
+PERFORMANCE_DB_PATH = "performance.db"
+PERFORMANCE_REPORTS_DIR = "performance_reports"
+PERFORMANCE_CONFIG_PATH = "forge/config/performance_presets.json"
+DEFAULT_PERFORMANCE_PRESET = "business"
+
+# Lighthouse configuration
+LIGHTHOUSE_DEFAULT_CATEGORIES = ["performance", "accessibility", "best-practices", "seo"]
+LIGHTHOUSE_DEFAULT_DEVICE = "desktop"
+LIGHTHOUSE_DEFAULT_FORM_FACTOR = "desktop"
+LIGHTHOUSE_DEFAULT_THROTTLING = True
+LIGHTHOUSE_TIMEOUT = 300  # 5 minutes
+
+# Performance thresholds
+PERFORMANCE_EXCELLENT_THRESHOLD = 90
+PERFORMANCE_GOOD_THRESHOLD = 70
+PERFORMANCE_NEEDS_IMPROVEMENT_THRESHOLD = 50
+
+# Core Web Vitals thresholds
+CWV_LCP_EXCELLENT = 2500  # ms
+CWV_LCP_GOOD = 4000  # ms
+CWV_FID_EXCELLENT = 100  # ms
+CWV_FID_GOOD = 300  # ms
+CWV_CLS_EXCELLENT = 0.1
+CWV_CLS_GOOD = 0.25
+CWV_FCP_EXCELLENT = 1800  # ms
+CWV_FCP_GOOD = 3000  # ms
+CWV_TTFB_EXCELLENT = 600  # ms
+CWV_TTFB_GOOD = 1000  # ms
+
+# Performance budget defaults
+DEFAULT_PERFORMANCE_SCORE_BUDGET = 80
+DEFAULT_PAGE_SIZE_BUDGET = 2500000  # 2.5MB
+DEFAULT_SCRIPT_SIZE_BUDGET = 500000  # 500KB
+DEFAULT_STYLESHEET_SIZE_BUDGET = 200000  # 200KB
+DEFAULT_IMAGE_SIZE_BUDGET = 1000000  # 1MB
+
+# Performance monitoring
+PERFORMANCE_MONITORING_INTERVAL = 3600  # 1 hour
+PERFORMANCE_ALERT_COOLDOWN = 86400  # 24 hours
+PERFORMANCE_TREND_ANALYSIS_DAYS = 30
+PERFORMANCE_REGRESSION_THRESHOLD = 10  # 10% decline
+
+# Performance report types
+PERFORMANCE_REPORT_FORMATS = ["html", "json", "pdf"]
+PERFORMANCE_DEFAULT_REPORT_FORMAT = "html"
+
+# Database optimization
+DB_OPTIMIZATION_DEFAULT_QUERIES = 100
+DB_OPTIMIZATION_SLOW_QUERY_THRESHOLD = 1000  # ms
+DB_OPTIMIZATION_INDEX_SUGGESTION_THRESHOLD = 10
+DB_OPTIMIZATION_TABLE_SIZE_WARNING = 1000000000  # 1GB
+
+# Caching strategies
+CACHE_STRATEGIES = ["none", "basic", "aggressive", "custom"]
+CACHE_DEFAULT_STRATEGY = "basic"
+CACHE_BROWSER_TTL = 3600  # 1 hour
+CACHE_PAGE_TTL = 86400  # 24 hours
+CACHE_API_TTL = 300  # 5 minutes
+
+# CDN providers
+CDN_PROVIDERS = ["cloudflare", "aws_cloudfront", "fastly", "keycdn", "none"]
+CDN_DEFAULT_PROVIDER = "cloudflare"
+CDN_CACHE_TTL = 86400  # 24 hours
+
+# Image optimization
+IMAGE_FORMATS = ["jpeg", "png", "webp", "avif", "gif"]
+IMAGE_DEFAULT_QUALITY = 85
+IMAGE_MAX_WIDTH = 2560
+IMAGE_MAX_HEIGHT = 1440
+IMAGE_WEBP_QUALITY = 80
+IMAGE_AVIF_QUALITY = 75
+IMAGE_JPEG_QUALITY = 85
+IMAGE_PNG_QUALITY = 90
+IMAGE_GIF_QUALITY = 80
+
+# Image optimization settings
+IMAGE_COMPRESSION_LEVELS = ["low", "medium", "high", "ultra"]
+IMAGE_DEFAULT_COMPRESSION = "medium"
+IMAGE_PROGRESSIVE_JPEG = True
+IMAGE_STRIP_METADATA = True
+IMAGE_PRESERVE_ORIGINAL = True
+
+# Image optimization thresholds
+IMAGE_MAX_FILE_SIZE = 10485760  # 10MB
+IMAGE_BATCH_SIZE = 50
+IMAGE_LAZY_LOAD_THRESHOLD = 800  # pixels
+IMAGE_OPTIMIZATION_TIMEOUT = 300  # 5 minutes
+
+# Image format conversion
+IMAGE_CREATE_WEBP = True
+IMAGE_CREATE_AVIF = True
+IMAGE_FALLBACK_FORMAT = "jpeg"
+IMAGE_MODERN_FORMATS = ["webp", "avif"]
+IMAGE_LEGACY_FORMATS = ["jpeg", "png", "gif"]
+
+# Image optimization analysis
+IMAGE_ANALYSIS_CACHE_TTL = 86400  # 24 hours
+IMAGE_OPTIMIZATION_HISTORY_DAYS = 90
+IMAGE_PERFORMANCE_GRADES = ["A", "B", "C", "D", "F"]
+
+# Image optimization database
+IMAGE_DB_PATH = "images.db"
+IMAGE_CACHE_DIR = ".forge/cache/images"
+IMAGE_CONFIG_PATH = ".forge/image_config.json"
+
+# Image optimization commands
+IMAGE_OPTIMIZE_COMMAND = "convert"
+IMAGE_IDENTIFY_COMMAND = "identify"
+IMAGE_PNGCRUSH_COMMAND = "pngcrush"
+
+# Image optimization reports
+IMAGE_REPORT_FORMATS = ["text", "json", "html"]
+IMAGE_DEFAULT_REPORT_FORMAT = "text"
+
+# Performance commands
+PERFORMANCE_TEST_COMMAND = "npx lighthouse"
+PERFORMANCE_TEST_OUTPUT_FORMAT = "json"
+PERFORMANCE_TEST_CHROME_FLAGS = "--headless"
+PERFORMANCE_TEST_SCREEN_EMULATION_MOBILE = "--screenEmulation.mobile"
+PERFORMANCE_TEST_THROTTLING_METHOD = "provided"
+
+# Performance API endpoints
+PERFORMANCE_API_PREFIX = "/api/v1/performance"
+PERFORMANCE_TEST_ENDPOINT = "/test"
+PERFORMANCE_HISTORY_ENDPOINT = "/history"
+PERFORMANCE_REPORT_ENDPOINT = "/report"
+PERFORMANCE_BUDGET_ENDPOINT = "/budget"
+PERFORMANCE_MONITOR_ENDPOINT = "/monitor"
+
+# Analytics configuration
+ANALYTICS_DB_PATH = "analytics.db"
+ANALYTICS_EVENTS_DB_PATH = "events.db"
+ANALYTICS_CONFIG_PATH = ".forge/analytics_config.json"
+ANALYTICS_CACHE_DIR = ".forge/cache/analytics"
+ANALYTICS_REPORTS_DIR = "analytics_reports"
+
+# Google Analytics 4
+GA4_API_BASE_URL = "https://analyticsdata.googleapis.com/v1beta"
+GA4_AUTH_SCOPES = ["https://www.googleapis.com/auth/analytics.readonly"]
+GA4_MAX_DIMENSIONS = 9
+GA4_MAX_METRICS = 10
+GA4_REPORT_TIMEOUT = 300
+
+# WordPress Stats
+WP_STATS_API_BASE_URL = "https://stats.wordpress.com"
+WP_STATS_MAX_DAYS = 90
+WP_STATS_RATE_LIMIT = 100  # requests per hour
+
+# Analytics data collection
+ANALYTICS_COLLECTION_INTERVAL = 3600  # 1 hour
+ANALYTICS_DATA_RETENTION_DAYS = 365
+ANALYTICS_CACHE_TTL = 3600  # 1 hour
+ANALYTICS_BATCH_SIZE = 1000
+
+# Traffic analysis
+TRAFFIC_ANALYSIS_MIN_DAYS = 7
+TRAFFIC_TREND_THRESHOLD = 10  # percentage
+TRAFFIC_PATTERN_DAYS = 14
+ENGAGEMENT_HIGH_THRESHOLD = 180  # seconds
+ENGAGEMENT_LOW_THRESHOLD = 30  # seconds
+
+# Content analysis
+CONTENT_TOP_PAGES_LIMIT = 50
+CONTENT_CATEGORIES = ["blog", "product", "service", "about", "contact", "landing", "other"]
+CONTENT_HIGH_PERFORMANCE_THRESHOLD = 70
+CONTENT_LOW_PERFORMANCE_THRESHOLD = 40
+BOUNCE_RATE_HIGH_THRESHOLD = 70
+BOUNCE_RATE_LOW_THRESHOLD = 30
+
+# Real-time analytics
+REAL_TIME_REFRESH_INTERVAL = 30  # seconds
+REAL_TIME_ACTIVE_MINUTES = 30
+REAL_TIME_ACTIVE_HOURS = 1
+
+# Analytics reports
+ANALYTICS_REPORT_FORMATS = ["html", "json", "pdf", "csv"]
+ANALYTICS_DEFAULT_REPORT_FORMAT = "html"
+ANALYTICS_REPORT_TEMPLATES_PATH = "forge/config/analytics_templates.json"
+
+# Analytics API endpoints
+ANALYTICS_API_PREFIX = "/api/v1/analytics"
+ANALYTICS_COLLECT_ENDPOINT = "/collect"
+ANALYTICS_TRAFFIC_ENDPOINT = "/traffic"
+ANALYTICS_CONTENT_ENDPOINT = "/content"
+ANALYTICS_REALTIME_ENDPOINT = "/realtime"
+ANALYTICS_INSIGHTS_ENDPOINT = "/insights"
