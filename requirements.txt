@@ -1,0 +1,42 @@
+# Core CLI dependencies
+typer[all]>=0.17.0
+rich>=14.0.0
+pydantic>=2.0.0
+click>=8.0.0
+
+# Database and storage
+SQLAlchemy>=2.0.0
+redis>=6.0.0
+
+# HTTP and API clients
+aiohttp>=3.10.0
+httpx>=0.25.0
+requests>=2.30.0
+
+# Cloud provider SDKs
+hcloud>=2.0.0
+cloudflare>=4.0.0
+google-api-python-client>=2.100.0
+google-auth>=2.20.0
+google-auth-oauthlib>=1.0.0
+
+# SSH and server management
+paramiko>=4.0.0
+PyNaCl>=1.5.0
+
+# Background tasks
+celery>=5.0.0
+structlog>=25.0.0
+
+# Development and testing (optional)
+pytest>=8.0.0
+pytest-cov>=7.0.0
+pytest-asyncio>=1.0.0
+coverage>=7.0.0
+
+# Utilities
+python-dotenv>=1.0.0
+PyYAML>=6.0.0
+tqdm>=4.60.0
+psutil>=6.0.0
+packaging>=25.0.0
