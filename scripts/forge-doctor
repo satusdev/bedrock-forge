@@ -1,0 +1,295 @@
+#!/bin/bash
+
+# Bedrock Forge CLI Diagnostics Script
+
+set -e
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+INSTALL_DIR="$HOME/.bedrock-forge"
+VENV_DIR="$INSTALL_DIR/venv"
+BIN_DIR="$HOME/.local/bin"
+FORGE_BIN="$BIN_DIR/forge"
+
+print_header() {
+    echo -e "${BLUE}🩺 Bedrock Forge CLI Diagnostics${NC}"
+    echo
+}
+
+print_success() {
+    echo -e "${GREEN}✅ $1${NC}"
+}
+
+print_warning() {
+    echo -e "${YELLOW}⚠️  $1${NC}"
+}
+
+print_error() {
+    echo -e "${RED}❌ $1${NC}"
+}
+
+print_info() {
+    echo -e "${CYAN}ℹ️  $1${NC}"
+}
+
+# Check installation directory
+check_install_dir() {
+    echo -e "${BLUE}📁 Installation Directory${NC}"
+
+    if [[ -d "$INSTALL_DIR" ]]; then
+        print_success "Installation directory exists: $INSTALL_DIR"
+
+        # Check if it's a git repository
+        cd "$INSTALL_DIR"
+        if git rev-parse --git-dir >/dev/null 2>&1; then
+            print_success "Git repository is valid"
+
+            # Check if it's up to date
+            git fetch origin >/dev/null 2>&1
+            local_behind=$(git rev-list --count HEAD..origin/main 2>/dev/null || echo "0")
+            if [[ "$local_behind" == "0" ]]; then
+                print_success "Repository is up to date"
+            else
+                print_warning "Repository is $local_behind commits behind"
+                print_info "Run 'forge update' to get the latest version"
+            fi
+
+            # Show current commit
+            local commit=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+            print_info "Current commit: $commit"
+        else
+            print_error "Not a valid git repository"
+        fi
+    else
+        print_error "Installation directory not found"
+    fi
+    echo
+}
+
+# Check virtual environment
+check_venv() {
+    echo -e "${BLUE}🐍 Python Virtual Environment${NC}"
+
+    if [[ -d "$VENV_DIR" ]]; then
+        print_success "Virtual environment exists: $VENV_DIR"
+
+        # Check if virtual environment is activated properly
+        if [[ -f "$VENV_DIR/bin/python" ]] && [[ -f "$VENV_DIR/bin/pip" ]]; then
+            print_success "Python and pip are available in venv"
+
+            # Check Python version
+            local python_version=$("$VENV_DIR/bin/python" --version 2>&1 || echo "unknown")
+            print_info "Python version: $python_version"
+
+            # Check if forge is installed
+            if "$VENV_DIR/bin/python" -m forge --version >/dev/null 2>&1; then
+                local version=$("$VENV_DIR/bin/python" -m forge --version 2>/dev/null || echo "unknown")
+                print_success "Bedrock Forge CLI is installed (version: $version)"
+            else
+                print_error "Bedrock Forge CLI is not installed in venv"
+            fi
+
+            # Check dependencies
+            print_info "Checking key dependencies..."
+            local deps=("typer" "rich" "pydantic" "click" "SQLAlchemy")
+            for dep in "${deps[@]}"; do
+                if "$VENV_DIR/bin/python" -c "import $dep" >/dev/null 2>&1; then
+                    print_success "  $dep is installed"
+                else
+                    print_error "  $dep is missing"
+                fi
+            done
+        else
+            print_error "Virtual environment is broken (missing python or pip)"
+        fi
+    else
+        print_error "Virtual environment not found"
+    fi
+    echo
+}
+
+# Check global command
+check_global_command() {
+    echo -e "${BLUE}🔧 Global Command${NC}"
+
+    if [[ -f "$FORGE_BIN" ]]; then
+        print_success "Global command exists: $FORGE_BIN"
+
+        # Check if it's executable
+        if [[ -x "$FORGE_BIN" ]]; then
+            print_success "Global command is executable"
+        else
+            print_error "Global command is not executable"
+        fi
+
+        # Check if it points to the right venv
+        if grep -q "$VENV_DIR" "$FORGE_BIN" 2>/dev/null; then
+            print_success "Global command points to correct virtual environment"
+        else
+            print_warning "Global command may not point to the correct venv"
+        fi
+    else
+        print_error "Global command not found"
+    fi
+
+    # Check if forge is in PATH
+    if command -v forge >/dev/null 2>&1; then
+        print_success "forge command is in PATH: $(which forge)"
+    else
+        print_error "forge command is not in PATH"
+        print_info "Current PATH: $PATH"
+
+        # Check if ~/.local/bin is in PATH
+        if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
+            print_warning "$BIN_DIR is not in PATH"
+            print_info "Add it to your shell configuration:"
+            echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+        fi
+    fi
+    echo
+}
+
+# Check system requirements
+check_system() {
+    echo -e "${BLUE}💻 System Requirements${NC}"
+
+    # Check Python
+    if command -v python3 >/dev/null 2>&1; then
+        local python_version=$(python3 --version 2>&1)
+        print_success "System Python available: $python_version"
+
+        if python3 -c "import sys; exit(0 if sys.version_info >= (3, 9) else 1)" 2>/dev/null; then
+            print_success "Python version meets requirements (3.9+)"
+        else
+            print_error "Python version is too old (requires 3.9+)"
+        fi
+    else
+        print_error "Python 3 not found on system"
+    fi
+
+    # Check pip
+    if command -v pip3 >/dev/null 2>&1; then
+        local pip_version=$(pip3 --version 2>&1)
+        print_success "pip3 available: $pip_version"
+    else
+        print_error "pip3 not found"
+    fi
+
+    # Check git
+    if command -v git >/dev/null 2>&1; then
+        local git_version=$(git --version 2>&1)
+        print_success "git available: $git_version"
+    else
+        print_error "git not found"
+    fi
+
+    # Check optional tools
+    echo
+    print_info "Optional tools:"
+
+    if command -v ddev >/dev/null 2>&1; then
+        local ddev_version=$(ddev version 2>/dev/null | head -1 || echo "unknown")
+        print_success "  ddev available: $ddev_version"
+    else
+        print_warning "  ddev not found (required for local development)"
+    fi
+
+    if command -v docker >/dev/null 2>&1; then
+        local docker_version=$(docker --version 2>&1)
+        print_success "  docker available: $docker_version"
+    else
+        print_warning "  docker not found (optional for containerized environments)"
+    fi
+
+    echo
+}
+
+# Test functionality
+test_functionality() {
+    echo -e "${BLUE}🧪 Functionality Test${NC}"
+
+    if command -v forge >/dev/null 2>&1; then
+        print_info "Testing forge command..."
+
+        # Test help command
+        if forge --help >/dev/null 2>&1; then
+            print_success "forge --help works"
+        else
+            print_error "forge --help failed"
+        fi
+
+        # Test config command
+        if forge config show >/dev/null 2>&1; then
+            print_success "forge config show works"
+        else
+            print_warning "forge config show failed (may be normal if not configured)"
+        fi
+
+        # Test version command
+        if forge --version >/dev/null 2>&1; then
+            local version=$(forge --version 2>/dev/null || echo "unknown")
+            print_success "forge --version works: $version"
+        else
+            print_error "forge --version failed"
+        fi
+    else
+        print_error "forge command not available for testing"
+    fi
+
+    echo
+}
+
+# Show recommendations
+show_recommendations() {
+    echo -e "${BLUE}💡 Recommendations${NC}"
+
+    local issues=0
+
+    # Check for common issues and provide solutions
+    if [[ ! -d "$INSTALL_DIR" ]]; then
+        print_error "Installation directory missing"
+        print_info "Solution: Run installation script"
+        echo "  curl -sSL https://raw.githubusercontent.com/bedrock-forge/bedrock-forge/main/install.sh | bash"
+        ((issues++))
+    fi
+
+    if ! command -v forge >/dev/null 2>&1; then
+        print_error "forge command not in PATH"
+        print_info "Solution: Add ~/.local/bin to PATH"
+        echo "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc"
+        echo "  source ~/.bashrc"
+        ((issues++))
+    fi
+
+    if [[ "$issues" -eq 0 ]]; then
+        print_success "No issues found! Your Bedrock Forge CLI installation is healthy. 🎉"
+    else
+        print_warning "Found $issues issue(s). Please follow the recommended solutions above."
+    fi
+
+    echo
+    print_info "For additional help, visit:"
+    echo "  📖 Documentation: https://github.com/bedrock-forge/bedrock-forge"
+    echo "  🐛 Issues: https://github.com/bedrock-forge/bedrock-forge/issues"
+    echo
+}
+
+# Main function
+main() {
+    print_header
+    check_install_dir
+    check_venv
+    check_global_command
+    check_system
+    test_functionality
+    show_recommendations
+}
+
+# Run main function
+main "$@"
