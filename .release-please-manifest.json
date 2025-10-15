@@ -1,9 +1,0 @@
-{
-  ".": {
-    "release-type": "python",
-    "package-name": "bedrock-forge",
-    "changelog-path": "CHANGELOG.md",
-    "version-file": "pyproject.toml",
-    "include-component-in-tag": false
-  }
-}

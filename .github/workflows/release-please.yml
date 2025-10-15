@@ -1,64 +1,19 @@
+name: Release Please
+
 on:
   push:
     branches:
       - main
 
-permissions:
-  contents: write
-  issues: write
-  pull-requests: write
-
-name: release-please
-
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
     steps:
-      - uses: googleapis/release-please-action@v4
-        id: release
+      - uses: google-github-actions/release-please-action@v3
         with:
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
-          # You can optionally specify a token if you want CI checks to run on release PRs
-          # token: ${{ secrets.MY_RELEASE_PLEASE_TOKEN }}
-
-      # Checkout code if release was created
-      - uses: actions/checkout@v4
-        if: ${{ steps.release.outputs.release_created }}
-
-      # Set up Python if release was created (for potential package publishing)
-      - name: Set up Python
-        if: ${{ steps.release.outputs.release_created }}
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-
-      # Install build dependencies if release was created
-      - name: Install build dependencies
-        if: ${{ steps.release.outputs.release_created }}
-        run: |
-          python -m pip install --upgrade pip
-          pip install build twine
-
-      # Build package if release was created
-      - name: Build package
-        if: ${{ steps.release.outputs.release_created }}
-        run: |
-          python -m build
-
-      # Upload distribution artifacts to GitHub release
-      - name: Upload Release Assets
-        if: ${{ steps.release.outputs.release_created }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release upload ${{ steps.release.outputs.tag_name }} dist/* || true
-
-      # Optional: Publish to PyPI (uncomment and configure secrets when ready)
-      # - name: Publish to PyPI
-      #   if: ${{ steps.release.outputs.release_created }}
-      #   env:
-      #     TWINE_USERNAME: __token__
-      #     TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-      #   run: |
-      #     twine upload dist/*
+          release-type: python
+          package-name: bedrock-forge
