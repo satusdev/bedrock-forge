@@ -42,3 +42,14 @@ node_modules
 
 # Forge logs
 forge/logs/
+
+# Python build artifacts
+*.egg-info/
+dist/
+build/
+*.egg
+*.whl
+*.tar.gz
+
+# Release Please artifacts (keep config files, ignore generated files)
+*.release-please-release-PR*.md
