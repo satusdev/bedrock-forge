@@ -1,6 +1,8 @@
 import typer
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 from ..utils.config_manager import get_config_manager, setup_credentials_interactive
 from ..utils.errors import ForgeError
@@ -302,6 +304,189 @@ def reset():
         config_manager._provider_configs = {}
 
         typer.echo(_("✓ Configuration reset to defaults"))
+
+
+@app.command()
+def doctor():
+    """Check installation health and diagnose issues."""
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.text import Text
+
+    console = Console()
+
+    # Installation paths
+    install_dir = Path.home() / ".bedrock-forge"
+    venv_dir = install_dir / "venv"
+    bin_dir = Path.home() / ".local/bin"
+    forge_bin = bin_dir / "forge"
+
+    console.print(Panel(
+        "[bold blue]🩺 Bedrock Forge CLI Health Check[/bold blue]",
+        title="Diagnosis",
+        border_style="blue"
+    ))
+
+    # Check installation directory
+    console.print("\n[bold]📁 Installation Directory[/bold]")
+    install_table = Table()
+    install_table.add_column("Check", style="cyan")
+    install_table.add_column("Status", style="green")
+
+    if install_dir.exists():
+        install_table.add_row("Installation directory", "✅ Found")
+
+        # Check if it's a git repo
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--git-dir"],
+                cwd=install_dir,
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                install_table.add_row("Git repository", "✅ Valid")
+
+                # Check if up to date
+                subprocess.run(["git", "fetch", "origin"], cwd=install_dir, capture_output=True)
+                behind_result = subprocess.run(
+                    ["git", "rev-list", "--count", "HEAD..origin/main"],
+                    cwd=install_dir,
+                    capture_output=True,
+                    text=True
+                )
+                if behind_result.returncode == 0:
+                    behind = behind_result.stdout.strip()
+                    if behind == "0":
+                        install_table.add_row("Repository status", "✅ Up to date")
+                    else:
+                        install_table.add_row("Repository status", f"⚠️ {behind} commits behind")
+            else:
+                install_table.add_row("Git repository", "❌ Invalid")
+        except:
+            install_table.add_row("Git repository", "❌ Unknown")
+    else:
+        install_table.add_row("Installation directory", "❌ Not found")
+
+    console.print(install_table)
+
+    # Check virtual environment
+    console.print("\n[bold]🐍 Virtual Environment[/bold]")
+    venv_table = Table()
+    venv_table.add_column("Check", style="cyan")
+    venv_table.add_column("Status", style="green")
+
+    if venv_dir.exists():
+        venv_table.add_row("Virtual environment", "✅ Found")
+
+        python_exe = venv_dir / "bin" / "python"
+        pip_exe = venv_dir / "bin" / "pip"
+
+        if python_exe.exists() and pip_exe.exists():
+            venv_table.add_row("Python & pip", "✅ Available")
+
+            # Check Python version
+            try:
+                result = subprocess.run([str(python_exe), "--version"], capture_output=True, text=True)
+                venv_table.add_row("Python version", f"✅ {result.stdout.strip()}")
+            except:
+                venv_table.add_row("Python version", "❌ Unknown")
+
+            # Check if forge is installed
+            try:
+                result = subprocess.run([str(python_exe), "-m", "forge", "--version"], capture_output=True, text=True)
+                if result.returncode == 0:
+                    venv_table.add_row("Bedrock Forge CLI", f"✅ {result.stdout.strip()}")
+                else:
+                    venv_table.add_row("Bedrock Forge CLI", "❌ Not installed")
+            except:
+                venv_table.add_row("Bedrock Forge CLI", "❌ Unknown")
+        else:
+            venv_table.add_row("Python & pip", "❌ Missing")
+    else:
+        venv_table.add_row("Virtual environment", "❌ Not found")
+
+    console.print(venv_table)
+
+    # Check global command
+    console.print("\n[bold]🔧 Global Command[/bold]")
+    global_table = Table()
+    global_table.add_column("Check", style="cyan")
+    global_table.add_column("Status", style="green")
+
+    if forge_bin.exists():
+        global_table.add_row("Global command", "✅ Found")
+
+        if forge_bin.is_file() and os.access(forge_bin, os.X_OK):
+            global_table.add_row("Executable", "✅ Yes")
+        else:
+            global_table.add_row("Executable", "❌ No")
+
+        # Check if forge is in PATH
+        try:
+            subprocess.run(["forge", "--version"], capture_output=True, check=True)
+            global_table.add_row("In PATH", "✅ Yes")
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            global_table.add_row("In PATH", "❌ No")
+            console.print("[yellow]💡 To add forge to PATH, run:[/yellow]")
+            console.print("  echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> ~/.bashrc")
+            console.print("  source ~/.bashrc")
+    else:
+        global_table.add_row("Global command", "❌ Not found")
+
+    console.print(global_table)
+
+    # System requirements
+    console.print("\n[bold]💻 System Requirements[/bold]")
+    system_table = Table()
+    system_table.add_column("Tool", style="cyan")
+    system_table.add_column("Status", style="green")
+
+    # Check Python
+    try:
+        result = subprocess.run([sys.executable, "--version"], capture_output=True, text=True)
+        system_table.add_row("Python", f"✅ {result.stdout.strip()}")
+    except:
+        system_table.add_row("Python", "❌ Not found")
+
+    # Check pip
+    try:
+        result = subprocess.run([sys.executable, "-m", "pip", "--version"], capture_output=True, text=True)
+        system_table.add_row("pip", f"✅ {result.stdout.strip()}")
+    except:
+        system_table.add_row("pip", "❌ Not found")
+
+    # Check git
+    try:
+        result = subprocess.run(["git", "--version"], capture_output=True, text=True)
+        system_table.add_row("git", f"✅ {result.stdout.strip()}")
+    except:
+        system_table.add_row("git", "❌ Not found")
+
+    # Check optional tools
+    try:
+        result = subprocess.run(["ddev", "--version"], capture_output=True, text=True)
+        system_table.add_row("ddev", f"✅ {result.stdout.strip()}")
+    except:
+        system_table.add_row("ddev", "⚠️ Not found (required for local development)")
+
+    console.print(system_table)
+
+    # Recommendations
+    console.print("\n[bold]💡 Recommendations[/bold]")
+
+    if not install_dir.exists():
+        console.print("[red]❌ Installation directory missing[/red]")
+        console.print("   Solution: Run installation script")
+        console.print("   curl -sSL https://raw.githubusercontent.com/bedrock-forge/bedrock-forge/main/install.sh | bash")
+    elif not forge_bin.exists() or not os.access(forge_bin, os.X_OK):
+        console.print("[red]❌ Global command not working[/red]")
+        console.print("   Solution: Reinstall the global command")
+        console.print("   ln -sf ~/.bedrock-forge/venv/bin/forge ~/.local/bin/forge")
+    else:
+        console.print("[green]✅ Installation appears healthy![/green]")
+        console.print("   Your Bedrock Forge CLI is ready to use.")
 
 
 if __name__ == "__main__":

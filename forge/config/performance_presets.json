@@ -1,0 +1,463 @@
+{
+  "presets": {
+    "blog": {
+      "name": "Blog/Content Site",
+      "description": "Performance optimization preset for blogs and content-focused websites",
+      "lighthouse_target": 85,
+      "cache_strategy": "aggressive",
+      "image_optimization": true,
+      "cdn_required": true,
+      "database_optimization": false,
+      "budgets": {
+        "performance_score": 80,
+        "page_size": 2000000,
+        "lcp": 3000,
+        "cls": 0.2
+      },
+      "optimizations": [
+        "enable_page_caching",
+        "optimize_images",
+        "minify_css_js",
+        "enable_browser_caching",
+        "remove_render_blocking"
+      ]
+    },
+    "business": {
+      "name": "Business Website",
+      "description": "Comprehensive performance optimization for professional business websites",
+      "lighthouse_target": 90,
+      "cache_strategy": "aggressive",
+      "image_optimization": true,
+      "cdn_required": true,
+      "database_optimization": true,
+      "budgets": {
+        "performance_score": 85,
+        "page_size": 2500000,
+        "lcp": 2500,
+        "cls": 0.15,
+        "fid": 150
+      },
+      "optimizations": [
+        "enable_page_caching",
+        "optimize_images",
+        "minify_css_js",
+        "enable_browser_caching",
+        "remove_render_blocking",
+        "database_optimization",
+        "critical_css",
+        "lazy_loading"
+      ]
+    },
+    "ecommerce": {
+      "name": "E-commerce Store",
+      "description": "High-performance optimization for online stores and e-commerce platforms",
+      "lighthouse_target": 95,
+      "cache_strategy": "aggressive",
+      "image_optimization": true,
+      "cdn_required": true,
+      "database_optimization": true,
+      "budgets": {
+        "performance_score": 90,
+        "page_size": 3000000,
+        "lcp": 2000,
+        "cls": 0.1,
+        "fid": 100,
+        "ttfb": 400
+      },
+      "optimizations": [
+        "enable_page_caching",
+        "optimize_images",
+        "minify_css_js",
+        "enable_browser_caching",
+        "remove_render_blocking",
+        "database_optimization",
+        "critical_css",
+        "lazy_loading",
+        "resource_hints",
+        "preconnect_critical_domains"
+      ]
+    },
+    "portfolio": {
+      "name": "Portfolio/Creative",
+      "description": "Performance optimization for portfolio and creative websites",
+      "lighthouse_target": 88,
+      "cache_strategy": "aggressive",
+      "image_optimization": true,
+      "cdn_required": true,
+      "database_optimization": false,
+      "budgets": {
+        "performance_score": 85,
+        "page_size": 4000000,
+        "lcp": 2800,
+        "cls": 0.2
+      },
+      "optimizations": [
+        "enable_page_caching",
+        "optimize_images",
+        "minify_css_js",
+        "enable_browser_caching",
+        "remove_render_blocking",
+        "optimize_gallery_images",
+        "lazy_loading"
+      ]
+    },
+    "minimal": {
+      "name": "Minimal Setup",
+      "description": "Basic performance optimizations for simple websites",
+      "lighthouse_target": 75,
+      "cache_strategy": "basic",
+      "image_optimization": false,
+      "cdn_required": false,
+      "database_optimization": false,
+      "budgets": {
+        "performance_score": 70,
+        "page_size": 1500000,
+        "lcp": 4000,
+        "cls": 0.25
+      },
+      "optimizations": [
+        "enable_basic_caching",
+        "minify_css_js"
+      ]
+    },
+    "performance": {
+      "name": "Maximum Performance",
+      "description": "Aggressive performance optimization for maximum speed",
+      "lighthouse_target": 98,
+      "cache_strategy": "aggressive",
+      "image_optimization": true,
+      "cdn_required": true,
+      "database_optimization": true,
+      "budgets": {
+        "performance_score": 95,
+        "page_size": 1500000,
+        "lcp": 1500,
+        "cls": 0.05,
+        "fid": 50,
+        "ttfb": 300,
+        "fcp": 1200,
+        "si": 2000
+      },
+      "optimizations": [
+        "enable_page_caching",
+        "optimize_images",
+        "minify_css_js",
+        "enable_browser_caching",
+        "remove_render_blocking",
+        "database_optimization",
+        "critical_css",
+        "lazy_loading",
+        "resource_hints",
+        "preconnect_critical_domains",
+        "early_hints",
+        "compression_brotli",
+        "font_optimization",
+        "third_party_optimization"
+      ]
+    }
+  },
+  "cache_strategies": {
+    "none": {
+      "name": "No Caching",
+      "description": "No caching enabled",
+      "page_cache_ttl": 0,
+      "browser_cache_ttl": 0,
+      "object_cache_ttl": 0,
+      "cdn_cache_ttl": 0
+    },
+    "basic": {
+      "name": "Basic Caching",
+      "description": "Basic page and browser caching",
+      "page_cache_ttl": 3600,
+      "browser_cache_ttl": 86400,
+      "object_cache_ttl": 300,
+      "cdn_cache_ttl": 86400
+    },
+    "aggressive": {
+      "name": "Aggressive Caching",
+      "description": "Comprehensive caching for maximum performance",
+      "page_cache_ttl": 86400,
+      "browser_cache_ttl": 604800,
+      "object_cache_ttl": 3600,
+      "cdn_cache_ttl": 604800,
+      "cache_preload": true,
+      "cache_compression": true
+    },
+    "custom": {
+      "name": "Custom Caching",
+      "description": "Custom caching configuration",
+      "page_cache_ttl": 0,
+      "browser_cache_ttl": 0,
+      "object_cache_ttl": 0,
+      "cdn_cache_ttl": 0,
+      "custom_settings": true
+    }
+  },
+  "optimizations": {
+    "enable_page_caching": {
+      "name": "Page Caching",
+      "description": "Enable server-side page caching for faster load times",
+      "category": "caching",
+      "impact": "high",
+      "complexity": "low"
+    },
+    "optimize_images": {
+      "name": "Image Optimization",
+      "description": "Compress and optimize images for better performance",
+      "category": "media",
+      "impact": "high",
+      "complexity": "medium"
+    },
+    "minify_css_js": {
+      "name": "Minify CSS/JS",
+      "description": "Minify CSS and JavaScript files to reduce size",
+      "category": "assets",
+      "impact": "medium",
+      "complexity": "low"
+    },
+    "enable_browser_caching": {
+      "name": "Browser Caching",
+      "description": "Enable browser caching for static resources",
+      "category": "caching",
+      "impact": "medium",
+      "complexity": "low"
+    },
+    "remove_render_blocking": {
+      "name": "Remove Render-Blocking",
+      "description": "Eliminate render-blocking resources for faster rendering",
+      "category": "rendering",
+      "impact": "high",
+      "complexity": "medium"
+    },
+    "database_optimization": {
+      "name": "Database Optimization",
+      "description": "Optimize database queries and structure",
+      "category": "database",
+      "impact": "medium",
+      "complexity": "high"
+    },
+    "critical_css": {
+      "name": "Critical CSS",
+      "description": "Generate and inline critical CSS for faster rendering",
+      "category": "css",
+      "impact": "high",
+      "complexity": "medium"
+    },
+    "lazy_loading": {
+      "name": "Lazy Loading",
+      "description": "Implement lazy loading for images and iframes",
+      "category": "media",
+      "impact": "medium",
+      "complexity": "low"
+    },
+    "resource_hints": {
+      "name": "Resource Hints",
+      "description": "Add prefetch, preload, and preconnect hints",
+      "category": "network",
+      "impact": "low",
+      "complexity": "low"
+    },
+    "preconnect_critical_domains": {
+      "name": "Preconnect Critical Domains",
+      "description": "Preconnect to critical third-party domains",
+      "category": "network",
+      "impact": "low",
+      "complexity": "low"
+    },
+    "optimize_gallery_images": {
+      "name": "Optimize Gallery Images",
+      "description": "Specialized optimization for image galleries",
+      "category": "media",
+      "impact": "medium",
+      "complexity": "medium"
+    },
+    "enable_basic_caching": {
+      "name": "Basic Caching",
+      "description": "Enable basic caching mechanisms",
+      "category": "caching",
+      "impact": "medium",
+      "complexity": "low"
+    },
+    "early_hints": {
+      "name": "Early Hints",
+      "description": "Use 103 Early Hints for faster loading",
+      "category": "network",
+      "impact": "medium",
+      "complexity": "high"
+    },
+    "compression_brotli": {
+      "name": "Brotli Compression",
+      "description": "Enable Brotli compression for better compression",
+      "category": "compression",
+      "impact": "medium",
+      "complexity": "medium"
+    },
+    "font_optimization": {
+      "name": "Font Optimization",
+      "description": "Optimize web font loading and display",
+      "category": "fonts",
+      "impact": "low",
+      "complexity": "medium"
+    },
+    "third_party_optimization": {
+      "name": "Third-Party Optimization",
+      "description": "Optimize loading of third-party scripts",
+      "category": "third_party",
+      "impact": "medium",
+      "complexity": "high"
+    }
+  },
+  "default_budgets": {
+    "performance_score": {
+      "budget_type": "performance_score",
+      "resource_type": "page",
+      "max_value": 80,
+      "warning_threshold": 70,
+      "description": "Overall Lighthouse performance score"
+    },
+    "page_size": {
+      "budget_type": "size",
+      "resource_type": "page",
+      "max_value": 2500000,
+      "warning_threshold": 2000000,
+      "description": "Total page size in bytes"
+    },
+    "script_size": {
+      "budget_type": "size",
+      "resource_type": "script",
+      "max_value": 500000,
+      "warning_threshold": 400000,
+      "description": "Total JavaScript size in bytes"
+    },
+    "stylesheet_size": {
+      "budget_type": "size",
+      "resource_type": "stylesheet",
+      "max_value": 200000,
+      "warning_threshold": 150000,
+      "description": "Total CSS size in bytes"
+    },
+    "image_size": {
+      "budget_type": "size",
+      "resource_type": "image",
+      "max_value": 1000000,
+      "warning_threshold": 800000,
+      "description": "Total image size in bytes"
+    },
+    "lcp": {
+      "budget_type": "time",
+      "resource_type": "page",
+      "max_value": 2500,
+      "warning_threshold": 4000,
+      "description": "Largest Contentful Paint in milliseconds"
+    },
+    "cls": {
+      "budget_type": "score",
+      "resource_type": "page",
+      "max_value": 0.1,
+      "warning_threshold": 0.25,
+      "description": "Cumulative Layout Shift score"
+    },
+    "fid": {
+      "budget_type": "time",
+      "resource_type": "page",
+      "max_value": 100,
+      "warning_threshold": 300,
+      "description": "First Input Delay in milliseconds"
+    },
+    "ttfb": {
+      "budget_type": "time",
+      "resource_type": "page",
+      "max_value": 600,
+      "warning_threshold": 1000,
+      "description": "Time to First Byte in milliseconds"
+    },
+    "resource_count": {
+      "budget_type": "count",
+      "resource_type": "page",
+      "max_value": 100,
+      "warning_threshold": 150,
+      "description": "Total number of resources"
+    },
+    "script_count": {
+      "budget_type": "count",
+      "resource_type": "script",
+      "max_value": 25,
+      "warning_threshold": 40,
+      "description": "Number of JavaScript resources"
+    },
+    "stylesheet_count": {
+      "budget_type": "count",
+      "resource_type": "stylesheet",
+      "max_value": 10,
+      "warning_threshold": 15,
+      "description": "Number of CSS resources"
+    },
+    "image_count": {
+      "budget_type": "count",
+      "resource_type": "image",
+      "max_value": 30,
+      "warning_threshold": 50,
+      "description": "Number of image resources"
+    }
+  },
+  "monitoring": {
+    "alert_thresholds": {
+      "performance_drop": 10,
+      "lcp_increase": 20,
+      "cls_increase": 50,
+      "ttfb_increase": 30
+    },
+    "testing_frequency": {
+      "critical": "daily",
+      "important": "weekly",
+      "normal": "monthly"
+    },
+    "report_schedules": {
+      "executive": "monthly",
+      "technical": "weekly",
+      "alerts": "immediate"
+    }
+  },
+  "devices": {
+    "desktop": {
+      "name": "Desktop",
+      "form_factor": "desktop",
+      "screen_emulation": false,
+      "throttling": {
+        "rtt_ms": 40,
+        "throughput_kbps": 10240,
+        "cpu_slowdown_multiplier": 1,
+        "request_latency_ms": 0,
+        "download_throughput_kbps": 0,
+        "upload_throughput_kbps": 0
+      }
+    },
+    "mobile": {
+      "name": "Mobile",
+      "form_factor": "mobile",
+      "screen_emulation": true,
+      "user_agent": "Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36",
+      "throttling": {
+        "rtt_ms": 150,
+        "throughput_kbps": 937.5,
+        "cpu_slowdown_multiplier": 4,
+        "request_latency_ms": 0,
+        "download_throughput_kbps": 0,
+        "upload_throughput_kbps": 0
+      }
+    },
+    "tablet": {
+      "name": "Tablet",
+      "form_factor": "desktop",
+      "screen_emulation": false,
+      "throttling": {
+        "rtt_ms": 80,
+        "throughput_kbps": 2560,
+        "cpu_slowdown_multiplier": 2,
+        "request_latency_ms": 0,
+        "download_throughput_kbps": 0,
+        "upload_throughput_kbps": 0
+      }
+    }
+  }
+}

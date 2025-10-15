@@ -1,0 +1,313 @@
+{
+  "presets": {
+    "blog": {
+      "name": "Blog",
+      "description": "Optimized for blog and content websites",
+      "settings": {
+        "jpeg_quality": 80,
+        "png_quality": 85,
+        "webp_quality": 75,
+        "avif_quality": 70,
+        "max_width": 1920,
+        "max_height": 1080,
+        "create_webp": true,
+        "create_avif": false,
+        "progressive_jpeg": true,
+        "strip_metadata": true,
+        "preserve_original": true,
+        "batch_size": 25,
+        "max_file_size": 5242880
+      },
+      "rules": {
+        "compress_photos": true,
+        "compress_graphics": true,
+        "resize_large_images": true,
+        "create_thumbnails": true,
+        "lazy_load_all": false,
+        "webp_for_all": true
+      }
+    },
+    "business": {
+      "name": "Business",
+      "description": "Balanced optimization for business websites",
+      "settings": {
+        "jpeg_quality": 85,
+        "png_quality": 90,
+        "webp_quality": 80,
+        "avif_quality": 75,
+        "max_width": 2560,
+        "max_height": 1440,
+        "create_webp": true,
+        "create_avif": true,
+        "progressive_jpeg": true,
+        "strip_metadata": true,
+        "preserve_original": true,
+        "batch_size": 50,
+        "max_file_size": 10485760
+      },
+      "rules": {
+        "compress_photos": true,
+        "compress_graphics": true,
+        "resize_large_images": true,
+        "create_thumbnails": true,
+        "lazy_load_all": true,
+        "webp_for_all": true
+      }
+    },
+    "ecommerce": {
+      "name": "E-commerce",
+      "description": "High-quality optimization for product images",
+      "settings": {
+        "jpeg_quality": 90,
+        "png_quality": 95,
+        "webp_quality": 85,
+        "avif_quality": 80,
+        "max_width": 2048,
+        "max_height": 2048,
+        "create_webp": true,
+        "create_avif": true,
+        "progressive_jpeg": true,
+        "strip_metadata": false,
+        "preserve_original": true,
+        "batch_size": 100,
+        "max_file_size": 20971520
+      },
+      "rules": {
+        "compress_photos": true,
+        "compress_graphics": true,
+        "resize_large_images": true,
+        "create_thumbnails": true,
+        "lazy_load_all": true,
+        "webp_for_all": true,
+        "preserve_product_details": true
+      }
+    },
+    "portfolio": {
+      "name": "Portfolio",
+      "description": "Maximum quality for visual portfolios",
+      "settings": {
+        "jpeg_quality": 95,
+        "png_quality": 95,
+        "webp_quality": 90,
+        "avif_quality": 85,
+        "max_width": 3840,
+        "max_height": 2160,
+        "create_webp": true,
+        "create_avif": true,
+        "progressive_jpeg": true,
+        "strip_metadata": false,
+        "preserve_original": true,
+        "batch_size": 30,
+        "max_file_size": 52428800
+      },
+      "rules": {
+        "compress_photos": false,
+        "compress_graphics": true,
+        "resize_large_images": false,
+        "create_thumbnails": true,
+        "lazy_load_all": true,
+        "webp_for_all": true,
+        "preserve_artistic_quality": true
+      }
+    },
+    "performance": {
+      "name": "Performance",
+      "description": "Maximum compression for performance-critical sites",
+      "settings": {
+        "jpeg_quality": 70,
+        "png_quality": 75,
+        "webp_quality": 65,
+        "avif_quality": 60,
+        "max_width": 1920,
+        "max_height": 1080,
+        "create_webp": true,
+        "create_avif": true,
+        "progressive_jpeg": true,
+        "strip_metadata": true,
+        "preserve_original": false,
+        "batch_size": 100,
+        "max_file_size": 3145728
+      },
+      "rules": {
+        "compress_photos": true,
+        "compress_graphics": true,
+        "resize_large_images": true,
+        "create_thumbnails": true,
+        "lazy_load_all": true,
+        "webp_for_all": true,
+        "aggressive_compression": true
+      }
+    },
+    "minimal": {
+      "name": "Minimal",
+      "description": "Basic optimization with minimal processing",
+      "settings": {
+        "jpeg_quality": 85,
+        "png_quality": 90,
+        "webp_quality": 80,
+        "avif_quality": 75,
+        "max_width": 2560,
+        "max_height": 1440,
+        "create_webp": false,
+        "create_avif": false,
+        "progressive_jpeg": false,
+        "strip_metadata": false,
+        "preserve_original": true,
+        "batch_size": 10,
+        "max_file_size": 5242880
+      },
+      "rules": {
+        "compress_photos": true,
+        "compress_graphics": false,
+        "resize_large_images": false,
+        "create_thumbnails": false,
+        "lazy_load_all": false,
+        "webp_for_all": false
+      }
+    }
+  },
+  "format_profiles": {
+    "photographs": {
+      "name": "Photographs",
+      "description": "Settings for photographic images",
+      "formats": ["jpeg", "webp", "avif"],
+      "quality": 85,
+      "progressive": true,
+      "optimize": true
+    },
+    "graphics": {
+      "name": "Graphics",
+      "description": "Settings for graphics and illustrations",
+      "formats": ["png", "webp"],
+      "quality": 90,
+      "progressive": false,
+      "optimize": true
+    },
+    "logos": {
+      "name": "Logos",
+      "description": "Settings for logos and icons",
+      "formats": ["png", "svg"],
+      "quality": 95,
+      "progressive": false,
+      "optimize": false
+    },
+    "screenshots": {
+      "name": "Screenshots",
+      "description": "Settings for screenshots",
+      "formats": ["png", "jpeg", "webp"],
+      "quality": 80,
+      "progressive": false,
+      "optimize": true
+    }
+  },
+  "size_profiles": {
+    "thumbnail": {
+      "name": "Thumbnail",
+      "max_width": 150,
+      "max_height": 150,
+      "quality": 75
+    },
+    "small": {
+      "name": "Small",
+      "max_width": 300,
+      "max_height": 300,
+      "quality": 80
+    },
+    "medium": {
+      "name": "Medium",
+      "max_width": 768,
+      "max_height": 768,
+      "quality": 85
+    },
+    "large": {
+      "name": "Large",
+      "max_width": 1024,
+      "max_height": 1024,
+      "quality": 85
+    },
+    "xlarge": {
+      "name": "Extra Large",
+      "max_width": 2048,
+      "max_height": 2048,
+      "quality": 90
+    }
+  },
+  "optimization_strategies": {
+    "lossless": {
+      "name": "Lossless",
+      "description": "No quality loss, maximum file size",
+      "jpeg_quality": 100,
+      "png_quality": 100,
+      "webp_quality": 100,
+      "avif_quality": 100
+    },
+    "balanced": {
+      "name": "Balanced",
+      "description": "Good balance between quality and size",
+      "jpeg_quality": 85,
+      "png_quality": 90,
+      "webp_quality": 80,
+      "avif_quality": 75
+    },
+    "compressed": {
+      "name": "Compressed",
+      "description": "Smaller file size with acceptable quality loss",
+      "jpeg_quality": 70,
+      "png_quality": 75,
+      "webp_quality": 65,
+      "avif_quality": 60
+    },
+    "aggressive": {
+      "name": "Aggressive",
+      "description": "Maximum compression with noticeable quality loss",
+      "jpeg_quality": 50,
+      "png_quality": 60,
+      "webp_quality": 45,
+      "avif_quality": 40
+    }
+  },
+  "device_optimization": {
+    "mobile": {
+      "name": "Mobile",
+      "max_width": 768,
+      "max_height": 1024,
+      "quality_adjustment": -5,
+      "prioritize_webp": true,
+      "create_avif": false
+    },
+    "tablet": {
+      "name": "Tablet",
+      "max_width": 1024,
+      "max_height": 768,
+      "quality_adjustment": 0,
+      "prioritize_webp": true,
+      "create_avif": true
+    },
+    "desktop": {
+      "name": "Desktop",
+      "max_width": 2560,
+      "max_height": 1440,
+      "quality_adjustment": 0,
+      "prioritize_webp": true,
+      "create_avif": true
+    },
+    "retina": {
+      "name": "Retina",
+      "max_width": 3840,
+      "max_height": 2160,
+      "quality_adjustment": 5,
+      "prioritize_webp": true,
+      "create_avif": true
+    }
+  },
+  "default_settings": {
+    "preset": "business",
+    "auto_optimize": true,
+    "batch_on_upload": true,
+    "lazy_load_threshold": 800,
+    "cleanup_unused_days": 90,
+    "generate_reports": true,
+    "alert_on_large_files": true,
+    "monitor_performance": true
+  }
+}
