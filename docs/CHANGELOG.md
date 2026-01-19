@@ -8,23 +8,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Placeholder for upcoming features
-- Documentation improvements planned
+- **Billing System**: Complete subscription management with recurring billing (monthly to triennial)
+- **Domain Tracking**: Registrar management with expiry date monitoring and alerts
+- **SSL Management**: Certificate tracking with auto-renewal status and expiry notifications
+- **Hosting Packages**: Package definitions with resource limits and tiered pricing
+- **Client Management**: Full CRM capabilities with invoicing and payment tracking
+- **CyberPanel Integration**: Full server management including websites, databases, and SSL
+- **Google Drive Integration**: Automated project asset backups and storage
+- **Invoice Generation**: Automatic renewal invoice usage and PDF generation
 
-### Changed
-- Breaking changes will be listed here
+### Database
+- New models: `Subscription`, `Domain`, `SSLCertificate`, `HostingPackage`
+- Updated models: `Client` and `Project` with new relationships
+- Added `features` JSON field to HostingPackage for flexible capability tracking
 
-### Deprecated
-- Features to be removed in future versions
-
-### Removed
-- Features removed in this version
-
-### Fixed
-- Bug fixes for upcoming release
+### API
+- Added `/subscriptions` endpoints for full lifecycle management
+- Added `/domains` endpoints with WHOIS integration
+- Added `/ssl` endpoints with provider tracking
+- Added `/packages` endpoints for hosting plan definitions
+- Added `/cyberpanel` endpoints for server operations
+- Added `/invoices` endpoints for billing cycles
 
 ### Security
-- Security improvements and vulnerability fixes
+- Added automated expiry alerts for Domains (60 days) and SSL (14 days)
+
 
 ## [1.0.0] - 2024-10-05
 

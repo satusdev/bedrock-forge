@@ -564,6 +564,75 @@ class EnhancedDeployment:
         """Add post-deployment hook."""
 ```
 
+## 💰 Billing APIs
+
+### Subscriptions
+
+#### `forge.api.routes.subscriptions`
+
+Manages recurring subscriptions.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/subscriptions` | List subscriptions with filters |
+| `POST` | `/subscriptions` | Create new subscription |
+| `GET` | `/subscriptions/{id}` | Get subscription details |
+| `POST` | `/subscriptions/{id}/renew` | Manually renew subscription |
+| `POST` | `/subscriptions/{id}/invoice` | Generate renewal invoice |
+
+### Domains
+
+#### `forge.api.routes.domains`
+
+Tracks domain registrations.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/domains` | List domains |
+| `GET` | `/domains/expiring` | Get domains expiring soon |
+| `POST` | `/domains` | Add domain to tracking |
+| `POST` | `/domains/{id}/renew` | Mark domain as renewed |
+
+### SSL Certificates
+
+#### `forge.api.routes.ssl`
+
+Monitors SSL certificates.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/ssl` | List certificates |
+| `GET` | `/ssl/expiring` | Get certificates expiring soon |
+| `POST` | `/ssl` | Add certificate |
+| `PUT` | `/ssl/{id}` | Update certificate status |
+
+### Hosting Packages
+
+#### `forge.api.routes.packages`
+
+Defines hosting plans.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/packages` | List hosting packages |
+| `POST` | `/packages` | Create new package |
+| `GET` | `/packages/{id}` | Get package details |
+
+## 🖥️ CyberPanel API
+
+#### `forge.api.routes.cyberpanel`
+
+Integration with CyberPanel API.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/cyberpanel/servers/{id}/websites` | List websites on server |
+| `POST` | `/cyberpanel/servers/{id}/websites` | Create new website |
+| `DELETE` | `/cyberpanel/servers/{id}/websites/{domain}` | Delete website |
+| `POST` | `/cyberpanel/servers/{id}/ssl/{domain}` | Issue SSL certificate |
+| `GET` | `/cyberpanel/servers/{id}/databases` | List databases |
+| `GET` | `/cyberpanel/servers/{id}/info` | Get server statistics |
+
 ## 📊 Model APIs
 
 ### Project Model
@@ -1107,6 +1176,91 @@ class MyPlugin(Plugin):
         print("Running pre-deployment hook from my plugin")
 
 # Plugin would be discovered and loaded automatically
+```
+
+---
+
+## 🌐 REST API Endpoints
+
+### Status Page (Public)
+No authentication required.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/status/{project_id}` | Get project status page |
+| GET | `/api/status/{project_id}/history` | Get uptime history (30 days) |
+
+**Response: Status Page**
+```json
+{
+  "project_name": "My Site",
+  "overall_status": "operational",
+  "monitors": [{"name": "...", "status": "up", "uptime_24h": 99.9}],
+  "recent_incidents": [{"title": "...", "started_at": "..."}],
+  "last_updated": "2026-01-10T12:00:00Z"
+}
+```
+
+---
+
+### WP Management
+Requires admin authentication.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/wp/sites/{id}/state` | Get WP site state |
+| POST | `/api/wp/sites/{id}/scan` | Trigger WP scan |
+| GET | `/api/wp/updates` | List all pending updates |
+| POST | `/api/wp/updates/bulk` | Trigger bulk update |
+| GET | `/api/wp/updates/history` | Get update history |
+
+---
+
+### Client Portal Auth
+Separate authentication for client users.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/client/auth/login` | Client login |
+| GET | `/api/client/auth/me` | Get current client profile |
+| POST | `/api/client/auth/logout` | Client logout |
+
+**Login Request**
+```json
+{"email": "client@example.com", "password": "..."}
+```
+
+**Login Response**
+```json
+{
+  "access_token": "eyJ...",
+  "token_type": "bearer",
+  "client_id": 1,
+  "client_name": "Acme Corp"
+}
+```
+
+---
+
+### Client Portal
+Requires client authentication.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/client/projects` | List client's projects |
+| GET | `/api/client/invoices` | List client's invoices |
+| GET | `/api/client/tickets` | List support tickets |
+| POST | `/api/client/tickets` | Create ticket |
+| GET | `/api/client/tickets/{id}` | Get ticket details |
+| POST | `/api/client/tickets/{id}/reply` | Reply to ticket |
+
+**Create Ticket**
+```json
+{
+  "subject": "Help with...",
+  "message": "I need assistance with...",
+  "priority": "medium"
+}
 ```
 
 ---
