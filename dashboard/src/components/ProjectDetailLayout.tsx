@@ -6,7 +6,7 @@ import {
   Globe,
   Github,
   HardDrive,
-  WordPress,
+  FileCode,
   Server,
   Users,
   Settings,
@@ -40,25 +40,21 @@ const ProjectDetailLayout: React.FC<ProjectDetailLayoutProps> = ({ projectName }
   const [activeTab, setActiveTab] = useState('overview')
 
   // Fetch project data
-  const { data: project, isLoading, error } = useQuery(
-    ['project', projectName],
-    () => dashboardApi.getProjectStatus(projectName),
-    {
-      enabled: !!projectName,
-    }
-  )
+  const { data: project, isLoading, error } = useQuery({
+    queryKey: ['project', projectName],
+    queryFn: () => dashboardApi.getProjectStatus(projectName),
+    enabled: !!projectName,
+  })
 
   // Fetch comprehensive project data
-  const { data: comprehensiveProject } = useQuery(
-    ['comprehensive-project', projectName],
-    async () => {
+  const { data: comprehensiveProject } = useQuery({
+    queryKey: ['comprehensive-project', projectName],
+    queryFn: async () => {
       const projects = await dashboardApi.getComprehensiveProjects()
       return projects.data.find((p: any) => p.project_name === projectName)
     },
-    {
-      enabled: !!projectName,
-    }
-  )
+    enabled: !!projectName,
+  })
 
   const projectData = comprehensiveProject || project?.data
 
@@ -66,7 +62,7 @@ const ProjectDetailLayout: React.FC<ProjectDetailLayoutProps> = ({ projectName }
     { id: 'overview', name: 'Overview', icon: Globe },
     { id: 'github', name: 'GitHub', icon: Github },
     { id: 'backups', name: 'Backups', icon: HardDrive },
-    { id: 'wordpress', name: 'WordPress', icon: WordPress },
+    { id: 'wordpress', name: 'WordPress', icon: FileCode },
     { id: 'server', name: 'Server', icon: Server },
     { id: 'client', name: 'Client', icon: Users },
   ]

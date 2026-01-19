@@ -35,24 +35,23 @@ class WebSocketService {
   private getWebSocketUrl(): string {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = window.location.hostname
-    const port = '8001'  // Backend port
-    return `${protocol}//${host}:${port}/api/v1/dashboard/ws/${this.clientId}`
+    const port = '8000'  // Backend port
+    return `${protocol}//${host}:${port}/api/v1/ws/${this.clientId}`
   }
 
+  private connectionPromise: Promise<void> | null = null
+
   connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      if (this.ws?.readyState === WebSocket.OPEN) {
-        resolve()
-        return
-      }
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      return Promise.resolve()
+    }
 
-      if (this.isConnecting) {
-        reject(new Error('Connection already in progress'))
-        return
-      }
+    if (this.connectionPromise) {
+      return this.connectionPromise
+    }
 
-      this.isConnecting = true
-
+    this.isConnecting = true
+    this.connectionPromise = new Promise((resolve, reject) => {
       try {
         this.ws = new WebSocket(this.url)
 
@@ -60,6 +59,7 @@ class WebSocketService {
           console.log('WebSocket connected')
           this.isConnecting = false
           this.reconnectAttempts = 0
+          this.connectionPromise = null
           resolve()
         }
 
@@ -76,6 +76,7 @@ class WebSocketService {
           console.log('WebSocket disconnected:', event.code, event.reason)
           this.isConnecting = false
           this.ws = null
+          this.connectionPromise = null
 
           // Attempt to reconnect if not explicitly closed
           if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
@@ -90,13 +91,17 @@ class WebSocketService {
         this.ws.onerror = (error) => {
           console.error('WebSocket error:', error)
           this.isConnecting = false
+          this.connectionPromise = null
           reject(error)
         }
       } catch (error) {
         this.isConnecting = false
+        this.connectionPromise = null
         reject(error)
       }
     })
+
+    return this.connectionPromise
   }
 
   disconnect() {

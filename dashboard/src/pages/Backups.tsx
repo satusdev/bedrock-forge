@@ -1,486 +1,608 @@
-import React, { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import React, { useState, useEffect } from 'react';
 import {
-  Database,
-  Cloud,
-  Download,
-  Upload,
-  Calendar,
-  Clock,
-  CheckCircle,
-  AlertTriangle,
-  Trash2,
-  RefreshCw,
-  Play,
-  Settings,
-  Filter,
-  Search,
-  ChevronDown,
-  HardDrive,
-  FileText
-} from 'lucide-react'
-import Card from '@/components/ui/Card'
-import Button from '@/components/ui/Button'
-import Badge from '@/components/ui/Badge'
-import { dashboardApi } from '@/services/api'
-import { useRealTimeUpdates } from '@/hooks/useRealTimeUpdates'
-import toast from 'react-hot-toast'
+	Database,
+	Cloud,
+	HardDrive,
+	Download,
+	RotateCcw,
+	Plus,
+	Trash2,
+	FolderOpen,
+	RefreshCw,
+	Loader2,
+	CheckCircle,
+	XCircle,
+	Clock,
+	Filter,
+} from 'lucide-react';
+import { dashboardApi } from '../services/api';
+import { Backup, BackupType, BackupStorageType, BackupStatus } from '../types';
+import toast from 'react-hot-toast';
 
-interface BackupInfo {
-  path: string
-  info: {
-    timestamp: string
-    type: string
-    database: boolean
-    files: boolean
-    size: number
-  }
+interface Project {
+	id: number;
+	name: string;
 }
 
 const Backups: React.FC = () => {
-  const [selectedProject, setSelectedProject] = useState<string>('')
-  const [showRestoreModal, setShowRestoreModal] = useState(false)
-  const [showBackupModal, setShowBackupModal] = useState(false)
-  const [selectedBackup, setSelectedBackup] = useState<BackupInfo | null>(null)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [sortBy, setSortBy] = useState<'date' | 'size' | 'project'>('date')
+	const [backups, setBackups] = useState<Backup[]>([]);
+	const [projects, setProjects] = useState<Project[]>([]);
+	const [loading, setLoading] = useState(true);
+	const [actionLoading, setActionLoading] = useState<number | null>(null);
+	const [showCreateModal, setShowCreateModal] = useState(false);
 
-  const queryClient = useQueryClient()
+	// Filters
+	const [filterProjectId, setFilterProjectId] = useState<number | undefined>();
+	const [filterBackupType, setFilterBackupType] = useState<
+		BackupType | undefined
+	>();
 
-  // Set up real-time updates
-  const { isConnected } = useRealTimeUpdates({
-    onWordPressUpdate: (projectName, data) => {
-      // Refresh backups when backup operations complete
-      if (data.type?.includes('backup')) {
-        queryClient.invalidateQueries(['backups', selectedProject])
-      }
-    }
-  })
+	// Form state
+	const [formData, setFormData] = useState({
+		project_id: 0,
+		backup_type: 'full' as BackupType,
+		storage_type: 'google_drive' as BackupStorageType,
+		name: '',
+	});
 
-  // Fetch projects for dropdown
-  const { data: projectsData } = useQuery({
-    queryKey: ['comprehensive-projects'],
-    queryFn: dashboardApi.getComprehensiveProjects,
-  })
+	// Stats
+	const [stats, setStats] = useState({
+		total: 0,
+		totalSize: 0,
+		googleDriveCount: 0,
+		localCount: 0,
+	});
 
-  const projects = projectsData?.data || []
+	useEffect(() => {
+		fetchBackups();
+		fetchProjects();
+	}, [filterProjectId, filterBackupType]);
 
-  // Fetch backups for selected project
-  const { data: backupsData, isLoading, refetch } = useQuery({
-    queryKey: ['backups', selectedProject],
-    queryFn: () => selectedProject ? dashboardApi.listBackups(selectedProject) : null,
-    enabled: !!selectedProject,
-  })
+	const fetchBackups = async () => {
+		try {
+			setLoading(true);
+			const response = await dashboardApi.getBackups({
+				project_id: filterProjectId,
+				backup_type: filterBackupType,
+			});
+			// Handle both list response formats
+			const backupList = response.data.items || response.data || [];
+			setBackups(backupList);
 
-  const backups = backupsData?.data?.backups || []
+			// Calculate stats
+			const totalSize = backupList.reduce(
+				(acc: number, b: Backup) => acc + (b.size_bytes || 0),
+				0
+			);
+			const googleDriveCount = backupList.filter(
+				(b: Backup) => b.storage_type === 'google_drive'
+			).length;
+			const localCount = backupList.filter(
+				(b: Backup) => b.storage_type === 'local'
+			).length;
 
-  // Create backup mutation
-  const createBackupMutation = useMutation({
-    mutationFn: (backupOptions: any) => dashboardApi.createBackup(selectedProject, backupOptions),
-    onSuccess: (response) => {
-      toast.success('Backup started successfully!')
-      setShowBackupModal(false)
-      refetch()
-    },
-    onError: (error: any) => {
-      toast.error(`Failed to start backup: ${error.message}`)
-    }
-  })
+			setStats({
+				total: backupList.length,
+				totalSize,
+				googleDriveCount,
+				localCount,
+			});
+		} catch (error) {
+			console.error('Failed to fetch backups:', error);
+			toast.error('Failed to load backups');
+		} finally {
+			setLoading(false);
+		}
+	};
 
-  // Restore backup mutation
-  const restoreBackupMutation = useMutation({
-    mutationFn: (restoreOptions: any) => dashboardApi.restoreBackup(selectedProject, restoreOptions),
-    onSuccess: (response) => {
-      toast.success('Restore started successfully!')
-      setShowRestoreModal(false)
-      setSelectedBackup(null)
-    },
-    onError: (error: any) => {
-      toast.error(`Failed to start restore: ${error.message}`)
-    }
-  })
+	const fetchProjects = async () => {
+		try {
+			const response = await dashboardApi.getProjects();
+			setProjects(response.data || []);
+		} catch (error) {
+			console.error('Failed to fetch projects:', error);
+		}
+	};
 
-  // Filter and sort backups
-  const filteredBackups = backups
-    .filter(backup => {
-      if (!searchQuery) return true
-      const searchLower = searchQuery.toLowerCase()
-      return backup.info.timestamp.toLowerCase().includes(searchLower) ||
-             backup.info.type.toLowerCase().includes(searchLower)
-    })
-    .sort((a, b) => {
-      switch (sortBy) {
-        case 'date':
-          return new Date(b.info.timestamp).getTime() - new Date(a.info.timestamp).getTime()
-        case 'size':
-          return b.info.size - a.info.size
-        case 'project':
-          return 0 // No project sorting in individual view
-        default:
-          return 0
-      }
-    })
+	const handleCreateBackup = async () => {
+		if (!formData.project_id) {
+			toast.error('Please select a project');
+			return;
+		}
 
-  const handleCreateBackup = (backupOptions: any) => {
-    if (!selectedProject) {
-      toast.error('Please select a project first')
-      return
-    }
-    createBackupMutation.mutate(backupOptions)
-  }
+		try {
+			setActionLoading(-1);
+			await dashboardApi.createManualBackup({
+				project_id: formData.project_id,
+				backup_type: formData.backup_type,
+				storage_type: formData.storage_type,
+				name: formData.name || undefined,
+			});
+			toast.success('Backup started successfully');
+			setShowCreateModal(false);
+			setFormData({
+				project_id: 0,
+				backup_type: 'full',
+				storage_type: 'google_drive',
+				name: '',
+			});
+			fetchBackups();
+		} catch (error) {
+			console.error('Failed to create backup:', error);
+			toast.error('Failed to create backup');
+		} finally {
+			setActionLoading(null);
+		}
+	};
 
-  const handleRestoreBackup = (restoreOptions: any) => {
-    if (!selectedBackup || !selectedProject) {
-      toast.error('Please select a backup and project')
-      return
-    }
-    restoreBackupMutation.mutate({
-      backup_path: selectedBackup.path,
-      ...restoreOptions
-    })
-  }
+	const handleDeleteBackup = async (backupId: number) => {
+		if (!confirm('Are you sure you want to delete this backup?')) return;
 
-  const formatFileSize = (bytes: number) => {
-    if (bytes === 0) return '0 B'
-    const k = 1024
-    const sizes = ['B', 'KB', 'MB', 'GB']
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
-  }
+		try {
+			setActionLoading(backupId);
+			await dashboardApi.deleteBackup(backupId);
+			toast.success('Backup deleted');
+			fetchBackups();
+		} catch (error) {
+			console.error('Failed to delete backup:', error);
+			toast.error('Failed to delete backup');
+		} finally {
+			setActionLoading(null);
+		}
+	};
 
-  const formatDate = (timestamp: string) => {
-    return new Date(timestamp).toLocaleString()
-  }
+	const handleRestore = async (backupId: number) => {
+		if (
+			!confirm(
+				'Are you sure you want to restore from this backup? This will overwrite current data.'
+			)
+		)
+			return;
 
-  const getBackupTypeBadge = (type: string) => {
-    switch (type) {
-      case 'full':
-        return { variant: 'success' as const, text: 'Full' }
-      case 'database':
-        return { variant: 'info' as const, text: 'Database' }
-      case 'files':
-        return { variant: 'warning' as const, text: 'Files' }
-      default:
-        return { variant: 'default' as const, text: type }
-    }
-  }
+		try {
+			setActionLoading(backupId);
+			await dashboardApi.restoreBackupFile(backupId);
+			toast.success('Restore initiated');
+		} catch (error) {
+			console.error('Failed to restore backup:', error);
+			toast.error('Failed to restore backup');
+		} finally {
+			setActionLoading(null);
+		}
+	};
 
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Backups</h1>
-          <p className="mt-1 text-sm text-gray-500">Manage project backups and restore points</p>
-        </div>
-        <div className="flex items-center space-x-3">
-          {/* Connection Status */}
-          <div className="flex items-center space-x-2 px-3 py-1 rounded-lg bg-gray-100">
-            {isConnected ? (
-              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-            ) : (
-              <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-            )}
-            <span className="text-sm text-gray-700">
-              {isConnected ? 'Live' : 'Offline'}
-            </span>
-          </div>
-          <Button
-            variant="primary"
-            onClick={() => setShowBackupModal(true)}
-            disabled={!selectedProject}
-          >
-            <Database className="w-4 h-4 mr-2" />
-            Create Backup
-          </Button>
-        </div>
-      </div>
+	const formatSize = (bytes: number | undefined) => {
+		if (!bytes) return '0 B';
+		const units = ['B', 'KB', 'MB', 'GB'];
+		let size = bytes;
+		let unitIndex = 0;
+		while (size >= 1024 && unitIndex < units.length - 1) {
+			size /= 1024;
+			unitIndex++;
+		}
+		return `${size.toFixed(1)} ${units[unitIndex]}`;
+	};
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Project Selection */}
-        <div className="lg:col-span-1">
-          <Card title="Select Project">
-            <div className="space-y-2">
-              <select
-                value={selectedProject}
-                onChange={(e) => setSelectedProject(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-              >
-                <option value="">Choose a project...</option>
-                {projects.map((project: any) => (
-                  <option key={project.project_name} value={project.project_name}>
-                    {project.project_name}
-                  </option>
-                ))}
-              </select>
+	const formatDate = (dateStr: string) => {
+		const date = new Date(dateStr);
+		return date.toLocaleString();
+	};
 
-              {selectedProject && (
-                <div className="mt-4 space-y-3">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-600">Total Backups</span>
-                    <span className="font-medium">{backups.length}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-600">Storage Used</span>
-                    <span className="font-medium">
-                      {formatFileSize(backups.reduce((total, backup) => total + backup.info.size, 0))}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-600">Last Backup</span>
-                    <span className="font-medium">
-                      {backups.length > 0
-                        ? formatDate(backups[0].info.timestamp)
-                        : 'Never'
-                      }
-                    </span>
-                  </div>
-                </div>
-              )}
-            </div>
-          </Card>
-        </div>
+	const getStatusIcon = (status: BackupStatus) => {
+		switch (status) {
+			case 'completed':
+				return <CheckCircle className='h-4 w-4 text-green-500' />;
+			case 'failed':
+				return <XCircle className='h-4 w-4 text-red-500' />;
+			case 'running':
+				return <Loader2 className='h-4 w-4 text-blue-500 animate-spin' />;
+			default:
+				return <Clock className='h-4 w-4 text-gray-400' />;
+		}
+	};
 
-        {/* Backup List */}
-        <div className="lg:col-span-3">
-          <Card>
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-4">
-                <div className="relative">
-                  <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Search backups..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  />
-                </div>
-                <select
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value as 'date' | 'size' | 'project')}
-                  className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                >
-                  <option value="date">Sort by Date</option>
-                  <option value="size">Sort by Size</option>
-                </select>
-              </div>
-              <Button
-                variant="secondary"
-                onClick={() => refetch()}
-                disabled={isLoading}
-              >
-                <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-                Refresh
-              </Button>
-            </div>
+	const getBackupTypeLabel = (type: BackupType) => {
+		const labels: Record<BackupType, string> = {
+			full: 'Full',
+			database: 'DB',
+			files: 'Files',
+		};
+		return labels[type] || type;
+	};
 
-            {!selectedProject ? (
-              <div className="text-center py-12">
-                <Database className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No Project Selected</h3>
-                <p className="text-gray-500 mb-4">Select a project to view and manage backups</p>
-              </div>
-            ) : isLoading ? (
-              <div className="text-center py-12">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
-                <p className="mt-3 text-gray-500">Loading backups...</p>
-              </div>
-            ) : filteredBackups.length === 0 ? (
-              <div className="text-center py-12">
-                <Cloud className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No Backups Found</h3>
-                <p className="text-gray-500 mb-4">Create your first backup for this project</p>
-                <Button onClick={() => setShowBackupModal(true)}>
-                  <Database className="w-4 h-4 mr-2" />
-                  Create First Backup
-                </Button>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {filteredBackups.map((backup, index) => {
-                  const typeBadge = getBackupTypeBadge(backup.info.type)
-                  return (
-                    <div
-                      key={index}
-                      className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-4">
-                          <div className="w-10 h-10 bg-primary-100 rounded-lg flex items-center justify-center">
-                            <Database className="w-5 h-5 text-primary-600" />
-                          </div>
-                          <div>
-                            <div className="flex items-center space-x-2">
-                              <h4 className="font-medium text-gray-900">
-                                Backup from {formatDate(backup.info.timestamp)}
-                              </h4>
-                              <Badge variant={typeBadge.variant}>
-                                {typeBadge.text}
-                              </Badge>
-                            </div>
-                            <div className="flex items-center space-x-4 mt-1 text-sm text-gray-500">
-                              <span className="flex items-center">
-                                <HardDrive className="w-4 h-4 mr-1" />
-                                {formatFileSize(backup.info.size)}
-                              </span>
-                              <span className="flex items-center">
-                                <Clock className="w-4 h-4 mr-1" />
-                                {new Date(backup.info.timestamp).toLocaleDateString()}
-                              </span>
-                              <span className="flex items-center">
-                                <Database className="w-4 h-4 mr-1" />
-                                {backup.info.database ? 'DB' : 'No DB'}
-                              </span>
-                              <span className="flex items-center">
-                                <FileText className="w-4 h-4 mr-1" />
-                                {backup.info.files ? 'Files' : 'No Files'}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => {
-                              setSelectedBackup(backup)
-                              setShowRestoreModal(true)
-                            }}
-                          >
-                            <RefreshCw className="w-4 h-4 mr-1" />
-                            Restore
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                          >
-                            <Download className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </Card>
-        </div>
-      </div>
+	const getBackupTypeColor = (type: BackupType) => {
+		const colors: Record<BackupType, string> = {
+			full: 'bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300',
+			database:
+				'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+			files:
+				'bg-orange-50 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
+		};
+		return colors[type] || 'bg-gray-50 text-gray-700';
+	};
 
-      {/* Backup Creation Modal */}
-      {showBackupModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">Create Backup</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Backup Type
-                </label>
-                <select className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500">
-                  <option value="full">Full Backup (Database + Files)</option>
-                  <option value="database">Database Only</option>
-                  <option value="files">Files Only</option>
-                </select>
-              </div>
-              <div className="flex items-center space-x-3">
-                <input type="checkbox" id="include-db" defaultChecked className="rounded border-gray-300" />
-                <label htmlFor="include-db" className="text-sm text-gray-700">
-                  Include Database
-                </label>
-              </div>
-              <div className="flex items-center space-x-3">
-                <input type="checkbox" id="include-files" defaultChecked className="rounded border-gray-300" />
-                <label htmlFor="include-files" className="text-sm text-gray-700">
-                  Include Files (wp-content)
-                </label>
-              </div>
-            </div>
-            <div className="mt-6 flex justify-end space-x-3">
-              <Button variant="secondary" onClick={() => setShowBackupModal(false)}>
-                Cancel
-              </Button>
-              <Button
-                onClick={() => handleCreateBackup({
-                  type: 'full',
-                  database: true,
-                  files: true
-                })}
-                disabled={createBackupMutation.isLoading}
-              >
-                {createBackupMutation.isLoading ? 'Creating...' : 'Create Backup'}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+	const getStorageIcon = (type: BackupStorageType) => {
+		switch (type) {
+			case 'google_drive':
+				return <Cloud className='h-4 w-4' />;
+			case 'local':
+				return <HardDrive className='h-4 w-4' />;
+			default:
+				return <Database className='h-4 w-4' />;
+		}
+	};
 
-      {/* Restore Modal */}
-      {showRestoreModal && selectedBackup && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">Restore Backup</h3>
-            <div className="space-y-4">
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                <div className="flex items-start">
-                  <AlertTriangle className="w-5 h-5 text-yellow-600 mt-0.5 mr-2" />
-                  <div>
-                    <h4 className="text-sm font-medium text-yellow-800">Warning</h4>
-                    <p className="text-sm text-yellow-700 mt-1">
-                      This will replace the current database and/or files with the backup from {formatDate(selectedBackup.info.timestamp)}.
-                      This action cannot be undone.
-                    </p>
-                  </div>
-                </div>
-              </div>
-              <div>
-                <p className="text-sm text-gray-600">
-                  <strong>Backup:</strong> {formatDate(selectedBackup.info.timestamp)}
-                </p>
-                <p className="text-sm text-gray-600">
-                  <strong>Type:</strong> {selectedBackup.info.type}
-                </p>
-                <p className="text-sm text-gray-600">
-                  <strong>Size:</strong> {formatFileSize(selectedBackup.info.size)}
-                </p>
-              </div>
-              <div className="space-y-2">
-                <div className="flex items-center space-x-3">
-                  <input type="checkbox" id="restore-db" defaultChecked className="rounded border-gray-300" />
-                  <label htmlFor="restore-db" className="text-sm text-gray-700">
-                    Restore Database
-                  </label>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <input type="checkbox" id="restore-files" defaultChecked className="rounded border-gray-300" />
-                  <label htmlFor="restore-files" className="text-sm text-gray-700">
-                    Restore Files (wp-content)
-                  </label>
-                </div>
-              </div>
-            </div>
-            <div className="mt-6 flex justify-end space-x-3">
-              <Button variant="secondary" onClick={() => setShowRestoreModal(false)}>
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                onClick={() => handleRestoreBackup({
-                  type: 'full',
-                  database: true,
-                  files: true
-                })}
-                disabled={restoreBackupMutation.isLoading}
-              >
-                {restoreBackupMutation.isLoading ? 'Restoring...' : 'Restore Backup'}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
+	return (
+		<div className='space-y-6'>
+			<div className='flex justify-between items-center'>
+				<h1 className='text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2'>
+					<Database className='h-6 w-6 text-indigo-600' />
+					Backup Manager
+				</h1>
+				<div className='flex gap-2'>
+					<button
+						onClick={fetchBackups}
+						className='p-2 text-gray-500 hover:text-indigo-600 border border-gray-200 dark:border-gray-700 rounded-lg transition-colors'
+						title='Refresh'
+					>
+						<RefreshCw className={`h-5 w-5 ${loading ? 'animate-spin' : ''}`} />
+					</button>
+					<button
+						onClick={() => setShowCreateModal(true)}
+						className='px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2 transition-colors shadow-sm'
+					>
+						<Plus className='h-4 w-4' />
+						New Backup
+					</button>
+				</div>
+			</div>
 
-export default Backups
+			{/* Stats Cards */}
+			<div className='grid grid-cols-1 md:grid-cols-4 gap-4'>
+				<div className='bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200 dark:border-gray-700'>
+					<div className='flex items-center gap-3'>
+						<div className='p-2 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg'>
+							<Database className='h-5 w-5 text-indigo-600' />
+						</div>
+						<div>
+							<div className='text-2xl font-bold text-gray-900 dark:text-white'>
+								{stats.total}
+							</div>
+							<div className='text-sm text-gray-500'>Total Backups</div>
+						</div>
+					</div>
+				</div>
+				<div className='bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200 dark:border-gray-700'>
+					<div className='flex items-center gap-3'>
+						<div className='p-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg'>
+							<HardDrive className='h-5 w-5 text-blue-600' />
+						</div>
+						<div>
+							<div className='text-2xl font-bold text-gray-900 dark:text-white'>
+								{formatSize(stats.totalSize)}
+							</div>
+							<div className='text-sm text-gray-500'>Total Size</div>
+						</div>
+					</div>
+				</div>
+				<div className='bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200 dark:border-gray-700'>
+					<div className='flex items-center gap-3'>
+						<div className='p-2 bg-green-50 dark:bg-green-900/20 rounded-lg'>
+							<Cloud className='h-5 w-5 text-green-600' />
+						</div>
+						<div>
+							<div className='text-2xl font-bold text-gray-900 dark:text-white'>
+								{stats.googleDriveCount}
+							</div>
+							<div className='text-sm text-gray-500'>Google Drive</div>
+						</div>
+					</div>
+				</div>
+				<div className='bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200 dark:border-gray-700'>
+					<div className='flex items-center gap-3'>
+						<div className='p-2 bg-orange-50 dark:bg-orange-900/20 rounded-lg'>
+							<HardDrive className='h-5 w-5 text-orange-600' />
+						</div>
+						<div>
+							<div className='text-2xl font-bold text-gray-900 dark:text-white'>
+								{stats.localCount}
+							</div>
+							<div className='text-sm text-gray-500'>Local Storage</div>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			{/* Filters */}
+			<div className='flex gap-4 items-center'>
+				<div className='flex items-center gap-2'>
+					<Filter className='h-4 w-4 text-gray-400' />
+					<span className='text-sm text-gray-500'>Filter:</span>
+				</div>
+				<select
+					value={filterProjectId || ''}
+					onChange={e =>
+						setFilterProjectId(
+							e.target.value ? parseInt(e.target.value) : undefined
+						)
+					}
+					className='px-3 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300'
+				>
+					<option value=''>All Projects</option>
+					{projects.map(project => (
+						<option key={project.id} value={project.id}>
+							{project.name}
+						</option>
+					))}
+				</select>
+				<select
+					value={filterBackupType || ''}
+					onChange={e =>
+						setFilterBackupType((e.target.value as BackupType) || undefined)
+					}
+					className='px-3 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300'
+				>
+					<option value=''>All Types</option>
+					<option value='full'>Full Backup</option>
+					<option value='database'>Database</option>
+					<option value='files'>Files</option>
+				</select>
+			</div>
+
+			{/* Backups Table */}
+			<div className='bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden'>
+				{loading ? (
+					<div className='flex items-center justify-center py-16'>
+						<Loader2 className='h-8 w-8 animate-spin text-indigo-600' />
+					</div>
+				) : backups.length > 0 ? (
+					<div className='overflow-x-auto'>
+						<table className='w-full text-left'>
+							<thead className='bg-gray-50 dark:bg-gray-900/50'>
+								<tr>
+									<th className='px-6 py-4 text-xs font-semibold text-gray-500 uppercase'>
+										Status
+									</th>
+									<th className='px-6 py-4 text-xs font-semibold text-gray-500 uppercase'>
+										Name
+									</th>
+									<th className='px-6 py-4 text-xs font-semibold text-gray-500 uppercase'>
+										Project
+									</th>
+									<th className='px-6 py-4 text-xs font-semibold text-gray-500 uppercase'>
+										Type
+									</th>
+									<th className='px-6 py-4 text-xs font-semibold text-gray-500 uppercase'>
+										Size
+									</th>
+									<th className='px-6 py-4 text-xs font-semibold text-gray-500 uppercase'>
+										Storage
+									</th>
+									<th className='px-6 py-4 text-xs font-semibold text-gray-500 uppercase'>
+										Date
+									</th>
+									<th className='px-6 py-4 text-xs font-semibold text-gray-500 uppercase text-right'>
+										Actions
+									</th>
+								</tr>
+							</thead>
+							<tbody className='divide-y divide-gray-100 dark:divide-gray-700'>
+								{backups.map(backup => (
+									<tr
+										key={backup.id}
+										className='hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors'
+									>
+										<td className='px-6 py-4'>
+											<div className='flex items-center gap-2'>
+												{getStatusIcon(backup.status)}
+												<span className='text-xs capitalize text-gray-500'>
+													{backup.status}
+												</span>
+											</div>
+										</td>
+										<td className='px-6 py-4'>
+											<span className='font-medium text-gray-900 dark:text-gray-200 truncate max-w-xs block'>
+												{backup.name}
+											</span>
+											{backup.error_message && (
+												<span className='text-xs text-red-500 truncate block max-w-xs'>
+													{backup.error_message}
+												</span>
+											)}
+										</td>
+										<td className='px-6 py-4 text-sm text-gray-600 dark:text-gray-300'>
+											{backup.project_name || `#${backup.project_id}`}
+										</td>
+										<td className='px-6 py-4'>
+											<span
+												className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getBackupTypeColor(
+													backup.backup_type
+												)}`}
+											>
+												{getBackupTypeLabel(backup.backup_type)}
+											</span>
+										</td>
+										<td className='px-6 py-4 text-sm text-gray-600 dark:text-gray-300'>
+											{formatSize(backup.size_bytes)}
+										</td>
+										<td className='px-6 py-4'>
+											<div className='flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-300'>
+												{getStorageIcon(backup.storage_type)}
+												<span className='capitalize'>
+													{backup.storage_type.replace('_', ' ')}
+												</span>
+											</div>
+										</td>
+										<td className='px-6 py-4 text-sm text-gray-600 dark:text-gray-300'>
+											{formatDate(backup.created_at)}
+										</td>
+										<td className='px-6 py-4 text-right'>
+											<div className='flex justify-end gap-1'>
+												{backup.status === 'completed' && (
+													<>
+														<button
+															className='p-1.5 text-gray-400 hover:text-indigo-600 transition-colors rounded hover:bg-gray-100 dark:hover:bg-gray-700'
+															title='Download'
+														>
+															<Download className='h-4 w-4' />
+														</button>
+														<button
+															onClick={() => handleRestore(backup.id)}
+															disabled={actionLoading === backup.id}
+															className='p-1.5 text-gray-400 hover:text-green-600 transition-colors rounded hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50'
+															title='Restore'
+														>
+															{actionLoading === backup.id ? (
+																<Loader2 className='h-4 w-4 animate-spin' />
+															) : (
+																<RotateCcw className='h-4 w-4' />
+															)}
+														</button>
+													</>
+												)}
+												<button
+													onClick={() => handleDeleteBackup(backup.id)}
+													disabled={actionLoading === backup.id}
+													className='p-1.5 text-gray-400 hover:text-red-500 transition-colors rounded hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50'
+													title='Delete'
+												>
+													<Trash2 className='h-4 w-4' />
+												</button>
+											</div>
+										</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+					</div>
+				) : (
+					<div className='flex flex-col items-center justify-center py-16 text-gray-400'>
+						<FolderOpen className='w-12 h-12 mb-3 text-gray-300' />
+						<p className='text-sm font-medium'>No backups yet</p>
+						<p className='text-xs mt-1'>
+							Create your first backup using the button above
+						</p>
+					</div>
+				)}
+			</div>
+
+			{/* Create Backup Modal */}
+			{showCreateModal && (
+				<div className='fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4'>
+					<div className='bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-md w-full'>
+						<div className='p-6 border-b border-gray-100 dark:border-gray-700'>
+							<h2 className='text-xl font-bold text-gray-900 dark:text-white'>
+								Create New Backup
+							</h2>
+						</div>
+
+						<div className='p-6 space-y-4'>
+							{/* Project */}
+							<div>
+								<label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
+									Project *
+								</label>
+								<select
+									value={formData.project_id}
+									onChange={e =>
+										setFormData({
+											...formData,
+											project_id: parseInt(e.target.value),
+										})
+									}
+									className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500'
+								>
+									<option value={0}>Select a project...</option>
+									{projects.map(project => (
+										<option key={project.id} value={project.id}>
+											{project.name}
+										</option>
+									))}
+								</select>
+							</div>
+
+							{/* Backup Type */}
+							<div>
+								<label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
+									Backup Type
+								</label>
+								<select
+									value={formData.backup_type}
+									onChange={e =>
+										setFormData({
+											...formData,
+											backup_type: e.target.value as BackupType,
+										})
+									}
+									className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500'
+								>
+									<option value='full'>Full Backup (Database + Files)</option>
+									<option value='database'>Database Only</option>
+									<option value='files'>Files Only</option>
+								</select>
+							</div>
+
+							{/* Storage Type */}
+							<div>
+								<label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
+									Storage Location
+								</label>
+								<select
+									value={formData.storage_type}
+									onChange={e =>
+										setFormData({
+											...formData,
+											storage_type: e.target.value as BackupStorageType,
+										})
+									}
+									className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500'
+								>
+									<option value='google_drive'>Google Drive</option>
+									<option value='local'>Local Storage</option>
+									<option value='s3'>AWS S3</option>
+								</select>
+							</div>
+
+							{/* Name (optional) */}
+							<div>
+								<label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
+									Name (optional)
+								</label>
+								<input
+									type='text'
+									value={formData.name}
+									onChange={e =>
+										setFormData({ ...formData, name: e.target.value })
+									}
+									className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500'
+									placeholder='Auto-generated if empty'
+								/>
+							</div>
+						</div>
+
+						<div className='p-6 border-t border-gray-100 dark:border-gray-700 flex justify-end gap-3'>
+							<button
+								onClick={() => setShowCreateModal(false)}
+								className='px-4 py-2 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
+							>
+								Cancel
+							</button>
+							<button
+								onClick={handleCreateBackup}
+								disabled={actionLoading !== null}
+								className='px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2'
+							>
+								{actionLoading !== null && (
+									<Loader2 className='h-4 w-4 animate-spin' />
+								)}
+								Create Backup
+							</button>
+						</div>
+					</div>
+				</div>
+			)}
+		</div>
+	);
+};
+
+export default Backups;

@@ -32,7 +32,7 @@ import {
   ChevronRight,
   ChevronLeft,
   Home,
-  Grid3X3,
+  LayoutGrid,
   List,
   Eye,
   Edit,
@@ -78,153 +78,131 @@ const GoogleDriveBackup: React.FC<GoogleDriveBackupProps> = ({ project }) => {
   const { setTaskStatus } = useDashboardStore()
 
   // Check Google Drive auth status
-  const { data: authStatus } = useQuery(
-    ['google-drive-auth-status'],
-    dashboardApi.getGoogleDriveAuthStatus,
-    {
-      refetchInterval: 30000, // Check every 30 seconds
-    }
-  )
+  const { data: authStatus } = useQuery({
+    queryKey: ['google-drive-auth-status'],
+    queryFn: dashboardApi.getGoogleDriveAuthStatus,
+    refetchInterval: 30000, // Check every 30 seconds
+  })
 
   // Get storage usage
-  const { data: storageUsage } = useQuery(
-    'google-drive-storage',
-    dashboardApi.getDriveStorageUsage,
-    {
-      enabled: authStatus?.data?.authenticated,
-      refetchInterval: 60000, // Check every minute
-    }
-  )
+  const { data: storageUsage } = useQuery({
+    queryKey: ['google-drive-storage'],
+    queryFn: dashboardApi.getDriveStorageUsage,
+    enabled: authStatus?.data?.authenticated,
+    refetchInterval: 60000, // Check every minute
+  })
 
   // Get backup history
-  const { data: backupHistory } = useQuery(
-    ['google-drive-backups', project.project_name],
-    () => dashboardApi.getProjectDriveBackups(project.project_name, 20),
-    {
-      enabled: !!(project.project_name && authStatus?.data?.authenticated),
-      refetchInterval: 30000, // Check every 30 seconds
-    }
-  )
+  const { data: backupHistory } = useQuery({
+    queryKey: ['google-drive-backups', project.project_name],
+    queryFn: () => dashboardApi.getProjectDriveBackups(project.project_name, 20),
+    enabled: !!(project.project_name && authStatus?.data?.authenticated),
+    refetchInterval: 30000, // Check every 30 seconds
+  })
 
   // Get Google Drive files if backup folder exists
-  const { data: driveFiles } = useQuery(
-    ['google-drive-files', project.google_drive?.backup_folder_id],
-    () => dashboardApi.listDriveFiles(project.google_drive?.backup_folder_id),
-    {
-      enabled: !!(project.google_drive?.backup_folder_id && authStatus?.data?.authenticated),
-    }
-  )
+  const { data: driveFiles } = useQuery({
+    queryKey: ['google-drive-files', project.google_drive?.backup_folder_id],
+    queryFn: () => dashboardApi.listDriveFiles(project.google_drive?.backup_folder_id),
+    enabled: !!(project.google_drive?.backup_folder_id && authStatus?.data?.authenticated),
+  })
 
   // Backup mutations
-  const createBackup = useMutation(
-    (options: any) => dashboardApi.backupProjectToDrive(project.project_name, options),
-    {
-      onSuccess: (response) => {
-        const taskId = response.data.task_id
-        if (taskId) {
-          // Poll for task completion
-          const interval = setInterval(async () => {
-            try {
-              const taskResponse = await dashboardApi.getTaskStatus(taskId)
-              const taskData = taskResponse.data
+  const createBackup = useMutation({
+    mutationFn: (options: any) => dashboardApi.backupProjectToDrive(project.project_name, options),
+    onSuccess: (response) => {
+      const taskId = response.data.task_id
+      if (taskId) {
+        // Poll for task completion
+        const interval = setInterval(async () => {
+          try {
+            const taskResponse = await dashboardApi.getTaskStatus(taskId)
+            const taskData = taskResponse.data
 
-              setTaskStatus(taskId, taskData)
+            setTaskStatus(taskId, taskData)
 
-              if (taskData.status === 'completed' || taskData.status === 'failed') {
-                clearInterval(interval)
-                queryClient.invalidateQueries(['google-drive-backups', project.project_name])
-                queryClient.invalidateQueries('google-drive-storage')
-              }
-            } catch (error) {
+            if (taskData.status === 'completed' || taskData.status === 'failed') {
               clearInterval(interval)
+              queryClient.invalidateQueries({ queryKey: ['google-drive-backups', project.project_name] })
+              queryClient.invalidateQueries({ queryKey: ['google-drive-storage'] })
             }
-          }, 2000)
-        }
-        setShowBackupOptions(false)
-      },
-    }
-  )
+          } catch (error) {
+            clearInterval(interval)
+          }
+        }, 2000)
+      }
+      setShowBackupOptions(false)
+    },
+  })
 
   // Cleanup backups mutation
-  const cleanupBackups = useMutation(
-    (retentionDays: number) => dashboardApi.cleanupDriveBackups(project.project_name, retentionDays),
-    {
-      onSuccess: () => {
-        queryClient.invalidateQueries(['google-drive-backups', project.project_name])
-        queryClient.invalidateQueries('google-drive-storage')
-      },
-    }
-  )
+  const cleanupBackups = useMutation({
+    mutationFn: (retentionDays: number) => dashboardApi.cleanupDriveBackups(project.project_name, retentionDays),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['google-drive-backups', project.project_name] })
+      queryClient.invalidateQueries({ queryKey: ['google-drive-storage'] })
+    },
+  })
 
   // Setup Google Drive integration
-  const setupIntegration = useMutation(
-    () => dashboardApi.setupProjectGoogleDrive(project.project_name),
-    {
-      onSuccess: () => {
-        queryClient.invalidateQueries(['comprehensive-project', project.project_name])
-      },
-    }
-  )
+  const setupIntegration = useMutation({
+    mutationFn: () => dashboardApi.setupProjectGoogleDrive(project.project_name),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['comprehensive-project', project.project_name] })
+    },
+  })
 
   // Enhanced file management mutations
-  const authenticateGoogleDrive = useMutation(
-    () => dashboardApi.authenticateGoogleDrive(),
-    {
-      onSuccess: () => {
-        setShowAuthForm(false)
-        queryClient.invalidateQueries(['google-drive-auth-status'])
-        toast.success('Google Drive authentication successful!')
-      },
-      onError: (error: any) => {
-        toast.error(`Google Drive authentication failed: ${error.message}`)
-      }
+  const authenticateGoogleDrive = useMutation({
+    mutationFn: () => dashboardApi.authenticateGoogleDrive(),
+    onSuccess: () => {
+      setShowAuthForm(false)
+      queryClient.invalidateQueries({ queryKey: ['google-drive-auth-status'] })
+      toast.success('Google Drive authentication successful!')
+    },
+    onError: (error: any) => {
+      toast.error(`Google Drive authentication failed: ${error.message}`)
     }
-  )
+  })
 
-  const uploadFile = useMutation(
-    (fileData: { file: File, folderId?: string }) =>
-      dashboardApi.uploadToDrive(fileData.file.path || fileData.file.name, fileData.folderId),
-    {
-      onSuccess: () => {
-        queryClient.invalidateQueries(['google-drive-files', currentFolderId])
-        setUploadFiles(null)
-        setShowUploadModal(false)
-        toast.success('File uploaded successfully!')
-      },
-      onError: (error: any) => {
-        toast.error(`Upload failed: ${error.message}`)
-      }
+  const uploadFile = useMutation({
+    mutationFn: (fileData: { file: File, folderId?: string }) =>
+      dashboardApi.uploadToDrive((fileData.file as any).path || fileData.file.name, fileData.folderId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['google-drive-files', currentFolderId] })
+      setUploadFiles(null)
+      setShowUploadModal(false)
+      toast.success('File uploaded successfully!')
+    },
+    onError: (error: any) => {
+      toast.error(`Upload failed: ${error.message}`)
     }
-  )
+  })
 
-  const createFolder = useMutation(
-    (folderData: { name: string, parentFolderId?: string }) =>
+  const createFolder = useMutation({
+    mutationFn: (folderData: { name: string, parentFolderId?: string }) =>
       dashboardApi.createDriveFolder(folderData.name, folderData.parentFolderId),
-    {
-      onSuccess: () => {
-        queryClient.invalidateQueries(['google-drive-files', currentFolderId])
-        setNewFolderName('')
-        setShowCreateFolderModal(false)
-        toast.success('Folder created successfully!')
-      },
-      onError: (error: any) => {
-        toast.error(`Failed to create folder: ${error.message}`)
-      }
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['google-drive-files', currentFolderId] })
+      setNewFolderName('')
+      setShowCreateFolderModal(false)
+      toast.success('Folder created successfully!')
+    },
+    onError: (error: any) => {
+      toast.error(`Failed to create folder: ${error.message}`)
     }
-  )
+  })
 
-  const downloadFile = useMutation(
-    (fileData: { fileId: string, outputPath: string }) =>
+  const downloadFile = useMutation({
+    mutationFn: (fileData: { fileId: string, outputPath: string }) =>
       dashboardApi.downloadFromDrive(fileData.fileId, fileData.outputPath),
-    {
-      onSuccess: () => {
-        toast.success('File downloaded successfully!')
-      },
-      onError: (error: any) => {
-        toast.error(`Download failed: ${error.message}`)
-      }
+    onSuccess: () => {
+      toast.success('File downloaded successfully!')
+    },
+    onError: (error: any) => {
+      toast.error(`Download failed: ${error.message}`)
     }
-  )
+  })
 
   const isAuthenticated = authStatus?.data?.authenticated
   const isIntegrated = !!project.google_drive?.backup_folder_id
@@ -776,7 +754,7 @@ const GoogleDriveBackup: React.FC<GoogleDriveBackupProps> = ({ project }) => {
                       onClick={() => setViewMode('grid')}
                       className="p-1"
                     >
-                      <Grid3X3 className="w-4 h-4" />
+                      <LayoutGrid className="w-4 h-4" />
                     </Button>
                     <Button
                       variant={viewMode === 'list' ? 'primary' : 'ghost'}

@@ -1,5 +1,7 @@
 /**
  * React hook for real-time WebSocket updates.
+ * 
+ * Handles React StrictMode double-mount gracefully and prevents duplicate toasts.
  */
 
 import { useEffect, useCallback, useRef } from 'react'
@@ -26,18 +28,28 @@ export const useRealTimeUpdates = (options: UseRealTimeUpdatesOptions = {}) => {
 
   const queryClient = useQueryClient()
   const connectionTimeoutRef = useRef<NodeJS.Timeout>()
+  const isMountedRef = useRef(true)
+  const hasShownConnectedToastRef = useRef(false)
 
   const handleConnectionChange = useCallback((connected: boolean) => {
+    // Only show toasts if mounted and haven't shown it yet
+    if (!isMountedRef.current) return
+
     onConnectionChange?.(connected)
 
-    if (connected) {
+    if (connected && !hasShownConnectedToastRef.current) {
+      hasShownConnectedToastRef.current = true
       toast.success('Real-time updates connected')
-    } else {
+    } else if (!connected && hasShownConnectedToastRef.current) {
+      // Only show disconnect if we previously showed connected
+      hasShownConnectedToastRef.current = false
       toast.error('Real-time updates disconnected')
     }
   }, [onConnectionChange])
 
   const handleMessage = useCallback((message: WebSocketMessage) => {
+    if (!isMountedRef.current) return
+
     switch (message.type) {
       case 'connection':
         handleConnectionChange(message.status === 'connected')
@@ -79,62 +91,65 @@ export const useRealTimeUpdates = (options: UseRealTimeUpdatesOptions = {}) => {
               break
 
             default:
-              console.log('Unhandled project update type:', updateType)
+              // Silently ignore unhandled types
+              break
           }
         }
         break
 
       case 'subscription_confirmed':
-        console.log(`Subscribed to project updates for: ${message.project_name}`)
-        break
-
       case 'unsubscription_confirmed':
-        console.log(`Unsubscribed from project updates for: ${message.project_name}`)
-        break
-
       case 'pong':
-        // Handle pong response (keep-alive)
+        // Handle silently
         break
 
       default:
-        console.log('Unhandled WebSocket message type:', message.type)
+        // Silently ignore unhandled types
+        break
     }
   }, [queryClient, onProjectUpdate, onDdevStatusChange, onWordPressUpdate, handleConnectionChange])
 
   const connect = useCallback(async () => {
-    if (!enabled) return
+    if (!enabled || !isMountedRef.current) return
 
     try {
       await websocketService.connect()
 
+      // Only proceed if still mounted after async connect
+      if (!isMountedRef.current) return
+
       // Set up event handlers
       websocketService.on('message', handleMessage)
 
-      // Send initial ping
-      websocketService.ping()
+      // Only send ping if connection is actually open
+      if (websocketService.isConnected()) {
+        websocketService.ping()
+      }
 
       // Set up periodic ping to keep connection alive
       connectionTimeoutRef.current = setInterval(() => {
-        if (websocketService.isConnected()) {
+        if (websocketService.isConnected() && isMountedRef.current) {
           websocketService.ping()
         }
       }, 30000) // Ping every 30 seconds
 
     } catch (error) {
-      console.error('Failed to connect WebSocket:', error)
-      handleConnectionChange(false)
+      // Silently fail - WebSocket will auto-reconnect
+      if (isMountedRef.current) {
+        handleConnectionChange(false)
+      }
     }
   }, [enabled, handleMessage, handleConnectionChange])
 
   const disconnect = useCallback(() => {
     if (connectionTimeoutRef.current) {
       clearInterval(connectionTimeoutRef.current)
+      connectionTimeoutRef.current = undefined
     }
 
     websocketService.off('message', handleMessage)
     websocketService.disconnect()
-    handleConnectionChange(false)
-  }, [handleMessage, handleConnectionChange])
+  }, [handleMessage])
 
   const subscribeToProject = useCallback((projectName: string) => {
     if (websocketService.isConnected()) {
@@ -149,11 +164,15 @@ export const useRealTimeUpdates = (options: UseRealTimeUpdatesOptions = {}) => {
   }, [])
 
   useEffect(() => {
+    isMountedRef.current = true
+    hasShownConnectedToastRef.current = false
+
     if (enabled) {
       connect()
     }
 
     return () => {
+      isMountedRef.current = false
       disconnect()
     }
   }, [enabled, connect, disconnect])

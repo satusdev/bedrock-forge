@@ -8,6 +8,8 @@ import {
   Activity,
   CheckCircle,
   AlertTriangle,
+  AlertCircle,
+  Info,
   Search,
   RefreshCw,
   Settings,
@@ -21,13 +23,14 @@ import {
   Calendar,
   X,
   Download,
-  EyeOff
+  EyeOff,
+  FileCode
 } from 'lucide-react'
 import Card from './ui/Card'
 import Badge from './ui/Badge'
 import Button from './ui/Button'
 import { useDashboardStore } from '@/store/useDashboardStore'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query'
 import { dashboardApi } from '@/services/api'
 import { useRealTimeUpdates } from '@/hooks/useRealTimeUpdates'
 import toast from 'react-hot-toast'
@@ -94,7 +97,7 @@ const WordPressManager: React.FC<WordPressManagerProps> = ({ project }) => {
   const handleUpdateTheme = async (themeName: string) => {
     try {
       toast.loading(`Updating theme ${themeName}...`, { id: `update-theme-${themeName}` })
-      await dashboardApi.updateTheme(project.project_name, themeName)
+      await dashboardApi.updateProjectTheme(project.project_name, themeName)
       toast.success(`Theme ${themeName} updated successfully!`, { id: `update-theme-${themeName}` })
     } catch (error: any) {
       toast.error(`Failed to update theme: ${error.response?.data?.detail || error.message}`, {
@@ -129,29 +132,25 @@ const WordPressManager: React.FC<WordPressManagerProps> = ({ project }) => {
   }
 
   // Get plugins
-  const { data: pluginsData, isLoading: pluginsLoading } = useQuery(
-    ['plugins', project.project_name],
-    () => dashboardApi.getProjectPlugins(project.project_name),
-    {
-      enabled: !!project.project_name,
-      refetchInterval: 60000, // Check every minute
-    }
-  )
+  const { data: pluginsData, isLoading: pluginsLoading } = useQuery({
+    queryKey: ['plugins', project.project_name],
+    queryFn: () => dashboardApi.getProjectPlugins(project.project_name),
+    enabled: !!project.project_name,
+    refetchInterval: 60000, // Check every minute
+  })
 
   // Get themes
-  const { data: themesData, isLoading: themesLoading } = useQuery(
-    ['themes', project.project_name],
-    () => dashboardApi.getProjectThemes(project.project_name),
-    {
-      enabled: !!project.project_name,
-      refetchInterval: 60000, // Check every minute
-    }
-  )
+  const { data: themesData, isLoading: themesLoading } = useQuery({
+    queryKey: ['themes', project.project_name],
+    queryFn: () => dashboardApi.getProjectThemes(project.project_name),
+    enabled: !!project.project_name,
+    refetchInterval: 60000, // Check every minute
+  })
 
   // Get WordPress info (mock - would need API endpoint)
-  const { data: wpInfo } = useQuery(
-    ['wordpress-info', project.project_name],
-    () => Promise.resolve({
+  const { data: wpInfo } = useQuery({
+    queryKey: ['wordpress-info', project.project_name],
+    queryFn: () => Promise.resolve({
       version: '6.4.3',
       database_version: '8.0.33',
       php_version: '8.1.27',
@@ -161,36 +160,30 @@ const WordPressManager: React.FC<WordPressManagerProps> = ({ project }) => {
       users_count: 3,
       posts_count: 42,
       pages_count: 8
-    })
-  )
+    }),
+  })
 
   // Mock mutations for WordPress operations
-  const updatePlugin = useMutation(
-    (pluginName: string) => Promise.resolve({ success: true }),
-    {
-      onSuccess: () => {
-        queryClient.invalidateQueries(['plugins', project.project_name])
-      },
-    }
-  )
+  const updatePlugin = useMutation({
+    mutationFn: (pluginName: string) => Promise.resolve({ success: true }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['plugins', project.project_name] })
+    },
+  })
 
-  const updateTheme = useMutation(
-    (themeName: string) => Promise.resolve({ success: true }),
-    {
-      onSuccess: () => {
-        queryClient.invalidateQueries(['themes', project.project_name])
-      },
-    }
-  )
+  const updateTheme = useMutation({
+    mutationFn: (themeName: string) => Promise.resolve({ success: true }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['themes', project.project_name] })
+    },
+  })
 
-  const updateWordPressCore = useMutation(
-    () => Promise.resolve({ success: true }),
-    {
-      onSuccess: () => {
-        queryClient.invalidateQueries(['wordpress-info', project.project_name])
-      },
-    }
-  )
+  const updateWordPressCore = useMutation({
+    mutationFn: () => Promise.resolve({ success: true }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['wordpress-info', project.project_name] })
+    },
+  })
 
   const plugins = pluginsData?.data?.plugins || []
   const themes = themesData?.data?.themes || []
@@ -242,7 +235,7 @@ const WordPressManager: React.FC<WordPressManagerProps> = ({ project }) => {
   const tabs = [
     { id: 'plugins', name: 'Plugins', icon: Puzzle, count: plugins.length },
     { id: 'themes', name: 'Themes', icon: Palette, count: themes.length },
-    { id: 'core', name: 'WordPress Core', icon: WordPress },
+    { id: 'core', name: 'WordPress Core', icon: FileCode },
     { id: 'health', name: 'Site Health', icon: Shield },
     { id: 'database', name: 'Database', icon: Database },
   ]
@@ -474,7 +467,7 @@ const WordPressManager: React.FC<WordPressManagerProps> = ({ project }) => {
                       const count = plugins.filter((p: any) => (p.source || 'wordpress') === source).length
                       return (
                         <div key={source as string} className="flex justify-between">
-                          <span className="text-gray-600 capitalize">{source}</span>
+                          <span className="text-gray-600 capitalize">{String(source)}</span>
                           <span className="font-medium">{count}</span>
                         </div>
                       )

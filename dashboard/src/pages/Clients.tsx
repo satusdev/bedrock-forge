@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Users,
@@ -18,7 +19,8 @@ import {
   X,
   Clock,
   MapPin,
-  CreditCard
+  CreditCard,
+  RefreshCw
 } from 'lucide-react'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
@@ -27,7 +29,7 @@ import { dashboardApi } from '@/services/api'
 import { useRealTimeUpdates } from '@/hooks/useRealTimeUpdates'
 import toast from 'react-hot-toast'
 
-interface Client {
+export interface Client {
   id: string
   name: string
   email: string
@@ -356,7 +358,9 @@ const Clients: React.FC = () => {
                       </div>
                       <div className="flex-1">
                         <div className="flex items-center space-x-3">
-                          <h3 className="text-lg font-medium text-gray-900">{client.name}</h3>
+                          <Link to={`/clients/${client.id}`} className="text-lg font-medium text-gray-900 hover:text-blue-600">
+                            {client.name}
+                          </Link>
                           <Badge variant={statusBadge.variant}>
                             {statusBadge.text}
                           </Badge>
@@ -728,7 +732,5 @@ const ClientForm: React.FC<ClientFormProps> = ({
     </form>
   )
 }
-
-export default Clients
 
 export default Clients
