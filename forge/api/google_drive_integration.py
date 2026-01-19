@@ -17,7 +17,7 @@ try:
     from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
-    from google_auth_oauthlib.flow import InstalledAppFlow
+    from google_auth_oauthlib.flow import InstalledAppFlow, Flow
     GOOGLE_DRIVE_AVAILABLE = True
 except ImportError:
     GOOGLE_DRIVE_AVAILABLE = False
@@ -29,9 +29,17 @@ from ..models.dashboard_project import GoogleDriveIntegration
 class GoogleDriveService:
     """Google Drive integration service."""
 
-    SCOPES = ['https://www.googleapis.com/auth/drive']
+    SCOPES = [
+        'https://www.googleapis.com/auth/drive',
+        'https://www.googleapis.com/auth/userinfo.email',
+        'https://www.googleapis.com/auth/userinfo.profile',
+        'openid'
+    ]
     TOKEN_FILE = 'token.json'
     CREDENTIALS_FILE = 'credentials.json'
+    
+    # OAuth state storage (in-memory for flow tracking)
+    _oauth_flows: Dict[str, Any] = {}
 
     def __init__(self, credentials_path: Optional[str] = None, token_path: Optional[str] = None):
         """
@@ -45,15 +53,249 @@ class GoogleDriveService:
         self.token_path = token_path or os.getenv('GOOGLE_DRIVE_TOKEN_FILE', self.TOKEN_FILE)
         self.service = None
         self.credentials = None
+        self._user_info = None
 
         if GOOGLE_DRIVE_AVAILABLE:
             self._authenticate()
         else:
             logger.warning("Google Drive libraries not available. Install with: pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib")
 
+    def get_auth_url(self, redirect_uri: Optional[str] = None, state: Optional[str] = None) -> str:
+        """
+        Generate OAuth authorization URL for web-based authentication.
+        
+        Args:
+            redirect_uri: OAuth callback URL (defaults to localhost:3000/settings)
+            state: Optional state parameter for CSRF protection
+            
+        Returns:
+            Authorization URL to redirect the user to
+        """
+        if not GOOGLE_DRIVE_AVAILABLE:
+            raise ValueError("Google Drive libraries not available")
+        
+        redirect_uri = redirect_uri or os.getenv(
+            'GOOGLE_OAUTH_REDIRECT_URI', 
+            'http://localhost:3000/settings'
+        )
+        
+        # Check if we have environment-based credentials
+        client_id = os.getenv('GOOGLE_CLIENT_ID')
+        client_secret = os.getenv('GOOGLE_CLIENT_SECRET')
+        
+        if client_id and client_secret:
+            # Use environment variables
+            client_config = {
+                "web": {
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "redirect_uris": [redirect_uri]
+                }
+            }
+            flow = Flow.from_client_config(
+                client_config,
+                scopes=self.SCOPES,
+                redirect_uri=redirect_uri
+            )
+        elif os.path.exists(self.credentials_path):
+            # Use credentials.json file
+            flow = Flow.from_client_secrets_file(
+                self.credentials_path,
+                scopes=self.SCOPES,
+                redirect_uri=redirect_uri
+            )
+        else:
+            raise ValueError(
+                "Google OAuth not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET "
+                f"environment variables, or provide {self.credentials_path}"
+            )
+        
+        auth_url, generated_state = flow.authorization_url(
+            access_type='offline',
+            include_granted_scopes='true',
+            prompt='consent',
+            state=state
+        )
+        
+        # Store flow for later use in callback
+        GoogleDriveService._oauth_flows[generated_state] = {
+            'flow': flow,
+            'redirect_uri': redirect_uri,
+            'created_at': datetime.utcnow()
+        }
+        
+        logger.info(f"Generated Google OAuth URL with state: {generated_state}")
+        return auth_url
+    
+    def complete_auth(self, authorization_code: str, state: str, redirect_uri: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Complete OAuth flow with authorization code from callback.
+        
+        Args:
+            authorization_code: The code from Google's OAuth callback
+            state: The state parameter from the callback
+            redirect_uri: The redirect URI used in the auth request
+            
+        Returns:
+            Dict with credentials info and user email
+        """
+        if not GOOGLE_DRIVE_AVAILABLE:
+            raise ValueError("Google Drive libraries not available")
+        
+        # Get stored flow or create new one
+        flow_data = GoogleDriveService._oauth_flows.get(state)
+        
+        if flow_data:
+            flow = flow_data['flow']
+            # Clean up stored flow
+            del GoogleDriveService._oauth_flows[state]
+        else:
+            # Create new flow if not found (e.g., server restart)
+            redirect_uri = redirect_uri or os.getenv(
+                'GOOGLE_OAUTH_REDIRECT_URI',
+                'http://localhost:3000/settings'
+            )
+            
+            # Check if we have environment-based credentials
+            client_id = os.getenv('GOOGLE_CLIENT_ID')
+            client_secret = os.getenv('GOOGLE_CLIENT_SECRET')
+            
+            if client_id and client_secret:
+                client_config = {
+                    "web": {
+                        "client_id": client_id,
+                        "client_secret": client_secret,
+                        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                        "token_uri": "https://oauth2.googleapis.com/token",
+                        "redirect_uris": [redirect_uri]
+                    }
+                }
+                flow = Flow.from_client_config(
+                    client_config,
+                    scopes=self.SCOPES,
+                    redirect_uri=redirect_uri
+                )
+            elif os.path.exists(self.credentials_path):
+                flow = Flow.from_client_secrets_file(
+                    self.credentials_path,
+                    scopes=self.SCOPES,
+                    redirect_uri=redirect_uri
+                )
+            else:
+                raise ValueError("Google OAuth not configured")
+        
+        # Exchange code for tokens
+        flow.fetch_token(code=authorization_code)
+        self.credentials = flow.credentials
+        
+        # Save credentials to file
+        with open(self.token_path, 'w') as token:
+            token.write(self.credentials.to_json())
+        
+        # Build the service
+        self.service = build('drive', 'v3', credentials=self.credentials)
+        
+        # Get user info
+        user_info = self._get_user_info()
+        
+        logger.info(f"Google Drive OAuth completed for: {user_info.get('email', 'unknown')}")
+        
+        return {
+            'success': True,
+            'access_token': self.credentials.token,
+            'refresh_token': self.credentials.refresh_token,
+            'expires_at': self.credentials.expiry.isoformat() if self.credentials.expiry else None,
+            'scope': ' '.join(self.credentials.scopes) if self.credentials.scopes else None,
+            'email': user_info.get('email'),
+            'name': user_info.get('name'),
+        }
+    
+    def _get_user_info(self) -> Dict[str, Any]:
+        """Get authenticated user's info from Google."""
+        if self._user_info:
+            return self._user_info
+            
+        try:
+            if not self.credentials:
+                return {}
+            
+            # Build people service to get user info
+            from googleapiclient.discovery import build
+            people_service = build('people', 'v1', credentials=self.credentials)
+            profile = people_service.people().get(
+                resourceName='people/me',
+                personFields='names,emailAddresses'
+            ).execute()
+            
+            email = None
+            name = None
+            
+            if 'emailAddresses' in profile:
+                email = profile['emailAddresses'][0].get('value')
+            if 'names' in profile:
+                name = profile['names'][0].get('displayName')
+            
+            self._user_info = {'email': email, 'name': name}
+            return self._user_info
+            
+        except Exception as e:
+            logger.error(f"Failed to get user info: {e}")
+            return {}
+    
+    def set_credentials_from_tokens(self, access_token: str, refresh_token: Optional[str] = None, 
+                                     expiry: Optional[datetime] = None) -> bool:
+        """
+        Set credentials from stored tokens (e.g., from database).
+        
+        Args:
+            access_token: The OAuth access token
+            refresh_token: The OAuth refresh token
+            expiry: Token expiration datetime
+            
+        Returns:
+            True if credentials were set successfully
+        """
+        if not GOOGLE_DRIVE_AVAILABLE:
+            return False
+            
+        try:
+            # Load client config for token refresh
+            with open(self.credentials_path, 'r') as f:
+                client_config = json.load(f)
+            
+            client_id = client_config.get('web', client_config.get('installed', {})).get('client_id')
+            client_secret = client_config.get('web', client_config.get('installed', {})).get('client_secret')
+            token_uri = client_config.get('web', client_config.get('installed', {})).get('token_uri', 
+                'https://oauth2.googleapis.com/token')
+            
+            self.credentials = Credentials(
+                token=access_token,
+                refresh_token=refresh_token,
+                token_uri=token_uri,
+                client_id=client_id,
+                client_secret=client_secret,
+                scopes=self.SCOPES,
+                expiry=expiry
+            )
+            
+            # Refresh if expired
+            if self.credentials.expired and self.credentials.refresh_token:
+                self.credentials.refresh(Request())
+            
+            # Build service
+            self.service = build('drive', 'v3', credentials=self.credentials)
+            logger.info("Google Drive credentials loaded from tokens")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to set credentials from tokens: {e}")
+            return False
+
     def _authenticate(self) -> bool:
         """
-        Authenticate with Google Drive API.
+        Authenticate with Google Drive API using stored token file.
 
         Returns:
             True if authentication successful, False otherwise
@@ -63,22 +305,17 @@ class GoogleDriveService:
             if os.path.exists(self.token_path):
                 self.credentials = Credentials.from_authorized_user_file(self.token_path, self.SCOPES)
 
-            # If there are no (valid) credentials available, let the user log in
+            # If there are no (valid) credentials available, don't auto-login
             if not self.credentials or not self.credentials.valid:
                 if self.credentials and self.credentials.expired and self.credentials.refresh_token:
                     self.credentials.refresh(Request())
+                    # Save refreshed credentials
+                    with open(self.token_path, 'w') as token:
+                        token.write(self.credentials.to_json())
                 else:
-                    if not os.path.exists(self.credentials_path):
-                        logger.error(f"Google Drive credentials file not found: {self.credentials_path}")
-                        logger.info("Please create credentials from Google Cloud Console and save as credentials.json")
-                        return False
-
-                    flow = InstalledAppFlow.from_client_secrets_file(self.credentials_path, self.SCOPES)
-                    self.credentials = flow.run_local_server(port=0)
-
-                # Save the credentials for the next run
-                with open(self.token_path, 'w') as token:
-                    token.write(self.credentials.to_json())
+                    # Don't auto-start local server - user should use get_auth_url() for web flow
+                    logger.info("Google Drive not authenticated. Use get_auth_url() to start OAuth flow.")
+                    return False
 
             # Build the service
             self.service = build('drive', 'v3', credentials=self.credentials)
