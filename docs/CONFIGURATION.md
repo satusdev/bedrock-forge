@@ -533,6 +533,24 @@ FORGE_PROD_DB_PASSWORD=prod_password
       "script_debug": true
     }
   },
+  "deployment": {
+    "default_strategy": "atomic",
+    "health_check_timeout": 30,
+    "backup_before_deploy": true,
+    "rollback_on_failure": true
+  },
+  "billing": {
+    "default_cycle": "yearly",
+    "payment_terms": "net30",
+    "currency": "USD",
+    "auto_invoice": true,
+    "invoice_footer": "Thank you for your business!",
+    "reminders": {
+      "subscription_days": 30,
+      "domain_days": 60,
+      "ssl_days": 14
+    }
+  },
   "development": {
     "hot_reload": true,
     "live_reload": true,
