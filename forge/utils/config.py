@@ -100,3 +100,21 @@ def load_config(site_name: Optional[str], env: str, db_url: Optional[str] = None
         server_type=config_data.get("server_type"),
         region=config_data.get("region")
     )
+
+
+def get_config() -> dict:
+    """
+    Get configuration as a dictionary for simple access.
+    Used by Celery tasks and other modules that need dict-style config.
+    """
+    return {
+        "smtp_server": os.getenv("SMTP_SERVER", "localhost"),
+        "smtp_port": int(os.getenv("SMTP_PORT", "587")),
+        "smtp_user": os.getenv("SMTP_USER"),
+        "smtp_password": os.getenv("SMTP_PASSWORD"),
+        "admin_email": os.getenv("ADMIN_EMAIL"),
+        "backup_retention_days": int(os.getenv("BACKUP_RETENTION_DAYS", "30")),
+        "backup_schedule": os.getenv("BACKUP_SCHEDULE", "0 2 * * *"),
+        "redis_url": os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+        "database_url": os.getenv("DATABASE_URL"),
+    }

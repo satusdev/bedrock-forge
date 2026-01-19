@@ -71,8 +71,10 @@ class LocalConfigManager:
         Args:
             base_dir: Base directory for projects. Defaults to ~/Work/Wordpress/
         """
-        self.base_dir = base_dir or Path.home() / "Work" / "Wordpress"
-        self.global_config_path = Path.home() / ".forge" / "projects.json"
+        self.base_dir = base_dir or Path(os.getenv("FORGE_BASE_DIR", str(Path.home() / "Work" / "Wordpress")))
+        
+        config_dir = Path(os.getenv("FORGE_CONFIG_DIR", str(Path.home() / ".forge")))
+        self.global_config_path = config_dir / "projects.json"
         self.default_config_path = Path("forge/config/default.json")
         self.env_local_path = Path("forge/config/.env.local")
 
