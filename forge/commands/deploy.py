@@ -12,6 +12,8 @@ import subprocess
 
 app = typer.Typer()
 
+from forge.utils.ssh import SSHConnection
+
 from forge.provision.ftp import upload_via_ftp
 from forge.provision.core import (
     ServerConfig, DeploymentMethod, ServerType, WebServer,
@@ -296,6 +298,114 @@ def history(
 
             typer.echo()
 
+            typer.echo()
+
     except Exception as e:
-        typer.secho(f"❌ Failed to load deployment history: {e}", fg=typer.colors.RED)
+        typer.secho(f"❌ Error loading history: {e}", fg=typer.colors.RED)
+
+@app.command()
+def promote(
+    staging_host: str = typer.Option(..., help="Staging server host"),
+    staging_user: str = typer.Option(..., help="Staging server SSH user"),
+    prod_host: str = typer.Option(..., help="Production server host"),
+    prod_user: str = typer.Option(..., help="Production server SSH user"),
+    staging_path: str = typer.Option("/var/www/html", help="Path to project on staging"),
+    prod_path: str = typer.Option("/var/www/html", help="Path to project on production"),
+    prod_url: str = typer.Option(..., help="Production URL (e.g. https://example.com)"),
+    staging_url: str = typer.Option(..., help="Staging URL (e.g. https://staging.example.com)"),
+    key_path: str = typer.Option("~/.ssh/id_rsa", help="SSH key path"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    verbose: bool = typer.Option(False, "--verbose")
+):
+    """
+    Promote Staging to Production.
+    
+    1. Dump DB & Compress Files on Staging.
+    2. Download artifacts to Local.
+    3. Upload artifacts to Production.
+    4. Extract Files & Import DB on Production.
+    5. Run Search-Replace on Production.
+    """
+    logger.info("🚀 Starting Staging -> Production Promotion")
+    
+    from datetime import datetime
+    import os
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    temp_dir = Path("/tmp") / f"forge_promote_{timestamp}"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    
+    db_dump_name = f"db_export_{timestamp}.sql"
+    files_archive_name = f"files_{timestamp}.tar.gz"
+    
+    remote_db_path = f"/tmp/{db_dump_name}"
+    remote_files_path = f"/tmp/{files_archive_name}"
+    local_db_path = temp_dir / db_dump_name
+    local_files_path = temp_dir / files_archive_name
+    
+    try:
+        # Step 1: Connect to Staging
+        logger.info(f"🔌 Connecting to Staging ({staging_host})...")
+        with SSHConnection(staging_host, staging_user, key_path) as staging:
+            # Export DB
+            logger.info("📦 [Staging] Exporting database...")
+            staging.run(f"cd {staging_path} && wp db export {remote_db_path}")
+            
+            # Compress Files (excluding some dirs)
+            logger.info("📦 [Staging] Compressing files...")
+            # Exclude .env, .git, uploads (usually shared or huge? User said 'takes files needed')
+            # Assuming full code sync. If user wants uploads, we include them. 
+            # Usually uploads are synced separately or via CDN, but user said 'files and all'.
+            # Detailed request: "takes files needed and compresses them"
+            # We'll compress the whole dir but exclude .env to avoid overwriting prod secrets.
+            staging.run(f"cd {staging_path} && tar -czf {remote_files_path} --exclude='.env' .")
+            
+            # Step 2: Download to Local
+            logger.info("⬇️ [Local] Downloading artifacts from Staging...")
+            staging.download(remote_db_path, str(local_db_path))
+            staging.download(remote_files_path, str(local_files_path))
+            
+            # Cleanup Staging
+            staging.run(f"rm {remote_db_path} {remote_files_path}")
+
+        # Step 3: Connect to Production
+        logger.info(f"🔌 Connecting to Production ({prod_host})...")
+        with SSHConnection(prod_host, prod_user, key_path) as prod:
+            # Step 4: Upload to Production
+            logger.info("⬆️ [Production] Uploading artifacts...")
+            prod.upload(str(local_db_path), remote_db_path)
+            prod.upload(str(local_files_path), remote_files_path)
+            
+            # Backup Prod DB (Safety)
+            logger.info("🛡️ [Production] Creating safety backup of current DB...")
+            prod.run(f"cd {prod_path} && wp db export /tmp/prod_backup_{timestamp}.sql")
+            
+            # Extract Files
+            logger.info("📂 [Production] Extracting files...")
+            prod.run(f"cd {prod_path} && tar -xzf {remote_files_path}")
+            
+            # Import DB
+            logger.info("🗄️ [Production] Importing database...")
+            prod.run(f"cd {prod_path} && wp db import {remote_db_path}")
+            
+            # Step 5: Search & Replace
+            logger.info(f"🔄 [Production] Replacing URL: {staging_url} -> {prod_url}")
+            prod.run(f"cd {prod_path} && wp search-replace '{staging_url}' '{prod_url}' --all-tables")
+            
+            # Flush Cache
+            logger.info("🧹 [Production] Flushing caches...")
+            prod.run(f"cd {prod_path} && wp cache flush")
+            
+            # Cleanup Production
+            prod.run(f"rm {remote_db_path} {remote_files_path}")
+
+        logger.info("✅ Promotion Completed Successfully!")
+        
+    except Exception as e:
+        logger.error(f"❌ Promotion Failed: {e}")
         raise typer.Exit(1)
+    finally:
+        # Cleanup Local
+        if temp_dir.exists():
+            import shutil
+            shutil.rmtree(temp_dir)

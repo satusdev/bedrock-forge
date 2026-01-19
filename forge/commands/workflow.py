@@ -7,6 +7,10 @@ from tqdm import tqdm
 import gettext
 import json
 import subprocess
+import asyncio
+from forge.workflows.healing import ServiceHealer, run_healing_routine
+from forge.workflows.testing import AutomatedTester
+from forge.workflows.deploy import DeploymentPipeline
 
 _ = gettext.gettext
 
@@ -306,6 +310,62 @@ def clear_workflows(
             logger.error(f"Workflow '{workflow_name}' state not found.")
     else:
         logger.error("Please specify a workflow name or use --all flag.")
+
+@app.command()
+def heal(
+    verbose: bool = typer.Option(False, "--verbose")
+):
+    """Run self-healing routine for system services."""
+    try:
+        report = asyncio.run(run_healing_routine())
+        logger.info("Self-healing report:")
+        for service, status in report.items():
+            status_emoji = "✅" if status in ["Healthy", "Recovered"] else "❌"
+            logger.info(f"{status_emoji} {service}: {status}")
+    except Exception as e:
+        logger.error(f"Healing routine failed: {e}")
+        raise typer.Exit(1)
+
+@app.command()
+def test(
+    project_path: str = typer.Argument(..., help="Path to project"),
+    verbose: bool = typer.Option(False, "--verbose")
+):
+    """Run automated tests for a project."""
+    try:
+        tester = AutomatedTester(project_path)
+        results = asyncio.run(tester.run_all_tests())
+        
+        logger.info("Test Results:")
+        for test_name, result in results.items():
+            status = result['status']
+            emoji = "✅" if status in ["passed", "completed"] else "❌"
+            logger.info(f"{emoji} {test_name}: {status}")
+            if verbose or status == "failed":
+                logger.info(f"Output:\n{result['output']}")
+    except Exception as e:
+        logger.error(f"Testing failed: {e}")
+        raise typer.Exit(1)
+
+@app.command()
+def deploy_pipeline(
+    project_path: str = typer.Argument(..., help="Path to project"),
+    environment: str = typer.Argument("production", help="Environment to deploy to"),
+    verbose: bool = typer.Option(False, "--verbose")
+):
+    """Run full deployment pipeline (test -> backup -> deploy)."""
+    try:
+        pipeline = DeploymentPipeline(project_path, environment)
+        success = asyncio.run(pipeline.run_pipeline())
+        
+        if success:
+            logger.info("🚀 Pipeline execution successful!")
+        else:
+            logger.error("🛑 Pipeline execution failed.")
+            raise typer.Exit(1)
+    except Exception as e:
+        logger.error(f"Pipeline failed: {e}")
+        raise typer.Exit(1)
 
 if __name__ == "__main__":
     app()

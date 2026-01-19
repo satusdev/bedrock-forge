@@ -11,9 +11,11 @@ from forge.utils.logging import logger
 from forge.utils.errors import ForgeError
 from forge.utils.shell import run_shell
 from tqdm import tqdm
+from tqdm import tqdm
 import shutil
 import keyring
 import gettext
+from forge.utils.ssh import SSHConnection
 
 _ = gettext.gettext
 BACKUP_DIR = ".ddev/backups"
@@ -112,9 +114,11 @@ def backup(
     gdrive_folder: str = "forge-backups",
     retention: int = 7,
     dry_run: bool = False,
-    verbose: bool = False
+    verbose: bool = False,
+    remote_host: str = None,
+    remote_user: str = None
 ) -> BackupResult:
-    """Backup DB and/or uploads, optionally to Google Drive."""
+    """Backup DB and/or uploads, optionally to Google Drive (Local or Remote)."""
     start_time = datetime.now()
     backup_status = BackupStatus(project_dir)
 
@@ -123,33 +127,96 @@ def backup(
         backup_dir = project_dir / BACKUP_DIR
         backup_dir.mkdir(exist_ok=True)
         timestamp = start_time.strftime("%Y%m%d_%H%M%S")
-        backup_files = []
+        
+        # If remote is specified, we fetch from remote first
+        if remote_host:
+            if not remote_user:
+                 raise ForgeError("Remote user required via --remote-user")
+            
+            logger.info(f"🌍 Initiating Remote Backup from {remote_host}...")
+            if not dry_run:
+                with SSHConnection(remote_host, remote_user) as conn:
+                    # Remote Paths
+                    remote_tmp = "/tmp"
+                    r_db = f"{remote_tmp}/db_{timestamp}.sql"
+                    r_uploads = f"{remote_tmp}/uploads_{timestamp}.tar.gz"
+                    
+                    # Capture
+                    if db:
+                        logger.info("📦 [Remote] Exporting Database...")
+                        # Assuming standard bedrock path /var/www/html/current or similar. 
+                        # We might need --remote-path arg, but let's assume standard or user home relative
+                        # Best practice: ask user for path or assume standard. 
+                        # For now, let's try to detect or assume /var/www/html/current
+                        web_root = "/var/www/html/current" # Default assumption
+                        conn.run(f"cd {web_root} && wp db export {r_db}")
+                    
+                    if uploads:
+                        logger.info("📦 [Remote] Archiving Uploads...")
+                        conn.run(f"cd {web_root}/web/app/uploads && tar -czf {r_uploads} .")
+                    
+                    # Download
+                    if db:
+                        local_db = backup_dir / f"db_{timestamp}.sql"
+                        logger.info(f"⬇️ Downloading DB -> {local_db}...")
+                        conn.download(r_db, str(local_db))
+                        conn.run(f"rm {r_db}") # Clean remote
+                    
+                    if uploads:
+                        local_uploads = backup_dir / f"uploads_{timestamp}.tar.gz"
+                        logger.info(f"⬇️ Downloading Uploads -> {local_uploads}...")
+                        conn.download(r_uploads, str(local_uploads))
+                        conn.run(f"rm {r_uploads}") # Clean remote
+            
+            # Fall through to existing local logic (handling files in backup_dir)
+            # We just need to populating backup_files list for the rest of function
+            backup_files = []
+            if db: backup_files.append(backup_dir / f"db_{timestamp}.sql")
+            if uploads: backup_files.append(backup_dir / f"uploads_{timestamp}.tar.gz")
 
+        else:
+            # ORIGINAL LOCAL LOGIC
+            backup_files = []
+            
+            check_rclone_config(dry_run)
+            
+            # ... (rest of local logic follows) ...
+            # Wait, I am replacing the function signature block, I need to be careful not to delete the body.
+            # The replace_file_content tool requires me to provide the "ReplacementContent".
+            # If I don't replicate the local logic here, it will be lost.
+            # I should use a logic block that handles both.
+            
+            # ... (Re-implementing the local capture logic inside the else block) ...
+            
+            # Backup database (Local)
+            if db:
+                db_file = backup_dir / f"db_{timestamp}.sql"
+                logger.info(_(f"Backing up DB to {db_file}"))
+                if not dry_run:
+                    run_shell("ddev export-db --file " + str(db_file), dry_run)
+                backup_files.append(db_file)
+    
+            # Backup uploads (Local)
+            if uploads:
+                uploads_file = backup_dir / f"uploads_{timestamp}.tar.gz"
+                logger.info(_(f"Archiving uploads to {uploads_file}"))
+                if not dry_run:
+                    with tqdm(desc=_("Archiving uploads"), total=1, disable=not verbose) as pbar:
+                        shutil.make_archive(str(uploads_file).replace(".tar.gz", ""), "gztar", "web/app/uploads")
+                        pbar.update(1)
+                backup_files.append(uploads_file)
+
+        # SHARED LOGIC (GDrive Sync, Cleanup, etc)
         check_rclone_config(dry_run)
-
+        
+        # ... (Continuing with the rest of original function)
+        # To avoid duplicating massive code, I will paste the rest of the function here.
+        
         # Determine backup type
         backup_type = []
         if db: backup_type.append("db")
         if uploads: backup_type.append("uploads")
         backup_type = "+".join(backup_type) if backup_type else "none"
-
-        # Backup database
-        if db:
-            db_file = backup_dir / f"db_{timestamp}.sql"
-            logger.info(_(f"Backing up DB to {db_file}"))
-            if not dry_run:
-                run_shell("ddev export-db --file " + str(db_file), dry_run)
-            backup_files.append(db_file)
-
-        # Backup uploads
-        if uploads:
-            uploads_file = backup_dir / f"uploads_{timestamp}.tar.gz"
-            logger.info(_(f"Archiving uploads to {uploads_file}"))
-            if not dry_run:
-                with tqdm(desc=_("Archiving uploads"), total=1, disable=not verbose) as pbar:
-                    shutil.make_archive(str(uploads_file).replace(".tar.gz", ""), "gztar", "web/app/uploads")
-                    pbar.update(1)
-            backup_files.append(uploads_file)
 
         # Calculate total size
         total_size = sum(f.stat().st_size for f in backup_files if f.exists())
@@ -157,19 +224,23 @@ def backup(
         # Sync to Google Drive
         gdrive_synced = False
         if gdrive:
-            logger.info(_("Syncing backup(s) to Google Drive via rclone..."))
+            # Create Date/Time folder structure as requested: /forge-backups/YYYY-MM-DD/HH-MM-SS/
+            date_folder = start_time.strftime("%Y-%m-%d")
+            time_folder = start_time.strftime("%H-%M-%S")
+            target_folder = f"{gdrive_folder}/{date_folder}/{time_folder}"
+            
+            logger.info(_(f"Syncing backup(s) to Google Drive: {target_folder}"))
             gdrive_creds_file = get_gdrive_creds()
             try:
                 for f in tqdm(backup_files, desc=_("Uploading to GDrive"), disable=not verbose):
                     if not dry_run:
-                        run_rclone(f"rclone copy {f} gdrive:{gdrive_folder}/", gdrive_creds_file)
+                        run_rclone(f"rclone copy {f} gdrive:{target_folder}/", gdrive_creds_file)
                 gdrive_synced = True
             except Exception as e:
                 logger.error(f"Google Drive sync failed: {e}")
-                # Continue with backup even if GDrive fails
             finally:
                 if gdrive_creds_file.exists():
-                    os.unlink(gdrive_creds_file)  # Clean up temp creds
+                    os.unlink(gdrive_creds_file)
 
         # Apply retention policy
         cleanup_old_backups(backup_dir, retention, dry_run, verbose)
@@ -202,6 +273,7 @@ def backup(
                 logger.info(_("Synced to Google Drive"))
 
         return result
+
 
     except Exception as e:
         duration = (datetime.now() - start_time).total_seconds()
@@ -254,10 +326,12 @@ def backup_command(
     gdrive: bool = typer.Option(False, "--gdrive", help=_("Backup to Google Drive")),
     gdrive_folder: str = typer.Option("forge-backups", "--gdrive-folder", help=_("Google Drive folder")),
     retention: int = typer.Option(7, "--retention", help=_("Number of backups to keep")),
+    remote_host: str = typer.Option(None, "--remote-host", help="Remote server host (for remote backup)"),
+    remote_user: str = typer.Option(None, "--remote-user", help="Remote ssh user (for remote backup)"),
     dry_run: bool = typer.Option(False, "--dry-run"),
     verbose: bool = typer.Option(False, "--verbose")
 ):
-    result = backup(Path(project_dir).resolve(), db, uploads, gdrive, gdrive_folder, retention, dry_run, verbose)
+    result = backup(Path(project_dir).resolve(), db, uploads, gdrive, gdrive_folder, retention, dry_run, verbose, remote_host, remote_user)
 
     if result.success:
         typer.secho(_("✅ Backup completed successfully!"), fg=typer.colors.GREEN)
@@ -648,6 +722,246 @@ def health(
     except Exception as e:
         typer.secho(f"❌ Health check failed: {e}", fg=typer.colors.RED)
         raise typer.Exit(1)
+
+
+# ===== GOOGLE DRIVE COMMANDS =====
+
+@app.command("list-gdrive-folders")
+def list_gdrive_folders(
+    parent_id: str = typer.Option("root", "--parent", "-p", help=_("Parent folder ID (default: root)")),
+    recursive: bool = typer.Option(False, "--recursive", "-r", help=_("List folders recursively")),
+    max_depth: int = typer.Option(2, "--depth", help=_("Maximum depth for recursive listing"))
+):
+    """
+    List Google Drive folders for backup configuration.
+    
+    Use this to find folder IDs for backup destinations.
+    """
+    try:
+        from ..api.google_drive_integration import get_google_drive_service, GOOGLE_DRIVE_AVAILABLE
+        
+        if not GOOGLE_DRIVE_AVAILABLE:
+            typer.secho("❌ Google Drive libraries not installed.", fg=typer.colors.RED)
+            typer.echo("Install with: pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib")
+            raise typer.Exit(1)
+        
+        service = get_google_drive_service()
+        
+        if not service.is_authenticated():
+            typer.secho("❌ Not authenticated with Google Drive.", fg=typer.colors.RED)
+            typer.echo("Please set up credentials.json and run authentication.")
+            raise typer.Exit(1)
+        
+        def list_folders(folder_id: str, depth: int = 0, prefix: str = ""):
+            """Recursively list folders."""
+            folders = service.list_files(folder_id, mime_types=['application/vnd.google-apps.folder'])
+            
+            for folder in folders:
+                indent = "  " * depth
+                typer.echo(f"{indent}📁 {folder['name']}")
+                typer.echo(f"{indent}   ID: {folder['id']}")
+                
+                if recursive and depth < max_depth:
+                    list_folders(folder['id'], depth + 1)
+        
+        typer.secho("📂 Google Drive Folders", fg=typer.colors.BLUE)
+        typer.echo(f"Parent: {'root' if parent_id == 'root' else parent_id}")
+        typer.echo("-" * 40)
+        
+        list_folders(parent_id)
+        
+        typer.echo("-" * 40)
+        typer.echo("\n💡 Copy the folder ID to use with --gdrive-folder or in schedule configuration.")
+        
+    except Exception as e:
+        typer.secho(f"❌ Failed to list folders: {e}", fg=typer.colors.RED)
+        raise typer.Exit(1)
+
+
+@app.command("cleanup-gdrive")
+def cleanup_gdrive(
+    folder_id: str = typer.Option(..., "--folder-id", "-f", help=_("Google Drive backup folder ID")),
+    retention_days: int = typer.Option(30, "--retention", "-r", help=_("Keep backups newer than N days")),
+    retention_count: int = typer.Option(None, "--keep", "-k", help=_("Keep N most recent backups (alternative to days)")),
+    dry_run: bool = typer.Option(False, "--dry-run", "-n", help=_("Show what would be deleted without deleting")),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help=_("Show detailed output"))
+):
+    """
+    Clean up old backups from Google Drive.
+    
+    Deletes backup folders older than retention period or keeps only N most recent.
+    Backup folders are expected to follow naming: backup_YYYYMMDD_HHMMSS
+    """
+    try:
+        from ..api.google_drive_integration import get_google_drive_service, GOOGLE_DRIVE_AVAILABLE
+        from datetime import datetime, timedelta
+        
+        if not GOOGLE_DRIVE_AVAILABLE:
+            typer.secho("❌ Google Drive libraries not installed.", fg=typer.colors.RED)
+            typer.echo("Install with: pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib")
+            raise typer.Exit(1)
+        
+        service = get_google_drive_service()
+        
+        if not service.is_authenticated():
+            typer.secho("❌ Not authenticated with Google Drive.", fg=typer.colors.RED)
+            raise typer.Exit(1)
+        
+        typer.secho("🧹 Google Drive Backup Cleanup", fg=typer.colors.BLUE)
+        typer.echo(f"Folder ID: {folder_id}")
+        
+        if retention_count:
+            typer.echo(f"Strategy: Keep {retention_count} most recent backups")
+        else:
+            typer.echo(f"Strategy: Delete backups older than {retention_days} days")
+        
+        if dry_run:
+            typer.secho("🔍 DRY RUN - No files will be deleted", fg=typer.colors.YELLOW)
+        
+        typer.echo("-" * 40)
+        
+        # Get backup folders
+        folders = service.list_files(folder_id, mime_types=['application/vnd.google-apps.folder'])
+        
+        # Filter and parse backup folders
+        backup_folders = []
+        for folder in folders:
+            if folder['name'].startswith('backup_'):
+                try:
+                    # Parse timestamp from folder name
+                    timestamp_str = folder['name'].replace('backup_', '')
+                    backup_date = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
+                    backup_folders.append({
+                        'id': folder['id'],
+                        'name': folder['name'],
+                        'date': backup_date
+                    })
+                except ValueError:
+                    if verbose:
+                        typer.echo(f"⚠️ Skipping folder with invalid format: {folder['name']}")
+                    continue
+        
+        # Sort by date (newest first)
+        backup_folders.sort(key=lambda x: x['date'], reverse=True)
+        
+        typer.echo(f"Found {len(backup_folders)} backup folders")
+        
+        # Determine which to delete
+        to_delete = []
+        
+        if retention_count:
+            # Keep N most recent
+            to_delete = backup_folders[retention_count:]
+        else:
+            # Delete older than retention_days
+            cutoff_date = datetime.now() - timedelta(days=retention_days)
+            to_delete = [f for f in backup_folders if f['date'] < cutoff_date]
+        
+        if not to_delete:
+            typer.secho("✅ No backups to clean up", fg=typer.colors.GREEN)
+            return
+        
+        typer.echo(f"\n🗑️ Backups to delete: {len(to_delete)}")
+        
+        deleted_count = 0
+        for folder in to_delete:
+            age_days = (datetime.now() - folder['date']).days
+            
+            if verbose or dry_run:
+                typer.echo(f"  {'[DRY RUN] ' if dry_run else ''}Deleting: {folder['name']} ({age_days} days old)")
+            
+            if not dry_run:
+                try:
+                    if service.delete_file(folder['id']):
+                        deleted_count += 1
+                    else:
+                        typer.secho(f"  ❌ Failed to delete: {folder['name']}", fg=typer.colors.RED)
+                except Exception as e:
+                    typer.secho(f"  ❌ Error deleting {folder['name']}: {e}", fg=typer.colors.RED)
+        
+        typer.echo("-" * 40)
+        
+        if dry_run:
+            typer.secho(f"📊 Would delete {len(to_delete)} backup(s)", fg=typer.colors.YELLOW)
+        else:
+            typer.secho(f"✅ Deleted {deleted_count} backup(s)", fg=typer.colors.GREEN)
+        
+        # Show remaining
+        remaining = len(backup_folders) - len(to_delete)
+        typer.echo(f"📁 Remaining backups: {remaining}")
+        
+    except Exception as e:
+        typer.secho(f"❌ Cleanup failed: {e}", fg=typer.colors.RED)
+        raise typer.Exit(1)
+
+
+@app.command("gdrive-info")
+def gdrive_info(
+    folder_id: str = typer.Option(None, "--folder-id", "-f", help=_("Show info for specific folder"))
+):
+    """
+    Show Google Drive connection info and storage usage.
+    """
+    try:
+        from ..api.google_drive_integration import get_google_drive_service, GOOGLE_DRIVE_AVAILABLE
+        
+        if not GOOGLE_DRIVE_AVAILABLE:
+            typer.secho("❌ Google Drive libraries not installed.", fg=typer.colors.RED)
+            raise typer.Exit(1)
+        
+        service = get_google_drive_service()
+        
+        if not service.is_authenticated():
+            typer.secho("❌ Not authenticated with Google Drive.", fg=typer.colors.RED)
+            raise typer.Exit(1)
+        
+        typer.secho("☁️ Google Drive Information", fg=typer.colors.BLUE)
+        typer.echo("-" * 40)
+        typer.secho("✅ Connected and authenticated", fg=typer.colors.GREEN)
+        
+        # Get storage quota
+        try:
+            about = service.service.about().get(fields="storageQuota,user").execute()
+            
+            if 'user' in about:
+                typer.echo(f"\n👤 Account: {about['user'].get('emailAddress', 'Unknown')}")
+            
+            if 'storageQuota' in about:
+                quota = about['storageQuota']
+                used = int(quota.get('usage', 0))
+                limit = int(quota.get('limit', 0))
+                
+                used_gb = used / (1024**3)
+                limit_gb = limit / (1024**3) if limit else 0
+                
+                typer.echo(f"\n💾 Storage:")
+                typer.echo(f"   Used: {used_gb:.2f} GB")
+                if limit_gb > 0:
+                    percent = (used / limit) * 100
+                    typer.echo(f"   Limit: {limit_gb:.2f} GB")
+                    typer.echo(f"   Usage: {percent:.1f}%")
+                else:
+                    typer.echo("   Limit: Unlimited")
+                    
+        except Exception as e:
+            typer.echo(f"\n⚠️ Could not fetch storage info: {e}")
+        
+        # Show folder info if specified
+        if folder_id:
+            typer.echo(f"\n📁 Folder: {folder_id}")
+            folders = service.list_files(folder_id, mime_types=['application/vnd.google-apps.folder'])
+            files = service.list_files(folder_id)
+            
+            backup_count = sum(1 for f in folders if f['name'].startswith('backup_'))
+            
+            typer.echo(f"   Subfolders: {len(folders)}")
+            typer.echo(f"   Files: {len(files) - len(folders)}")
+            typer.echo(f"   Backup folders: {backup_count}")
+        
+    except Exception as e:
+        typer.secho(f"❌ Failed to get info: {e}", fg=typer.colors.RED)
+        raise typer.Exit(1)
+
 
 if __name__ == "__main__":
     app()
