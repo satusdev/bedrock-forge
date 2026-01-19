@@ -1,5 +1,5 @@
 import typer
-from .commands import local, provision, sync, deploy, ci, monitor, info, workflow, config, plugins, api, performance, database, cache, cdn, image, monitoring, analytics, behavior, seo, conversions, reports
+from .commands import local, provision, sync, deploy, ci, monitor, info, workflow, config, plugins, api, performance, database, cache, cdn, image, monitoring, analytics, behavior, seo, conversions, reports, security
 from .utils.logging import logger
 
 app = typer.Typer(rich_markup_mode="rich", help="Unified CLI for Bedrock WordPress workflows")
@@ -26,6 +26,7 @@ app.add_typer(behavior.app, name="behavior", help="User behavior tracking and an
 app.add_typer(seo.app, name="seo", help="SEO performance monitoring and analysis")
 app.add_typer(conversions.app, name="conversions", help="Conversion tracking and analysis")
 app.add_typer(reports.app, name="reports", help="Custom report generation and management")
+app.add_typer(security.app, name="security", help="Security auditing and hardening")
 
 @app.callback()
 def main(

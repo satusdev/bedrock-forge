@@ -8,9 +8,11 @@ deployment workflows, and collaboration features.
 import os
 import json
 import subprocess
+import secrets
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlencode
 
 try:
     from github import Github, GithubException, Repository
@@ -25,6 +27,14 @@ from ..models.dashboard_project import GitHubIntegration
 
 class GitHubService:
     """GitHub integration service."""
+    
+    # OAuth configuration
+    GITHUB_OAUTH_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
+    GITHUB_OAUTH_TOKEN_URL = "https://github.com/login/oauth/access_token"
+    GITHUB_API_USER_URL = "https://api.github.com/user"
+    
+    # OAuth state storage
+    _oauth_states: Dict[str, Any] = {}
 
     def __init__(self, access_token: Optional[str] = None):
         """
@@ -35,6 +45,7 @@ class GitHubService:
         """
         self.access_token = access_token or os.getenv("GITHUB_ACCESS_TOKEN")
         self.client = None
+        self._user_info = None
 
         if GITHUB_AVAILABLE and self.access_token:
             try:
@@ -50,6 +61,238 @@ class GitHubService:
                 logger.warning("PyGithub library not available. Install with: pip install PyGithub")
             if not self.access_token:
                 logger.warning("GitHub access token not provided")
+
+    def authenticate(self, access_token: str) -> bool:
+        """
+        Authenticate or re-authenticate with a new access token.
+        
+        Args:
+            access_token: GitHub personal access token or OAuth token
+            
+        Returns:
+            True if authentication successful
+        """
+        if not GITHUB_AVAILABLE:
+            logger.error("PyGithub library not available")
+            return False
+            
+        try:
+            self.access_token = access_token
+            self.client = Github(access_token)
+            # Test authentication by getting user
+            user = self.client.get_user()
+            self._user_info = {
+                'login': user.login,
+                'name': user.name,
+                'email': user.email,
+                'avatar_url': user.avatar_url
+            }
+            logger.info(f"GitHub API authenticated successfully as {user.login}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to authenticate with GitHub: {e}")
+            self.client = None
+            self._user_info = None
+            return False
+    
+    def get_auth_url(self, redirect_uri: Optional[str] = None, state: Optional[str] = None) -> str:
+        """
+        Generate GitHub OAuth authorization URL.
+        
+        Args:
+            redirect_uri: OAuth callback URL
+            state: Optional CSRF state parameter
+            
+        Returns:
+            Authorization URL to redirect user to
+        """
+        client_id = os.getenv("GITHUB_CLIENT_ID")
+        if not client_id:
+            raise ValueError("GITHUB_CLIENT_ID environment variable not set")
+        
+        redirect_uri = redirect_uri or os.getenv(
+            "GITHUB_OAUTH_REDIRECT_URI",
+            "http://localhost:3000/settings"
+        )
+        
+        # Generate state if not provided
+        state = state or secrets.token_urlsafe(32)
+        
+        # Store state for verification
+        GitHubService._oauth_states[state] = {
+            'redirect_uri': redirect_uri,
+            'created_at': datetime.utcnow()
+        }
+        
+        params = {
+            'client_id': client_id,
+            'redirect_uri': redirect_uri,
+            'scope': 'repo read:user user:email',
+            'state': state,
+        }
+        
+        auth_url = f"{self.GITHUB_OAUTH_AUTHORIZE_URL}?{urlencode(params)}"
+        logger.info(f"Generated GitHub OAuth URL with state: {state}")
+        return auth_url
+    
+    def complete_auth(self, code: str, state: str) -> Dict[str, Any]:
+        """
+        Complete OAuth flow by exchanging code for access token.
+        
+        Args:
+            code: Authorization code from GitHub callback
+            state: State parameter from callback
+            
+        Returns:
+            Dict with access token and user info
+        """
+        import requests
+        
+        client_id = os.getenv("GITHUB_CLIENT_ID")
+        client_secret = os.getenv("GITHUB_CLIENT_SECRET")
+        
+        if not client_id or not client_secret:
+            raise ValueError("GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET must be set")
+        
+        # Verify state
+        state_data = GitHubService._oauth_states.get(state)
+        if state_data:
+            del GitHubService._oauth_states[state]
+        
+        # Exchange code for token
+        response = requests.post(
+            self.GITHUB_OAUTH_TOKEN_URL,
+            data={
+                'client_id': client_id,
+                'client_secret': client_secret,
+                'code': code,
+            },
+            headers={'Accept': 'application/json'}
+        )
+        
+        if response.status_code != 200:
+            raise ValueError(f"GitHub token exchange failed: {response.text}")
+        
+        token_data = response.json()
+        
+        if 'error' in token_data:
+            raise ValueError(f"GitHub OAuth error: {token_data.get('error_description', token_data['error'])}")
+        
+        access_token = token_data.get('access_token')
+        
+        # Authenticate with new token
+        self.authenticate(access_token)
+        
+        return {
+            'success': True,
+            'access_token': access_token,
+            'token_type': token_data.get('token_type', 'bearer'),
+            'scope': token_data.get('scope'),
+            'login': self._user_info.get('login') if self._user_info else None,
+            'name': self._user_info.get('name') if self._user_info else None,
+            'email': self._user_info.get('email') if self._user_info else None,
+            'avatar_url': self._user_info.get('avatar_url') if self._user_info else None,
+        }
+    
+    def get_user_info(self) -> Dict[str, Any]:
+        """Get authenticated user's info."""
+        if self._user_info:
+            return self._user_info
+        
+        if not self.client:
+            return {}
+        
+        try:
+            user = self.client.get_user()
+            self._user_info = {
+                'login': user.login,
+                'name': user.name,
+                'email': user.email,
+                'avatar_url': user.avatar_url
+            }
+            return self._user_info
+        except Exception as e:
+            logger.error(f"Failed to get GitHub user info: {e}")
+            return {}
+    
+    def pull_changes(self, project_name: str, project_dir: Optional[Path] = None) -> Dict[str, Any]:
+        """
+        Pull latest changes for a project.
+        
+        Args:
+            project_name: Name of the project
+            project_dir: Optional explicit path to project directory
+            
+        Returns:
+            Result dict with status and message
+        """
+        # Resolve project directory
+        if not project_dir:
+            # Try common locations
+            base_dirs = [
+                Path(os.getenv('FORGE_BASE_DIR', '/home/nadbad/Work/Wordpress')),
+                Path.home() / 'Work' / 'Wordpress',
+                Path('/var/www'),
+            ]
+            
+            for base in base_dirs:
+                potential_path = base / project_name
+                if potential_path.exists() and (potential_path / '.git').exists():
+                    project_dir = potential_path
+                    break
+        
+        if not project_dir or not project_dir.exists():
+            return {
+                'status': 'error',
+                'message': f'Project directory not found for {project_name}'
+            }
+        
+        success = self.pull_repository(project_dir)
+        
+        if success:
+            return {
+                'status': 'success',
+                'message': f'Successfully pulled changes for {project_name}',
+                'directory': str(project_dir)
+            }
+        else:
+            return {
+                'status': 'error',
+                'message': f'Failed to pull changes for {project_name}'
+            }
+    
+    def get_status(self, project_name: str, project_dir: Optional[Path] = None) -> Dict[str, Any]:
+        """
+        Get git status for a project.
+        
+        Args:
+            project_name: Name of the project
+            project_dir: Optional explicit path to project directory
+            
+        Returns:
+            Status dict with git information
+        """
+        # Resolve project directory
+        if not project_dir:
+            base_dirs = [
+                Path(os.getenv('FORGE_BASE_DIR', '/home/nadbad/Work/Wordpress')),
+                Path.home() / 'Work' / 'Wordpress',
+                Path('/var/www'),
+            ]
+            
+            for base in base_dirs:
+                potential_path = base / project_name
+                if potential_path.exists() and (potential_path / '.git').exists():
+                    project_dir = potential_path
+                    break
+        
+        if not project_dir or not project_dir.exists():
+            return {
+                'status': 'not_found',
+                'message': f'Project directory not found for {project_name}'
+            }
+        
+        return self.get_repository_status(project_dir)
 
     def is_authenticated(self) -> bool:
         """Check if GitHub API is authenticated."""
