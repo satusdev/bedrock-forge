@@ -1,0 +1,132 @@
+# Bedrock Forge Docker Compose - Development
+# Hot-reload enabled for API and Dashboard
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: forge-dev-postgres
+    environment:
+      POSTGRES_USER: forge
+      POSTGRES_PASSWORD: forge
+      POSTGRES_DB: forge
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U forge']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis (Celery broker + cache)
+  redis:
+    image: redis:7-alpine
+    container_name: forge-dev-redis
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # FastAPI Backend with hot reload
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    container_name: forge-dev-api
+    entrypoint: []
+    command: >
+      sh -c "alembic -c forge/db/alembic.ini upgrade heads 2>/dev/null || echo
+      'Migration skipped' &&
+             uvicorn forge.api.app:app --reload --host 0.0.0.0 --port 8000"
+    ports:
+      - '8000:8000'
+    environment:
+      DATABASE_URL: postgresql+asyncpg://forge:forge@postgres:5432/forge
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: dev-secret-key-not-for-production
+      ENCRYPTION_KEY: dev-encryption-key
+      DEBUG: 'true'
+      CORS_ORIGINS: '["http://localhost:3000", "http://127.0.0.1:3000"]'
+      # Path mapping for Docker-in-Docker
+      FORGE_BASE_DIR: /home/nadbad/Work/Wordpress
+      FORGE_CONFIG_DIR: /home/nadbad/.forge
+    volumes:
+      - ../forge:/app/forge # Hot reload
+      - /var/run/docker.sock:/var/run/docker.sock:ro # Docker control
+      # Map Host paths exactly to Container paths for DDEV compatibility
+      - /home/nadbad/Work/Wordpress:/home/nadbad/Work/Wordpress
+      - /home/nadbad/.forge:/home/nadbad/.forge
+      - /home/nadbad/.ddev:/root/.ddev # DDEV global config (container runs as root? check Dockerfile user)
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'python3',
+          '-c',
+          "import urllib.request;
+          urllib.request.urlopen('http://localhost:8000/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Celery Worker
+  celery-worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    container_name: forge-dev-celery
+    entrypoint: []
+    volumes:
+      - ../forge:/app/forge # Hot reload
+      - /var/run/docker.sock:/var/run/docker.sock:ro # Docker control
+      # Map Host paths exactly to Container paths for DDEV compatibility
+      - /home/nadbad/Work/Wordpress:/home/nadbad/Work/Wordpress
+      - /home/nadbad/.forge:/home/nadbad/.forge
+      - /home/nadbad/.ddev:/root/.ddev
+    command: >
+      celery -A forge.api.celery_worker:celery_app worker --loglevel=info -Q
+      default,backups,maintenance,monitoring
+    environment:
+      DATABASE_URL: postgresql+asyncpg://forge:forge@postgres:5432/forge
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      SECRET_KEY: dev-secret-key-not-for-production
+      # Path mapping for Docker-in-Docker
+      FORGE_BASE_DIR: /home/nadbad/Work/Wordpress
+      FORGE_CONFIG_DIR: /home/nadbad/.forge
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # React Dashboard with hot reload
+  dashboard:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.dashboard
+      target: development # Use dev stage if available
+    container_name: forge-dev-dashboard
+    volumes:
+      - ../dashboard:/app
+    ports:
+      - '3000:3000'
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000/api/v1
+      NODE_ENV: development
+    command: npm run dev -- --host 0.0.0.0 --port 3000
+
+volumes:
+  postgres_dev_data:
