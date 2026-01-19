@@ -45,134 +45,112 @@ const GitHubIntegration: React.FC<GitHubIntegrationProps> = ({ project }) => {
   const queryClient = useQueryClient()
 
   // Check GitHub auth status
-  const { data: authStatus } = useQuery(
-    ['github-auth-status'],
-    dashboardApi.getGitHubAuthStatus,
-    {
-      refetchInterval: 30000, // Check every 30 seconds
-    }
-  )
+  const { data: authStatus } = useQuery({
+    queryKey: ['github-auth-status'],
+    queryFn: dashboardApi.getGitHubAuthStatus,
+    refetchInterval: 30000, // Check every 30 seconds
+  })
 
   // Get repository info if GitHub is configured
-  const { data: repoInfo, isLoading: repoLoading } = useQuery(
-    ['github-repo', project.github?.repository_url],
-    () => dashboardApi.getRepositoryInfo(project.github?.repository_url),
-    {
-      enabled: !!(project.github?.repository_url && authStatus?.data?.authenticated),
-    }
-  )
+  const { data: repoInfo, isLoading: repoLoading } = useQuery({
+    queryKey: ['github-repo', project.github?.repository_url],
+    queryFn: () => dashboardApi.getRepositoryInfo(project.github?.repository_url),
+    enabled: !!(project.github?.repository_url && authStatus?.data?.authenticated),
+  })
 
   // Get branches
-  const { data: branches } = useQuery(
-    ['github-branches', project.github?.repository_url],
-    () => dashboardApi.getRepositoryBranches(project.github?.repository_url),
-    {
-      enabled: !!(project.github?.repository_url && authStatus?.data?.authenticated),
-    }
-  )
+  const { data: branches } = useQuery({
+    queryKey: ['github-branches', project.github?.repository_url],
+    queryFn: () => dashboardApi.getRepositoryBranches(project.github?.repository_url),
+    enabled: !!(project.github?.repository_url && authStatus?.data?.authenticated),
+  })
 
   // Get commits
-  const { data: commits } = useQuery(
-    ['github-commits', project.github?.repository_url, project.github?.branch],
-    () => dashboardApi.getRepositoryCommits(project.github?.repository_url, project.github?.branch, 10),
-    {
-      enabled: !!(project.github?.repository_url && authStatus?.data?.authenticated),
-    }
-  )
+  const { data: commits } = useQuery({
+    queryKey: ['github-commits', project.github?.repository_url, project.github?.branch],
+    queryFn: () => dashboardApi.getRepositoryCommits(project.github?.repository_url, project.github?.branch, 10),
+    enabled: !!(project.github?.repository_url && authStatus?.data?.authenticated),
+  })
 
   // Get pull requests
-  const { data: pullRequests } = useQuery(
-    ['github-prs', project.github?.repository_url],
-    () => dashboardApi.getRepositoryPullRequests(project.github?.repository_url, 'open'),
-    {
-      enabled: !!(project.github?.repository_url && authStatus?.data?.authenticated),
-    }
-  )
+  const { data: pullRequests } = useQuery({
+    queryKey: ['github-prs', project.github?.repository_url],
+    queryFn: () => dashboardApi.getRepositoryPullRequests(project.github?.repository_url, 'open'),
+    enabled: !!(project.github?.repository_url && authStatus?.data?.authenticated),
+  })
 
   // Get Git status
-  const { data: gitStatus } = useQuery(
-    ['git-status', project.project_name],
-    () => dashboardApi.getRepositoryStatus(project.project_name),
-    {
-      enabled: !!project.project_name,
-    }
-  )
+  const { data: gitStatus } = useQuery({
+    queryKey: ['git-status', project.project_name],
+    queryFn: () => dashboardApi.getRepositoryStatus(project.project_name),
+    enabled: !!project.project_name,
+  })
 
   // Get deployments
-  const { data: deployments } = useQuery(
-    ['github-deployments', project.github?.repository_url],
-    () => dashboardApi.getRepositoryDeployments(project.github?.repository_url),
-    {
-      enabled: !!(project.github?.repository_url && authStatus?.data?.authenticated),
-    }
-  )
+  const { data: deployments } = useQuery({
+    queryKey: ['github-deployments', project.github?.repository_url],
+    queryFn: () => dashboardApi.getRepositoryDeployments(project.github?.repository_url),
+    enabled: !!(project.github?.repository_url && authStatus?.data?.authenticated),
+  })
 
   // Pull changes mutation
-  const pullChanges = useMutation(
-    () => dashboardApi.pullRepository(project.project_name, project.github?.branch),
-    {
-      onSuccess: () => {
-        queryClient.invalidateQueries(['git-status', project.project_name])
-        queryClient.invalidateQueries(['github-commits', project.github?.repository_url])
-      },
-    }
-  )
+  const pullChanges = useMutation({
+    mutationFn: () => dashboardApi.pullRepository(project.project_name, project.github?.branch),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['git-status', project.project_name] })
+      queryClient.invalidateQueries({ queryKey: ['github-commits', project.github?.repository_url] })
+    },
+  })
 
   // Create webhook mutation
-  const createWebhook = useMutation(
-    (webhookData: any) => dashboardApi.createWebhook(webhookData),
-    {
-      onSuccess: () => {
-        setShowWebhookForm(false)
-        setWebhookUrl('')
-        queryClient.invalidateQueries(['github-webhooks', project.github?.repository_url])
-      },
-    }
-  )
+  const createWebhook = useMutation({
+    mutationFn: (webhookData: { repository_url: string; webhook_url: string; events: string[] }) => 
+      dashboardApi.createWebhook(webhookData.repository_url, webhookData.webhook_url, webhookData.events),
+    onSuccess: () => {
+      setShowWebhookForm(false)
+      setWebhookUrl('')
+      queryClient.invalidateQueries({ queryKey: ['github-webhooks', project.github?.repository_url] })
+    },
+  })
 
   // Create deployment mutation
-  const createDeployment = useMutation(
-    (deploymentData: any) => dashboardApi.createDeployment(deploymentData),
-    {
-      onSuccess: () => {
-        queryClient.invalidateQueries(['github-deployments', project.github?.repository_url])
-      },
-    }
-  )
+  const createDeployment = useMutation({
+    mutationFn: (deploymentData: { repository_url: string; ref: string; environment: string; description?: string }) => 
+      dashboardApi.createDeployment(deploymentData.repository_url, deploymentData.ref, deploymentData.environment, deploymentData.description),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['github-deployments', project.github?.repository_url] })
+    },
+  })
 
   // Authenticate with GitHub mutation
-  const authenticateGitHub = useMutation(
-    (token: string) => dashboardApi.authenticateGitHub(token),
-    {
-      onSuccess: () => {
-        setShowAuthForm(false)
-        setGithubToken('')
-        queryClient.invalidateQueries(['github-auth-status'])
-        toast.success('GitHub authentication successful!')
-      },
-      onError: (error: any) => {
-        toast.error(`GitHub authentication failed: ${error.message}`)
-      }
+  const authenticateGitHub = useMutation({
+    mutationFn: (token: string) => dashboardApi.authenticateGitHub(token),
+    onSuccess: () => {
+      setShowAuthForm(false)
+      setGithubToken('')
+      queryClient.invalidateQueries({ queryKey: ['github-auth-status'] })
+      toast.success('GitHub authentication successful!')
+    },
+    onError: (error: any) => {
+      toast.error(`GitHub authentication failed: ${error.message}`)
     }
-  )
+  })
 
   // Connect repository mutation
-  const connectRepository = useMutation(
-    (repoData: any) => dashboardApi.updateGitHubIntegration(project.project_name, repoData),
-    {
-      onSuccess: () => {
-        setShowRepoConnectForm(false)
-        setRepoUrl('')
-        setRepoBranch('main')
-        queryClient.invalidateQueries(['comprehensive-project', project.project_name])
-        queryClient.invalidateQueries(['github-repo'])
-        toast.success('Repository connected successfully!')
-      },
-      onError: (error: any) => {
-        toast.error(`Failed to connect repository: ${error.message}`)
-      }
+  const connectRepository = useMutation({
+    mutationFn: (repoData: any) => dashboardApi.updateGitHubIntegration(project.project_name, repoData),
+    onSuccess: () => {
+      setShowRepoConnectForm(false)
+      setRepoUrl('')
+      setRepoBranch('main')
+      queryClient.invalidateQueries({ queryKey: ['comprehensive-project', project.project_name] })
+      queryClient.invalidateQueries({ queryKey: ['github-repo'] })
+      toast.success('Repository connected successfully!')
+    },
+    onError: (error: any) => {
+      toast.error(`Failed to connect repository: ${error.message}`)
     }
-  )
+  })
 
   const isAuthenticated = authStatus?.data?.authenticated
   const hasGitHubConfig = !!project.github?.repository_url

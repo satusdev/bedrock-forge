@@ -1,360 +1,1603 @@
-import React, { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Settings as SettingsIcon,
-  Palette,
-  Bell,
-  Layout,
-  Database,
-  Shield,
-  Download,
-  Upload,
-  RotateCcw,
-  Save
-} from 'lucide-react'
-import Card from '@/components/ui/Card'
-import Button from '@/components/ui/Button'
-import Badge from '@/components/ui/Badge'
-import { dashboardApi } from '@/services/api'
+	Settings as SettingsIcon,
+	Palette,
+	Bell,
+	Layout,
+	Database,
+	Shield,
+	Download,
+	Upload,
+	RotateCcw,
+	Save,
+	Cloud,
+	RefreshCw,
+	Loader2,
+	Plus,
+	Trash2,
+	TestTube2,
+	Check,
+	X,
+	MessageSquare,
+	HardDrive,
+	Github,
+} from 'lucide-react';
+import toast from 'react-hot-toast';
+import Card from '@/components/ui/Card';
+import Button from '@/components/ui/Button';
+import Badge from '@/components/ui/Badge';
+import { dashboardApi, settingsApi } from '@/services/api';
+import { useTheme } from '@/contexts/ThemeContext';
+import { Key } from 'lucide-react';
 
 const Settings: React.FC = () => {
-  const queryClient = useQueryClient()
-  const [activeTab, setActiveTab] = useState('appearance')
+	const queryClient = useQueryClient();
+	const { theme: currentTheme, setTheme: setContextTheme } = useTheme();
+	const [activeTab, setActiveTab] = useState('appearance');
+	const [cloudflareToken, setCloudflareToken] = useState('');
 
-  // Fetch dashboard configuration
-  const { data: configData, isLoading } = useQuery({
-    queryKey: ['dashboard-config'],
-    queryFn: dashboardApi.getDashboardConfig,
-  })
+	// Fetch dashboard configuration
+	const { data: configData, isLoading } = useQuery({
+		queryKey: ['dashboard-config'],
+		queryFn: dashboardApi.getDashboardConfig,
+	});
 
-  const config = configData?.data
+	const config = configData?.data;
 
-  // Update configuration mutation
-  const updateConfigMutation = useMutation({
-    mutationFn: dashboardApi.updateDashboardConfig,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['dashboard-config'] })
-    },
-  })
+	// Update configuration mutation
+	const updateConfigMutation = useMutation({
+		mutationFn: dashboardApi.updateDashboardConfig,
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['dashboard-config'] });
+		},
+	});
 
-  // Theme update mutation
-  const updateThemeMutation = useMutation({
-    mutationFn: dashboardApi.updateTheme,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['dashboard-config'] })
-    },
-  })
+	// Theme update mutation
+	const updateThemeMutation = useMutation({
+		mutationFn: dashboardApi.updateTheme,
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['dashboard-config'] });
+		},
+	});
 
-  // Layout preferences mutation
-  const updateLayoutMutation = useMutation({
-    mutationFn: dashboardApi.updateLayoutPreferences,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['dashboard-config'] })
-    },
-  })
+	// Layout preferences mutation
+	const updateLayoutMutation = useMutation({
+		mutationFn: dashboardApi.updateLayoutPreferences,
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['dashboard-config'] });
+		},
+	});
 
-  // Notification preferences mutation
-  const updateNotificationsMutation = useMutation({
-    mutationFn: dashboardApi.updateNotificationPreferences,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['dashboard-config'] })
-    },
-  })
+	// Notification preferences mutation
+	const updateNotificationsMutation = useMutation({
+		mutationFn: dashboardApi.updateNotificationPreferences,
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['dashboard-config'] });
+		},
+	});
 
-  // Reset configuration mutation
-  const resetConfigMutation = useMutation({
-    mutationFn: dashboardApi.resetConfiguration,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['dashboard-config'] })
-    },
-  })
+	// Reset configuration mutation
+	const resetConfigMutation = useMutation({
+		mutationFn: dashboardApi.resetConfiguration,
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['dashboard-config'] });
+		},
+	});
 
-  const tabs = [
-    { id: 'appearance', label: 'Appearance', icon: Palette },
-    { id: 'layout', label: 'Layout', icon: Layout },
-    { id: 'notifications', label: 'Notifications', icon: Bell },
-    { id: 'advanced', label: 'Advanced', icon: Shield },
-  ]
+	// Cloudflare queries
+	const { data: cfStatus } = useQuery({
+		queryKey: ['cloudflare-status'],
+		queryFn: dashboardApi.getCloudflareStatus,
+	});
 
-  const handleThemeChange = (theme: string) => {
-    updateThemeMutation.mutate({ theme })
-  }
+	const connectCloudflareMutation = useMutation({
+		mutationFn: (token: string) => dashboardApi.connectCloudflare(token),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['cloudflare-status'] });
+			toast.success('Cloudflare connected!');
+			setCloudflareToken('');
+		},
+		onError: () => toast.error('Failed to connect Cloudflare'),
+	});
 
-  const handleColorChange = (colorType: 'primary' | 'accent', color: string) => {
-    const updateData = colorType === 'primary'
-      ? { theme: config?.theme || 'light', primary_color: color }
-      : { theme: config?.theme || 'light', accent_color: color }
-    updateThemeMutation.mutate(updateData)
-  }
+	const disconnectCloudflareMutation = useMutation({
+		mutationFn: dashboardApi.disconnectCloudflare,
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['cloudflare-status'] });
+			toast.success('Cloudflare disconnected');
+		},
+	});
 
-  const handleLayoutChange = (updates: any) => {
-    updateLayoutMutation.mutate(updates)
-  }
+	const syncCloudflareMutation = useMutation({
+		mutationFn: dashboardApi.syncCloudflare,
+		onSuccess: response => {
+			queryClient.invalidateQueries({ queryKey: ['cloudflare-status'] });
+			toast.success(
+				`Synced ${response.data.domains_synced} domains, ${response.data.ssl_synced} SSL certs`
+			);
+		},
+		onError: () => toast.error('Sync failed'),
+	});
 
-  const handleNotificationChange = (updates: any) => {
-    updateNotificationsMutation.mutate(updates)
-  }
+	const tabs = [
+		{ id: 'appearance', label: 'Appearance', icon: Palette },
+		{ id: 'layout', label: 'Layout', icon: Layout },
+		{ id: 'notifications', label: 'Notifications', icon: Bell },
+		{ id: 'integrations', label: 'Integrations', icon: Cloud },
+		{ id: 'security', label: 'Security', icon: Key },
+		{ id: 'advanced', label: 'Advanced', icon: Shield },
+	];
 
-  const handleReset = () => {
-    if (confirm('Are you sure you want to reset all settings to defaults? This cannot be undone.')) {
-      resetConfigMutation.mutate()
-    }
-  }
+	const handleThemeChange = (theme: string) => {
+		updateThemeMutation.mutate({ theme });
+		setContextTheme(theme as 'light' | 'dark' | 'system');
+		toast.success(`Theme changed to ${theme}`);
+	};
 
-  const handleExport = () => {
-    const exportPath = `/tmp/bedrock-forge-config-${new Date().toISOString().split('T')[0]}.json`
-    dashboardApi.exportConfiguration(exportPath)
-      .then(() => {
-        alert('Configuration exported successfully!')
-      })
-      .catch(() => {
-        alert('Failed to export configuration')
-      })
-  }
+	const handleColorChange = (
+		colorType: 'primary' | 'accent',
+		color: string
+	) => {
+		const updateData =
+			colorType === 'primary'
+				? { theme: config?.theme || 'light', primary_color: color }
+				: { theme: config?.theme || 'light', accent_color: color };
+		updateThemeMutation.mutate(updateData);
+	};
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
-      </div>
-    )
-  }
+	const handleLayoutChange = (updates: any) => {
+		updateLayoutMutation.mutate(updates);
+	};
 
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            Manage your dashboard preferences and configuration
-          </p>
-        </div>
-      </div>
+	const handleNotificationChange = (updates: any) => {
+		updateNotificationsMutation.mutate(updates);
+	};
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Sidebar */}
-        <div className="lg:col-span-1">
-          <Card>
-            <nav className="space-y-1">
-              {tabs.map((tab) => {
-                const Icon = tab.icon
-                return (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
-                    className={`w-full flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-                      activeTab === tab.id
-                        ? 'bg-primary-100 text-primary-700'
-                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                    }`}
-                  >
-                    <Icon className="w-4 h-4 mr-3" />
-                    {tab.label}
-                  </button>
-                )
-              })}
-            </nav>
-          </Card>
-        </div>
+	const handleReset = () => {
+		if (
+			confirm(
+				'Are you sure you want to reset all settings to defaults? This cannot be undone.'
+			)
+		) {
+			resetConfigMutation.mutate();
+		}
+	};
 
-        {/* Content */}
-        <div className="lg:col-span-3">
-          {activeTab === 'appearance' && (
-            <div className="space-y-6">
-              <Card title="Theme Settings">
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Theme Mode
-                    </label>
-                    <div className="grid grid-cols-3 gap-3">
-                      {['light', 'dark', 'auto'].map((theme) => (
-                        <button
-                          key={theme}
-                          onClick={() => handleThemeChange(theme)}
-                          className={`px-4 py-2 text-sm font-medium rounded-md border transition-colors ${
-                            config?.theme === theme
-                              ? 'border-primary-500 bg-primary-50 text-primary-700'
-                              : 'border-gray-300 text-gray-700 hover:bg-gray-50'
-                          }`}
-                        >
-                          {theme.charAt(0).toUpperCase() + theme.slice(1)}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+	const handleExport = () => {
+		const exportPath = `/tmp/bedrock-forge-config-${
+			new Date().toISOString().split('T')[0]
+		}.json`;
+		dashboardApi
+			.exportConfiguration(exportPath)
+			.then(() => {
+				alert('Configuration exported successfully!');
+			})
+			.catch(() => {
+				alert('Failed to export configuration');
+			});
+	};
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Primary Color
-                    </label>
-                    <div className="flex items-center space-x-3">
-                      <input
-                        type="color"
-                        value={config?.primary_color || '#3b82f6'}
-                        onChange={(e) => handleColorChange('primary', e.target.value)}
-                        className="h-10 w-20 border border-gray-300 rounded cursor-pointer"
-                      />
-                      <input
-                        type="text"
-                        value={config?.primary_color || '#3b82f6'}
-                        onChange={(e) => handleColorChange('primary', e.target.value)}
-                        className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                        placeholder="#3b82f6"
-                      />
-                    </div>
-                  </div>
+	if (isLoading) {
+		return (
+			<div className='flex items-center justify-center h-64'>
+				<div className='animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600'></div>
+			</div>
+		);
+	}
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Accent Color
-                    </label>
-                    <div className="flex items-center space-x-3">
-                      <input
-                        type="color"
-                        value={config?.accent_color || '#10b981'}
-                        onChange={(e) => handleColorChange('accent', e.target.value)}
-                        className="h-10 w-20 border border-gray-300 rounded cursor-pointer"
-                      />
-                      <input
-                        type="text"
-                        value={config?.accent_color || '#10b981'}
-                        onChange={(e) => handleColorChange('accent', e.target.value)}
-                        className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                        placeholder="#10b981"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </Card>
-            </div>
-          )}
+	return (
+		<div className='space-y-6'>
+			{/* Header */}
+			<div className='flex items-center justify-between'>
+				<div>
+					<h1 className='text-2xl font-bold text-gray-900 dark:text-white'>
+						Settings
+					</h1>
+					<p className='mt-1 text-sm text-gray-500 dark:text-gray-400'>
+						Manage your dashboard preferences and configuration
+					</p>
+				</div>
+			</div>
 
-          {activeTab === 'layout' && (
-            <div className="space-y-6">
-              <Card title="Layout Preferences">
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="text-sm font-medium text-gray-900">Collapse Sidebar</h4>
-                      <p className="text-sm text-gray-500">Start with sidebar collapsed</p>
-                    </div>
-                    <button
-                      onClick={() => handleLayoutChange({ sidebar_collapsed: !config?.sidebar_collapsed })}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                        config?.sidebar_collapsed ? 'bg-primary-600' : 'bg-gray-200'
-                      }`}
-                    >
-                      <span
-                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                          config?.sidebar_collapsed ? 'translate-x-6' : 'translate-x-1'
-                        }`}
-                      />
-                    </button>
-                  </div>
+			<div className='grid grid-cols-1 lg:grid-cols-4 gap-6'>
+				{/* Sidebar */}
+				<div className='lg:col-span-1'>
+					<Card>
+						<nav className='space-y-1'>
+							{tabs.map(tab => {
+								const Icon = tab.icon;
+								return (
+									<button
+										key={tab.id}
+										onClick={() => setActiveTab(tab.id)}
+										className={`w-full flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+											activeTab === tab.id
+												? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
+												: 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white'
+										}`}
+									>
+										<Icon className='w-4 h-4 mr-3' />
+										{tab.label}
+									</button>
+								);
+							})}
+						</nav>
+					</Card>
+				</div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Default Project View
-                    </label>
-                    <select
-                      value={config?.default_project_view || 'grid'}
-                      onChange={(e) => handleLayoutChange({ default_project_view: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                    >
-                      <option value="grid">Grid</option>
-                      <option value="list">List</option>
-                      <option value="compact">Compact</option>
-                    </select>
-                  </div>
-                </div>
-              </Card>
-            </div>
-          )}
+				{/* Content */}
+				<div className='lg:col-span-3'>
+					{activeTab === 'appearance' && (
+						<div className='space-y-6'>
+							<Card title='Theme Settings'>
+								<div className='space-y-4'>
+									<div>
+										<label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+											Theme Mode
+										</label>
+										<div className='grid grid-cols-3 gap-3'>
+											{['light', 'dark', 'system'].map(theme => (
+												<button
+													key={theme}
+													onClick={() => handleThemeChange(theme)}
+													className={`px-4 py-2 text-sm font-medium rounded-md border transition-colors ${
+														currentTheme === theme
+															? 'border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
+															: 'border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700'
+													}`}
+												>
+													{theme.charAt(0).toUpperCase() + theme.slice(1)}
+												</button>
+											))}
+										</div>
+									</div>
 
-          {activeTab === 'notifications' && (
-            <div className="space-y-6">
-              <Card title="Notification Settings">
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="text-sm font-medium text-gray-900">Enable Notifications</h4>
-                      <p className="text-sm text-gray-500">Receive notifications for important events</p>
-                    </div>
-                    <button
-                      onClick={() => handleNotificationChange({
-                        notifications_enabled: !config?.notifications_enabled
-                      })}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                        config?.notifications_enabled ? 'bg-primary-600' : 'bg-gray-200'
-                      }`}
-                    >
-                      <span
-                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                          config?.notifications_enabled ? 'translate-x-6' : 'translate-x-1'
-                        }`}
-                      />
-                    </button>
-                  </div>
-                </div>
-              </Card>
-            </div>
-          )}
+									<div>
+										<label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+											Primary Color
+										</label>
+										<div className='flex items-center space-x-3'>
+											<input
+												type='color'
+												value={config?.primary_color || '#3b82f6'}
+												onChange={e =>
+													handleColorChange('primary', e.target.value)
+												}
+												className='h-10 w-20 border border-gray-300 dark:border-gray-600 rounded cursor-pointer'
+											/>
+											<input
+												type='text'
+												value={config?.primary_color || '#3b82f6'}
+												onChange={e =>
+													handleColorChange('primary', e.target.value)
+												}
+												className='flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500'
+												placeholder='#3b82f6'
+											/>
+										</div>
+									</div>
 
-          {activeTab === 'advanced' && (
-            <div className="space-y-6">
-              <Card title="Advanced Settings">
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="text-sm font-medium text-gray-900">Debug Mode</h4>
-                      <p className="text-sm text-gray-500">Enable debug logging and additional info</p>
-                    </div>
-                    <button
-                      onClick={() => handleLayoutChange({ debug_mode: !config?.debug_mode })}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                        config?.debug_mode ? 'bg-primary-600' : 'bg-gray-200'
-                      }`}
-                    >
-                      <span
-                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                          config?.debug_mode ? 'translate-x-6' : 'translate-x-1'
-                        }`}
-                      />
-                    </button>
-                  </div>
+									<div>
+										<label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+											Accent Color
+										</label>
+										<div className='flex items-center space-x-3'>
+											<input
+												type='color'
+												value={config?.accent_color || '#10b981'}
+												onChange={e =>
+													handleColorChange('accent', e.target.value)
+												}
+												className='h-10 w-20 border border-gray-300 dark:border-gray-600 rounded cursor-pointer'
+											/>
+											<input
+												type='text'
+												value={config?.accent_color || '#10b981'}
+												onChange={e =>
+													handleColorChange('accent', e.target.value)
+												}
+												className='flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500'
+												placeholder='#10b981'
+											/>
+										</div>
+									</div>
+								</div>
+							</Card>
+						</div>
+					)}
 
-                  <div className="border-t pt-4">
-                    <h4 className="text-sm font-medium text-gray-900 mb-3">Configuration Management</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <Button
-                        variant="secondary"
-                        onClick={handleExport}
-                        className="w-full"
-                      >
-                        <Download className="w-4 h-4 mr-2" />
-                        Export Config
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        onClick={handleReset}
-                        className="w-full"
-                        disabled={resetConfigMutation.isLoading}
-                      >
-                        <RotateCcw className="w-4 h-4 mr-2" />
-                        Reset to Defaults
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </Card>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  )
+					{activeTab === 'layout' && (
+						<div className='space-y-6'>
+							<Card title='Layout Preferences'>
+								<div className='space-y-4'>
+									<div className='flex items-center justify-between'>
+										<div>
+											<h4 className='text-sm font-medium text-gray-900'>
+												Collapse Sidebar
+											</h4>
+											<p className='text-sm text-gray-500'>
+												Start with sidebar collapsed
+											</p>
+										</div>
+										<button
+											onClick={() =>
+												handleLayoutChange({
+													sidebar_collapsed: !config?.sidebar_collapsed,
+												})
+											}
+											className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+												config?.sidebar_collapsed
+													? 'bg-primary-600'
+													: 'bg-gray-200'
+											}`}
+										>
+											<span
+												className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+													config?.sidebar_collapsed
+														? 'translate-x-6'
+														: 'translate-x-1'
+												}`}
+											/>
+										</button>
+									</div>
+
+									<div>
+										<label className='block text-sm font-medium text-gray-700 mb-2'>
+											Default Project View
+										</label>
+										<select
+											value={config?.default_project_view || 'grid'}
+											onChange={e =>
+												handleLayoutChange({
+													default_project_view: e.target.value,
+												})
+											}
+											className='w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500'
+										>
+											<option value='grid'>Grid</option>
+											<option value='list'>List</option>
+											<option value='compact'>Compact</option>
+										</select>
+									</div>
+								</div>
+							</Card>
+						</div>
+					)}
+
+					{activeTab === 'notifications' && (
+						<div className='space-y-6'>
+							<Card title='Notification Settings'>
+								<div className='space-y-4'>
+									<div className='flex items-center justify-between'>
+										<div>
+											<h4 className='text-sm font-medium text-gray-900'>
+												Enable Notifications
+											</h4>
+											<p className='text-sm text-gray-500'>
+												Receive notifications for important events
+											</p>
+										</div>
+										<button
+											onClick={() =>
+												handleNotificationChange({
+													notifications_enabled: !config?.notifications_enabled,
+												})
+											}
+											className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+												config?.notifications_enabled
+													? 'bg-primary-600'
+													: 'bg-gray-200'
+											}`}
+										>
+											<span
+												className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+													config?.notifications_enabled
+														? 'translate-x-6'
+														: 'translate-x-1'
+												}`}
+											/>
+										</button>
+									</div>
+								</div>
+							</Card>
+
+							{/* Notification Channels */}
+							<NotificationChannelsSection />
+						</div>
+					)}
+
+					{activeTab === 'integrations' && (
+						<div className='space-y-6'>
+							<Card title='Cloudflare Integration'>
+								<div className='space-y-4'>
+									<p className='text-sm text-gray-600'>
+										Connect Cloudflare to sync domains and SSL certificates.
+									</p>
+
+									{cfStatus?.data?.connected ? (
+										<div className='space-y-4'>
+											<div className='flex items-center justify-between p-3 bg-green-50 rounded-lg'>
+												<div className='flex items-center'>
+													<Cloud className='w-5 h-5 text-green-600 mr-2' />
+													<span className='text-green-700 font-medium'>
+														Connected
+													</span>
+													{cfStatus.data.zone_count > 0 && (
+														<span className='ml-2 text-sm text-gray-500'>
+															({cfStatus.data.zone_count} zones)
+														</span>
+													)}
+												</div>
+												<div className='flex items-center space-x-2'>
+													<Button
+														variant='secondary'
+														size='sm'
+														onClick={() => syncCloudflareMutation.mutate()}
+														disabled={syncCloudflareMutation.isPending}
+													>
+														{syncCloudflareMutation.isPending ? (
+															<Loader2 className='w-4 h-4 mr-1 animate-spin' />
+														) : (
+															<RefreshCw className='w-4 h-4 mr-1' />
+														)}
+														Sync
+													</Button>
+													<Button
+														variant='secondary'
+														size='sm'
+														onClick={() =>
+															disconnectCloudflareMutation.mutate()
+														}
+													>
+														Disconnect
+													</Button>
+												</div>
+											</div>
+											{cfStatus.data.last_sync && (
+												<p className='text-xs text-gray-500'>
+													Last synced:{' '}
+													{new Date(cfStatus.data.last_sync).toLocaleString()}
+												</p>
+											)}
+										</div>
+									) : (
+										<div className='space-y-3'>
+											<div>
+												<label className='block text-sm font-medium text-gray-700 mb-1'>
+													API Token
+												</label>
+												<input
+													type='password'
+													value={cloudflareToken}
+													onChange={e => setCloudflareToken(e.target.value)}
+													placeholder='Enter your Cloudflare API token'
+													className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500'
+												/>
+												<p className='text-xs text-gray-500 mt-1'>
+													Create a token with Zone:Read permissions at
+													Cloudflare dashboard.
+												</p>
+											</div>
+											<Button
+												variant='primary'
+												onClick={() =>
+													connectCloudflareMutation.mutate(cloudflareToken)
+												}
+												disabled={
+													!cloudflareToken ||
+													connectCloudflareMutation.isPending
+												}
+											>
+												{connectCloudflareMutation.isPending ? (
+													<Loader2 className='w-4 h-4 mr-2 animate-spin' />
+												) : (
+													<Cloud className='w-4 h-4 mr-2' />
+												)}
+												Connect Cloudflare
+											</Button>
+										</div>
+									)}
+								</div>
+							</Card>
+
+							{/* Google Drive Integration */}
+							<GoogleDriveIntegrationCard />
+
+							{/* GitHub Integration */}
+							<GitHubIntegrationCard />
+						</div>
+					)}
+
+					{activeTab === 'security' && (
+						<div className='space-y-6'>
+							<SecuritySettings />
+						</div>
+					)}
+
+					{activeTab === 'advanced' && (
+						<div className='space-y-6'>
+							<Card title='Advanced Settings'>
+								<div className='space-y-4'>
+									<div className='flex items-center justify-between'>
+										<div>
+											<h4 className='text-sm font-medium text-gray-900'>
+												Debug Mode
+											</h4>
+											<p className='text-sm text-gray-500'>
+												Enable debug logging and additional info
+											</p>
+										</div>
+										<button
+											onClick={() =>
+												handleLayoutChange({ debug_mode: !config?.debug_mode })
+											}
+											className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+												config?.debug_mode ? 'bg-primary-600' : 'bg-gray-200'
+											}`}
+										>
+											<span
+												className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+													config?.debug_mode ? 'translate-x-6' : 'translate-x-1'
+												}`}
+											/>
+										</button>
+									</div>
+
+									<div className='border-t pt-4'>
+										<h4 className='text-sm font-medium text-gray-900 mb-3'>
+											Configuration Management
+										</h4>
+										<div className='grid grid-cols-1 md:grid-cols-2 gap-3'>
+											<Button
+												variant='secondary'
+												onClick={handleExport}
+												className='w-full'
+											>
+												<Download className='w-4 h-4 mr-2' />
+												Export Config
+											</Button>
+											<Button
+												variant='secondary'
+												onClick={handleReset}
+												className='w-full'
+												disabled={resetConfigMutation.isLoading}
+											>
+												<RotateCcw className='w-4 h-4 mr-2' />
+												Reset to Defaults
+											</Button>
+										</div>
+									</div>
+								</div>
+							</Card>
+						</div>
+					)}
+				</div>
+			</div>
+		</div>
+	);
+};
+
+const SecuritySettings: React.FC = () => {
+	const queryClient = useQueryClient();
+	const [isEditing, setIsEditing] = useState(false);
+	const [privateKeyInput, setPrivateKeyInput] = useState('');
+
+	const { data: sshData, isLoading } = useQuery({
+		queryKey: ['system-ssh-key'],
+		queryFn: settingsApi.getSystemSSHKey,
+	});
+
+	const updateKeyMutation = useMutation({
+		mutationFn: settingsApi.updateSystemSSHKey,
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['system-ssh-key'] });
+			toast.success('System SSH Identity updated successfully');
+			setIsEditing(false);
+			setPrivateKeyInput('');
+		},
+		onError: (error: any) => {
+			toast.error(error.response?.data?.detail || 'Failed to update SSH key');
+		},
+	});
+
+	const configured = sshData?.data?.configured;
+	const publicKey = sshData?.data?.public_key;
+
+	const handleSave = () => {
+		if (!privateKeyInput) {
+			toast.error('Please enter a private key');
+			return;
+		}
+		updateKeyMutation.mutate(privateKeyInput);
+	};
+
+	return (
+		<Card title='System SSH Identity'>
+			<div className='space-y-6'>
+				<p className='text-sm text-gray-600 dark:text-gray-400'>
+					Configure a centralized SSH identity for Bedrock Forge. This key will
+					be used as a fallback when connecting to servers that don't have
+					specific credentials.
+				</p>
+
+				{isLoading ? (
+					<div className='flex items-center space-x-2 text-primary-600'>
+						<Loader2 className='w-5 h-5 animate-spin' />
+						<span>Loading identity status...</span>
+					</div>
+				) : (
+					<>
+						{configured && !isEditing ? (
+							<div className='space-y-4'>
+								<div className='bg-green-50 dark:bg-green-900/20 p-4 rounded-lg border border-green-200 dark:border-green-800'>
+									<div className='flex items-center space-x-2 text-green-700 dark:text-green-400 mb-2'>
+										<Shield className='w-5 h-5' />
+										<span className='font-semibold'>Identity Configured</span>
+									</div>
+									<p className='text-sm text-green-800 dark:text-green-300'>
+										Your system has a valid SSH identity.
+									</p>
+								</div>
+
+								<div>
+									<label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+										System Public Key
+									</label>
+									<div className='relative'>
+										<textarea
+											readOnly
+											value={publicKey}
+											className='w-full h-24 p-3 bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-md font-mono text-xs text-gray-600 dark:text-gray-400 focus:outline-none'
+											onClick={e => e.currentTarget.select()}
+										/>
+										<div className='absolute top-2 right-2'>
+											<Button
+												size='sm'
+												variant='secondary'
+												onClick={() => {
+													navigator.clipboard.writeText(publicKey);
+													toast.success('Public key copied to clipboard');
+												}}
+											>
+												Copy
+											</Button>
+										</div>
+									</div>
+									<p className='mt-2 text-xs text-gray-500'>
+										Add this public key to the{' '}
+										<code>~/.ssh/authorized_keys</code> file on your servers.
+									</p>
+								</div>
+
+								<div className='pt-4 border-t border-gray-200 dark:border-gray-700'>
+									<Button
+										variant='secondary'
+										onClick={() => setIsEditing(true)}
+									>
+										Update Private Key
+									</Button>
+								</div>
+							</div>
+						) : (
+							<div className='space-y-4'>
+								{!configured && (
+									<div className='bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg border border-yellow-200 dark:border-yellow-800 mb-4'>
+										<div className='flex items-center space-x-2 text-yellow-700 dark:text-yellow-400'>
+											<Shield className='w-5 h-5' />
+											<span className='font-medium'>
+												No Identity Configured
+											</span>
+										</div>
+										<p className='mt-1 text-sm text-yellow-800 dark:text-yellow-300'>
+											Please provide an SSH Private Key to enable centralized
+											server access.
+										</p>
+									</div>
+								)}
+
+								<div>
+									<label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+										Private Key
+									</label>
+									<textarea
+										value={privateKeyInput}
+										onChange={e => setPrivateKeyInput(e.target.value)}
+										placeholder='-----BEGIN OPENSSH PRIVATE KEY-----...'
+										className='w-full h-48 p-3 font-mono text-xs border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-white'
+									/>
+									<p className='mt-2 text-xs text-gray-500'>
+										Paste your private key here (e.g. from Bitwarden). It will
+										be encrypted and stored securely.
+									</p>
+								</div>
+
+								<div className='flex space-x-3'>
+									<Button
+										variant='primary'
+										onClick={handleSave}
+										disabled={
+											updateKeyMutation.isPending || !privateKeyInput.trim()
+										}
+									>
+										{updateKeyMutation.isPending && (
+											<Loader2 className='w-4 h-4 mr-2 animate-spin' />
+										)}
+										Save Identity
+									</Button>
+									{configured && (
+										<Button
+											variant='secondary'
+											onClick={() => setIsEditing(false)}
+										>
+											Cancel
+										</Button>
+									)}
+								</div>
+							</div>
+						)}
+					</>
+				)}
+			</div>
+		</Card>
+	);
+};
+
+// Notification Channels Section Component
+interface NotificationChannel {
+	id: number;
+	name: string;
+	channel_type: 'slack' | 'email' | 'telegram' | 'webhook' | 'discord';
+	config: Record<string, any>;
+	is_active: boolean;
+	last_sent_at: string | null;
+	last_error: string | null;
+	created_at: string | null;
 }
 
-export default Settings
+const NotificationChannelsSection: React.FC = () => {
+	const queryClient = useQueryClient();
+	const [showAddModal, setShowAddModal] = useState(false);
+	const [testingId, setTestingId] = useState<number | null>(null);
+
+	const { data: channelsData, isLoading } = useQuery({
+		queryKey: ['notification-channels'],
+		queryFn: dashboardApi.getNotificationChannels,
+	});
+
+	const deleteChannelMutation = useMutation({
+		mutationFn: (id: number) => dashboardApi.deleteNotificationChannel(id),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['notification-channels'] });
+			toast.success('Notification channel deleted');
+		},
+		onError: () => toast.error('Failed to delete channel'),
+	});
+
+	const testChannelMutation = useMutation({
+		mutationFn: (id: number) =>
+			dashboardApi.testNotificationChannel({ channel_id: id }),
+		onSuccess: response => {
+			if (response.data.status === 'success') {
+				toast.success('Test notification sent!');
+			} else {
+				toast.error(response.data.message || 'Test failed');
+			}
+			setTestingId(null);
+		},
+		onError: () => {
+			toast.error('Failed to send test notification');
+			setTestingId(null);
+		},
+	});
+
+	const toggleChannelMutation = useMutation({
+		mutationFn: ({ id, is_active }: { id: number; is_active: boolean }) =>
+			dashboardApi.updateNotificationChannel(id, { is_active }),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['notification-channels'] });
+		},
+	});
+
+	const channels: NotificationChannel[] = channelsData?.data?.channels || [];
+
+	const handleTest = (id: number) => {
+		setTestingId(id);
+		testChannelMutation.mutate(id);
+	};
+
+	const handleDelete = (id: number, name: string) => {
+		if (confirm(`Delete notification channel "${name}"?`)) {
+			deleteChannelMutation.mutate(id);
+		}
+	};
+
+	const getChannelIcon = (type: string) => {
+		switch (type) {
+			case 'slack':
+				return <MessageSquare className='w-5 h-5 text-purple-500' />;
+			case 'email':
+				return <Bell className='w-5 h-5 text-blue-500' />;
+			case 'telegram':
+				return <MessageSquare className='w-5 h-5 text-sky-500' />;
+			case 'discord':
+				return <MessageSquare className='w-5 h-5 text-indigo-500' />;
+			case 'webhook':
+				return <Cloud className='w-5 h-5 text-gray-500' />;
+			default:
+				return <Bell className='w-5 h-5' />;
+		}
+	};
+
+	return (
+		<>
+			<Card title='Notification Channels'>
+				<div className='space-y-4'>
+					<div className='flex justify-between items-center'>
+						<p className='text-sm text-gray-600 dark:text-gray-400'>
+							Configure channels to receive alerts for monitor downtime, backup
+							failures, and other events.
+						</p>
+						<Button size='sm' onClick={() => setShowAddModal(true)}>
+							<Plus className='w-4 h-4 mr-1' /> Add Channel
+						</Button>
+					</div>
+
+					{isLoading ? (
+						<div className='flex items-center justify-center py-8'>
+							<Loader2 className='w-6 h-6 animate-spin text-primary-600' />
+						</div>
+					) : channels.length === 0 ? (
+						<div className='text-center py-8 text-gray-500 dark:text-gray-400'>
+							<Bell className='w-12 h-12 mx-auto mb-3 text-gray-300 dark:text-gray-600' />
+							<p>No notification channels configured.</p>
+							<p className='text-sm'>Add a channel to receive alerts.</p>
+						</div>
+					) : (
+						<div className='space-y-3'>
+							{channels.map(channel => (
+								<div
+									key={channel.id}
+									className='flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg'
+								>
+									<div className='flex items-center space-x-3'>
+										{getChannelIcon(channel.channel_type)}
+										<div>
+											<div className='flex items-center space-x-2'>
+												<span className='font-medium text-gray-900 dark:text-white'>
+													{channel.name}
+												</span>
+												<Badge
+													variant={channel.is_active ? 'success' : 'default'}
+													className='text-xs'
+												>
+													{channel.is_active ? 'Active' : 'Inactive'}
+												</Badge>
+											</div>
+											<span className='text-xs text-gray-500 dark:text-gray-400 capitalize'>
+												{channel.channel_type}
+												{channel.last_sent_at && (
+													<>
+														{' '}
+														· Last sent:{' '}
+														{new Date(channel.last_sent_at).toLocaleString()}
+													</>
+												)}
+											</span>
+										</div>
+									</div>
+									<div className='flex items-center space-x-2'>
+										<button
+											onClick={() =>
+												toggleChannelMutation.mutate({
+													id: channel.id,
+													is_active: !channel.is_active,
+												})
+											}
+											className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+												channel.is_active
+													? 'bg-primary-600'
+													: 'bg-gray-300 dark:bg-gray-600'
+											}`}
+											title={channel.is_active ? 'Disable' : 'Enable'}
+										>
+											<span
+												className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+													channel.is_active ? 'translate-x-5' : 'translate-x-1'
+												}`}
+											/>
+										</button>
+										<Button
+											size='sm'
+											variant='secondary'
+											onClick={() => handleTest(channel.id)}
+											disabled={testingId === channel.id}
+											title='Send test notification'
+										>
+											{testingId === channel.id ? (
+												<Loader2 className='w-4 h-4 animate-spin' />
+											) : (
+												<TestTube2 className='w-4 h-4' />
+											)}
+										</Button>
+										<Button
+											size='sm'
+											variant='secondary'
+											onClick={() => handleDelete(channel.id, channel.name)}
+											className='text-red-600 hover:text-red-700'
+											title='Delete channel'
+										>
+											<Trash2 className='w-4 h-4' />
+										</Button>
+									</div>
+								</div>
+							))}
+						</div>
+					)}
+				</div>
+			</Card>
+
+			{showAddModal && (
+				<AddNotificationChannelModal
+					onClose={() => setShowAddModal(false)}
+					onSuccess={() => {
+						queryClient.invalidateQueries({
+							queryKey: ['notification-channels'],
+						});
+						setShowAddModal(false);
+					}}
+				/>
+			)}
+		</>
+	);
+};
+
+// Add Notification Channel Modal
+interface AddNotificationChannelModalProps {
+	onClose: () => void;
+	onSuccess: () => void;
+}
+
+const AddNotificationChannelModal: React.FC<
+	AddNotificationChannelModalProps
+> = ({ onClose, onSuccess }) => {
+	const [channelType, setChannelType] = useState<
+		'slack' | 'email' | 'telegram' | 'webhook' | 'discord'
+	>('slack');
+	const [name, setName] = useState('');
+	const [config, setConfig] = useState<Record<string, string>>({});
+	const [isSubmitting, setIsSubmitting] = useState(false);
+	const [isTesting, setIsTesting] = useState(false);
+
+	const createChannelMutation = useMutation({
+		mutationFn: dashboardApi.createNotificationChannel,
+		onSuccess: () => {
+			toast.success('Notification channel created!');
+			onSuccess();
+		},
+		onError: (error: any) => {
+			toast.error(error.response?.data?.detail || 'Failed to create channel');
+		},
+	});
+
+	const testMutation = useMutation({
+		mutationFn: dashboardApi.testNotificationChannel,
+		onSuccess: response => {
+			if (response.data.status === 'success') {
+				toast.success('Test notification sent!');
+			} else {
+				toast.error(
+					response.data.message || 'Test failed - check your configuration'
+				);
+			}
+			setIsTesting(false);
+		},
+		onError: () => {
+			toast.error('Test failed - check your configuration');
+			setIsTesting(false);
+		},
+	});
+
+	const handleTest = () => {
+		if (!validateConfig()) return;
+		setIsTesting(true);
+		testMutation.mutate({
+			channel_type: channelType,
+			config,
+		});
+	};
+
+	const handleSubmit = async (e: React.FormEvent) => {
+		e.preventDefault();
+		if (!name.trim()) {
+			toast.error('Please enter a channel name');
+			return;
+		}
+		if (!validateConfig()) return;
+
+		setIsSubmitting(true);
+		try {
+			await createChannelMutation.mutateAsync({
+				name: name.trim(),
+				channel_type: channelType,
+				config,
+				is_active: true,
+			});
+		} finally {
+			setIsSubmitting(false);
+		}
+	};
+
+	const validateConfig = () => {
+		switch (channelType) {
+			case 'slack':
+				if (
+					!config.webhook_url ||
+					!config.webhook_url.startsWith('https://hooks.slack.com/')
+				) {
+					toast.error('Please enter a valid Slack webhook URL');
+					return false;
+				}
+				break;
+			case 'email':
+				if (!config.to || !config.to.includes('@')) {
+					toast.error('Please enter a valid email address');
+					return false;
+				}
+				break;
+			case 'telegram':
+				if (!config.bot_token || !config.chat_id) {
+					toast.error('Please enter bot token and chat ID');
+					return false;
+				}
+				break;
+			case 'webhook':
+			case 'discord':
+				if (!config.webhook_url || !config.webhook_url.startsWith('https://')) {
+					toast.error('Please enter a valid webhook URL');
+					return false;
+				}
+				break;
+		}
+		return true;
+	};
+
+	const renderConfigFields = () => {
+		switch (channelType) {
+			case 'slack':
+				return (
+					<div>
+						<label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
+							Webhook URL *
+						</label>
+						<input
+							type='url'
+							value={config.webhook_url || ''}
+							onChange={e =>
+								setConfig({ ...config, webhook_url: e.target.value })
+							}
+							placeholder='https://hooks.slack.com/services/...'
+							className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-white'
+							required
+						/>
+						<p className='text-xs text-gray-500 mt-1'>
+							Create an incoming webhook in your Slack workspace settings.
+						</p>
+					</div>
+				);
+
+			case 'email':
+				return (
+					<div className='space-y-4'>
+						<div>
+							<label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
+								To Address *
+							</label>
+							<input
+								type='email'
+								value={config.to || ''}
+								onChange={e => setConfig({ ...config, to: e.target.value })}
+								placeholder='admin@example.com'
+								className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-white'
+								required
+							/>
+						</div>
+						<p className='text-xs text-gray-500'>
+							Uses system SMTP settings. Configure SMTP in environment
+							variables.
+						</p>
+					</div>
+				);
+
+			case 'telegram':
+				return (
+					<div className='space-y-4'>
+						<div>
+							<label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
+								Bot Token *
+							</label>
+							<input
+								type='password'
+								value={config.bot_token || ''}
+								onChange={e =>
+									setConfig({ ...config, bot_token: e.target.value })
+								}
+								placeholder='123456789:ABC...'
+								className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-white'
+								required
+							/>
+						</div>
+						<div>
+							<label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
+								Chat ID *
+							</label>
+							<input
+								type='text'
+								value={config.chat_id || ''}
+								onChange={e =>
+									setConfig({ ...config, chat_id: e.target.value })
+								}
+								placeholder='-123456789'
+								className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-white'
+								required
+							/>
+						</div>
+					</div>
+				);
+
+			case 'webhook':
+			case 'discord':
+				return (
+					<div>
+						<label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
+							Webhook URL *
+						</label>
+						<input
+							type='url'
+							value={config.webhook_url || ''}
+							onChange={e =>
+								setConfig({ ...config, webhook_url: e.target.value })
+							}
+							placeholder={
+								channelType === 'discord'
+									? 'https://discord.com/api/webhooks/...'
+									: 'https://your-webhook-endpoint.com/webhook'
+							}
+							className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-white'
+							required
+						/>
+					</div>
+				);
+
+			default:
+				return null;
+		}
+	};
+
+	return (
+		<div className='fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50'>
+			<div className='bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-lg'>
+				<div className='flex items-center justify-between p-4 border-b dark:border-gray-700'>
+					<h2 className='text-xl font-semibold text-gray-900 dark:text-white'>
+						Add Notification Channel
+					</h2>
+					<button
+						onClick={onClose}
+						className='text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+					>
+						<X className='w-6 h-6' />
+					</button>
+				</div>
+
+				<form onSubmit={handleSubmit} className='p-4 space-y-4'>
+					<div>
+						<label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
+							Channel Name *
+						</label>
+						<input
+							type='text'
+							value={name}
+							onChange={e => setName(e.target.value)}
+							placeholder='e.g., Production Alerts'
+							className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-white'
+							required
+						/>
+					</div>
+
+					<div>
+						<label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
+							Channel Type
+						</label>
+						<select
+							value={channelType}
+							onChange={e => {
+								setChannelType(e.target.value as any);
+								setConfig({});
+							}}
+							className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-white'
+						>
+							<option value='slack'>Slack</option>
+							<option value='email'>Email</option>
+							<option value='telegram'>Telegram</option>
+							<option value='discord'>Discord</option>
+							<option value='webhook'>Custom Webhook</option>
+						</select>
+					</div>
+
+					{renderConfigFields()}
+
+					<div className='flex justify-between pt-4 border-t dark:border-gray-700'>
+						<Button
+							type='button'
+							variant='secondary'
+							onClick={handleTest}
+							disabled={isTesting}
+						>
+							{isTesting ? (
+								<Loader2 className='w-4 h-4 mr-2 animate-spin' />
+							) : (
+								<TestTube2 className='w-4 h-4 mr-2' />
+							)}
+							Test
+						</Button>
+						<div className='flex space-x-3'>
+							<Button type='button' variant='secondary' onClick={onClose}>
+								Cancel
+							</Button>
+							<Button type='submit' disabled={isSubmitting}>
+								{isSubmitting ? (
+									<Loader2 className='w-4 h-4 mr-2 animate-spin' />
+								) : (
+									<Check className='w-4 h-4 mr-2' />
+								)}
+								Create Channel
+							</Button>
+						</div>
+					</div>
+				</form>
+			</div>
+		</div>
+	);
+};
+
+// Google Drive Integration Card Component
+const GoogleDriveIntegrationCard: React.FC = () => {
+	const queryClient = useQueryClient();
+	const [isConnecting, setIsConnecting] = useState(false);
+
+	const { data: gdriveStatus, isLoading } = useQuery({
+		queryKey: ['gdrive-status'],
+		queryFn: dashboardApi.getGoogleDriveAuthStatus,
+	});
+
+	const disconnectMutation = useMutation({
+		mutationFn: dashboardApi.disconnectGoogleDrive,
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['gdrive-status'] });
+			toast.success('Google Drive disconnected');
+		},
+		onError: () => toast.error('Failed to disconnect Google Drive'),
+	});
+
+	// Handle OAuth callback from URL
+	React.useEffect(() => {
+		const urlParams = new URLSearchParams(window.location.search);
+		const code = urlParams.get('code');
+		const state = urlParams.get('state');
+		const oauthProvider =
+			urlParams.get('oauth') || (state?.includes('google') ? 'google' : null);
+
+		if (code && (oauthProvider === 'google' || state)) {
+			// Complete the OAuth flow
+			setIsConnecting(true);
+			dashboardApi
+				.completeGoogleDriveAuth(
+					code,
+					state || '',
+					window.location.origin + '/settings'
+				)
+				.then(() => {
+					queryClient.invalidateQueries({ queryKey: ['gdrive-status'] });
+					toast.success('Google Drive connected successfully!');
+					// Clean URL
+					window.history.replaceState({}, document.title, '/settings');
+				})
+				.catch(err => {
+					toast.error(
+						'Failed to connect Google Drive: ' +
+							(err.response?.data?.detail || err.message)
+					);
+				})
+				.finally(() => setIsConnecting(false));
+		}
+	}, [queryClient]);
+
+	const handleConnect = async () => {
+		try {
+			setIsConnecting(true);
+			const response = await dashboardApi.getGoogleDriveAuthUrl(
+				window.location.origin + '/settings?oauth=google'
+			);
+			if (response.data?.auth_url) {
+				window.location.href = response.data.auth_url;
+			} else {
+				toast.error('Failed to get authorization URL');
+				setIsConnecting(false);
+			}
+		} catch (error: any) {
+			toast.error(error.response?.data?.detail || 'Failed to start OAuth flow');
+			setIsConnecting(false);
+		}
+	};
+
+	const connected = gdriveStatus?.data?.authenticated;
+
+	return (
+		<Card title='Google Drive Integration'>
+			<div className='space-y-4'>
+				<p className='text-sm text-gray-600 dark:text-gray-400'>
+					Connect Google Drive for cloud backups and file storage.
+				</p>
+
+				{isLoading ? (
+					<div className='flex items-center'>
+						<Loader2 className='w-5 h-5 animate-spin text-gray-500' />
+						<span className='ml-2 text-sm text-gray-500'>
+							Checking status...
+						</span>
+					</div>
+				) : connected ? (
+					<div className='space-y-4'>
+						<div className='flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/20 rounded-lg'>
+							<div className='flex items-center'>
+								<HardDrive className='w-5 h-5 text-green-600 dark:text-green-400 mr-2' />
+								<div>
+									<span className='text-green-700 dark:text-green-300 font-medium'>
+										Connected
+									</span>
+									{gdriveStatus?.data?.email && (
+										<p className='text-sm text-gray-500 dark:text-gray-400'>
+											{gdriveStatus.data.email}
+										</p>
+									)}
+								</div>
+							</div>
+							<Button
+								variant='secondary'
+								size='sm'
+								onClick={() => disconnectMutation.mutate()}
+								disabled={disconnectMutation.isPending}
+							>
+								{disconnectMutation.isPending ? (
+									<Loader2 className='w-4 h-4 animate-spin' />
+								) : (
+									'Disconnect'
+								)}
+							</Button>
+						</div>
+					</div>
+				) : (
+					<Button
+						variant='primary'
+						onClick={handleConnect}
+						disabled={isConnecting}
+					>
+						{isConnecting ? (
+							<Loader2 className='w-4 h-4 mr-2 animate-spin' />
+						) : (
+							<HardDrive className='w-4 h-4 mr-2' />
+						)}
+						Connect Google Drive
+					</Button>
+				)}
+			</div>
+		</Card>
+	);
+};
+
+// GitHub Integration Card Component
+const GitHubIntegrationCard: React.FC = () => {
+	const queryClient = useQueryClient();
+	const [isConnecting, setIsConnecting] = useState(false);
+	const [showTokenInput, setShowTokenInput] = useState(false);
+	const [token, setToken] = useState('');
+
+	const { data: githubStatus, isLoading } = useQuery({
+		queryKey: ['github-status'],
+		queryFn: dashboardApi.getGitHubAuthStatus,
+	});
+
+	const disconnectMutation = useMutation({
+		mutationFn: dashboardApi.disconnectGitHub,
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['github-status'] });
+			toast.success('GitHub disconnected');
+		},
+		onError: () => toast.error('Failed to disconnect GitHub'),
+	});
+
+	const connectWithTokenMutation = useMutation({
+		mutationFn: (pat: string) => dashboardApi.authenticateGitHub(pat),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['github-status'] });
+			toast.success('GitHub connected successfully!');
+			setShowTokenInput(false);
+			setToken('');
+		},
+		onError: (error: any) => {
+			toast.error(error.response?.data?.detail || 'Failed to connect GitHub');
+		},
+	});
+
+	// Handle OAuth callback from URL
+	React.useEffect(() => {
+		const urlParams = new URLSearchParams(window.location.search);
+		const code = urlParams.get('code');
+		const state = urlParams.get('state');
+		const oauthProvider = urlParams.get('oauth');
+
+		if (code && (oauthProvider === 'github' || state?.includes('github'))) {
+			setIsConnecting(true);
+			dashboardApi
+				.authenticateGitHub(code, state || '')
+				.then(() => {
+					queryClient.invalidateQueries({ queryKey: ['github-status'] });
+					toast.success('GitHub connected successfully!');
+					window.history.replaceState({}, document.title, '/settings');
+				})
+				.catch(err => {
+					toast.error(
+						'Failed to connect GitHub: ' +
+							(err.response?.data?.detail || err.message)
+					);
+				})
+				.finally(() => setIsConnecting(false));
+		}
+	}, [queryClient]);
+
+	const handleOAuthConnect = async () => {
+		try {
+			setIsConnecting(true);
+			const response = await dashboardApi.getGitHubAuthUrl(
+				window.location.origin + '/settings?oauth=github'
+			);
+			if (response.data?.auth_url) {
+				window.location.href = response.data.auth_url;
+			} else {
+				toast.error(
+					'GitHub OAuth not configured. Use Personal Access Token instead.'
+				);
+				setShowTokenInput(true);
+				setIsConnecting(false);
+			}
+		} catch (error: any) {
+			// If OAuth not configured, fall back to PAT
+			if (error.response?.status === 400) {
+				toast.info('GitHub OAuth not configured. Use Personal Access Token.');
+				setShowTokenInput(true);
+			} else {
+				toast.error(
+					error.response?.data?.detail || 'Failed to start OAuth flow'
+				);
+			}
+			setIsConnecting(false);
+		}
+	};
+
+	const connected = githubStatus?.data?.authenticated;
+
+	return (
+		<Card title='GitHub Integration'>
+			<div className='space-y-4'>
+				<p className='text-sm text-gray-600 dark:text-gray-400'>
+					Connect GitHub for repository management and deployments.
+				</p>
+
+				{isLoading ? (
+					<div className='flex items-center'>
+						<Loader2 className='w-5 h-5 animate-spin text-gray-500' />
+						<span className='ml-2 text-sm text-gray-500'>
+							Checking status...
+						</span>
+					</div>
+				) : connected ? (
+					<div className='space-y-4'>
+						<div className='flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/20 rounded-lg'>
+							<div className='flex items-center'>
+								<Github className='w-5 h-5 text-green-600 dark:text-green-400 mr-2' />
+								<div>
+									<span className='text-green-700 dark:text-green-300 font-medium'>
+										Connected
+									</span>
+									{githubStatus?.data?.login && (
+										<p className='text-sm text-gray-500 dark:text-gray-400'>
+											@{githubStatus.data.login}
+										</p>
+									)}
+								</div>
+							</div>
+							<Button
+								variant='secondary'
+								size='sm'
+								onClick={() => disconnectMutation.mutate()}
+								disabled={disconnectMutation.isPending}
+							>
+								{disconnectMutation.isPending ? (
+									<Loader2 className='w-4 h-4 animate-spin' />
+								) : (
+									'Disconnect'
+								)}
+							</Button>
+						</div>
+					</div>
+				) : showTokenInput ? (
+					<div className='space-y-3'>
+						<div>
+							<label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
+								Personal Access Token
+							</label>
+							<input
+								type='password'
+								value={token}
+								onChange={e => setToken(e.target.value)}
+								placeholder='ghp_xxxxxxxxxxxx'
+								className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-white'
+							/>
+							<p className='text-xs text-gray-500 mt-1'>
+								Create a token with repo scope at{' '}
+								<a
+									href='https://github.com/settings/tokens'
+									target='_blank'
+									rel='noopener noreferrer'
+									className='text-primary-600 hover:underline'
+								>
+									GitHub Settings
+								</a>
+							</p>
+						</div>
+						<div className='flex space-x-2'>
+							<Button
+								variant='primary'
+								onClick={() => connectWithTokenMutation.mutate(token)}
+								disabled={!token || connectWithTokenMutation.isPending}
+							>
+								{connectWithTokenMutation.isPending ? (
+									<Loader2 className='w-4 h-4 mr-2 animate-spin' />
+								) : (
+									<Github className='w-4 h-4 mr-2' />
+								)}
+								Connect
+							</Button>
+							<Button
+								variant='secondary'
+								onClick={() => setShowTokenInput(false)}
+							>
+								Cancel
+							</Button>
+						</div>
+					</div>
+				) : (
+					<div className='flex space-x-2'>
+						<Button
+							variant='primary'
+							onClick={handleOAuthConnect}
+							disabled={isConnecting}
+						>
+							{isConnecting ? (
+								<Loader2 className='w-4 h-4 mr-2 animate-spin' />
+							) : (
+								<Github className='w-4 h-4 mr-2' />
+							)}
+							Connect with GitHub
+						</Button>
+						<Button variant='secondary' onClick={() => setShowTokenInput(true)}>
+							Use Token
+						</Button>
+					</div>
+				)}
+			</div>
+		</Card>
+	);
+};
+
+export default Settings;
