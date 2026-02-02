@@ -1,6 +1,7 @@
 # Bedrock Forge Implementation Status
 
-This document provides detailed technical information about the implementation status, architecture, and usage of the Bedrock Forge CLI.
+This document provides detailed technical information about the implementation
+status, architecture, and usage of the Bedrock Forge CLI.
 
 ## Table of Contents
 
@@ -19,6 +20,7 @@ This document provides detailed technical information about the implementation s
 **Status**: Fully implemented and tested
 
 **Completed Components**:
+
 - ✅ **CLI Entry Point**: `forge/main.py` with typer-based CLI structure
 - ✅ **Core Utilities**: All utility modules implemented
   - `utils/config.py` - Configuration management
@@ -28,7 +30,8 @@ This document provides detailed technical information about the implementation s
   - `utils/api.py` - HTTP client for external APIs
   - `utils/ssh.py` - SSH operations utilities
 - ✅ **Project Structure**: Complete modular architecture
-- ✅ **Configuration System**: JSON-based configuration with environment overrides
+- ✅ **Configuration System**: JSON-based configuration with environment
+  overrides
 - ✅ **Dependency Management**: `requirements.txt` and `pyproject.toml`
 
 **Testing**: All core utilities have comprehensive unit tests with 80%+ coverage
@@ -38,6 +41,7 @@ This document provides detailed technical information about the implementation s
 **Status**: Production ready with full DDEV integration
 
 **Completed Components**:
+
 - ✅ **Project Creation**: Automated Bedrock project setup
 - ✅ **DDEV Integration**: Complete DDEV workflow management
 - ✅ **GitHub Integration**: Automatic repository creation
@@ -45,6 +49,7 @@ This document provides detailed technical information about the implementation s
 - ✅ **Project Management**: List, switch, and manage multiple projects
 
 **Key Commands**:
+
 ```bash
 forge local create-project <name> [--template=<template>]
 forge local list-projects
@@ -59,6 +64,7 @@ forge local delete-project <name>
 **Status**: Complete multi-provider provisioning system
 
 **Completed Components**:
+
 - ✅ **Hetzner Cloud**: Complete server creation and management
 - ✅ **CyberPanel**: Automated WordPress hosting setup
 - ✅ **LibyanSpider**: cPanel-based hosting automation
@@ -68,6 +74,7 @@ forge local delete-project <name>
 - ✅ **Monitoring Setup**: Basic monitoring infrastructure
 
 **Key Commands**:
+
 ```bash
 forge provision hetzner-create <name> [--plan=<plan>]
 forge provision cyberpanel-provision <domain> [--package=<package>]
@@ -83,6 +90,7 @@ forge provision ssl-setup <domain> [--provider=<provider>]
 **Status**: Enterprise-grade backup and sync system
 
 **Completed Components**:
+
 - ✅ **Google Drive Integration**: rclone-based cloud backups
 - ✅ **Scheduled Backups**: Celery task scheduling
 - ✅ **Database Synchronization**: Pull/push database changes
@@ -92,6 +100,7 @@ forge provision ssl-setup <domain> [--provider=<provider>]
 - ✅ **Compression and Encryption**: Optimized backup storage
 
 **Key Commands**:
+
 ```bash
 forge sync backup <project> <environment> [--remote=<remote>]
 forge sync restore <project> <backup_id> [--target=<target>]
@@ -108,6 +117,7 @@ forge sync schedule-backup <project> <schedule>
 **Status**: Production deployment with advanced features
 
 **Completed Components**:
+
 - ✅ **Atomic Deployments**: Zero-downtime deployments
 - ✅ **Version Management**: Complete deployment tracking
 - ✅ **Rollback System**: Instant rollback to any version
@@ -117,6 +127,7 @@ forge sync schedule-backup <project> <schedule>
 - ✅ **Environment Management**: Multi-environment deployments
 
 **Key Commands**:
+
 ```bash
 forge deploy <project> <environment> [--strategy=<strategy>]
 forge deploy rollback <project> [--version=<version>]
@@ -132,6 +143,7 @@ forge ci trigger-build <project> [--branch=<branch>]
 **Status**: Complete monitoring and workflow system
 
 **Completed Components**:
+
 - ✅ **Basic Monitoring**: Uptime checks and health monitoring
 - ✅ **Log Management**: Centralized logging setup
 - ✅ **Workflow Engine**: Basic workflow orchestration
@@ -139,6 +151,7 @@ forge ci trigger-build <project> [--branch=<branch>]
 - ✅ **Dashboard**: Uptime and performance dashboard
 
 **Key Commands**:
+
 ```bash
 forge monitor list-sites
 forge monitor health-check <site>
@@ -146,11 +159,27 @@ forge monitor setup-alerts <site>
 forge workflow run <workflow> <project>
 ```
 
+#### SEO Suite MVP (Beyond Lighthouse)
+
+**Scope (MVP):**
+
+- CLI SEO analysis via `forge seo analyze` (uses local project context)
+- Keyword tracking commands (`forge seo keywords`, `forge seo track`)
+- Competitor/backlink summaries (`forge seo competitors`, `forge seo backlinks`)
+- Technical SEO snapshot storage (title/meta/h1/links) via `SEOAnalyzer`
+
+**Notes:**
+
+- Search Console integration is optional; without it, results are simulated.
+- Advanced SEO reporting (real GSC data, SERP crawling, backlink verification)
+  remains planned and requires external integrations.
+
 ### ✅ Phase 7: Billing and Client Management (100% Complete)
 
 **Status**: Full billing system with CRM capabilities
 
 **Completed Components**:
+
 - ✅ **Client CRM**: Contact management and project association
 - ✅ **Subscription Management**: Recurring billing with strict cycles
 - ✅ **Invoice Generation**: Automated PDF invoices
@@ -158,6 +187,7 @@ forge workflow run <workflow> <project>
 - ✅ **Hosting Packages**: Tiered pricing and resource limits
 
 **Key Commands**:
+
 ```bash
 forge billing list-clients
 forge billing create-subscription <client> <plan>
@@ -171,6 +201,7 @@ forge ssl check-status
 **Status**: Comprehensive test suite with 80%+ coverage
 
 **Completed Components**:
+
 - ✅ **Unit Tests**: All core modules tested
 - ✅ **Integration Tests**: Complete workflow testing
 - ✅ **Mock Framework**: External service mocking
@@ -179,6 +210,7 @@ forge ssl check-status
 - ✅ **Performance Testing**: Load and stress testing
 
 **Test Categories**:
+
 - Unit tests for individual modules
 - Integration tests for workflows
 - Mock tests for external APIs
@@ -186,6 +218,7 @@ forge ssl check-status
 - Security and performance testing
 
 **Running Tests**:
+
 ```bash
 # Run all tests
 python forge/tests/run_tests.py all
@@ -298,6 +331,7 @@ bedrock-forge/
 ### Global Options
 
 All commands support these global options:
+
 - `--env, -e`: Environment (local, staging, production)
 - `--dry-run, -n`: Show what would be done without executing
 - `--verbose, -v`: Verbose output
@@ -307,9 +341,11 @@ All commands support these global options:
 ### Local Commands
 
 #### `forge local create-project <name>`
+
 Create a new Bedrock project with DDEV.
 
 **Options**:
+
 - `--template, -t`: Project template (default: bedrock)
 - `--domain, -d`: Custom domain
 - `--github, -g`: Create GitHub repository
@@ -317,22 +353,27 @@ Create a new Bedrock project with DDEV.
 - `--skip-ddev`: Skip DDEV setup
 
 **Example**:
+
 ```bash
 forge local create-project mysite --template=bedrock --github --domain=mysite.com
 ```
 
 #### `forge local list-projects`
+
 List all local projects.
 
 **Example**:
+
 ```bash
 forge local list-projects --format=table
 ```
 
 #### `forge local switch-project <name>`
+
 Switch to a different project.
 
 **Example**:
+
 ```bash
 forge local switch-project mysite
 ```
@@ -340,28 +381,34 @@ forge local switch-project mysite
 ### Provision Commands
 
 #### `forge provision hetzner-create <name>`
+
 Create a new Hetzner Cloud server.
 
 **Options**:
+
 - `--plan, -p`: Server plan (default: cpx11)
 - `--location, -l`: Datacenter location
 - `--image, -i`: Server image
 - `--ssh-key, -k`: SSH key name
 
 **Example**:
+
 ```bash
 forge provision hetzner-create myserver --plan=cpx21 --location=nbg1
 ```
 
 #### `forge provision cyberpanel-provision <domain>`
+
 Provision a CyberPanel server.
 
 **Options**:
+
 - `--package, -p`: Hosting package
 - `--php-version`: PHP version
 - `--ssl`: Setup SSL certificate
 
 **Example**:
+
 ```bash
 forge provision cyberpanel-provision mysite.com --package=standard --ssl
 ```
@@ -369,28 +416,34 @@ forge provision cyberpanel-provision mysite.com --package=standard --ssl
 ### Sync Commands
 
 #### `forge sync backup <project> <environment>`
+
 Backup a project to cloud storage.
 
 **Options**:
+
 - `--remote, -r`: Remote storage configuration
 - `--compress, -c`: Compress backup
 - `--exclude, -e`: Exclude patterns
 - `--schedule, -s`: Schedule expression
 
 **Example**:
+
 ```bash
 forge sync backup mysite production --remote=gdrive:backups --compress
 ```
 
 #### `forge sync restore <project> <backup_id>`
+
 Restore a project from backup.
 
 **Options**:
+
 - `--target, -t`: Target environment
 - `--database-only, -d`: Restore database only
 - `--files-only, -f`: Restore files only
 
 **Example**:
+
 ```bash
 forge sync restore mysite backup_20240101_120000 --target=staging
 ```
@@ -398,27 +451,33 @@ forge sync restore mysite backup_20240101_120000 --target=staging
 ### Deploy Commands
 
 #### `forge deploy <project> <environment>`
+
 Deploy a project to environment.
 
 **Options**:
+
 - `--strategy, -s`: Deployment strategy
 - `--rollback-on-failure, -r`: Auto rollback on failure
 - `--skip-backup, -b`: Skip pre-deployment backup
 - `--health-check, -h`: Health check URL
 
 **Example**:
+
 ```bash
 forge deploy mysite production --strategy=atomic --health-check=https://mysite.com/health
 ```
 
 #### `forge deploy rollback <project>`
+
 Rollback deployment to previous version.
 
 **Options**:
+
 - `--version, -v`: Specific version to rollback to
 - `--force, -f`: Force rollback without confirmation
 
 **Example**:
+
 ```bash
 forge deploy rollback mysite --version=v1.2.0
 ```
@@ -430,6 +489,7 @@ forge deploy rollback mysite --version=v1.2.0
 Configuration is managed through JSON files with environment-specific overrides:
 
 #### Default Configuration Location
+
 - `~/.forge/config/default.json` - Global default configuration
 - `~/.forge/config/<env>.json` - Environment-specific overrides
 - `./.forge/config.json` - Project-specific configuration
@@ -438,36 +498,36 @@ Configuration is managed through JSON files with environment-specific overrides:
 
 ```json
 {
-  "admin_user": "admin",
-  "admin_email": "admin@example.com",
-  "site_name": "my-site",
-  "php_version": "8.1",
-  "mysql_version": "8.0",
-  "github_token": null,
-  "providers": {
-    "hetzner": {
-      "api_token": "your-token",
-      "default_plan": "cpx11",
-      "default_location": "nbg1"
-    },
-    "cloudflare": {
-      "api_token": "your-token",
-      "default_zone_id": "your-zone-id"
-    }
-  },
-  "backup": {
-    "rclone_config_path": "~/.config/rclone/rclone.conf",
-    "default_remote": "gdrive",
-    "default_bucket": "forge-backups",
-    "retention_days": 30,
-    "compression": true
-  },
-  "deployment": {
-    "default_strategy": "atomic",
-    "health_check_timeout": 30,
-    "backup_before_deploy": true,
-    "rollback_on_failure": true
-  }
+	"admin_user": "admin",
+	"admin_email": "admin@example.com",
+	"site_name": "my-site",
+	"php_version": "8.1",
+	"mysql_version": "8.0",
+	"github_token": null,
+	"providers": {
+		"hetzner": {
+			"api_token": "your-token",
+			"default_plan": "cpx11",
+			"default_location": "nbg1"
+		},
+		"cloudflare": {
+			"api_token": "your-token",
+			"default_zone_id": "your-zone-id"
+		}
+	},
+	"backup": {
+		"rclone_config_path": "~/.config/rclone/rclone.conf",
+		"default_remote": "gdrive",
+		"default_bucket": "forge-backups",
+		"retention_days": 30,
+		"compression": true
+	},
+	"deployment": {
+		"default_strategy": "atomic",
+		"health_check_timeout": 30,
+		"backup_before_deploy": true,
+		"rollback_on_failure": true
+	}
 }
 ```
 
@@ -581,6 +641,7 @@ The test suite maintains 80%+ code coverage across all modules:
 - **Integration Workflows**: 80%+ coverage
 
 Coverage reports are generated in:
+
 - `forge/htmlcov/index.html` - Interactive HTML report
 - `forge/coverage.xml` - Machine-readable XML report
 
@@ -608,18 +669,21 @@ Shared test fixtures in `tests/conftest.py`:
 ### Development Setup
 
 1. **Clone Repository**:
+
    ```bash
    git clone https://github.com/your-org/bedrock-forge.git
    cd bedrock-forge
    ```
 
 2. **Install Dependencies**:
+
    ```bash
    pip install -r forge/requirements.txt
    pip install -r forge/requirements-dev.txt  # Development dependencies
    ```
 
 3. **Set Up Environment**:
+
    ```bash
    cp forge/config/example.default.json ~/.forge/config/default.json
    ```
@@ -639,6 +703,7 @@ The project uses the following code style tools:
 - **mypy**: Type checking
 
 Run style checks:
+
 ```bash
 python forge/tests/run_tests.py lint
 ```
@@ -646,21 +711,25 @@ python forge/tests/run_tests.py lint
 ### Adding New Features
 
 1. **Create Feature Branch**:
+
    ```bash
    git checkout -b feature/new-feature
    ```
 
 2. **Implement Feature**:
+
    - Add code to appropriate module
    - Follow existing patterns and naming conventions
    - Add comprehensive error handling
 
 3. **Add Tests**:
+
    - Write unit tests for new functionality
    - Add integration tests for workflows
    - Ensure 80%+ test coverage
 
 4. **Update Documentation**:
+
    - Update command help text
    - Add examples to documentation
    - Update configuration schemas
@@ -698,12 +767,14 @@ class CustomPlugin(BasePlugin):
 ### Debugging
 
 Enable debug logging:
+
 ```bash
 export FORGE_LOG_LEVEL=DEBUG
 python -m forge <command> --verbose
 ```
 
 Use built-in debugging features:
+
 - `--dry-run`: Preview actions without execution
 - `--verbose`: Detailed output
 - `--debug`: Enable debug mode
@@ -713,16 +784,19 @@ Use built-in debugging features:
 ### Near Term (Next 3 Months)
 
 1. **Enhanced Monitoring Dashboard**
+
    - Web-based monitoring interface
    - Real-time metrics and alerts
    - Historical data visualization
 
 2. **GUI Backup/Restore Interface**
+
    - Desktop application for backup management
    - Visual backup selection and restoration
    - Progress tracking and scheduling
 
 3. **Additional Hosting Providers**
+
    - DigitalOcean integration
    - AWS Lightsail support
    - Vultr cloud provider
@@ -735,16 +809,19 @@ Use built-in debugging features:
 ### Medium Term (3-6 Months)
 
 1. **Multi-Site Management**
+
    - Manage multiple WordPress installations
    - Bulk operations and updates
    - Centralized monitoring
 
 2. **Performance Optimization Tools**
+
    - Database optimization
    - Caching configuration
    - Performance profiling
 
 3. **Security Scanning Integration**
+
    - Vulnerability scanning
    - Security hardening recommendations
    - Compliance reporting
@@ -757,11 +834,13 @@ Use built-in debugging features:
 ### Long Term (6+ Months)
 
 1. **AI-Powered Features**
+
    - Intelligent troubleshooting
    - Performance optimization suggestions
    - Automated issue detection
 
 2. **Enterprise Features**
+
    - Team collaboration tools
    - Role-based access control
    - Audit logging
@@ -776,15 +855,18 @@ Use built-in debugging features:
 ### Common Issues
 
 1. **DDEV Not Found**
+
    - Ensure DDEV is installed and in PATH
    - Run `ddev version` to verify installation
 
 2. **SSH Connection Issues**
+
    - Check SSH key permissions
    - Verify firewall settings
    - Test connection manually: `ssh user@host`
 
 3. **Configuration Not Found**
+
    - Verify configuration file paths
    - Check file permissions
    - Use `--config` option to specify file
@@ -798,12 +880,14 @@ Use built-in debugging features:
 
 - **Documentation**: This file and README.md
 - **Issues**: [GitHub Issues](https://github.com/your-org/bedrock-forge/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-org/bedrock-forge/discussions)
+- **Discussions**:
+  [GitHub Discussions](https://github.com/your-org/bedrock-forge/discussions)
 - **Debug Mode**: Use `--verbose --dry-run` for troubleshooting
 
 ## Contributing
 
-We welcome contributions! Please see the main README.md for basic guidelines, and this document for technical details.
+We welcome contributions! Please see the main README.md for basic guidelines,
+and this document for technical details.
 
 ### Areas Needing Help
 
