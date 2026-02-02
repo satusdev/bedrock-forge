@@ -46,6 +46,7 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
       DEBUG: ${DEBUG:-false}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://localhost:3000}
+      CHROME_PATH: /usr/bin/chromium
     depends_on:
       postgres:
         condition: service_healthy
@@ -60,12 +61,13 @@ services:
       dockerfile: deploy/Dockerfile.api
     container_name: forge-celery-worker
     command:
-      celery -A forge.api.celery_worker:celery_app worker --loglevel=info -Q
+      celery -A forge.core.celery_app:celery_app worker --loglevel=info -Q
       default,backups,maintenance,monitoring
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-forge}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-forge}
       REDIS_URL: redis://redis:6379/0
       SECRET_KEY: ${SECRET_KEY}
+      CHROME_PATH: /usr/bin/chromium
     depends_on:
       postgres:
         condition: service_healthy
@@ -79,11 +81,12 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile.api
     container_name: forge-celery-beat
-    command: celery -A forge.api.celery_worker:celery_app beat --loglevel=info
+    command: celery -A forge.core.celery_app:celery_app beat --loglevel=info
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-forge}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-forge}
       REDIS_URL: redis://redis:6379/0
       SECRET_KEY: ${SECRET_KEY}
+      CHROME_PATH: /usr/bin/chromium
     depends_on:
       - redis
     restart: unless-stopped
