@@ -14,6 +14,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rsync \
     curl \
     gnupg \
+    unzip \
+    nodejs \
+    npm \
+    chromium \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Docker CLI
@@ -32,6 +36,15 @@ RUN curl -fsSL https://pkg.ddev.com/apt/gpg.key | gpg --dearmor -o /etc/apt/keyr
     echo "deb [signed-by=/etc/apt/keyrings/ddev.gpg] https://pkg.ddev.com/apt/ * *" | tee /etc/apt/sources.list.d/ddev.list && \
     apt-get update && \
     apt-get install -y ddev
+
+# Install rclone for Google Drive backups
+RUN curl https://rclone.org/install.sh | bash
+
+# Install Lighthouse for SEO/performance checks
+RUN npm install -g lighthouse
+
+# Chrome path for Lighthouse
+ENV CHROME_PATH=/usr/bin/chromium
 
 # Install Python dependencies
 COPY requirements.txt .

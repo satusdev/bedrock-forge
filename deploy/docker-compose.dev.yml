@@ -52,9 +52,16 @@ services:
       ENCRYPTION_KEY: dev-encryption-key
       DEBUG: 'true'
       CORS_ORIGINS: '["http://localhost:3000", "http://127.0.0.1:3000"]'
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-http://localhost:3000/settings?oauth=google}
+      GOOGLE_DRIVE_CREDENTIALS_FILE: ${GOOGLE_DRIVE_CREDENTIALS_FILE:-/home/nadbad/.forge/credentials.json}
+      GOOGLE_DRIVE_TOKEN_FILE: ${GOOGLE_DRIVE_TOKEN_FILE:-/home/nadbad/.forge/google_drive_token.json}
       # Path mapping for Docker-in-Docker
       FORGE_BASE_DIR: /home/nadbad/Work/Wordpress
       FORGE_CONFIG_DIR: /home/nadbad/.forge
+      RCLONE_CONFIG: /home/nadbad/.forge/rclone.conf
+      CHROME_PATH: /usr/bin/chromium
     volumes:
       - ../forge:/app/forge # Hot reload
       - /var/run/docker.sock:/var/run/docker.sock:ro # Docker control
@@ -95,7 +102,7 @@ services:
       - /home/nadbad/.forge:/home/nadbad/.forge
       - /home/nadbad/.ddev:/root/.ddev
     command: >
-      celery -A forge.api.celery_worker:celery_app worker --loglevel=info -Q
+      celery -A forge.core.celery_app:celery_app worker --loglevel=info -Q
       default,backups,maintenance,monitoring
     environment:
       DATABASE_URL: postgresql+asyncpg://forge:forge@postgres:5432/forge
@@ -103,9 +110,51 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       SECRET_KEY: dev-secret-key-not-for-production
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-http://localhost:3000/settings?oauth=google}
+      GOOGLE_DRIVE_CREDENTIALS_FILE: ${GOOGLE_DRIVE_CREDENTIALS_FILE:-/home/nadbad/.forge/credentials.json}
+      GOOGLE_DRIVE_TOKEN_FILE: ${GOOGLE_DRIVE_TOKEN_FILE:-/home/nadbad/.forge/google_drive_token.json}
       # Path mapping for Docker-in-Docker
       FORGE_BASE_DIR: /home/nadbad/Work/Wordpress
       FORGE_CONFIG_DIR: /home/nadbad/.forge
+      RCLONE_CONFIG: /home/nadbad/.forge/rclone.conf
+      CHROME_PATH: /usr/bin/chromium
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Celery Beat (Scheduler)
+  celery-beat:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    container_name: forge-dev-celery-beat
+    entrypoint: []
+    volumes:
+      - ../forge:/app/forge
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /home/nadbad/Work/Wordpress:/home/nadbad/Work/Wordpress
+      - /home/nadbad/.forge:/home/nadbad/.forge
+      - /home/nadbad/.ddev:/root/.ddev
+    command: celery -A forge.core.celery_app:celery_app beat --loglevel=info
+    environment:
+      DATABASE_URL: postgresql+asyncpg://forge:forge@postgres:5432/forge
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      SECRET_KEY: dev-secret-key-not-for-production
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-http://localhost:3000/settings?oauth=google}
+      GOOGLE_DRIVE_CREDENTIALS_FILE: ${GOOGLE_DRIVE_CREDENTIALS_FILE:-/home/nadbad/.forge/credentials.json}
+      GOOGLE_DRIVE_TOKEN_FILE: ${GOOGLE_DRIVE_TOKEN_FILE:-/home/nadbad/.forge/google_drive_token.json}
+      FORGE_BASE_DIR: /home/nadbad/Work/Wordpress
+      FORGE_CONFIG_DIR: /home/nadbad/.forge
+      RCLONE_CONFIG: /home/nadbad/.forge/rclone.conf
+      CHROME_PATH: /usr/bin/chromium
     depends_on:
       postgres:
         condition: service_healthy
