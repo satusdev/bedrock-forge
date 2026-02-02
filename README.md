@@ -142,6 +142,37 @@ forge sync backup myproject production
 
 ---
 
+## 🐳 Docker Quick Start
+
+Run the full stack (API, Dashboard, Database, Redis, Celery) with Docker in under 5 minutes.
+
+### Development Setup
+
+```bash
+# Clone and start
+git clone https://github.com/bedrock-forge/bedrock-forge.git
+cd bedrock-forge/deploy
+docker compose -f docker-compose.dev.yml up -d
+
+# Access the application
+# Dashboard: http://localhost:3000
+# API: http://localhost:8000
+# API Docs: http://localhost:8000/docs
+```
+
+### Production Setup
+
+```bash
+cd deploy
+cp .env.production .env
+# Edit .env with your secrets (POSTGRES_PASSWORD, SECRET_KEY)
+docker compose build && docker compose up -d
+```
+
+> 📖 **Full Docker documentation**: [Docker Quick Start Guide](docs/DOCKER_QUICKSTART.md)
+
+---
+
 ## 🎯 Key Features
 
 ### 🏠 **Local Development**

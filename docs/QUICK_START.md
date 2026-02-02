@@ -12,6 +12,22 @@ Get started with Bedrock Forge in 5 minutes. This guide will walk you through in
 - [Deploy to Production](#deploy-to-production)
 - [Next Steps](#next-steps)
 
+## 🐳 Docker Quick Start (Alternative)
+
+**Prefer containers?** Skip the manual installation and run everything with Docker:
+
+```bash
+git clone https://github.com/bedrock-forge/bedrock-forge.git
+cd bedrock-forge/deploy
+docker compose -f docker-compose.dev.yml up -d
+```
+
+Access the Dashboard at http://localhost:3000 and API at http://localhost:8000.
+
+> 📖 **Full Docker guide**: [Docker Quick Start](DOCKER_QUICKSTART.md)
+
+---
+
 ## 🚀 Prerequisites
 
 ### Required Software

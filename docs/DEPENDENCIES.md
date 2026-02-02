@@ -1,10 +1,13 @@
 # Dependencies Reference
 
-This guide provides a comprehensive list of all dependencies used by Bedrock Forge, including Python packages, system dependencies, and optional components.
+This guide provides a comprehensive list of all dependencies used by Bedrock
+Forge, including Python packages, system dependencies, and optional components.
 
 ## Overview
 
-Bedrock Forge manages its dependencies through Python's package management system, with clear separation between core dependencies, optional components, and development requirements.
+Bedrock Forge manages its dependencies through Python's package management
+system, with clear separation between core dependencies, optional components,
+and development requirements.
 
 ## Core Dependencies
 
@@ -65,6 +68,7 @@ psutil>=5.9.0                # System and process utilities
 python-dotenv>=1.0.0         # Environment variable management
 click-completion>=0.5.2      # CLI completion
  packaging>=23.0             # Package utilities
+python-whois>=0.8.0          # WHOIS lookup support
 ```
 
 ### Development Dependencies (`requirements-dev.txt`)
@@ -371,19 +375,19 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
     ports:
-      - "3306:3306"
+      - '3306:3306'
 
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - '6379:6379'
 
   nginx:
     image: nginx:alpine
     volumes:
       - ./tests/fixtures/nginx.conf:/etc/nginx/nginx.conf:ro
     ports:
-      - "8080:80"
+      - '8080:80'
     depends_on:
       - forge
 
@@ -573,6 +577,7 @@ def upload_to_s3(data):
 ### Common Issues
 
 **Import Errors**:
+
 ```bash
 # Check installed packages
 pip list | grep package_name
@@ -585,6 +590,7 @@ pip uninstall package_name && pip install package_name
 ```
 
 **Version Conflicts**:
+
 ```bash
 # Check dependency tree
 pipdeptree
@@ -597,6 +603,7 @@ pip install --force-reinstall package_name
 ```
 
 **Build Failures**:
+
 ```bash
 # Install build dependencies
 sudo apt-get install build-essential python3-dev
@@ -623,4 +630,5 @@ pip install -r requirements.txt
 pip freeze > requirements.txt
 ```
 
-This comprehensive dependencies reference ensures proper management of all packages and system requirements for Bedrock Forge.
+This comprehensive dependencies reference ensures proper management of all
+packages and system requirements for Bedrock Forge.
