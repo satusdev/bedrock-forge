@@ -37,11 +37,21 @@ const ProjectOverview: React.FC<ProjectOverviewProps> = ({ project }) => {
     }
   )
 
-  const { data: plugins } = useQuery(
-    ['plugins', project.project_name],
-    () => dashboardApi.getProjectPlugins(project.project_name),
+  const { data: plugins, isLoading: pluginsLoading } = useQuery(
+    ['plugins', project.project_name || project.name || project.slug],
+    () => dashboardApi.getProjectPlugins(project.project_name || project.name || project.slug),
     {
-      enabled: !!project.project_name,
+      enabled: !!(project.project_name || project.name || project.slug),
+      staleTime: 60000,
+    }
+  )
+
+  const { data: themes, isLoading: themesLoading } = useQuery(
+    ['themes', project.project_name || project.name || project.slug],
+    () => dashboardApi.getProjectThemes(project.project_name || project.name || project.slug),
+    {
+      enabled: !!(project.project_name || project.name || project.slug),
+      staleTime: 60000,
     }
   )
 
@@ -78,6 +88,7 @@ const ProjectOverview: React.FC<ProjectOverviewProps> = ({ project }) => {
 
   const gitStatusData = gitStatus?.data
   const pluginsData = plugins?.data?.plugins || []
+  const themesData = themes?.data?.themes || []
 
   const quickActions = [
     { id: 'start_ddev', label: 'Start DDEV', icon: Play, variant: 'primary' as const },
@@ -240,24 +251,65 @@ const ProjectOverview: React.FC<ProjectOverviewProps> = ({ project }) => {
         </Card>
 
         <Card title="Plugins">
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">Total Plugins</span>
-              <span className="text-sm text-gray-600">{pluginsData.length}</span>
+          {pluginsLoading ? (
+            <div className="text-center py-4 text-gray-500">
+              <RefreshCw className="w-6 h-6 mx-auto mb-2 animate-spin" />
+              <p className="text-sm">Loading plugins...</p>
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">Active</span>
-              <span className="text-sm text-gray-600">
-                {pluginsData.filter((p: any) => p.status === 'active').length}
-              </span>
+          ) : pluginsData.length === 0 ? (
+            <div className="text-center py-4 text-gray-500">
+              <p className="text-sm">No plugins found</p>
+              <p className="text-xs mt-1">Ensure the server is accessible and WP-CLI is available</p>
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">Updates Available</span>
-              <span className="text-sm text-gray-600">
-                {pluginsData.filter((p: any) => p.update === 'available').length}
-              </span>
+          ) : (
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              {pluginsData.slice(0, 10).map((plugin: any, index: number) => (
+                <div key={plugin.name || index} className="flex items-center justify-between py-1 text-sm border-b border-gray-100 last:border-0">
+                  <span className="font-medium truncate max-w-[150px]" title={plugin.name}>{plugin.title || plugin.name}</span>
+                  <div className="flex items-center space-x-2">
+                    <Badge variant={plugin.status === 'active' ? 'success' : plugin.status === 'inactive' ? 'secondary' : 'warning'}>
+                      {plugin.status}
+                    </Badge>
+                    {plugin.update === 'available' && (
+                      <Badge variant="warning">Update</Badge>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {pluginsData.length > 10 && (
+                <p className="text-xs text-gray-500 text-center">+{pluginsData.length - 10} more plugins</p>
+              )}
             </div>
-          </div>
+          )}
+        </Card>
+
+        <Card title="Themes">
+          {themesLoading ? (
+            <div className="text-center py-4 text-gray-500">
+              <RefreshCw className="w-6 h-6 mx-auto mb-2 animate-spin" />
+              <p className="text-sm">Loading themes...</p>
+            </div>
+          ) : themesData.length === 0 ? (
+            <div className="text-center py-4 text-gray-500">
+              <p className="text-sm">No themes found</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {themesData.map((theme: any, index: number) => (
+                <div key={theme.name || index} className="flex items-center justify-between py-1 text-sm border-b border-gray-100 last:border-0">
+                  <span className="font-medium truncate max-w-[150px]" title={theme.name}>{theme.title || theme.name}</span>
+                  <div className="flex items-center space-x-2">
+                    <Badge variant={theme.status === 'active' ? 'success' : 'secondary'}>
+                      {theme.status}
+                    </Badge>
+                    {theme.update === 'available' && (
+                      <Badge variant="warning">Update</Badge>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </Card>
 
         <Card title="SSL Certificate">

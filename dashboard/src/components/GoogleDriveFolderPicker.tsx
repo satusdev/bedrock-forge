@@ -1,30 +1,18 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
 	Folder,
 	FolderOpen,
-	ChevronRight,
-	Home,
-	RefreshCw,
-	Plus,
-	Check,
+	Search,
 	X,
-	Loader2,
 	HardDrive,
+	Loader2,
 } from 'lucide-react';
-import { dashboardApi } from '../services/api';
 import toast from 'react-hot-toast';
+import { dashboardApi } from '../services/api';
 
-interface DriveFile {
-	id: string;
-	name: string;
-	mimeType: string;
-	modifiedTime?: string;
-	size?: number;
-}
-
-interface BreadcrumbItem {
-	id: string | null;
-	name: string;
+interface DriveFolderResult {
+	path: string;
+	source?: 'base' | 'shared';
 }
 
 interface GoogleDriveFolderPickerProps {
@@ -33,352 +21,257 @@ interface GoogleDriveFolderPickerProps {
 	initialFolderId?: string;
 }
 
-export const GoogleDriveFolderPicker: React.FC<
-	GoogleDriveFolderPickerProps
-> = ({ onSelect, onCancel, initialFolderId }) => {
-	const [isAuthenticated, setIsAuthenticated] = useState(false);
-	const [loading, setLoading] = useState(true);
-	const [folders, setFolders] = useState<DriveFile[]>([]);
-	const [currentFolderId, setCurrentFolderId] = useState<string | null>(
-		initialFolderId || null
-	);
-	const [breadcrumbs, setBreadcrumbs] = useState<BreadcrumbItem[]>([
-		{ id: null, name: 'My Drive' },
-	]);
-	const [selectedFolder, setSelectedFolder] = useState<DriveFile | null>(null);
-	const [newFolderName, setNewFolderName] = useState('');
-	const [showNewFolderInput, setShowNewFolderInput] = useState(false);
-	const [creatingFolder, setCreatingFolder] = useState(false);
+const GoogleDriveFolderPicker: React.FC<GoogleDriveFolderPickerProps> = ({
+	onSelect,
+	onCancel,
+	initialFolderId,
+}) => {
+	const [query, setQuery] = useState('');
+	const [results, setResults] = useState<DriveFolderResult[]>([]);
+	const [isLoading, setIsLoading] = useState(false);
+	const [currentPath, setCurrentPath] = useState(''); // Tracking navigation path
+    const [searchQuery, setSearchQuery] = useState(''); // Tracking search input
+    const [defaultPath, setDefaultPath] = useState('');
 
-	// Check auth status
+	// Load initial folders (root or base)
 	useEffect(() => {
-		const checkAuth = async () => {
-			try {
-				const response = await dashboardApi.getGoogleDriveAuthStatus();
-				setIsAuthenticated(response.data?.authenticated || false);
-			} catch (error) {
-				console.error('Failed to check Google Drive auth:', error);
-				setIsAuthenticated(false);
-			}
-		};
-		checkAuth();
+		loadFolders('');
+        checkDefaultPath();
 	}, []);
 
-	// Load folders
-	const loadFolders = useCallback(async () => {
-		if (!isAuthenticated) {
-			setLoading(false);
-			return;
-		}
+    const checkDefaultPath = async () => {
+        try {
+            const response = await dashboardApi.getDriveStatus();
+            if (response.data?.base_path) {
+                setDefaultPath(response.data.base_path);
+            }
+        } catch (e) {
+            console.error("Failed to check Drive status", e);
+        }
+    };
 
-		setLoading(true);
+	const loadFolders = async (path: string, isSearch: boolean = false) => {
+		setIsLoading(true);
+        setResults([]); // Clear previous results to indicate loading
 		try {
-			const response = await dashboardApi.listDriveFiles(
-				currentFolderId || undefined,
-				['application/vnd.google-apps.folder']
-			);
-			const files = response.data?.files || [];
-			// Filter only folders
-			const folderList = files.filter(
-				(f: DriveFile) => f.mimeType === 'application/vnd.google-apps.folder'
-			);
-			setFolders(folderList);
+            // If searching, use query. If navigating (isSearch=false), use path.
+            const params: any = {
+                max_results: 50,
+                shared_with_me: true, // Always check shared items
+            };
+
+            if (isSearch) {
+                params.query = searchQuery;
+            } else if (path) {
+                params.path = path;
+            }
+
+			const response = await dashboardApi.listDriveFolders(params);
+			setResults(response.data?.folders || []);
+            if (!isSearch) {
+                setCurrentPath(path);
+                // Also update search input to reflect current path but don't trigger search
+                setSearchQuery(path); 
+            }
 		} catch (error) {
 			console.error('Failed to load folders:', error);
-			toast.error('Failed to load Google Drive folders');
+			toast.error('Failed to load folders');
 		} finally {
-			setLoading(false);
-		}
-	}, [isAuthenticated, currentFolderId]);
-
-	useEffect(() => {
-		loadFolders();
-	}, [loadFolders]);
-
-	// Navigate into a folder
-	const handleFolderDoubleClick = (folder: DriveFile) => {
-		setCurrentFolderId(folder.id);
-		setBreadcrumbs(prev => [...prev, { id: folder.id, name: folder.name }]);
-		setSelectedFolder(null);
-	};
-
-	// Navigate via breadcrumb
-	const handleBreadcrumbClick = (index: number) => {
-		const newBreadcrumbs = breadcrumbs.slice(0, index + 1);
-		setBreadcrumbs(newBreadcrumbs);
-		setCurrentFolderId(newBreadcrumbs[newBreadcrumbs.length - 1].id);
-		setSelectedFolder(null);
-	};
-
-	// Select folder
-	const handleFolderClick = (folder: DriveFile) => {
-		setSelectedFolder(folder);
-	};
-
-	// Confirm selection
-	const handleConfirm = () => {
-		if (selectedFolder) {
-			const path =
-				breadcrumbs.map(b => b.name).join('/') + '/' + selectedFolder.name;
-			onSelect(selectedFolder.id, selectedFolder.name, path);
-		} else {
-			// Select current folder
-			const currentFolder = breadcrumbs[breadcrumbs.length - 1];
-			const path = breadcrumbs.map(b => b.name).join('/');
-			onSelect(currentFolder.id || 'root', currentFolder.name, path);
+			setIsLoading(false);
 		}
 	};
 
-	// Create new folder
-	const handleCreateFolder = async () => {
-		if (!newFolderName.trim()) {
-			toast.error('Please enter a folder name');
-			return;
-		}
-
-		setCreatingFolder(true);
-		try {
-			const response = await dashboardApi.createDriveFolder(
-				newFolderName.trim(),
-				currentFolderId || undefined
-			);
-			if (response.data) {
-				toast.success('Folder created successfully');
-				setNewFolderName('');
-				setShowNewFolderInput(false);
-				await loadFolders();
-				// Select the newly created folder
-				setSelectedFolder({
-					id: response.data.id,
-					name: newFolderName.trim(),
-					mimeType: 'application/vnd.google-apps.folder',
-				});
-			}
-		} catch (error) {
-			console.error('Failed to create folder:', error);
-			toast.error('Failed to create folder');
-		} finally {
-			setCreatingFolder(false);
-		}
+	const handleSearch = () => {
+        if (!searchQuery.trim()) return;
+        // If query looks like a path, treat as navigation
+        if (searchQuery.includes('/')) {
+            loadFolders(searchQuery, false);
+        } else {
+            loadFolders('', true);
+        }
 	};
 
-	// Start Google Drive authentication
-	const handleAuthenticate = async () => {
-		try {
-			const currentUrl = window.location.href;
-			const response = await dashboardApi.getGoogleDriveAuthUrl(currentUrl);
-			if (response.data?.url) {
-				// Store current state for restoration after OAuth
-				sessionStorage.setItem('gdrive_picker_active', 'true');
-				window.location.href = response.data.url;
-			}
-		} catch (error) {
-			console.error('Failed to get auth URL:', error);
-			toast.error('Failed to start Google Drive authentication');
-		}
-	};
+    const handleNavigate = (path: string) => {
+        setSearchQuery(path);
+        loadFolders(path, false);
+    };
+    
+    const handleBreadcrumbClick = (index: number, parts: string[]) => {
+        // e.g. parts=["WebDev", "Projects"] -> index=0 -> "WebDev"
+        const newPath = parts.slice(0, index + 1).join('/');
+        handleNavigate(newPath);
+    };
 
-	// Get current folder path
-	const getCurrentPath = () => {
-		return breadcrumbs.map(b => b.name).join('/');
+	const handleSelect = (path: string) => {
+        // Just select, don't navigate
+        // Although usually selecting a folder means "Use this one"
+        onSelect(path, path.split('/').pop() || path, path);
 	};
-
-	if (!isAuthenticated) {
-		return (
-			<div className='bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 max-w-lg mx-auto'>
-				<div className='text-center'>
-					<HardDrive className='w-16 h-16 mx-auto text-gray-400 mb-4' />
-					<h3 className='text-lg font-medium text-gray-900 dark:text-white mb-2'>
-						Connect Google Drive
-					</h3>
-					<p className='text-gray-600 dark:text-gray-400 mb-4'>
-						Connect your Google Drive account to select a backup folder.
-					</p>
-					<div className='flex gap-3 justify-center'>
-						<button
-							onClick={onCancel}
-							className='px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
-						>
-							Cancel
-						</button>
-						<button
-							onClick={handleAuthenticate}
-							className='px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2'
-						>
-							<HardDrive className='w-4 h-4' />
-							Connect Google Drive
-						</button>
-					</div>
-				</div>
-			</div>
-		);
-	}
+    
+    const handleUseDefault = () => {
+        if (defaultPath) {
+             onSelect(defaultPath, defaultPath.split('/').pop() || defaultPath, defaultPath);
+        }
+    };
 
 	return (
 		<div className='bg-white dark:bg-gray-800 rounded-lg shadow-lg max-w-2xl mx-auto'>
-			{/* Header */}
-			<div className='px-4 py-3 border-b border-gray-200 dark:border-gray-700'>
-				<div className='flex items-center justify-between'>
-					<h3 className='text-lg font-medium text-gray-900 dark:text-white flex items-center gap-2'>
-						<HardDrive className='w-5 h-5 text-blue-500' />
-						Select Google Drive Folder
+			<div className='px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between'>
+				<div className='flex items-center gap-2'>
+					<HardDrive className='w-5 h-5 text-gray-500' />
+					<h3 className='text-lg font-semibold text-gray-900 dark:text-white'>
+						Select Drive Folder
 					</h3>
-					<button
-						onClick={loadFolders}
-						disabled={loading}
-						className='p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-						title='Refresh'
-					>
-						<RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-					</button>
 				</div>
-
-				{/* Breadcrumbs */}
-				<div className='flex items-center gap-1 mt-2 text-sm overflow-x-auto'>
-					{breadcrumbs.map((crumb, index) => (
-						<React.Fragment key={crumb.id || 'root'}>
-							{index > 0 && (
-								<ChevronRight className='w-4 h-4 text-gray-400 flex-shrink-0' />
-							)}
-							<button
-								onClick={() => handleBreadcrumbClick(index)}
-								className={`flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 flex-shrink-0 ${
-									index === breadcrumbs.length - 1
-										? 'text-blue-600 dark:text-blue-400 font-medium'
-										: 'text-gray-600 dark:text-gray-400'
-								}`}
-							>
-								{index === 0 && <Home className='w-4 h-4' />}
-								{crumb.name}
-							</button>
-						</React.Fragment>
-					))}
-				</div>
+				<button
+					onClick={onCancel}
+					className='text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+				>
+					<X className='w-5 h-5' />
+				</button>
 			</div>
 
-			{/* Folder List */}
-			<div className='p-4 max-h-80 overflow-y-auto'>
-				{loading ? (
-					<div className='flex items-center justify-center py-8'>
-						<Loader2 className='w-8 h-8 animate-spin text-blue-500' />
-					</div>
-				) : folders.length === 0 ? (
-					<div className='text-center py-8 text-gray-500 dark:text-gray-400'>
-						<Folder className='w-12 h-12 mx-auto mb-2 opacity-50' />
-						<p>No folders found</p>
-						<p className='text-sm'>
-							Create a new folder or select current location
-						</p>
-					</div>
-				) : (
-					<div className='grid grid-cols-2 sm:grid-cols-3 gap-2'>
-						{folders.map(folder => (
-							<button
-								key={folder.id}
-								onClick={() => handleFolderClick(folder)}
-								onDoubleClick={() => handleFolderDoubleClick(folder)}
-								className={`flex items-center gap-2 p-3 rounded-lg border text-left transition-colors ${
-									selectedFolder?.id === folder.id
-										? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-										: 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700/50'
-								}`}
-							>
-								{selectedFolder?.id === folder.id ? (
-									<FolderOpen className='w-5 h-5 text-blue-500 flex-shrink-0' />
-								) : (
-									<Folder className='w-5 h-5 text-yellow-500 flex-shrink-0' />
-								)}
-								<span className='truncate text-sm text-gray-900 dark:text-white'>
-									{folder.name}
-								</span>
-							</button>
-						))}
-					</div>
-				)}
-			</div>
-
-			{/* New Folder Input */}
-			{showNewFolderInput && (
-				<div className='px-4 pb-2'>
-					<div className='flex items-center gap-2'>
-						<input
-							type='text'
-							value={newFolderName}
-							onChange={e => setNewFolderName(e.target.value)}
-							placeholder='New folder name'
-							className='flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent'
-							onKeyDown={e => {
-								if (e.key === 'Enter') handleCreateFolder();
-								if (e.key === 'Escape') {
-									setShowNewFolderInput(false);
-									setNewFolderName('');
-								}
-							}}
-							autoFocus
-						/>
+			<div className='p-4 space-y-4'>
+				<div>
+					<label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
+						Current Path / Search
+					</label>
+					<div className='flex gap-2'>
+						<div className='relative flex-1'>
+							<Search className='w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2' />
+							<input
+								value={searchQuery}
+								onChange={e => setSearchQuery(e.target.value)}
+								placeholder='Path (e.g. WebDev/Projects) or Search Name'
+								className='w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-white'
+								onKeyDown={e => {
+									if (e.key === 'Enter') handleSearch();
+								}}
+							/>
+						</div>
 						<button
-							onClick={handleCreateFolder}
-							disabled={creatingFolder || !newFolderName.trim()}
-							className='p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50'
+							onClick={handleSearch}
+							className='px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50'
+							disabled={isLoading}
 						>
-							{creatingFolder ? (
+							{isLoading ? (
 								<Loader2 className='w-4 h-4 animate-spin' />
 							) : (
-								<Check className='w-4 h-4' />
+								'Go'
 							)}
 						</button>
-						<button
-							onClick={() => {
-								setShowNewFolderInput(false);
-								setNewFolderName('');
-							}}
-							className='p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-						>
-							<X className='w-4 h-4' />
-						</button>
 					</div>
-				</div>
-			)}
-
-			{/* Footer */}
-			<div className='px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 rounded-b-lg'>
-				<div className='flex items-center justify-between'>
-					<button
-						onClick={() => setShowNewFolderInput(true)}
-						disabled={showNewFolderInput}
-						className='flex items-center gap-2 px-3 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white disabled:opacity-50'
-					>
-						<Plus className='w-4 h-4' />
-						New Folder
-					</button>
-
-					<div className='flex items-center gap-2'>
-						{selectedFolder && (
-							<span className='text-sm text-gray-500 dark:text-gray-400 mr-2'>
-								Selected:{' '}
-								<span className='font-medium'>{selectedFolder.name}</span>
+					
+					{/* Breadcrumbs */}
+					{currentPath && (
+						<div className='mt-2 flex items-center text-sm text-gray-500 overflow-x-auto pb-1'>
+							<span 
+								className='cursor-pointer hover:text-blue-600 hover:underline mr-1 font-medium'
+								onClick={() => handleNavigate('')}
+							>
+								Root
 							</span>
-						)}
-						<button
-							onClick={onCancel}
-							className='px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-						>
-							Cancel
-						</button>
-						<button
-							onClick={handleConfirm}
-							className='px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2'
-						>
-							<Check className='w-4 h-4' />
-							{selectedFolder ? 'Select Folder' : 'Select Current Folder'}
-						</button>
-					</div>
+							{currentPath.split('/').map((part, index, arr) => (
+								<React.Fragment key={index}>
+									<span className='mx-1 text-gray-400'>/</span>
+									<span 
+										className='cursor-pointer hover:text-blue-600 hover:underline whitespace-nowrap'
+										onClick={() => handleBreadcrumbClick(index, arr)}
+									>
+										{part}
+									</span>
+								</React.Fragment>
+							))}
+						</div>
+					)}
 				</div>
 
-				{/* Show selected path */}
-				<div className='mt-2 text-xs text-gray-500 dark:text-gray-400'>
-					Path: {getCurrentPath()}
-					{selectedFolder ? '/' + selectedFolder.name : ''}
+				<div className='border border-gray-200 dark:border-gray-700 rounded-lg max-h-80 overflow-y-auto min-h-[200px]'>
+					{isLoading ? (
+						<div className='h-full flex flex-col items-center justify-center p-6 text-gray-500'>
+							<Loader2 className='w-8 h-8 animate-spin text-blue-500 mb-2' />
+							<span>Loading folders...</span>
+						</div>
+					) : results.length === 0 ? (
+						<div className='h-full flex flex-col items-center justify-center p-6 text-gray-500'>
+							<FolderOpen className='w-12 h-12 text-gray-300 mb-2' />
+							<p>{searchQuery ? 'No folders found.' : 'No folders available.'}</p>
+                            {defaultPath && (
+                                <button 
+                                    onClick={handleUseDefault}
+                                    className="mt-4 text-blue-600 hover:underline text-sm"
+                                >
+                                    Use Default: {defaultPath}
+                                </button>
+                            )}
+						</div>
+					) : (
+						<ul className='divide-y divide-gray-200 dark:divide-gray-700'>
+							{results.map(result => (
+								<li
+									key={result.path}
+									className='p-3 hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center justify-between group transition-colors'
+								>
+									<div 
+                                        className='flex items-center gap-3 overflow-hidden flex-1 cursor-pointer'
+                                        onClick={() => handleNavigate(result.path)}
+                                    >
+										<Folder className='w-5 h-5 text-gray-400 flex-shrink-0 fill-current text-blue-100 dark:text-gray-600' />
+										<div className='min-w-0 text-left'>
+											<p className='text-sm font-medium text-gray-900 dark:text-white truncate group-hover:text-blue-600 dark:group-hover:text-blue-400'>
+												{result.path.split('/').pop()}
+											</p>
+											<p className='text-xs text-gray-500 truncate'>
+												{result.path}
+											</p>
+										</div>
+									</div>
+									
+									<div className='flex items-center gap-2 pl-2'>
+										{result.source === 'shared' && (
+											<span className='px-2 py-0.5 text-xs bg-yellow-100 text-yellow-800 rounded-full hidden sm:inline-block'>
+												Shared
+											</span>
+										)}
+										<button
+											onClick={() => handleSelect(result.path)}
+											className='px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-50 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700'
+										>
+											Select
+										</button>
+									</div>
+								</li>
+							))}
+						</ul>
+					)}
+				</div>
+
+				<div className='flex justify-between pt-2 items-center'>
+                    <div className="text-xs text-gray-500">
+                        {defaultPath && defaultPath !== currentPath && (
+                            <button 
+                                onClick={handleUseDefault}
+                                className="hover:text-blue-600 underline"
+                            >
+                                Use Default ({defaultPath})
+                            </button>
+                        )}
+                    </div>
+					<div className="flex gap-3">
+                        <button
+                            onClick={onCancel}
+                            className='px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            onClick={() => handleSelect(currentPath || searchQuery)}
+                            className='px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed'
+                            disabled={!currentPath && !searchQuery}
+                        >
+                            Use Current Path
+                        </button>
+                    </div>
 				</div>
 			</div>
 		</div>

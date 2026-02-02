@@ -2,50 +2,55 @@
  * Project Detail Page
  * Full project view with tabs for Overview, Environments, Plugins, Backups, Git.
  */
-import { useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
 	ArrowLeft,
+	ArrowLeftRight,
+	ArrowRight,
+	Archive,
+	AlertTriangle,
 	Globe,
 	Github,
 	Cloud,
-	Play,
-	Pause,
-	RefreshCw,
-	Package,
-	Archive,
-	GitBranch,
-	Settings,
-	ExternalLink,
-	AlertTriangle,
-	Server,
-	Plus,
-	Trash2,
-	ArrowRight,
-	ArrowLeftRight,
-	Copy,
 	Download,
+	ExternalLink,
+	GitBranch,
+	Package,
+	Pause,
+	Play,
+	Plus,
+	RefreshCw,
 	RotateCcw,
+	Server,
+	Settings,
+	Trash2,
 	Clock,
 	CheckCircle,
 	XCircle,
 	Shield,
 	AlertCircle,
+	Pencil,
+	Terminal,
 } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import LinkEnvironmentModal from '../components/LinkEnvironmentModal';
+import EditEnvironmentModal from '../components/EditEnvironmentModal';
 import SyncModal from '../components/SyncModal';
-import api, { dashboardApi } from '../services/api';
+import BackupSchedulePanel from '../components/BackupSchedulePanel';
+import { dashboardApi, getApiErrorMessage } from '../services/api';
 import toast from 'react-hot-toast';
+import TaskLogModal from '../components/TaskLogModal';
 
 type TabId =
 	| 'overview'
 	| 'environments'
 	| 'plugins'
 	| 'backups'
+	| 'restore'
 	| 'git'
 	| 'security';
 
@@ -89,6 +94,35 @@ export default function ProjectDetail() {
 	const [showSyncModal, setShowSyncModal] = useState(false);
 	const [syncSource, setSyncSource] = useState<Environment | null>(null);
 	const [syncDirection, setSyncDirection] = useState<'push' | 'pull'>('push');
+
+	// Backup and Security Env Selection
+	const [backupEnvId, setBackupEnvId] = useState<string>('');
+	const [securityEnvId, setSecurityEnvId] = useState<string>('');
+	const [restoreEnvId, setRestoreEnvId] = useState<string>('');
+	const [backupType, setBackupType] = useState<'database' | 'files' | 'full'>(
+		'database'
+	);
+	const [storageType, setStorageType] = useState<'gdrive' | 'local' | 'both'>(
+		'gdrive'
+	);
+
+	// Logs Modal State
+	const [logModal, setLogModal] = useState<{
+		isOpen: boolean;
+		backupId: number;
+		backupName: string;
+		isRunning: boolean;
+	}>({
+		isOpen: false,
+		backupId: 0,
+		backupName: '',
+		isRunning: false,
+	});
+
+	// Edit Environment State
+	const [editingEnv, setEditingEnv] = useState<Environment | null>(null);
+	const [showEditEnvModal, setShowEditEnvModal] = useState(false);
+
 	const queryClient = useQueryClient();
 
 	// Fetch project (for now using comprehensive, later should fetch by ID)
@@ -117,6 +151,26 @@ export default function ProjectDetail() {
 		enabled: !!projectId,
 	});
 	const driveSettings = driveData?.data;
+
+	// Drive backup index
+	const { data: driveIndexData } = useQuery({
+		queryKey: ['project-drive-backups-index', projectId],
+		queryFn: () => dashboardApi.getProjectDriveBackupIndex(projectId),
+		enabled: !!projectId,
+	});
+
+	const [backupsPage, setBackupsPage] = useState(1);
+	const backupsPageSize = 10;
+	const [selectedBackupIds, setSelectedBackupIds] = useState<number[]>([]);
+
+	// Fallback to DB backups if Drive index fails or is empty
+	const { data: dbBackupsData } = useQuery({
+		queryKey: ['project-backups', projectId, backupsPage, backupsPageSize],
+		queryFn: () =>
+			dashboardApi.getProjectBackups(projectId, backupsPage, backupsPageSize),
+		enabled: !!projectId,
+		keepPreviousData: true,
+	});
 
 	// Drive settings state
 	const [driveForm, setDriveForm] = useState({
@@ -157,6 +211,85 @@ export default function ProjectDetail() {
 		onError: () => toast.error('Failed to unlink environment'),
 	});
 
+	// Backup creation mutation
+	const createBackupMutation = useMutation({
+		mutationFn: (data: { envId: number; type: string; storage: string }) =>
+			dashboardApi.createEnvironmentBackup(
+				projectId!,
+				data.envId,
+				data.type,
+				data.storage
+			),
+		onSuccess: () => {
+			toast.success('Backup started');
+			// Invalidate both standard backups and drive index
+			queryClient.invalidateQueries({
+				queryKey: ['project-backups', projectId],
+			});
+			queryClient.invalidateQueries({
+				queryKey: ['project-drive-backups-index', projectId],
+			});
+		},
+		onError: (error: any) => {
+			toast.error(getApiErrorMessage(error, 'Backup failed to start'));
+		},
+	});
+
+	// Delete backup mutation
+	const deleteBackupMutation = useMutation({
+		mutationFn: (data: {
+			backupId: number;
+			force?: boolean;
+			deleteFile?: boolean;
+		}) =>
+			dashboardApi.deleteBackup(data.backupId, {
+				force: data.force,
+				delete_file: data.deleteFile,
+			}),
+		onSuccess: () => {
+			toast.success('Backup deleted');
+			queryClient.invalidateQueries({
+				queryKey: ['project-backups', projectId],
+			});
+			queryClient.invalidateQueries({
+				queryKey: ['project-drive-backups-index', projectId],
+			});
+		},
+		onError: (error: any) => {
+			toast.error(getApiErrorMessage(error, 'Failed to delete backup'));
+		},
+	});
+
+	const bulkDeleteBackupsMutation = useMutation({
+		mutationFn: (data: { backupIds: number[]; force?: boolean }) =>
+			dashboardApi.bulkDeleteBackups(data.backupIds, data.force),
+		onSuccess: () => {
+			toast.success('Selected backups deleted');
+			setSelectedBackupIds([]);
+			queryClient.invalidateQueries({
+				queryKey: ['project-backups', projectId],
+			});
+			queryClient.invalidateQueries({
+				queryKey: ['project-drive-backups-index', projectId],
+			});
+		},
+		onError: (error: any) => {
+			toast.error(
+				getApiErrorMessage(error, 'Failed to delete selected backups')
+			);
+		},
+	});
+
+	const refreshWhoisMutation = useMutation({
+		mutationFn: () => dashboardApi.refreshProjectWhois(projectId as number),
+		onSuccess: () => {
+			toast.success('WHOIS refreshed');
+		},
+		onError: (error: any) => {
+			toast.error(getApiErrorMessage(error, 'WHOIS refresh failed'));
+		},
+	});
+
 	// Drive settings mutation
 	const driveMutation = useMutation({
 		mutationFn: (settings: any) =>
@@ -174,12 +307,36 @@ export default function ProjectDetail() {
 		useState<SecurityScanResult | null>(null);
 	const [isScanning, setIsScanning] = useState(false);
 
+	// Drive clone state
+	const [driveEnv, setDriveEnv] = useState('');
+	const [driveTimestamp, setDriveTimestamp] = useState('');
+	const [targetEnvId, setTargetEnvId] = useState<number | ''>('');
+	const [driveSourceUrl, setDriveSourceUrl] = useState('');
+	const [driveTargetDomain, setDriveTargetDomain] = useState('');
+	const [setShellUser, setSetShellUser] = useState('');
+	const [runComposerInstall, setRunComposerInstall] = useState(true);
+	const [runComposerUpdate, setRunComposerUpdate] = useState(false);
+	const [runWpPluginUpdate, setRunWpPluginUpdate] = useState(false);
+	const [driveCloneTaskId, setDriveCloneTaskId] = useState<string | null>(null);
+	const [driveCloneStatus, setDriveCloneStatus] = useState<any>(null);
+
+	// Restore wizard state
+	const [restoreStep, setRestoreStep] = useState<1 | 2 | 3>(1);
+	const [selectedBackup, setSelectedBackup] = useState<any>(null);
+
 	// Security scan mutation
 	const runSecurityScan = async () => {
-		if (!projectId) return;
+		if (!projectId || !securityEnvId) {
+			toast.error('Please select an environment to scan');
+			return;
+		}
 		setIsScanning(true);
 		try {
-			const response = await api.runSecurityScan(projectId);
+			// Use dashboardApi which includes the new scanEnvironment method
+			const response = await dashboardApi.scanEnvironment(
+				projectId,
+				Number(securityEnvId)
+			);
 			setSecurityScanResult(response.data);
 			toast.success('Security scan completed');
 		} catch (error: any) {
@@ -192,11 +349,11 @@ export default function ProjectDetail() {
 	// Composer update state and handler
 	const [isUpdatingComposer, setIsUpdatingComposer] = useState(false);
 
-	const runComposerUpdate = async () => {
+	const runComposerUpdateTask = async () => {
 		if (!projectName) return;
 		setIsUpdatingComposer(true);
 		try {
-			const response = await api.runComposerUpdate(projectName);
+			const response = await dashboardApi.runComposerUpdate(projectName);
 			if (response.data.status === 'success') {
 				toast.success(
 					`Composer update completed! ${
@@ -210,6 +367,261 @@ export default function ProjectDetail() {
 			toast.error(error.response?.data?.detail || 'Composer update failed');
 		} finally {
 			setIsUpdatingComposer(false);
+		}
+	};
+
+	// Unified backup index (Drive + DB Fallback)
+	const driveIndexRaw = driveIndexData?.data?.environments || {};
+
+	// If Drive index is empty, try to populate from DB backups
+	// If Drive index is empty, try to populate from DB backups
+	const unifiedIndex = useMemo(() => {
+		// Deep copy the existing arrays to avoid mutating the React Query cache
+		const index: Record<string, any[]> = {};
+		Object.keys(driveIndexRaw).forEach(key => {
+			index[key] = [...driveIndexRaw[key]];
+		});
+
+		// Fallback/Merge with DB backups
+		if (dbBackupsData?.data?.items) {
+			dbBackupsData.data.items.forEach((backup: any) => {
+				// Infer environment from name or fallback to 'unknown'
+				// Typical name: "Backup STAGING - 2024..."
+				let envName = 'production'; // Default?
+				const lowerName = backup.name.toLowerCase();
+				if (lowerName.includes('staging')) envName = 'staging';
+				else if (lowerName.includes('prod')) envName = 'production';
+				else if (lowerName.includes('dev')) envName = 'development';
+
+				if (!index[envName]) index[envName] = [];
+
+				// Deduplicate based on timestamp/ID to prevent adding the same DB backup multiple times
+				// if useMemo re-runs. Since we copy fresh from driveIndexRaw and then loop over DB data,
+				// the only risk is if DB data has dupes or if we mutated the cache (which we fixed above).
+				// We can add a simple check to be safe against mixed sources having same backup.
+				const exists = index[envName].some(
+					b => (b.id && b.id === backup.id) || b.timestamp === backup.created_at
+				);
+
+				if (!exists) {
+					index[envName].push({
+						timestamp: backup.created_at,
+						type: backup.backup_type,
+						size: backup.size_bytes
+							? `${(backup.size_bytes / 1024 / 1024).toFixed(2)} MB`
+							: 'Unknown',
+						id: backup.id,
+						is_db_record: true, // Flag to know source
+						storage_type: backup.storage_type, // 'local', 'gdrive', etc.
+					});
+				}
+			});
+		}
+
+		// Sort all environments by timestamp desc
+		Object.keys(index).forEach(env => {
+			index[env].sort((a, b) => {
+				// Handle different timestamp formats if needed, but simple string sort desc usually works for ISO and YYYYMMDD
+				return (b.timestamp || '').localeCompare(a.timestamp || '');
+			});
+		});
+
+		return index;
+	}, [driveIndexRaw, dbBackupsData]);
+
+	// Use unifiedIndex instead of driveIndexRaw
+	const driveIndex = unifiedIndex;
+
+	const parseDomain = (url: string) => {
+		try {
+			return new URL(url).hostname;
+		} catch {
+			return url.replace(/^https?:\/\//, '').split('/')[0];
+		}
+	};
+
+	const formatBackupTimestamp = (ts: string) => {
+		if (!ts) return '';
+		// If it looks like an ISO date (from DB)
+		if (ts.includes('T') || ts.includes('+')) {
+			try {
+				return new Date(ts).toLocaleString();
+			} catch (e) {
+				return ts;
+			}
+		}
+		// If it looks like a folder name (YYYYMMDD-HHMMSS)
+		// Leave as is or format if needed
+		return ts;
+	};
+
+	// Helper component for Environment Status Card (Plugins Tab)
+	const EnvStatusCard = ({ env, colors, onClick }: any) => {
+		const { data: wpState, isLoading: wpLoading } = useQuery({
+			queryKey: ['wp-state', env.id],
+			queryFn: () => dashboardApi.getWpSiteState(env.id),
+			retry: false,
+			refetchOnWindowFocus: false,
+		});
+
+		return (
+			<div key={env.id} className='cursor-pointer' onClick={onClick}>
+				<Card
+					className={`border-2 ${colors.border} hover:shadow-lg transition-all duration-200`}
+				>
+					<div className='space-y-4'>
+						{/* Header */}
+						<div className='flex items-start justify-between'>
+							<div>
+								<div
+									className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${colors.bg} ${colors.text}`}
+								>
+									{colors.icon} {env.environment.toUpperCase()}
+								</div>
+								<p className='mt-2 text-sm text-gray-500'>{env.server_name}</p>
+							</div>
+							<Package className='w-6 h-6 text-gray-400' />
+						</div>
+
+						{/* Quick Stats */}
+						<div className='grid grid-cols-2 gap-4 p-3 bg-gray-50 rounded-lg'>
+							<div className='text-center'>
+								<div className='text-2xl font-bold text-gray-900'>
+									{wpLoading ? '...' : wpState?.data?.plugins_count ?? '--'}
+								</div>
+								<div className='text-xs text-gray-500'>Plugins</div>
+							</div>
+							<div className='text-center'>
+								<div className='text-2xl font-bold text-gray-900'>
+									{wpLoading ? '...' : wpState?.data?.themes_count ?? '--'}
+								</div>
+								<div className='text-xs text-gray-500'>Themes</div>
+							</div>
+						</div>
+
+						{/* Action */}
+						<div className='flex items-center justify-between pt-2 border-t'>
+							<span className='text-xs text-gray-400'>
+								{wpState?.data?.scan_error ? (
+									<span
+										className='text-red-500 flex items-center'
+										title={wpState.data.scan_error}
+									>
+										<AlertTriangle className='w-3 h-3 mr-1' />
+										Scan Error
+									</span>
+								) : wpState?.data?.last_scanned_at ? (
+									`Scanned: ${new Date(
+										wpState.data.last_scanned_at
+									).toLocaleDateString()}`
+								) : (
+									'Click to scan & view details'
+								)}
+							</span>
+							<Button
+								variant='secondary'
+								size='sm'
+								onClick={e => {
+									e.stopPropagation();
+									// Trigger WP scan
+									dashboardApi
+										.scanWpSite(env.id)
+										.then(() => {
+											toast.success('Scan started');
+										})
+										.catch(() => {
+											toast.error('Scan failed to start');
+										});
+								}}
+							>
+								<RefreshCw className='w-4 h-4 mr-1' />
+								Scan
+							</Button>
+						</div>
+					</div>
+				</Card>
+			</div>
+		);
+	};
+
+	const cloneFromDriveMutation = useMutation({
+		mutationFn: () =>
+			dashboardApi.cloneFromDrive({
+				project_id: projectId,
+				target_server_id: Number(targetEnvId),
+				target_domain: driveTargetDomain,
+				environment: driveEnv,
+				backup_timestamp: driveTimestamp,
+				source_url: driveSourceUrl || undefined,
+				target_url: driveTargetDomain
+					? `https://${driveTargetDomain}`
+					: undefined,
+				set_shell_user: setShellUser || undefined,
+				run_composer_install: runComposerInstall,
+				run_composer_update: runComposerUpdate,
+				run_wp_plugin_update: runWpPluginUpdate,
+			}),
+		onSuccess: response => {
+			setDriveCloneTaskId(response.data.task_id);
+			toast.success('Drive clone started');
+		},
+		onError: (error: any) => {
+			toast.error(
+				error.response?.data?.detail || 'Drive clone failed to start'
+			);
+		},
+	});
+
+	useEffect(() => {
+		if (!driveCloneTaskId) return;
+		const interval = setInterval(async () => {
+			try {
+				const response = await dashboardApi.getTaskStatus(driveCloneTaskId);
+				setDriveCloneStatus(response.data);
+				if (['completed', 'failed'].includes(response.data.status)) {
+					clearInterval(interval);
+				}
+			} catch {
+				clearInterval(interval);
+			}
+		}, 2000);
+
+		return () => clearInterval(interval);
+	}, [driveCloneTaskId]);
+
+	// Backup download handler (using generic dashboardApi)
+	const handleDownloadBackup = async (backupId: number, backupName: string) => {
+		try {
+			toast.loading('Starting download...', { id: 'download-toast' });
+			const response = await dashboardApi.downloadBackup(backupId);
+
+			// Create url for downloading
+			const url = window.URL.createObjectURL(new Blob([response.data]));
+			const link = document.createElement('a');
+			link.href = url;
+
+			// Try to get filename from content-disposition
+			const contentDisposition = response.headers['content-disposition'];
+			let fileName = backupName
+				? `${backupName}.tar.gz`
+				: `backup_${backupId}.tar.gz`;
+			if (contentDisposition) {
+				const fileNameMatch = contentDisposition.match(/filename="?(.+)"?/);
+				if (fileNameMatch && fileNameMatch.length === 2)
+					fileName = fileNameMatch[1];
+			}
+
+			link.setAttribute('download', fileName);
+			document.body.appendChild(link);
+			link.click();
+			link.remove();
+
+			toast.success('Download started', { id: 'download-toast' }); // update existing toast
+		} catch (error: any) {
+			toast.error(
+				'Download failed: ' + (error.response?.data?.detail || 'Unknown error'),
+				{ id: 'download-toast' }
+			);
 		}
 	};
 
@@ -229,7 +641,7 @@ export default function ProjectDetail() {
 
 		setRestoringBackupId(backupId);
 		try {
-			await api.restoreBackupById(backupId, 'local');
+			await dashboardApi.restoreBackupById(backupId, 'local');
 			toast.success('Restore started! This may take a few minutes.');
 		} catch (error: any) {
 			toast.error(error.response?.data?.detail || 'Restore failed');
@@ -240,11 +652,43 @@ export default function ProjectDetail() {
 
 	// Fetch backups
 	const { data: backupsData } = useQuery({
-		queryKey: ['project-backups', projectId],
-		queryFn: () => dashboardApi.getProjectBackups(projectId),
+		queryKey: ['project-backups', projectId, backupsPage, backupsPageSize],
+		queryFn: () =>
+			dashboardApi.getProjectBackups(projectId, backupsPage, backupsPageSize),
 		enabled: !!projectId && activeTab === 'backups',
+		keepPreviousData: true,
 	});
-	const backups = (backupsData?.data || []) as any[];
+	const backups = (backupsData?.data?.items || []) as any[];
+	const backupsTotal = backupsData?.data?.total || 0;
+	const backupsTotalPages = Math.max(
+		1,
+		Math.ceil(backupsTotal / backupsPageSize)
+	);
+	const isAllBackupsSelected =
+		backups.length > 0 && backups.every(b => selectedBackupIds.includes(b.id));
+
+	const toggleBackupSelection = (backupId: number) => {
+		setSelectedBackupIds(prev =>
+			prev.includes(backupId)
+				? prev.filter(id => id !== backupId)
+				: [...prev, backupId]
+		);
+	};
+
+	const toggleSelectAllBackups = () => {
+		if (isAllBackupsSelected) {
+			setSelectedBackupIds(prev =>
+				prev.filter(id => !backups.some(b => b.id === id))
+			);
+			return;
+		}
+		const pageIds = backups.map(b => b.id);
+		setSelectedBackupIds(prev => Array.from(new Set([...prev, ...pageIds])));
+	};
+
+	useEffect(() => {
+		setSelectedBackupIds([]);
+	}, [backupsPage]);
 
 	const handleUnlink = (envId: number, envName: string) => {
 		if (
@@ -276,6 +720,7 @@ export default function ProjectDetail() {
 		},
 		{ id: 'plugins' as TabId, label: 'Plugins & Themes', icon: Package },
 		{ id: 'backups' as TabId, label: 'Backups', icon: Archive },
+		{ id: 'restore' as TabId, label: 'Restore', icon: RotateCcw },
 		{ id: 'security' as TabId, label: 'Security', icon: Shield },
 		{ id: 'git' as TabId, label: 'Git', icon: GitBranch },
 	];
@@ -409,7 +854,7 @@ export default function ProjectDetail() {
 						<Button
 							variant='secondary'
 							size='sm'
-							onClick={runComposerUpdate}
+							onClick={runComposerUpdateTask}
 							disabled={isUpdatingComposer || actionMutation.isPending}
 						>
 							{isUpdatingComposer ? (
@@ -461,35 +906,34 @@ export default function ProjectDetail() {
 			{activeTab === 'overview' && (
 				<div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
 					{/* Environment */}
-					<Card title='Local Environment'>
-						<div className='space-y-4'>
-							<div className='flex justify-between'>
-								<span className='text-gray-500'>DDEV Status</span>
-								<Badge variant={ddevRunning ? 'success' : 'warning'}>
-									{project.environments?.local?.ddev_status || 'unknown'}
-								</Badge>
+					{/* Project Status */}
+					<Card title='Project Status'>
+						<div className='grid grid-cols-2 gap-4'>
+							<div>
+								<h4 className='text-sm font-medium text-gray-500'>Name</h4>
+								<p className='text-lg font-semibold text-gray-900'>
+									{project.project_name || project.name}
+								</p>
 							</div>
-							<div className='flex justify-between'>
-								<span className='text-gray-500'>WordPress Version</span>
-								<span>
-									{project.environments?.local?.wordpress_version || 'N/A'}
-								</span>
+							<div>
+								<h4 className='text-sm font-medium text-gray-500'>Framework</h4>
+								<Badge variant='success'>Bedrock</Badge>
 							</div>
-							<div className='flex justify-between'>
-								<span className='text-gray-500'>PHP Version</span>
-								<span>{project.environments?.local?.php_version || 'N/A'}</span>
-							</div>
-							<div className='flex justify-between'>
-								<span className='text-gray-500'>Health Score</span>
-								<span
-									className={
-										project.health_score >= 80
-											? 'text-green-600'
-											: 'text-yellow-600'
-									}
-								>
-									{project.health_score}%
-								</span>
+							<div>
+								<h4 className='text-sm font-medium text-gray-500'>
+									Environments
+								</h4>
+								<div className='flex items-center gap-2 mt-1'>
+									{environments.length > 0 ? (
+										environments.map(env => (
+											<Badge key={env.id} className='text-xs' variant='info'>
+												{env.environment.toUpperCase()}
+											</Badge>
+										))
+									) : (
+										<span className='text-gray-500 text-sm'>None linked</span>
+									)}
+								</div>
 							</div>
 						</div>
 					</Card>
@@ -520,11 +964,16 @@ export default function ProjectDetail() {
 									<div className='flex items-center space-x-2'>
 										<Badge
 											variant={
-												driveSettings?.gdrive_connected ? 'success' : 'default'
+												driveSettings?.gdrive_connected ||
+												driveSettings?.gdrive_global_configured
+													? 'success'
+													: 'default'
 											}
 										>
 											{driveSettings?.gdrive_connected
 												? 'Connected'
+												: driveSettings?.gdrive_global_configured
+												? 'Connected (Global)'
 												: 'Not Connected'}
 										</Badge>
 										<button
@@ -715,6 +1164,16 @@ export default function ProjectDetail() {
 												>
 													<Trash2 className='w-4 h-4' />
 												</button>
+												<button
+													onClick={() => {
+														setEditingEnv(env);
+														setShowEditEnvModal(true);
+													}}
+													className='p-1 text-gray-400 hover:text-blue-500 ml-1'
+													title='Edit environment'
+												>
+													<Pencil className='w-4 h-4' />
+												</button>
 											</div>
 
 											{/* Details */}
@@ -842,138 +1301,402 @@ export default function ProjectDetail() {
 			)}
 
 			{activeTab === 'plugins' && (
-				<Card title='Plugins'>
-					{pluginsData?.data?.plugins?.length > 0 ? (
-						<div className='divide-y'>
-							{pluginsData.data.plugins.map((plugin: any) => (
-								<div
-									key={plugin.name}
-									className='py-3 flex items-center justify-between'
-								>
-									<div>
-										<p className='font-medium'>{plugin.name}</p>
-										<p className='text-sm text-gray-500'>v{plugin.version}</p>
-									</div>
-									<Badge
-										variant={plugin.status === 'active' ? 'success' : 'default'}
-									>
-										{plugin.status}
-									</Badge>
-								</div>
-							))}
+				<div className='space-y-6'>
+					{/* Header */}
+					<div>
+						<h2 className='text-lg font-semibold text-gray-900'>
+							Plugins & Themes
+						</h2>
+						<p className='text-sm text-gray-500'>
+							Select an environment to view and manage WordPress plugins and
+							themes
+						</p>
+					</div>
+
+					{/* Environment Cards */}
+					{envLoading ? (
+						<div className='flex justify-center py-12'>
+							<div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600' />
 						</div>
+					) : environments.length === 0 ? (
+						<Card>
+							<div className='text-center py-12'>
+								<Server className='w-12 h-12 mx-auto mb-3 text-gray-300' />
+								<h3 className='text-lg font-medium text-gray-900'>
+									No Environments Linked
+								</h3>
+								<p className='mt-2 text-gray-500'>
+									Link staging or production environments to view plugins.
+								</p>
+								<Button
+									variant='primary'
+									className='mt-4'
+									onClick={() => setShowLinkModal(true)}
+								>
+									<Plus className='w-4 h-4 mr-2' />
+									Link Environment
+								</Button>
+							</div>
+						</Card>
 					) : (
-						<p className='text-gray-500'>No plugins found</p>
+						<div className='grid grid-cols-1 md:grid-cols-2 gap-6'>
+							{environments.map(env => {
+								const colors = getEnvColor(env.environment);
+								return (
+									<EnvStatusCard
+										key={env.id}
+										env={env}
+										colors={colors}
+										onClick={() => {
+											setActiveTab('environments');
+										}}
+									/>
+								);
+							})}
+						</div>
 					)}
-				</Card>
+
+					{/* Fallback for DDEV/Local plugins */}
+					{pluginsData?.data?.plugins?.length > 0 && (
+						<Card title='Local Development (DDEV)'>
+							<div className='divide-y'>
+								{pluginsData.data.plugins.map((plugin: any) => (
+									<div
+										key={plugin.name}
+										className='py-3 flex items-center justify-between'
+									>
+										<div>
+											<p className='font-medium'>{plugin.name}</p>
+											<p className='text-sm text-gray-500'>v{plugin.version}</p>
+										</div>
+										<Badge
+											variant={
+												plugin.status === 'active' ? 'success' : 'default'
+											}
+										>
+											{plugin.status}
+										</Badge>
+									</div>
+								))}
+							</div>
+						</Card>
+					)}
+				</div>
 			)}
 
 			{activeTab === 'backups' && (
 				<div className='space-y-6'>
-					{/* Backup Actions */}
-					<div className='flex items-center justify-between'>
-						<div>
-							<h2 className='text-lg font-semibold text-gray-900'>
-								Backup History
-							</h2>
-							<p className='text-sm text-gray-500'>
-								Point-in-time recovery available
-							</p>
-						</div>
-						<Button
-							variant='primary'
-							onClick={() => actionMutation.mutate({ action: 'backup' })}
-						>
-							<Plus className='w-4 h-4 mr-2' />
-							Create Backup
-						</Button>
-					</div>
+					<BackupSchedulePanel
+						projectId={projectId}
+						projectName={project.project_name || project.name}
+					/>
+					<Card>
+						<div className='flex items-center justify-between mb-4'>
+							<div>
+								<h2 className='text-lg font-semibold text-gray-900'>Backups</h2>
+								<p className='text-sm text-gray-500'>
+									Manage environment backups
+								</p>
+							</div>
+							<div className='flex items-center gap-2'>
+								<select
+									value={backupEnvId}
+									onChange={e => setBackupEnvId(e.target.value)}
+									className='border rounded-md text-sm px-3 py-2'
+								>
+									<option value=''>Select Environment to Backup</option>
+									{environments.map(env => (
+										<option key={env.id} value={env.id}>
+											{env.environment.toUpperCase()} ({env.server_name})
+										</option>
+									))}
+								</select>
 
-					{/* Backup Timeline */}
-					{backups.length > 0 ? (
-						<div className='relative'>
-							<div className='absolute left-4 top-0 bottom-0 w-0.5 bg-gray-200' />
-							<div className='space-y-4'>
-								{backups.map((backup: any, index: number) => (
-									<div
-										key={backup.id}
-										className='relative flex items-start pl-10'
-									>
-										<div
-											className={`absolute left-2 w-5 h-5 rounded-full flex items-center justify-center ${
-												backup.status === 'completed'
-													? 'bg-green-100 text-green-600'
-													: backup.status === 'failed'
-													? 'bg-red-100 text-red-600'
-													: 'bg-gray-100 text-gray-400'
-											}`}
-										>
-											{backup.status === 'completed' ? (
-												<CheckCircle className='w-3 h-3' />
-											) : backup.status === 'failed' ? (
-												<XCircle className='w-3 h-3' />
-											) : (
-												<Clock className='w-3 h-3' />
-											)}
-										</div>
-										<Card className='flex-1'>
-											<div className='flex items-center justify-between'>
-												<div>
-													<h4 className='font-medium text-gray-900'>
-														{backup.name || `Backup #${backup.id}`}
-													</h4>
-													<p className='text-sm text-gray-500'>
-														{new Date(backup.created_at).toLocaleString()}
-														{backup.size_bytes &&
-															` • ${(backup.size_bytes / 1024 / 1024).toFixed(
-																1
-															)} MB`}
-													</p>
-												</div>
-												<div className='flex items-center space-x-2'>
-													<Badge
-														variant={
-															backup.storage_type === 'gdrive' ||
-															backup.storage_type === 'google_drive'
-																? 'info'
-																: 'default'
-														}
-													>
-														{backup.storage_type === 'gdrive' ||
-														backup.storage_type === 'google_drive'
-															? 'Google Drive'
-															: 'Local'}
-													</Badge>
-													<Button variant='ghost' size='sm' title='Download'>
-														<Download className='w-4 h-4' />
-													</Button>
-													<Button
-														variant='ghost'
-														size='sm'
-														title='Restore'
-														onClick={() =>
-															handleRestoreBackup(
-																backup.id,
-																backup.name || `Backup #${backup.id}`
-															)
-														}
-														disabled={restoringBackupId === backup.id}
-													>
-														{restoringBackupId === backup.id ? (
-															<RefreshCw className='w-4 h-4 animate-spin' />
-														) : (
-															<RotateCcw className='w-4 h-4' />
-														)}
-													</Button>
-												</div>
-											</div>
-										</Card>
-									</div>
-								))}
+								<select
+									value={backupType}
+									onChange={e => setBackupType(e.target.value as any)}
+									className='border rounded-md text-sm px-3 py-2'
+								>
+									<option value='database'>Database Only</option>
+									<option value='files'>Files Only</option>
+									<option value='full'>Full Backup</option>
+								</select>
+
+								<select
+									value={storageType}
+									onChange={e => setStorageType(e.target.value as any)}
+									className='border rounded-md text-sm px-3 py-2'
+								>
+									<option value='gdrive'>Google Drive</option>
+									<option value='local'>Local Only</option>
+									<option value='both'>Both</option>
+								</select>
+
+								<Button
+									variant='primary'
+									onClick={() =>
+										backupEnvId
+											? createBackupMutation.mutate({
+													envId: Number(backupEnvId),
+													type: backupType,
+													storage: storageType,
+											  })
+											: toast.error('Please select an environment')
+									}
+									disabled={
+										!backupEnvId ||
+										createBackupMutation.isPending ||
+										actionMutation.isPending
+									}
+								>
+									{createBackupMutation.isPending ||
+									actionMutation.isPending ? (
+										<RefreshCw className='w-4 h-4 mr-2 animate-spin' />
+									) : (
+										<Plus className='w-4 h-4 mr-2' />
+									)}
+									Create Backup
+								</Button>
 							</div>
 						</div>
-					) : (
-						<Card>
+
+						<div className='flex items-center justify-between mb-4 border-t pt-4'>
+							<label className='flex items-center gap-2 text-sm text-gray-600'>
+								<input
+									type='checkbox'
+									checked={isAllBackupsSelected}
+									onChange={toggleSelectAllBackups}
+									className='rounded border-gray-300'
+								/>
+								Select all on page
+							</label>
+							<div className='flex items-center gap-3'>
+								{selectedBackupIds.length > 0 && (
+									<span className='text-sm text-gray-500'>
+										{selectedBackupIds.length} selected
+									</span>
+								)}
+								<Button
+									variant='secondary'
+									disabled={
+										bulkDeleteBackupsMutation.isPending ||
+										selectedBackupIds.length === 0
+									}
+									onClick={() => {
+										if (selectedBackupIds.length === 0) return;
+										const selectedBackups = backups.filter((backup: any) =>
+											selectedBackupIds.includes(backup.id)
+										);
+										const force = selectedBackups.some(
+											(backup: any) =>
+												['running', 'pending', 'failed'].includes(
+													String(backup.status || '').toLowerCase()
+												) ||
+												(backup.storage_type?.toLowerCase() ===
+													'google_drive' &&
+													!backup.drive_folder_id)
+										);
+										bulkDeleteBackupsMutation.mutate({
+											backupIds: selectedBackupIds,
+											force,
+										});
+									}}
+								>
+									<Trash2 className='w-4 h-4 mr-2 text-red-500' />
+									Delete Selected
+								</Button>
+							</div>
+						</div>
+
+						{/* Backup Timeline */}
+						{backups.length > 0 ? (
+							<div className='space-y-6'>
+								<div className='relative'>
+									<div className='absolute left-4 top-0 bottom-0 w-0.5 bg-gray-200' />
+									<div className='space-y-4'>
+										{backups.map((backup: any, index: number) => (
+											<div
+												key={backup.id}
+												className='relative flex items-start pl-10'
+											>
+												<div
+													className={`absolute left-2 w-5 h-5 rounded-full flex items-center justify-center ${
+														backup.status === 'completed'
+															? 'bg-green-100 text-green-600'
+															: backup.status === 'failed'
+															? 'bg-red-100 text-red-600'
+															: 'bg-gray-100 text-gray-400'
+													}`}
+												>
+													{backup.status?.toLowerCase() === 'completed' ? (
+														<CheckCircle className='w-3 h-3' />
+													) : backup.status?.toLowerCase() === 'failed' ? (
+														<XCircle className='w-3 h-3' />
+													) : (
+														<Clock className='w-3 h-3' />
+													)}
+												</div>
+												<Card className='flex-1'>
+													<div className='flex items-center justify-between'>
+														<div className='flex items-start gap-3'>
+															<input
+																type='checkbox'
+																checked={selectedBackupIds.includes(backup.id)}
+																onChange={() =>
+																	toggleBackupSelection(backup.id)
+																}
+																className='mt-1 rounded border-gray-300'
+															/>
+															<div>
+																<h4 className='font-medium text-gray-900'>
+																	{backup.name || `Backup #${backup.id}`}
+																</h4>
+																<p className='text-sm text-gray-500'>
+																	{new Date(backup.created_at).toLocaleString()}
+																	{backup.size_bytes
+																		? ` • ${(
+																				backup.size_bytes /
+																				1024 /
+																				1024
+																		  ).toFixed(1)} MB`
+																		: ''}
+																</p>
+																{backup.status?.toLowerCase() === 'failed' &&
+																	backup.error_message && (
+																		<div className='mt-2 p-2 bg-red-50 border border-red-100 rounded text-xs text-red-700 font-mono break-all'>
+																			<strong>Error:</strong>{' '}
+																			{backup.error_message}
+																		</div>
+																	)}
+															</div>
+														</div>
+														<div className='flex items-center space-x-2'>
+															<Button
+																variant='ghost'
+																size='sm'
+																title='View Logs'
+																onClick={() =>
+																	setLogModal({
+																		isOpen: true,
+																		backupId: backup.id,
+																		backupName: backup.name,
+																		isRunning:
+																			backup.status === 'running' ||
+																			backup.status === 'in_progress',
+																	})
+																}
+															>
+																<Terminal className='w-4 h-4 text-gray-500 hover:text-indigo-600' />
+															</Button>
+															<Badge
+																variant={
+																	backup.storage_type?.toLowerCase() ===
+																		'gdrive' ||
+																	backup.storage_type?.toLowerCase() ===
+																		'google_drive'
+																		? 'info'
+																		: 'default'
+																}
+															>
+																{backup.storage_type?.toLowerCase() ===
+																	'gdrive' ||
+																backup.storage_type?.toLowerCase() ===
+																	'google_drive'
+																	? 'Google Drive'
+																	: 'Local'}
+															</Badge>
+															{(backup.gdrive_link || backup.drive_folder_id) &&
+																(backup.storage_type?.toLowerCase() ===
+																	'gdrive' ||
+																	backup.storage_type?.toLowerCase() ===
+																		'google_drive') && (
+																	<a
+																		href={
+																			backup.gdrive_link ||
+																			`https://drive.google.com/drive/folders/${backup.drive_folder_id}`
+																		}
+																		target='_blank'
+																		rel='noopener noreferrer'
+																		title='Open in Google Drive'
+																	>
+																		<Button variant='ghost' size='sm'>
+																			<ExternalLink className='w-4 h-4 text-blue-500' />
+																		</Button>
+																	</a>
+																)}
+															<Button
+																variant='ghost'
+																size='sm'
+																title='Delete'
+																onClick={() => {
+																	if (
+																		confirm(
+																			'Are you sure you want to delete this backup?'
+																		)
+																	) {
+																		const status = String(
+																			backup.status || ''
+																		).toLowerCase();
+																		const isDrive =
+																			backup.storage_type?.toLowerCase() ===
+																				'google_drive' ||
+																			backup.storage_type?.toLowerCase() ===
+																				'gdrive';
+																		const deleteFile =
+																			!isDrive ||
+																			Boolean(backup.drive_folder_id);
+																		const force =
+																			['running', 'pending', 'failed'].includes(
+																				status
+																			) ||
+																			(isDrive && !backup.drive_folder_id);
+																		deleteBackupMutation.mutate({
+																			backupId: backup.id,
+																			force,
+																			deleteFile,
+																		});
+																	}
+																}}
+																disabled={deleteBackupMutation.isPending}
+															>
+																<Trash2 className='w-4 h-4 text-red-400' />
+															</Button>
+														</div>
+													</div>
+												</Card>
+											</div>
+										))}
+									</div>
+								</div>
+								<div className='flex items-center justify-between mt-6'>
+									<div className='text-sm text-gray-500'>
+										Page {backupsPage} of {backupsTotalPages}
+									</div>
+									<div className='flex items-center gap-2'>
+										<Button
+											variant='secondary'
+											disabled={backupsPage <= 1}
+											onClick={() =>
+												setBackupsPage(prev => Math.max(1, prev - 1))
+											}
+										>
+											Previous
+										</Button>
+										<Button
+											variant='secondary'
+											disabled={backupsPage >= backupsTotalPages}
+											onClick={() =>
+												setBackupsPage(prev =>
+													Math.min(backupsTotalPages, prev + 1)
+												)
+											}
+										>
+											Next
+										</Button>
+									</div>
+								</div>
+							</div>
+						) : (
 							<div className='text-center py-12'>
 								<Archive className='w-12 h-12 mx-auto mb-3 text-gray-300' />
 								<h3 className='text-lg font-medium text-gray-900'>
@@ -982,14 +1705,379 @@ export default function ProjectDetail() {
 								<p className='mt-2 text-gray-500'>
 									Create your first backup to enable point-in-time recovery.
 								</p>
+							</div>
+						)}
+					</Card>
+				</div>
+			)}
+
+			{activeTab === 'restore' && (
+				<div className='space-y-6'>
+					{/* Step Progress */}
+					<div className='flex items-center justify-center space-x-4 py-4'>
+						{[1, 2, 3].map(step => (
+							<div key={step} className='flex items-center'>
+								<div
+									className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
+										restoreStep >= step
+											? 'bg-blue-600 text-white'
+											: 'bg-gray-200 text-gray-500'
+									}`}
+								>
+									{step}
+								</div>
+								<span
+									className={`ml-2 text-sm ${
+										restoreStep >= step ? 'text-gray-900' : 'text-gray-400'
+									}`}
+								>
+									{step === 1 ? 'Source' : step === 2 ? 'Backup' : 'Restore'}
+								</span>
+								{step < 3 && <div className='w-12 h-0.5 bg-gray-200 mx-4' />}
+							</div>
+						))}
+					</div>
+
+					{/* Step 1: Select Source Environment */}
+					{restoreStep === 1 && (
+						<Card>
+							<h3 className='text-lg font-semibold text-gray-900 mb-2'>
+								Select Source Environment
+							</h3>
+							<p className='text-sm text-gray-500 mb-6'>
+								Choose an environment to restore backups from Google Drive
+							</p>
+
+							{Object.keys(driveIndex || {}).length === 0 ? (
+								<div className='text-center py-12'>
+									<Archive className='w-12 h-12 mx-auto mb-3 text-gray-300' />
+									<h3 className='text-lg font-medium text-gray-900'>
+										No Backups Found
+									</h3>
+									<p className='mt-2 text-gray-500'>
+										No backup folders found in Google Drive for this project.
+									</p>
+								</div>
+							) : (
+								<div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'>
+									{Object.entries(driveIndex || {}).map(
+										([envName, backups]: [string, any]) => {
+											const backupCount = Array.isArray(backups)
+												? backups.length
+												: 0;
+											const lastBackup =
+												Array.isArray(backups) && backups.length > 0
+													? backups[0]
+													: null;
+											const isStaging = envName
+												.toLowerCase()
+												.includes('staging');
+
+											return (
+												<div
+													key={envName}
+													className='cursor-pointer'
+													onClick={() => {
+														setDriveEnv(envName);
+														setDriveTimestamp('');
+														setSelectedBackup(null);
+														const envMatch = environments.find(
+															e => e.environment === envName
+														);
+														if (envMatch?.wp_url) {
+															setDriveSourceUrl(envMatch.wp_url);
+														}
+														setRestoreStep(2);
+													}}
+												>
+													<Card
+														className={`hover:shadow-lg transition-all duration-200 border-2 ${
+															isStaging
+																? 'border-yellow-200 hover:border-yellow-400'
+																: 'border-green-200 hover:border-green-400'
+														}`}
+													>
+														<div className='space-y-3'>
+															<div className='flex items-center justify-between'>
+																<div
+																	className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
+																		isStaging
+																			? 'bg-yellow-100 text-yellow-800'
+																			: 'bg-green-100 text-green-800'
+																	}`}
+																>
+																	{isStaging ? '🟡' : '🟢'}{' '}
+																	{envName.toUpperCase()}
+																</div>
+																<ArrowRight className='w-5 h-5 text-gray-400' />
+															</div>
+
+															<div className='pt-2'>
+																<div className='text-2xl font-bold text-gray-900'>
+																	{backupCount}
+																</div>
+																<div className='text-xs text-gray-500'>
+																	backups available
+																</div>
+															</div>
+
+															{lastBackup && (
+																<div className='text-xs text-gray-400 pt-2 border-t'>
+																	Last:{' '}
+																	{formatBackupTimestamp(lastBackup.timestamp)}
+																</div>
+															)}
+														</div>
+													</Card>
+												</div>
+											);
+										}
+									)}
+								</div>
+							)}
+						</Card>
+					)}
+
+					{/* Step 2: Choose Backup */}
+					{restoreStep === 2 && (
+						<Card>
+							<div className='flex items-center justify-between mb-4'>
+								<div>
+									<button
+										onClick={() => setRestoreStep(1)}
+										className='text-sm text-blue-600 hover:underline flex items-center'
+									>
+										<ArrowLeft className='w-4 h-4 mr-1' />
+										Back to environments
+									</button>
+									<h3 className='text-lg font-semibold text-gray-900 mt-2'>
+										{driveEnv.toUpperCase()} Backups
+									</h3>
+								</div>
+							</div>
+
+							<div className='space-y-3'>
+								{((driveIndex || {})[driveEnv] || []).map((backup: any) => (
+									<div
+										key={backup.timestamp}
+										className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
+											driveTimestamp === backup.timestamp
+												? 'border-blue-500 bg-blue-50'
+												: 'border-gray-200 hover:border-blue-300'
+										}`}
+										onClick={() => {
+											setDriveTimestamp(backup.timestamp);
+											setSelectedBackup(backup);
+										}}
+									>
+										<div className='flex items-center justify-between'>
+											<div className='flex items-center'>
+												<Archive className='w-5 h-5 mr-3 text-gray-400' />
+												<div>
+													<div className='font-medium text-gray-900'>
+														{formatBackupTimestamp(backup.timestamp)}
+													</div>
+													<div className='text-sm text-gray-500'>
+														{backup.type || 'Full backup'}
+														{backup.size ? ` • ${backup.size}` : ''}
+													</div>
+												</div>
+											</div>
+											{driveTimestamp === backup.timestamp && (
+												<CheckCircle className='w-5 h-5 text-blue-600' />
+											)}
+										</div>
+									</div>
+								))}
+							</div>
+
+							<div className='mt-6 flex justify-end'>
 								<Button
 									variant='primary'
-									className='mt-4'
-									onClick={() => actionMutation.mutate({ action: 'backup' })}
+									disabled={!driveTimestamp}
+									onClick={() => setRestoreStep(3)}
 								>
-									<Plus className='w-4 h-4 mr-2' />
-									Create First Backup
+									Continue to Configure
+									<ArrowRight className='w-4 h-4 ml-2' />
 								</Button>
+							</div>
+						</Card>
+					)}
+
+					{/* Step 3: Configure & Restore */}
+					{restoreStep === 3 && (
+						<Card>
+							<div className='flex items-center justify-between mb-4'>
+								<div>
+									<button
+										onClick={() => setRestoreStep(2)}
+										className='text-sm text-blue-600 hover:underline flex items-center'
+									>
+										<ArrowLeft className='w-4 h-4 mr-1' />
+										Back to backup selection
+									</button>
+									<h3 className='text-lg font-semibold text-gray-900 mt-2'>
+										Restore: {driveEnv} -{' '}
+										{formatBackupTimestamp(driveTimestamp)}
+									</h3>
+								</div>
+							</div>
+
+							<div className='space-y-4'>
+								<div>
+									<label className='block text-sm font-medium mb-1'>
+										Target Environment
+									</label>
+									<select
+										className='w-full border rounded-lg px-3 py-2'
+										value={targetEnvId}
+										onChange={e => {
+											const envId = Number(e.target.value) || '';
+											setTargetEnvId(envId);
+											const envMatch = environments.find(
+												env => env.id === envId
+											);
+											if (envMatch?.wp_url) {
+												try {
+													const url = new URL(envMatch.wp_url);
+													setDriveTargetDomain(url.hostname);
+													setSetShellUser(url.hostname);
+												} catch (e) {
+													/* ignore */
+												}
+											}
+										}}
+									>
+										<option value=''>Select target environment</option>
+										{environments.map(env => (
+											<option key={env.id} value={env.id}>
+												{env.environment.toUpperCase()} • {env.server_name}
+											</option>
+										))}
+									</select>
+								</div>
+
+								<div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
+									<div>
+										<label className='block text-sm font-medium mb-1'>
+											Source URL (for URL replacement)
+										</label>
+										<input
+											className='w-full border rounded-lg px-3 py-2'
+											value={driveSourceUrl}
+											onChange={e => setDriveSourceUrl(e.target.value)}
+											placeholder='https://old-domain.com'
+										/>
+									</div>
+									<div>
+										<label className='block text-sm font-medium mb-1'>
+											Target Domain
+										</label>
+										<input
+											className='w-full border rounded-lg px-3 py-2'
+											value={driveTargetDomain}
+											onChange={e => {
+												setDriveTargetDomain(e.target.value);
+												setSetShellUser(e.target.value);
+											}}
+											placeholder='site.example.com'
+										/>
+									</div>
+								</div>
+
+								<div>
+									<label className='block text-sm font-medium mb-1'>
+										System User
+									</label>
+									<input
+										className='w-full border rounded-lg px-3 py-2 max-w-xs'
+										value={setShellUser}
+										onChange={e => setSetShellUser(e.target.value)}
+										placeholder='siteuser'
+									/>
+								</div>
+
+								<div className='border-t pt-4 mt-4'>
+									<h4 className='text-sm font-medium text-gray-700 mb-3'>
+										Post-Restore Actions
+									</h4>
+									<div className='space-y-2'>
+										<label className='flex items-center gap-2 text-sm'>
+											<input
+												type='checkbox'
+												checked={runComposerInstall}
+												onChange={e => setRunComposerInstall(e.target.checked)}
+												className='rounded'
+											/>
+											Run composer install
+										</label>
+										<label className='flex items-center gap-2 text-sm'>
+											<input
+												type='checkbox'
+												checked={runComposerUpdate}
+												onChange={e => setRunComposerUpdate(e.target.checked)}
+												className='rounded'
+											/>
+											Run composer update
+										</label>
+										<label className='flex items-center gap-2 text-sm'>
+											<input
+												type='checkbox'
+												checked={runWpPluginUpdate}
+												onChange={e => setRunWpPluginUpdate(e.target.checked)}
+												className='rounded'
+											/>
+											Update WP plugins
+										</label>
+									</div>
+								</div>
+
+								<div className='bg-yellow-50 border border-yellow-200 rounded-lg p-4 flex items-start'>
+									<AlertTriangle className='w-5 h-5 text-yellow-600 mr-3 flex-shrink-0 mt-0.5' />
+									<div className='text-sm text-yellow-800'>
+										<strong>Warning:</strong> This will overwrite the target
+										environment's database and files. Make sure you have a
+										backup of the target before proceeding.
+									</div>
+								</div>
+
+								<div className='flex justify-between pt-4'>
+									<Button
+										variant='secondary'
+										onClick={() => {
+											setRestoreStep(1);
+											setDriveEnv('');
+											setDriveTimestamp('');
+											setSelectedBackup(null);
+										}}
+									>
+										Cancel
+									</Button>
+									<Button
+										variant='primary'
+										onClick={() => cloneFromDriveMutation.mutate()}
+										disabled={
+											!projectId ||
+											!driveEnv ||
+											!driveTimestamp ||
+											!targetEnvId ||
+											!driveTargetDomain ||
+											cloneFromDriveMutation.isPending
+										}
+									>
+										{cloneFromDriveMutation.isPending
+											? 'Starting…'
+											: 'Restore Now'}
+									</Button>
+								</div>
+
+								{driveCloneTaskId && (
+									<div className='mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700'>
+										<strong>Task:</strong> {driveCloneTaskId} •{' '}
+										{driveCloneStatus?.status || 'pending'} •{' '}
+										{driveCloneStatus?.message || 'Working...'}
+									</div>
+								)}
 							</div>
 						</Card>
 					)}
@@ -1016,23 +2104,37 @@ export default function ProjectDetail() {
 								Analyze your site for common security issues
 							</p>
 						</div>
-						<Button
-							variant='primary'
-							onClick={runSecurityScan}
-							disabled={isScanning}
-						>
-							{isScanning ? (
-								<>
-									<RefreshCw className='w-4 h-4 mr-2 animate-spin' />
-									Scanning...
-								</>
-							) : (
-								<>
-									<Shield className='w-4 h-4 mr-2' />
-									Run Security Scan
-								</>
-							)}
-						</Button>
+						<div className='flex items-center gap-3'>
+							<select
+								value={securityEnvId}
+								onChange={e => setSecurityEnvId(e.target.value)}
+								className='border rounded-md text-sm px-3 py-2'
+							>
+								<option value=''>Select Environment to Scan</option>
+								{environments.map(env => (
+									<option key={env.id} value={env.id}>
+										{env.environment.toUpperCase()} ({env.server_name})
+									</option>
+								))}
+							</select>
+							<Button
+								variant='primary'
+								onClick={runSecurityScan}
+								disabled={isScanning || !securityEnvId}
+							>
+								{isScanning ? (
+									<>
+										<RefreshCw className='w-4 h-4 mr-2 animate-spin' />
+										Scanning...
+									</>
+								) : (
+									<>
+										<Shield className='w-4 h-4 mr-2' />
+										Run Security Scan
+									</>
+								)}
+							</Button>
+						</div>
 					</div>
 
 					{/* Scan Results */}
@@ -1199,6 +2301,18 @@ export default function ProjectDetail() {
 				/>
 			)}
 
+			{projectId && showEditEnvModal && editingEnv && (
+				<EditEnvironmentModal
+					isOpen={showEditEnvModal}
+					onClose={() => {
+						setShowEditEnvModal(false);
+						setEditingEnv(null);
+					}}
+					projectId={projectId}
+					environment={editingEnv}
+				/>
+			)}
+
 			{/* Sync Modal */}
 			{projectId && (
 				<SyncModal
@@ -1214,6 +2328,14 @@ export default function ProjectDetail() {
 					initialDirection={syncDirection}
 				/>
 			)}
+
+			<TaskLogModal
+				isOpen={logModal.isOpen}
+				onClose={() => setLogModal({ ...logModal, isOpen: false })}
+				backupId={logModal.backupId}
+				backupName={logModal.backupName}
+				isRunning={logModal.isRunning}
+			/>
 		</div>
 	);
 }

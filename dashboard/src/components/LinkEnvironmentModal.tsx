@@ -27,6 +27,7 @@ interface Server {
 	name: string;
 	hostname: string;
 	status: string;
+	panel_type?: string;
 }
 
 interface ScannedSite {
@@ -66,7 +67,7 @@ export default function LinkEnvironmentModal({
 		database_user: '',
 		database_password: '',
 		backup_path: '',
-		backup_folder_id: '',
+		gdrive_backups_folder_id: '',
 		backup_folder_name: '',
 		notes: '',
 		// WP Admin credentials
@@ -93,7 +94,11 @@ export default function LinkEnvironmentModal({
 
 	// Link mutation
 	const linkMutation = useMutation({
-		mutationFn: (data: any) => dashboardApi.linkEnvironment(projectId, data),
+		mutationFn: (data: any) => 
+			dashboardApi.linkEnvironment(projectId, {
+				...data,
+				environment: data.environment.toLowerCase(),
+			}),
 		onSuccess: () => {
 			queryClient.invalidateQueries({
 				queryKey: ['project-environments', projectId],
@@ -117,7 +122,7 @@ export default function LinkEnvironmentModal({
 			database_user: '',
 			database_password: '',
 			backup_path: '',
-			backup_folder_id: '',
+			gdrive_backups_folder_id: '',
 			backup_folder_name: '',
 			notes: '',
 			wp_admin_username: '',
@@ -140,8 +145,12 @@ export default function LinkEnvironmentModal({
 		setScannedSites([]);
 		setSelectedSite(null);
 
+		// Determine base path based on server panel type
+		const selectedServer = servers.find(s => s.id === formData.server_id);
+		const basePath = selectedServer?.panel_type === 'cyberpanel' ? '/home' : '/var/www';
+
 		try {
-			const response = await dashboardApi.scanServerSites(formData.server_id);
+			const response = await dashboardApi.scanServerSites(formData.server_id, basePath);
 			if (response.data?.success) {
 				const sites = response.data.sites || [];
 				setScannedSites(sites);
@@ -162,7 +171,7 @@ export default function LinkEnvironmentModal({
 	};
 
 	// Select a scanned site and populate form
-	const handleSelectSite = (site: ScannedSite) => {
+	const handleSelectSite = async (site: ScannedSite) => {
 		setSelectedSite(site);
 		setFormData(prev => ({
 			...prev,
@@ -176,7 +185,35 @@ export default function LinkEnvironmentModal({
 					? 'development'
 					: prev.environment,
 		}));
+
+		// Auto-fetch .env for Bedrock sites
+		if (site.is_bedrock && formData.server_id) {
+			setFetchingEnv(true);
+			try {
+				const response = await dashboardApi.readServerEnv(
+					formData.server_id,
+					site.path
+				);
+				if (response.data?.success && response.data.env) {
+					const env = response.data.env;
+					setFormData(prev => ({
+						...prev,
+						database_name: env.db_name || prev.database_name,
+						database_user: env.db_user || prev.database_user,
+						database_password: env.db_password || prev.database_password,
+						wp_url: env.wp_home || env.wp_siteurl || prev.wp_url,
+					}));
+					toast.success('Credentials loaded from .env file');
+				}
+			} catch (error: any) {
+				console.error('Auto-fetch env error:', error);
+				// Silent fail - user can still manually enter credentials
+			} finally {
+				setFetchingEnv(false);
+			}
+		}
 	};
+
 
 	// Fetch .env credentials from Bedrock site
 	const handleFetchEnv = async () => {
@@ -226,7 +263,7 @@ export default function LinkEnvironmentModal({
 		setFormData(prev => ({
 			...prev,
 			backup_path: path,
-			backup_folder_id: folderId,
+			gdrive_backups_folder_id: folderId,
 			backup_folder_name: folderName,
 		}));
 		setShowDrivePicker(false);
@@ -628,7 +665,7 @@ export default function LinkEnvironmentModal({
 									onChange={e => updateForm('backup_path', e.target.value)}
 									placeholder='Select Google Drive folder or enter path'
 									className='flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 bg-gray-50'
-									readOnly={!!formData.backup_folder_id}
+									readOnly={!!formData.gdrive_backups_folder_id}
 								/>
 								<button
 									type='button'
@@ -638,14 +675,14 @@ export default function LinkEnvironmentModal({
 									<HardDrive className='w-4 h-4' />
 									Browse Drive
 								</button>
-								{formData.backup_folder_id && (
+								{formData.gdrive_backups_folder_id && (
 									<button
 										type='button'
 										onClick={() => {
 											setFormData(prev => ({
 												...prev,
 												backup_path: '',
-												backup_folder_id: '',
+												gdrive_backups_folder_id: '',
 												backup_folder_name: '',
 											}));
 										}}
@@ -656,7 +693,7 @@ export default function LinkEnvironmentModal({
 									</button>
 								)}
 							</div>
-							{formData.backup_folder_id && (
+							{formData.gdrive_backups_folder_id && (
 								<p className='text-xs text-green-600 mt-1'>
 									✓ Google Drive folder selected: {formData.backup_path}
 								</p>
@@ -669,7 +706,11 @@ export default function LinkEnvironmentModal({
 								<GoogleDriveFolderPicker
 									onSelect={handleDriveFolderSelect}
 									onCancel={() => setShowDrivePicker(false)}
-									initialFolderId={formData.backup_folder_id || undefined}
+									initialFolderId={
+										formData.backup_path ||
+										formData.gdrive_backups_folder_id ||
+										undefined
+									}
 								/>
 							</div>
 						)}

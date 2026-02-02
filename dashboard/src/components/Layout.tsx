@@ -6,6 +6,7 @@ import {
 	Users,
 	HardDrive,
 	Settings,
+	ArrowLeftRight,
 	Github,
 	Cloud,
 	Menu,
@@ -14,6 +15,8 @@ import {
 	Activity,
 	Shield,
 	Tag,
+	BarChart3,
+	FileText,
 } from 'lucide-react';
 import { useDashboardStore } from '@/store/useDashboardStore';
 
@@ -30,15 +33,21 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 	const navigation = [
 		{ name: 'Dashboard', href: '/', icon: LayoutDashboard },
 		{ name: 'Projects', href: '/projects', icon: FolderKanban },
+		{ name: 'Migrations', href: '/migrations', icon: ArrowLeftRight },
+		{ name: 'Backups', href: '/backups', icon: HardDrive },
+	];
+
+	const operationsNav = [
 		{ name: 'Servers', href: '/servers', icon: Server },
 		{ name: 'Monitoring', href: '/monitoring', icon: Activity },
+		{ name: 'Analytics', href: '/analytics', icon: BarChart3 },
 		{ name: 'Clients', href: '/clients', icon: Users },
-		{ name: 'Backups', href: '/backups', icon: HardDrive },
 		{ name: 'Audit Logs', href: '/audit-logs', icon: Shield },
 		{ name: 'Settings', href: '/settings', icon: Settings },
 	];
 
 	const billingNav = [
+		{ name: 'Invoices', href: '/billing/invoices', icon: FileText },
 		{ name: 'Subscriptions', href: '/billing/subscriptions', icon: Users }, // Placeholder icon
 		{ name: 'Packages', href: '/billing/packages', icon: FolderKanban }, // Placeholder icon
 	];
@@ -115,6 +124,33 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 								</Link>
 							);
 						})}
+					</div>
+
+					{/* Operations Section */}
+					<div className='mt-8 pt-6 border-t border-gray-200 dark:border-gray-700'>
+						<h3 className='px-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
+							Operations
+						</h3>
+						<div className='mt-2 space-y-1'>
+							{operationsNav.map(item => {
+								const Icon = item.icon;
+								return (
+									<Link
+										key={item.name}
+										to={item.href}
+										className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors duration-200 ${
+											isActive(item.href)
+												? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400 border-r-2 border-primary-700'
+												: 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white'
+										}`}
+										onClick={() => setSidebarOpen(false)}
+									>
+										<Icon className='w-5 h-5 mr-3' />
+										{item.name}
+									</Link>
+								);
+							})}
+						</div>
 					</div>
 
 					{/* Billing Section */}

@@ -28,6 +28,12 @@ interface Project {
 	name: string;
 }
 
+interface EnvironmentOption {
+	id: number;
+	environment: string;
+	server_name?: string;
+}
+
 const Schedules: React.FC = () => {
 	const [schedules, setSchedules] = useState<BackupSchedule[]>([]);
 	const [projects, setProjects] = useState<Project[]>([]);
@@ -37,11 +43,14 @@ const Schedules: React.FC = () => {
 		null
 	);
 	const [actionLoading, setActionLoading] = useState<number | null>(null);
+	const [environments, setEnvironments] = useState<EnvironmentOption[]>([]);
+	const [loadingEnvironments, setLoadingEnvironments] = useState(false);
 
 	// Form state
 	const [formData, setFormData] = useState<ScheduleCreateInput>({
 		name: '',
 		project_id: 0,
+		environment_id: undefined,
 		frequency: 'daily',
 		hour: 2,
 		minute: 0,
@@ -71,16 +80,39 @@ const Schedules: React.FC = () => {
 
 	const fetchProjects = async () => {
 		try {
-			const response = await dashboardApi.getProjects();
-			setProjects(response.data || []);
+			const response = await dashboardApi.getRemoteProjects();
+			const data = response.data;
+			setProjects(Array.isArray(data) ? data : data?.items || []);
 		} catch (error) {
 			console.error('Failed to fetch projects:', error);
+		}
+	};
+
+	const fetchEnvironments = async (projectId: number) => {
+		if (!projectId) {
+			setEnvironments([]);
+			return;
+		}
+		try {
+			setLoadingEnvironments(true);
+			const response = await dashboardApi.getProjectServers(projectId);
+			setEnvironments(response.data || []);
+		} catch (error) {
+			console.error('Failed to fetch environments:', error);
+			setEnvironments([]);
+		} finally {
+			setLoadingEnvironments(false);
 		}
 	};
 
 	const handleCreateSchedule = async () => {
 		if (!formData.name || !formData.project_id) {
 			toast.error('Please fill in required fields');
+			return;
+		}
+
+		if (!formData.environment_id) {
+			toast.error('Please select an environment');
 			return;
 		}
 
@@ -174,6 +206,7 @@ const Schedules: React.FC = () => {
 		setFormData({
 			name: '',
 			project_id: 0,
+			environment_id: undefined,
 			frequency: 'daily',
 			hour: 2,
 			minute: 0,
@@ -182,6 +215,7 @@ const Schedules: React.FC = () => {
 			retention_count: 7,
 			description: '',
 		});
+		setEnvironments([]);
 	};
 
 	const openEditModal = (schedule: BackupSchedule) => {
@@ -189,6 +223,7 @@ const Schedules: React.FC = () => {
 		setFormData({
 			name: schedule.name,
 			project_id: schedule.project_id,
+			environment_id: schedule.environment_id,
 			frequency: schedule.frequency,
 			hour: schedule.hour,
 			minute: schedule.minute,
@@ -201,6 +236,7 @@ const Schedules: React.FC = () => {
 			retention_days: schedule.retention_days,
 			description: schedule.description,
 		});
+		fetchEnvironments(schedule.project_id);
 	};
 
 	const formatNextRun = (nextRun?: string) => {
@@ -312,6 +348,11 @@ const Schedules: React.FC = () => {
 											{schedule.project_name ||
 												`Project #${schedule.project_id}`}
 										</p>
+										{schedule.environment_name && (
+											<p className='text-xs text-gray-500'>
+												Environment: {schedule.environment_name}
+											</p>
+										)}
 										<div className='text-sm text-gray-500 mt-2 flex flex-wrap items-center gap-x-4 gap-y-1'>
 											<span className='flex items-center gap-1'>
 												<Calendar className='h-3.5 w-3.5' />
@@ -425,12 +466,15 @@ const Schedules: React.FC = () => {
 								</label>
 								<select
 									value={formData.project_id}
-									onChange={e =>
+									onChange={e => {
+										const projectId = parseInt(e.target.value, 10) || 0;
 										setFormData({
 											...formData,
-											project_id: parseInt(e.target.value),
-										})
-									}
+											project_id: projectId,
+											environment_id: undefined,
+										});
+										fetchEnvironments(projectId);
+									}}
 									className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500'
 									disabled={!!editingSchedule}
 								>
@@ -551,6 +595,43 @@ const Schedules: React.FC = () => {
 										}
 										className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500'
 									/>
+								</div>
+							)}
+
+							{/* Environment */}
+							{formData.project_id > 0 && (
+								<div>
+									<label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
+										Environment *
+									</label>
+									{loadingEnvironments ? (
+										<div className='flex items-center gap-2 px-3 py-2 text-sm text-gray-500'>
+											<Loader2 className='h-4 w-4 animate-spin' />
+											Loading environments...
+										</div>
+									) : (
+										<select
+											value={formData.environment_id ?? ''}
+											onChange={e =>
+												setFormData({
+													...formData,
+													environment_id: e.target.value
+														? parseInt(e.target.value, 10)
+														: undefined,
+												})
+											}
+											className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500'
+											disabled={!!editingSchedule}
+										>
+											<option value=''>Select an environment...</option>
+											{environments.map(env => (
+												<option key={env.id} value={env.id}>
+													{env.environment}{' '}
+													{env.server_name ? `• ${env.server_name}` : ''}
+												</option>
+											))}
+										</select>
+									)}
 								</div>
 							)}
 

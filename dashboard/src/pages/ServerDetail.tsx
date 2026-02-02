@@ -28,7 +28,7 @@ import {
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
-import api from '../services/api';
+import api, { dashboardApi } from '../services/api';
 import toast from 'react-hot-toast';
 import React, { useState } from 'react';
 
@@ -43,6 +43,8 @@ function PanelLoginModal({
 		username: string;
 		password: string;
 		panel_type: string;
+		session_url?: string | null;
+		session_token?: string | null;
 	};
 	onClose: () => void;
 }) {
@@ -88,6 +90,23 @@ function PanelLoginModal({
 							<Globe className='w-4 h-4 ml-1' />
 						</a>
 					</div>
+
+					{panelData.session_url && (
+						<div>
+							<label className='block text-sm font-medium text-gray-700 mb-1'>
+								Session URL
+							</label>
+							<a
+								href={panelData.session_url}
+								target='_blank'
+								rel='noopener noreferrer'
+								className='text-blue-600 hover:underline flex items-center'
+							>
+								Open session
+								<Globe className='w-4 h-4 ml-1' />
+							</a>
+						</div>
+					)}
 
 					<div>
 						<label className='block text-sm font-medium text-gray-700 mb-1'>
@@ -559,7 +578,7 @@ function CreateDatabaseModal({
 		setIsSubmitting(true);
 
 		try {
-			await api.createCyberPanelDatabase(serverId, formData);
+			await dashboardApi.createCyberPanelDatabase(serverId, formData);
 			onSuccess();
 		} catch (error: any) {
 			toast.error(error.response?.data?.detail || 'Failed to create database');
@@ -724,7 +743,7 @@ export default function ServerDetail() {
 	// Fetch server details
 	const { data: serverData, isLoading } = useQuery({
 		queryKey: ['server', serverId],
-		queryFn: () => api.getServer(Number(serverId)),
+		queryFn: () => dashboardApi.getServer(Number(serverId)),
 		enabled: !!serverId,
 	});
 
@@ -735,7 +754,7 @@ export default function ServerDetail() {
 		isFetching: isFetchingWebsites,
 	} = useQuery({
 		queryKey: ['server-websites', serverId],
-		queryFn: () => api.getCyberPanelWebsites(Number(serverId)),
+		queryFn: () => dashboardApi.getCyberPanelWebsites(Number(serverId)),
 		enabled: !!serverId && serverData?.data?.panel_type === 'cyberpanel',
 	});
 
@@ -760,7 +779,7 @@ export default function ServerDetail() {
 		isFetching: isFetchingDatabases,
 	} = useQuery({
 		queryKey: ['server-databases', serverId],
-		queryFn: () => api.getCyberPanelDatabases(Number(serverId)),
+		queryFn: () => dashboardApi.getCyberPanelDatabases(Number(serverId)),
 		enabled:
 			!!serverId &&
 			serverData?.data?.panel_type === 'cyberpanel' &&
@@ -876,7 +895,12 @@ export default function ServerDetail() {
 	const openPanelLogin = async () => {
 		setLoadingPanelLogin(true);
 		try {
-			const response = await api.getServerPanelLogin(Number(serverId));
+			let response;
+			try {
+				response = await dashboardApi.getServerPanelSession(Number(serverId));
+			} catch (sessionError: any) {
+				response = await dashboardApi.getServerPanelLogin(Number(serverId));
+			}
 			setPanelLoginData(response.data);
 			setShowPanelLoginModal(true);
 		} catch (error: any) {
@@ -917,7 +941,7 @@ export default function ServerDetail() {
 		}
 
 		try {
-			await api.deleteCyberPanelDatabase(Number(serverId), dbName);
+			await dashboardApi.deleteCyberPanelDatabase(Number(serverId), dbName);
 			refetchDatabases();
 			toast.success(`Database ${dbName} deleted`);
 		} catch (error: any) {
@@ -1092,7 +1116,7 @@ export default function ServerDetail() {
 				<Card
 					title='Websites'
 					className='overflow-hidden'
-					action={
+					actions={
 						<Button
 							variant='outline'
 							onClick={() => refetchWebsites()}
@@ -1188,7 +1212,7 @@ export default function ServerDetail() {
 				<Card
 					title='Databases'
 					className='overflow-hidden'
-					action={
+					actions={
 						<div className='flex space-x-2'>
 							<Button
 								variant='outline'
@@ -1285,7 +1309,7 @@ export default function ServerDetail() {
 				<Card
 					title='CyberPanel Users'
 					className='overflow-hidden'
-					action={
+					actions={
 						<div className='flex space-x-2'>
 							<Button
 								variant='outline'
