@@ -65,6 +65,10 @@ class Backup(Base, TimestampMixin):
         DateTime(timezone=True), nullable=True
     )
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    storage_file_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    drive_folder_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    logs: Mapped[str | None] = mapped_column(Text, nullable=True)
     
     # Foreign keys
     project_id: Mapped[int] = mapped_column(
@@ -77,6 +81,14 @@ class Backup(Base, TimestampMixin):
     # Relationships
     project: Mapped["Project"] = relationship("Project", back_populates="backups")
     created_by: Mapped["User"] = relationship("User", back_populates="backups")
+    
+    # Optional link to specific environment (project_server)
+    project_server_id: Mapped[int | None] = mapped_column(
+        ForeignKey("project_servers.id"), nullable=True
+    )
+    # Note: Circular import prevention might be needed if ProjectServer imports Backup
+    # but typically for relationship definitions using string class names is fine.
+    project_server = relationship("ProjectServer", foreign_keys=[project_server_id])
     
     def __repr__(self) -> str:
         return f"<Backup(id={self.id}, name='{self.name}', status={self.status})>"

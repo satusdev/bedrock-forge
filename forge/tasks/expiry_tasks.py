@@ -8,6 +8,7 @@ from datetime import date, timedelta
 from typing import List, Dict, Any
 
 from ..utils.logging import logger
+from ..utils.asyncio_utils import run_async
 
 
 @shared_task(name="check_expiring_domains_ssl")
@@ -163,3 +164,46 @@ def get_expiry_summary(days: int = 30) -> Dict[str, Any]:
         logger.error(f"Error getting expiry summary: {e}")
     
     return result
+
+
+# ============================================================================
+# WHOIS Sync Tasks
+# ============================================================================
+
+@shared_task(name="forge.tasks.expiry_tasks.sync_domain_whois")
+def sync_domain_whois():
+    """
+    Sync WHOIS data for all active domains.
+    Updates expiry dates, registrars, and nameservers.
+    """
+    logger.info("Starting automatic domain WHOIS sync")
+    return run_async(_sync_domain_whois())
+
+
+async def _sync_domain_whois():
+    """Async worker for domain sync."""
+    from ..db import AsyncSessionLocal
+    from ..services.domain_service import DomainService
+    from ..db.models.domain import Domain
+    from sqlalchemy import select
+    
+    async with AsyncSessionLocal() as db:
+        service = DomainService(db)
+        
+        # Get all domains
+        result = await db.execute(select(Domain))
+        domains = result.scalars().all()
+        
+        synced = 0
+        failed = 0
+        
+        for domain in domains:
+            try:
+                # We reuse the same service/session
+                await service.fetch_whois(domain.id)
+                synced += 1
+            except Exception as e:
+                logger.error(f"Failed to sync domain {domain.domain_name}: {e}")
+                failed += 1
+                
+        return {"synced": synced, "failed": failed}

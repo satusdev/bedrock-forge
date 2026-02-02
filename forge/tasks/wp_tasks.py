@@ -56,9 +56,49 @@ async def _scan_wp_site(project_server_id: int) -> dict:
                 db.add(wp_state)
             
             ssh_base = _get_ssh_cmd(server, project_server=ps)
+
+            # Detect Bedrock structure and run WP-CLI from project root
+            raw_wp_path = (ps.wp_path or "").rstrip("/")
+            if "/web/web" in raw_wp_path:
+                raw_wp_path = raw_wp_path.replace("/web/web", "/web")
+            cli_path = raw_wp_path
+            if raw_wp_path.endswith("/web/app"):
+                cli_path = raw_wp_path[:-8]
+            elif "/web/app" in raw_wp_path:
+                cli_path = raw_wp_path.split("/web/app")[0]
+            elif raw_wp_path.endswith("/web"):
+                cli_path = raw_wp_path[:-4]
+
+            wp_env = "PATH=$PATH:/usr/local/bin:/usr/bin:/bin"
+            def _wp_cmd(cmd: str) -> str:
+                return f"cd {cli_path} && {wp_env} wp {cmd} --allow-root"
             
+            scan_error = None
+
+            # Preflight: ensure wp-cli exists on remote
+            wp_check_cmd = ssh_base + [f"{wp_env} command -v wp"]
+            proc = await asyncio.create_subprocess_exec(
+                *wp_check_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
+            if proc.returncode != 0 or not stdout.strip():
+                scan_error = (
+                    "WP-CLI not found on the server. Install wp-cli and ensure it is in PATH "
+                    "(/usr/local/bin or /usr/bin)."
+                )
+                wp_state.scan_error = scan_error
+                wp_state.last_scanned_at = datetime.utcnow()
+                await db.commit()
+                logger.error(
+                    f"WP scan failed for PS {project_server_id}: {scan_error} "
+                    f"stderr={stderr.decode()[:200]}"
+                )
+                return {"success": False, "error": scan_error}
+
             # 1. Get WP core version
-            wp_version_cmd = ssh_base + [f"cd {ps.wp_path} && wp core version"]
+            wp_version_cmd = ssh_base + [_wp_cmd("core version")]
             proc = await asyncio.create_subprocess_exec(
                 *wp_version_cmd,
                 stdout=asyncio.subprocess.PIPE,
@@ -69,7 +109,7 @@ async def _scan_wp_site(project_server_id: int) -> dict:
                 wp_state.wp_version = stdout.decode().strip()
             
             # 2. Check for WP core updates
-            wp_update_cmd = ssh_base + [f"cd {ps.wp_path} && wp core check-update --format=json"]
+            wp_update_cmd = ssh_base + [_wp_cmd("core check-update --format=json")]
             proc = await asyncio.create_subprocess_exec(
                 *wp_update_cmd,
                 stdout=asyncio.subprocess.PIPE,
@@ -85,13 +125,13 @@ async def _scan_wp_site(project_server_id: int) -> dict:
                     pass
             
             # 3. Get plugins list
-            plugins_cmd = ssh_base + [f"cd {ps.wp_path} && wp plugin list --format=json"]
+            plugins_cmd = ssh_base + [_wp_cmd("plugin list --format=json")]
             proc = await asyncio.create_subprocess_exec(
                 *plugins_cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=60)
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
             if proc.returncode == 0:
                 try:
                     plugins = json.loads(stdout.decode())
@@ -101,16 +141,22 @@ async def _scan_wp_site(project_server_id: int) -> dict:
                         1 for p in plugins if p.get("update") == "available"
                     )
                 except json.JSONDecodeError:
-                    pass
+                    logger.error(f"Failed to parse plugins JSON: {stdout.decode()[:200]}")
+                    if not scan_error:
+                        scan_error = "Plugin scan JSON error"
+            else:
+                 logger.error(f"WP plugin list failed: {stderr.decode()}")
+                 if not scan_error:
+                     scan_error = f"Plugin check failed: {stderr.decode()[:50]}"
             
             # 4. Get themes list
-            themes_cmd = ssh_base + [f"cd {ps.wp_path} && wp theme list --format=json"]
+            themes_cmd = ssh_base + [_wp_cmd("theme list --format=json")]
             proc = await asyncio.create_subprocess_exec(
                 *themes_cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=60)
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
             if proc.returncode == 0:
                 try:
                     themes = json.loads(stdout.decode())
@@ -120,16 +166,22 @@ async def _scan_wp_site(project_server_id: int) -> dict:
                         1 for t in themes if t.get("update") == "available"
                     )
                 except json.JSONDecodeError:
-                    pass
+                    logger.error(f"Failed to parse themes JSON: {stdout.decode()[:200]}")
+                    if not scan_error:
+                        scan_error = "Theme scan JSON error"
+            else:
+                 logger.error(f"WP theme list failed: {stderr.decode()}")
+                 if not scan_error:
+                     scan_error = f"Theme check failed: {stderr.decode()[:50]}"
             
             # 5. Get user count
-            users_cmd = ssh_base + [f"cd {ps.wp_path} && wp user list --format=count"]
+            users_cmd = ssh_base + [_wp_cmd("user list --format=count")]
             proc = await asyncio.create_subprocess_exec(
                 *users_cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
             if proc.returncode == 0:
                 try:
                     wp_state.users_count = int(stdout.decode().strip())
@@ -137,18 +189,18 @@ async def _scan_wp_site(project_server_id: int) -> dict:
                     pass
             
             # 6. Get PHP version
-            php_cmd = ssh_base + [f"cd {ps.wp_path} && wp eval 'echo phpversion();'"]
+            php_cmd = ssh_base + [_wp_cmd("eval 'echo phpversion();'")]
             proc = await asyncio.create_subprocess_exec(
                 *php_cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
             if proc.returncode == 0:
                 wp_state.php_version = stdout.decode().strip()[:20]
             
             wp_state.last_scanned_at = datetime.utcnow()
-            wp_state.scan_error = None
+            wp_state.scan_error = scan_error
             
             await db.commit()
             

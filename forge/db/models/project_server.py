@@ -20,9 +20,9 @@ if TYPE_CHECKING:
 
 class ServerEnvironment(str, PyEnum):
     """Server environment type for project context."""
-    STAGING = "staging"
-    PRODUCTION = "production"
-    DEVELOPMENT = "development"
+    staging = "staging"
+    production = "production"
+    development = "development"
 
 
 class ProjectServer(Base, TimestampMixin):
@@ -52,7 +52,7 @@ class ProjectServer(Base, TimestampMixin):
     
     # Environment context
     environment: Mapped[ServerEnvironment] = mapped_column(
-        Enum(ServerEnvironment), default=ServerEnvironment.STAGING
+        Enum(ServerEnvironment), default=ServerEnvironment.staging
     )
     
     # WordPress paths on this server
@@ -70,6 +70,12 @@ class ProjectServer(Base, TimestampMixin):
     # Per-site SSH credentials (override server defaults for CyberPanel sites)
     ssh_user: Mapped[str | None] = mapped_column(String(100), nullable=True)
     ssh_key_path: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
+    gdrive_backups_folder_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Database credentials (encrypted)
+    database_name: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
+    database_user: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
+    database_password: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
     
     # Is this the primary server for this environment?
     is_primary: Mapped[bool] = mapped_column(default=True)

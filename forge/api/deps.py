@@ -16,12 +16,12 @@ from ..core.config import settings
 from .security import verify_token
 
 
+import json
+from ..utils.redis_client import get_redis_client
+
 # Global in-memory storage for dashboard state
 # In production, this will be replaced with database sessions
 dashboard_cache: Dict[str, Any] = {}
-
-# Task status tracking for background operations
-task_status: Dict[str, Dict[str, Any]] = {}
 
 # OAuth2 scheme for token authentication
 oauth2_scheme = OAuth2PasswordBearer(
@@ -31,22 +31,37 @@ oauth2_scheme = OAuth2PasswordBearer(
 
 
 def get_task_status(task_id: str) -> Dict[str, Any]:
-    """Get the status of a background task."""
-    return task_status.get(task_id, {
+    """Get the status of a background task from Redis."""
+    try:
+        redis = get_redis_client()
+        data = redis.get(f"task:{task_id}")
+        if data:
+            return json.loads(data)
+    except Exception as e:
+        # Fallback or log error
+        print(f"Error getting task status from Redis: {e}")
+        
+    return {
         "status": "unknown",
         "message": "Task not found"
-    })
+    }
 
 
 def update_task_status(task_id: str, status: str, message: str = "", 
                        progress: int = 0, result: Any = None) -> None:
-    """Update the status of a background task."""
-    task_status[task_id] = {
-        "status": status,
-        "message": message,
-        "progress": progress,
-        "result": result
-    }
+    """Update the status of a background task in Redis."""
+    try:
+        redis = get_redis_client()
+        data = {
+            "status": status,
+            "message": message,
+            "progress": progress,
+            "result": result
+        }
+        # Store with 24h expiry
+        redis.setex(f"task:{task_id}", 86400, json.dumps(data))
+    except Exception as e:
+        print(f"Error updating task status in Redis: {e}")
 
 
 async def get_current_user(

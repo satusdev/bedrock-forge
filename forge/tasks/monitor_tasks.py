@@ -17,15 +17,7 @@ from ..db.models.monitor import MonitorStatus
 from ..db.models.heartbeat import Heartbeat, HeartbeatStatus
 from ..db.models.incident import Incident, IncidentStatus
 from ..utils.logging import logger
-
-
-def run_async(coro):
-    """Helper to run async code in sync context."""
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
+from ..utils.asyncio_utils import run_async
 
 
 async def check_url(url: str, timeout: int = 30) -> tuple[bool, int, str]:
@@ -48,138 +40,24 @@ async def check_url(url: str, timeout: int = 30) -> tuple[bool, int, str]:
 
 
 
-from ..db.models.notification_channel import NotificationChannel
-from ..services.notification_service import notification_service
-import json
+from ..services.monitor_service import MonitorService
+from ..api.deps import update_task_status
 
-async def _send_notifications(monitor: Monitor, alert_type: str, message: str):
-    """Send notifications to configured channels."""
-    if not monitor.notification_channels:
-        return
+async def _check_monitor(monitor_id: int, task_id: Optional[str] = None) -> dict:
+    """Check a single monitor using MonitorService."""
+    if task_id:
+        update_task_status(task_id, "running", f"Checking monitor {monitor_id}...")
         
-    try:
-        channel_ids = json.loads(monitor.notification_channels)
-        if not isinstance(channel_ids, list):
-            logger.warning(f"Invalid notification_channels format for monitor {monitor.id}")
-            return
-            
-        async with AsyncSessionLocal() as db:
-            # Fetch channels
-            result = await db.execute(
-                select(NotificationChannel)
-                .where(NotificationChannel.id.in_(channel_ids))
-                .where(NotificationChannel.is_active == True)
-            )
-            channels = result.scalars().all()
-            
-            level = "error" if alert_type == "DOWN" else "success"
-            title = f"Monitor Alert: {monitor.name}"
-            
-            for channel in channels:
-                await notification_service.send(
-                    channel=channel,
-                    title=title,
-                    message=message,
-                    level=level
-                )
-                
-    except Exception as e:
-        logger.error(f"Failed to send notifications for monitor {monitor.id}: {e}")
-
-async def _check_monitor(monitor_id: int) -> dict:
-    """Check a single monitor, record heartbeat, and manage incidents."""
     async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(Monitor).where(Monitor.id == monitor_id)
-        )
-        monitor = result.scalar_one_or_none()
+        service = MonitorService(db)
+        result = await service.check_monitor(monitor_id)
         
-        if not monitor or not monitor.is_active:
-            return {"skipped": True}
-        
-        # Perform check
-        success, response_time, message = await check_url(
-            monitor.url, 
-            monitor.timeout_seconds
-        )
-        
-        previous_status = monitor.last_status
-        new_status = HeartbeatStatus.UP if success else HeartbeatStatus.DOWN
-        
-        # Record heartbeat
-        heartbeat = Heartbeat(
-            monitor_id=monitor_id,
-            status=new_status,
-            response_time_ms=response_time,
-            message=message,
-            checked_at=datetime.utcnow()
-        )
-        db.add(heartbeat)
-        
-        # Update monitor
-        monitor.last_check_at = datetime.utcnow()
-        monitor.last_status = MonitorStatus.UP if success else MonitorStatus.DOWN
-        monitor.last_response_time_ms = response_time
-        monitor.consecutive_failures = 0 if success else (monitor.consecutive_failures or 0) + 1
-        
-        incident_created = False
-        incident_resolved = False
-        
-        # Incident management
-        if not success and monitor.consecutive_failures >= monitor.max_retries:
-            # Check if there's already an ongoing incident
-            existing = await db.execute(
-                select(Incident)
-                .where(Incident.monitor_id == monitor_id)
-                .where(Incident.status == IncidentStatus.ONGOING)
-            )
-            if not existing.scalar_one_or_none():
-                # Create new incident
-                incident = Incident(
-                    monitor_id=monitor_id,
-                    title=f"{monitor.name} is DOWN",
-                    status=IncidentStatus.ONGOING,
-                    started_at=datetime.utcnow(),
-                    created_at=datetime.utcnow(),
-                    updated_at=datetime.utcnow()
-                )
-                db.add(incident)
-                incident_created = True
-                logger.warning(f"Incident created for {monitor.name}")
-                
-                # Send DOWN notification
-                if monitor.alert_on_down:
-                    await _send_notifications(monitor, "DOWN", f"{monitor.name} is DOWN. Error: {message}")
-        
-        elif success and previous_status == MonitorStatus.DOWN:
-            # Resolve any ongoing incidents
-            result = await db.execute(
-                select(Incident)
-                .where(Incident.monitor_id == monitor_id)
-                .where(Incident.status == IncidentStatus.ONGOING)
-            )
-            for incident in result.scalars().all():
-                incident.resolve()
-                incident_resolved = True
-                logger.info(f"Incident resolved for {monitor.name}")
-                
-            if incident_resolved and monitor.alert_on_down:
-                 # Send UP notification
-                 await _send_notifications(monitor, "UP", f"{monitor.name} is UP. Response time: {response_time}ms")
-        
-        await db.commit()
-        
-        logger.info(f"Monitor {monitor.name}: {'UP' if success else 'DOWN'} ({response_time}ms)")
-        
-        return {
-            "monitor_id": monitor_id,
-            "name": monitor.name,
-            "success": success,
-            "response_time_ms": response_time,
-            "message": message,
-            "incident_created": incident_created,
-            "incident_resolved": incident_resolved
-        }
+        if task_id:
+            status = "completed" if result.get("success") else "failed"
+            msg = f"Check finished: {result.get('status')}"
+            update_task_status(task_id, status, msg)
+            
+        return result
 
 
 
@@ -279,9 +157,9 @@ from urllib.parse import urlparse
 
 
 @shared_task(name="forge.tasks.monitor_tasks.check_single_monitor")
-def check_single_monitor(monitor_id: int) -> dict:
+def check_single_monitor(monitor_id: int, task_id: Optional[str] = None) -> dict:
     """Check a single monitor (alias for API compatibility)."""
-    return check_monitor(monitor_id)
+    return run_async(_check_monitor(monitor_id, task_id))
 
 
 @shared_task(name="forge.tasks.monitor_tasks.check_ssl_certificates")

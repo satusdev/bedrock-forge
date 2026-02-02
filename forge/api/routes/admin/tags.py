@@ -16,7 +16,8 @@ from ....db.models.user import User
 from ....db.models.tag import Tag, DEFAULT_TAGS
 from ....db.models.project import Project
 from ....db.models.server import Server
-from ....db.models.project_tag import project_tags, server_tags
+from ....db.models.project_tag import project_tags, server_tags, client_tags
+from ....db.models.client import Client
 from ...deps import get_current_active_user
 from ....utils.logging import logger
 
@@ -342,6 +343,106 @@ async def set_server_tags(
     return {"success": True, "tags": [t.id for t in tags]}
 
 
+# Client-Tag management endpoints
+@router.get("/client/{client_id}", response_model=List[TagRead])
+async def get_client_tags(
+    client_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)]
+):
+    """Get all tags for a client."""
+    result = await db.execute(
+        select(Client).where(Client.id == client_id).options(selectinload(Client.tag_objects))
+    )
+    client = result.scalar_one_or_none()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    return client.tag_objects
+
+
+@router.put("/client/{client_id}")
+async def set_client_tags(
+    client_id: int,
+    data: TagAssignment,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)]
+):
+    """Set tags for a client (replaces existing tags)."""
+    result = await db.execute(
+        select(Client).where(Client.id == client_id).options(selectinload(Client.tag_objects))
+    )
+    client = result.scalar_one_or_none()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    tags_result = await db.execute(select(Tag).where(Tag.id.in_(data.tag_ids)))
+    tags = tags_result.scalars().all()
+
+    client.tag_objects = list(tags)
+
+    await db.commit()
+    await _update_tag_usage_counts(db)
+
+    return {"success": True, "tags": [t.id for t in tags]}
+
+
+@router.post("/client/{client_id}/add/{tag_id}")
+async def add_client_tag(
+    client_id: int,
+    tag_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)]
+):
+    """Add a tag to a client."""
+    result = await db.execute(
+        select(Client).where(Client.id == client_id).options(selectinload(Client.tag_objects))
+    )
+    client = result.scalar_one_or_none()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    tag_result = await db.execute(select(Tag).where(Tag.id == tag_id))
+    tag = tag_result.scalar_one_or_none()
+    if not tag:
+        raise HTTPException(status_code=404, detail="Tag not found")
+
+    if tag not in client.tag_objects:
+        client.tag_objects.append(tag)
+        await db.commit()
+        await _update_tag_usage_counts(db)
+
+    return {"success": True}
+
+
+@router.delete("/client/{client_id}/remove/{tag_id}")
+async def remove_client_tag(
+    client_id: int,
+    tag_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)]
+):
+    """Remove a tag from a client."""
+    result = await db.execute(
+        select(Client).where(Client.id == client_id).options(selectinload(Client.tag_objects))
+    )
+    client = result.scalar_one_or_none()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    tag_result = await db.execute(select(Tag).where(Tag.id == tag_id))
+    tag = tag_result.scalar_one_or_none()
+    if not tag:
+        raise HTTPException(status_code=404, detail="Tag not found")
+
+    if tag in client.tag_objects:
+        client.tag_objects.remove(tag)
+        await db.commit()
+        await _update_tag_usage_counts(db)
+
+    return {"success": True}
+
+
 async def _update_tag_usage_counts(db: AsyncSession):
     """Update usage count for all tags."""
     # Get all tags
@@ -360,7 +461,13 @@ async def _update_tag_usage_counts(db: AsyncSession):
             select(func.count()).select_from(server_tags).where(server_tags.c.tag_id == tag.id)
         )
         server_count = server_count_result.scalar() or 0
-        
-        tag.usage_count = project_count + server_count
+
+        # Count clients using this tag
+        client_count_result = await db.execute(
+            select(func.count()).select_from(client_tags).where(client_tags.c.tag_id == tag.id)
+        )
+        client_count = client_count_result.scalar() or 0
+
+        tag.usage_count = project_count + server_count + client_count
     
     await db.commit()

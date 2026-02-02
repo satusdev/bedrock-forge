@@ -4,7 +4,8 @@ Projects API routes.
 This module contains project management, DDEV control, plugins/themes management,
 and WordPress core update endpoints.
 """
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, status, Query
+from fastapi.responses import StreamingResponse
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Annotated
 from datetime import datetime
@@ -15,19 +16,27 @@ import uuid
 import json
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, case, desc
+from sqlalchemy.orm import joinedload
 
 from ....utils.logging import logger
 from ....utils.local_config import LocalConfigManager
 from ...schemas import ProjectStatus, QuickAction
 from ...schemas import ProjectCreate, ProjectUpdate, ProjectRead, ProjectSummary, LocalProject, TagsResponse
 from ...schemas import EnvironmentCreate, EnvironmentUpdate, EnvironmentRead
-from ...deps import task_status, update_task_status, get_current_active_user
+from ...deps import get_task_status, update_task_status, get_current_active_user
 from ....db import get_db
-from ....db.models import Project, Server, User
+from ....db.models import Project, Server, User, Domain
 from ....db.models.project import ProjectStatus as DBProjectStatus
 from ....db.models.project_server import ProjectServer, ServerEnvironment
+from ...dashboard_config import get_dashboard_config
+from ....services.backup.storage.gdrive import GoogleDriveStorage
 from ....db.models.monitor import Monitor, MonitorType
+from ....services.wordpress import WordPressService
+from ...schemas.wordpress import WPUser, WPUserCreate, MagicLoginResponse
+from ...schemas import ProjectServerUpdate, ProjectServerRead
+from ....services.monitor_service import MonitorService
+from ....services.domain_service import DomainService
 
 router = APIRouter()
 
@@ -44,32 +53,60 @@ def _get_project(project_name: str):
 
 async def _get_db_project(project_name: str, db: AsyncSession):
     """Helper to get project by name or slug from database."""
+    # Prefer slug match (unique) to avoid multiple-row errors on name.
     result = await db.execute(
-        select(Project).where(
-            (Project.name == project_name) | (Project.slug == project_name)
-        )
+        select(Project).where(Project.slug == project_name)
     )
-    return result.scalar_one_or_none()
+    project = result.scalar_one_or_none()
+    if project:
+        return project
+
+    # Fallback: name match (non-unique). Return most recent.
+    result = await db.execute(
+        select(Project)
+        .where(Project.name == project_name)
+        .order_by(Project.created_at.desc())
+    )
+    return result.scalars().first()
 
 
 async def _get_project_server(project_id: int, db: AsyncSession, environment: str = None):
-    """Get the primary project-server link for a project, optionally filtered by environment."""
+    """Get a project-server link for a project, optionally filtered by environment."""
     from ....db.models.project_server import ServerEnvironment
-    
-    query = select(ProjectServer).where(
-        ProjectServer.project_id == project_id,
-        ProjectServer.is_primary == True
-    )
-    
+
+    query = select(ProjectServer).where(ProjectServer.project_id == project_id)
+
     if environment:
         env_enum = ServerEnvironment(environment.lower())
         query = query.where(ProjectServer.environment == env_enum)
-    
+
+    # Prefer primary, then prefer production -> staging -> development, then newest
+    env_priority = case(
+        (ProjectServer.environment == ServerEnvironment.production, 0),
+        (ProjectServer.environment == ServerEnvironment.staging, 1),
+        (ProjectServer.environment == ServerEnvironment.development, 2),
+        else_=3,
+    )
+
+    query = query.order_by(
+        desc(ProjectServer.is_primary),
+        env_priority,
+        desc(ProjectServer.updated_at),
+        desc(ProjectServer.created_at),
+    )
+
     result = await db.execute(query)
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 
-async def _run_remote_wp_cli(server: "Server", wp_path: str, command: str, user_id: int) -> dict:
+async def _run_remote_wp_cli(
+    server: "Server", 
+    wp_path: str, 
+    command: str, 
+    user_id: int,
+    db: AsyncSession,
+    project_server: "ProjectServer" = None
+) -> dict:
     """
     Run WP-CLI command on remote server via SSH.
     
@@ -78,6 +115,8 @@ async def _run_remote_wp_cli(server: "Server", wp_path: str, command: str, user_
         wp_path: WordPress installation path on the server
         command: WP-CLI command to run (without 'wp' prefix)
         user_id: User ID for decrypting credentials
+        db: Database session for system key fallback
+        project_server: Optional environment with SSH credential overrides
     
     Returns:
         dict with 'success', 'output', and 'error' keys
@@ -85,47 +124,54 @@ async def _run_remote_wp_cli(server: "Server", wp_path: str, command: str, user_
     from ....utils.ssh import SSHConnection
     from ....utils.crypto import decrypt_credential
     
+    from forge.services.ssh_service import SSHKeyService
+
     try:
-        # Get SSH credentials
-        ssh_password = None
-        ssh_private_key = None
+        ssh = await SSHKeyService.get_configured_client(
+            db,
+            server,
+            ssh_user=project_server.ssh_user if project_server else None,
+            ssh_key_path=project_server.ssh_key_path if project_server else None
+        )
         
-        if server.ssh_password:
-            try:
-                ssh_password = decrypt_credential(server.ssh_password, str(user_id))
-            except:
-                ssh_password = server.ssh_password
+        # Log credentials being used for debugging
+        # Note: server.ssh_password might be encrypted string representation, we don't log it
+        logger.info(f"SSH Connection: host={server.hostname}, port={server.ssh_port}")
         
-        if server.ssh_private_key:
-            try:
-                ssh_private_key = decrypt_credential(server.ssh_private_key, str(user_id))
-            except:
-                ssh_private_key = server.ssh_private_key
-        
+        # Normalize path to avoid duplicate /web/web
+        normalized_wp_path = (wp_path or "").rstrip("/")
+        if "/web/web" in normalized_wp_path:
+            normalized_wp_path = normalized_wp_path.replace("/web/web", "/web")
+
         # Detect Bedrock structure and find the correct path for wp-cli
-        is_bedrock = '/web/app' in wp_path or wp_path.endswith('/web/app')
+        is_bedrock = (
+            '/web/app' in normalized_wp_path
+            or normalized_wp_path.endswith('/web/app')
+            or normalized_wp_path.endswith('/web')
+        )
         
         # For Bedrock, wp-cli should run from the bedrock root (parent of web/)
         if is_bedrock:
-            if wp_path.endswith('/web/app'):
-                cli_path = wp_path[:-8]  # Remove /web/app
-            elif '/web/app' in wp_path:
-                cli_path = wp_path.split('/web/app')[0]
+            if normalized_wp_path.endswith('/web/app'):
+                cli_path = normalized_wp_path[:-8]  # Remove /web/app
+            elif '/web/app' in normalized_wp_path:
+                cli_path = normalized_wp_path.split('/web/app')[0]
+            elif normalized_wp_path.endswith('/web'):
+                cli_path = normalized_wp_path[:-4]  # Remove /web
             else:
-                cli_path = wp_path
+                cli_path = normalized_wp_path
         else:
-            cli_path = wp_path
+            cli_path = normalized_wp_path
         
-        with SSHConnection(
-            host=server.hostname,
-            user=server.ssh_user,
-            port=server.ssh_port,
-            password=ssh_password,
-            private_key=ssh_private_key,
-            key_path=server.ssh_key_path
-        ) as ssh:
+        ssh_user = project_server.ssh_user if project_server and project_server.ssh_user else server.ssh_user
+        extra_flags = ""
+        if ssh_user == "root" and "--allow-root" not in command:
+            extra_flags = " --allow-root"
+
+        with ssh:
             # Run WP-CLI command
-            full_command = f"cd {cli_path} && wp {command}"
+            wp_env = "PATH=$PATH:/usr/local/bin:/usr/bin:/bin"
+            full_command = f"cd {cli_path} && {wp_env} wp {command}{extra_flags}"
             result = ssh.run(full_command, warn=True)
             
             return {
@@ -394,8 +440,12 @@ async def get_project_environments(
                 server_hostname=server_hostname,
                 wp_url=ps.wp_url,
                 wp_path=ps.wp_path,
+                database_name=ps.database_name,
+                database_user=ps.database_user,
+                database_password=ps.database_password,
                 notes=ps.notes,
                 is_primary=ps.is_primary,
+                gdrive_backups_folder_id=ps.gdrive_backups_folder_id,
                 created_at=ps.created_at,
                 updated_at=ps.updated_at
             ))
@@ -434,10 +484,17 @@ async def link_environment(
             raise HTTPException(status_code=404, detail="Server not found")
         
         # Check if this environment already exists for this project
+        # Ensure environment is handled case-insensitively
+        env_val = env_data.environment
+        if hasattr(env_val, 'value'):
+            env_val = env_val.value
+        if isinstance(env_val, str):
+            env_val = ServerEnvironment(env_val.lower())
+
         existing = await db.execute(
             select(ProjectServer).where(
                 ProjectServer.project_id == project_id,
-                ProjectServer.environment == env_data.environment
+                ProjectServer.environment == env_val
             )
         )
         if existing.scalar_one_or_none():
@@ -453,6 +510,12 @@ async def link_environment(
             environment=env_data.environment,
             wp_url=env_data.wp_url,
             wp_path=env_data.wp_path,
+            ssh_user=env_data.ssh_user,
+            ssh_key_path=env_data.ssh_key_path,
+            database_name=env_data.database_name,
+            database_user=env_data.database_user,
+            database_password=env_data.database_password,
+            gdrive_backups_folder_id=env_data.gdrive_backups_folder_id,
             notes=env_data.notes,
             is_primary=True
         )
@@ -461,24 +524,44 @@ async def link_environment(
         await db.commit()
         await db.refresh(project_server)
         
-        # Auto-create uptime monitor for the environment URL
+        # Auto-create uptime monitor and sync domain
         try:
-            monitor = Monitor(
-                name=f"{project.name} - {env_data.environment.value.capitalize()}",
-                url=env_data.wp_url,
-                monitor_type=MonitorType.UPTIME,
-                project_id=project.id,
-                created_by_id=current_user.id,
-                interval_seconds=300,  # 5-minute interval
-                timeout_seconds=30,
-                is_active=True,
+            # Monitor
+            monitor_service = MonitorService(db)
+            await monitor_service.create_monitor(
+                 name=f"{project.name} - {env_data.environment.value.capitalize()}",
+                 url=env_data.wp_url,
+                 user_id=current_user.id,
+                 project_id=project.id
             )
-            db.add(monitor)
-            await db.commit()
-            logger.info(f"Auto-created monitor '{monitor.name}' for project {project.name}")
-        except Exception as monitor_error:
-            # Log but don't fail the environment linking if monitor creation fails
-            logger.warning(f"Failed to auto-create monitor for {env_data.wp_url}: {monitor_error}")
+            logger.info(f"Auto-created monitor for project {project.name}")
+
+            # Domain (only if project has client)
+            # Domain (only if project has client OR fallback to internal)
+            client_id = project.client_id
+            
+            if not client_id:
+                # Try to find default internal client
+                from ....db.models.client import Client
+                internal_client = await db.execute(select(Client).where(Client.name == "Lamah Internal"))
+                ic = internal_client.scalar_one_or_none()
+                if ic:
+                    client_id = ic.id
+                    
+            if client_id:
+                domain_service = DomainService(db)
+                await domain_service.sync_domain_from_url(
+                    url=env_data.wp_url,
+                    client_id=client_id,
+                    project_id=project.id
+                )
+                logger.info(f"Auto-synced domain for project {project.name}")
+            else:
+                logger.info(f"Skipping domain sync: Project {project.name} has no client and 'Lamah Internal' not found")
+
+        except Exception as service_error:
+            # Log but don't fail the environment linking
+            logger.warning(f"Failed to run auto-services for {env_data.wp_url}: {service_error}")
         
         return EnvironmentRead(
             id=project_server.id,
@@ -489,6 +572,7 @@ async def link_environment(
             wp_url=project_server.wp_url,
             wp_path=project_server.wp_path,
             notes=project_server.notes,
+            gdrive_backups_folder_id=project_server.gdrive_backups_folder_id,
             is_primary=project_server.is_primary,
             created_at=project_server.created_at,
             updated_at=project_server.updated_at
@@ -520,6 +604,17 @@ async def unlink_environment(
         
         if not project_server:
             raise HTTPException(status_code=404, detail="Environment link not found")
+            
+        # Decouple backups before deleting
+        # We want to keep the backups but remove the link to this specific environment entry
+        from ....db.models.backup import Backup
+        from sqlalchemy import update
+        
+        await db.execute(
+            update(Backup)
+            .where(Backup.project_server_id == project_server.id)
+            .values(project_server_id=None)
+        )
         
         await db.delete(project_server)
         await db.commit()
@@ -607,6 +702,7 @@ async def clone_project_environment(
             source_project_server_id=request.source_env_id,
             target_server_id=request.target_server_id,
             target_domain=request.target_domain,
+            target_environment=request.target_environment,
             create_cyberpanel_site=request.create_cyberpanel_site,
             include_database=request.include_database,
             include_uploads=request.include_uploads,
@@ -658,23 +754,13 @@ class SecurityScanResult(BaseModel):
 @router.post("/{project_id}/security/scan", response_model=SecurityScanResult)
 async def run_security_scan(
     project_id: int,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_active_user)]
+    env_id: Optional[int] = None, # Optional environment ID
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
+    current_user: Annotated[User, Depends(get_current_active_user)] = None
 ):
     """
     Run custom security scan on a project.
-    
-    Checks:
-    - WordPress version (up to date?)
-    - Plugin updates available
-    - Theme updates available  
-    - File permissions (wp-config.php)
-    - Debug mode enabled
-    - SSL certificate status
-    - Database prefix (non-default?)
-    - Admin user enumeration
-    - .htaccess protections
-    - XML-RPC status
+    If env_id is provided, runs specific checks for that environment.
     """
     import ssl
     import socket
@@ -695,12 +781,35 @@ async def run_security_scan(
     
     checks: List[SecurityCheck] = []
     
-    # Determine if local (DDEV) or remote
-    is_local = project.directory and Path(project.directory).exists()
+    # Determine target URL and environment type
     site_url = project.wp_home
+    is_local = True
+    remote_server = None
+    remote_wp_path = None
+    
+    if env_id:
+        env_result = await db.execute(
+            select(ProjectServer).where(
+                ProjectServer.id == env_id,
+                ProjectServer.project_id == project_id
+            ).options(joinedload(ProjectServer.server))
+        )
+        env_link = env_result.scalar_one_or_none()
+        
+        if env_link:
+            site_url = env_link.wp_url
+            remote_server = env_link.server
+            remote_wp_path = env_link.wp_path
+            is_local = False
+    elif project.directory and Path(project.directory).exists():
+        is_local = True
+    else:
+        # Fallback to local config checks if no env specified and project dir doesn't look local?
+        # Actually existing logic assumed local if project.directory exists.
+        pass
     
     if not site_url:
-        raise HTTPException(status_code=400, detail="Project has no URL configured")
+        raise HTTPException(status_code=400, detail="Target environment has no URL configured")
     
     parsed_url = urlparse(site_url)
     
@@ -961,76 +1070,56 @@ async def run_security_scan(
     except:
         pass
     
-    # 8. Local-only checks (if DDEV project)
-    if is_local:
+    # 8. Local/Remote config checks
+    if is_local and project.directory:
+        # Existing local logic
         project_dir = Path(project.directory)
-        
-        # Check wp-config.php debug settings
         web_dir = project_dir / "web"
         wpconfig_path = web_dir / "wp-config.php" if web_dir.exists() else project_dir / "wp-config.php"
         
         if wpconfig_path.exists():
             try:
                 wpconfig_content = wpconfig_path.read_text()
-                
-                # WP_DEBUG check
-                if "define('WP_DEBUG', true)" in wpconfig_content or 'define("WP_DEBUG", true)' in wpconfig_content:
-                    checks.append(SecurityCheck(
-                        name="WP_DEBUG Mode",
-                        status="warn",
-                        message="WP_DEBUG is enabled",
-                        severity="low" if is_local else "medium",
-                        details={"note": "Acceptable for local development"}
-                    ))
-                else:
-                    checks.append(SecurityCheck(
-                        name="WP_DEBUG Mode",
-                        status="pass",
-                        message="WP_DEBUG is disabled",
-                        severity="info"
-                    ))
-                
-                # Default table prefix check
-                import re
-                prefix_match = re.search(r"\$table_prefix\s*=\s*['\"]([^'\"]+)['\"]", wpconfig_content)
-                if prefix_match:
-                    prefix = prefix_match.group(1)
-                    if prefix == 'wp_':
-                        checks.append(SecurityCheck(
-                            name="Database Prefix",
-                            status="warn",
-                            message="Using default 'wp_' database prefix",
-                            severity="low",
-                            details={"prefix": prefix}
-                        ))
-                    else:
-                        checks.append(SecurityCheck(
-                            name="Database Prefix",
-                            status="pass",
-                            message=f"Custom database prefix in use: {prefix}",
-                            severity="info",
-                            details={"prefix": prefix}
-                        ))
+                _check_wp_config_content(checks, wpconfig_content, oct(wpconfig_path.stat().st_mode)[-3:])
             except Exception as e:
-                logger.warning(f"Could not read wp-config.php: {e}")
-        
-        # Check file permissions
-        if wpconfig_path.exists():
-            mode = oct(wpconfig_path.stat().st_mode)[-3:]
-            if mode in ['644', '640', '600']:
-                checks.append(SecurityCheck(
-                    name="File Permissions",
-                    status="pass",
-                    message=f"wp-config.php has secure permissions ({mode})",
-                    severity="info"
-                ))
+                logger.warning(f"Could not read local wp-config: {e}")
+
+    elif remote_server and remote_wp_path:
+        # Remote SSH Logic
+        try:
+            from ...ssh import SSHClient
+            ssh = SSHClient(remote_server, db)
+            
+            # Read wp-config.php
+            # Typically at root or web root. We'll try configured path first.
+            cmd = f"cat {remote_wp_path}/wp-config.php || cat {remote_wp_path}/web/wp-config.php"
+            result = await ssh.run(cmd)
+            
+            if result.exit_status == 0:
+                wpconfig_content = result.stdout
+                
+                # Check permissions (stat)
+                perm_cmd = f"stat -c '%a' {remote_wp_path}/wp-config.php || stat -c '%a' {remote_wp_path}/web/wp-config.php"
+                perm_result = await ssh.run(perm_cmd)
+                mode = perm_result.stdout.strip() if perm_result.exit_status == 0 else "644" # fallback
+                
+                _check_wp_config_content(checks, wpconfig_content, mode)
             else:
                 checks.append(SecurityCheck(
-                    name="File Permissions",
+                    name="Configuration Check",
                     status="warn",
-                    message=f"wp-config.php permissions ({mode}) may be too permissive",
+                    message="Could not read wp-config.php via SSH",
                     severity="medium"
                 ))
+                
+        except Exception as e:
+             checks.append(SecurityCheck(
+                name="Remote Access",
+                status="fail",
+                message=f"SSH check failed: {str(e)}",
+                severity="high"
+            ))
+
     
     # Calculate summary and score
     summary = {"pass": 0, "warn": 0, "fail": 0}
@@ -1063,6 +1152,65 @@ async def run_security_scan(
     )
 
 
+
+def _check_wp_config_content(checks, wpconfig_content, mode):
+    """Helper to check wp-config content strings."""
+    # WP_DEBUG check
+    if "define('WP_DEBUG', true)" in wpconfig_content or 'define("WP_DEBUG", true)' in wpconfig_content:
+        checks.append(SecurityCheck(
+            name="WP_DEBUG Mode",
+            status="warn",
+            message="WP_DEBUG is enabled",
+            severity="medium",
+            details={"note": "Disable in production"}
+        ))
+    else:
+        checks.append(SecurityCheck(
+            name="WP_DEBUG Mode",
+            status="pass",
+            message="WP_DEBUG is disabled",
+            severity="info"
+        ))
+    
+    # Default table prefix check
+    import re
+    prefix_match = re.search(r"\$table_prefix\s*=\s*['\"]([^'\"]+)['\"]", wpconfig_content)
+    if prefix_match:
+        prefix = prefix_match.group(1)
+        if prefix == 'wp_':
+            checks.append(SecurityCheck(
+                name="Database Prefix",
+                status="warn",
+                message="Using default 'wp_' database prefix",
+                severity="low",
+                details={"prefix": prefix}
+            ))
+        else:
+            checks.append(SecurityCheck(
+                name="Database Prefix",
+                status="pass",
+                message=f"Custom database prefix in use: {prefix}",
+                severity="info",
+                details={"prefix": prefix}
+            ))
+            
+    # File permissions check
+    if mode in ['644', '640', '600']:
+        checks.append(SecurityCheck(
+            name="File Permissions",
+            status="pass",
+            message=f"wp-config.php has secure permissions ({mode})",
+            severity="info"
+        ))
+    else:
+        checks.append(SecurityCheck(
+            name="File Permissions",
+            status="warn",
+            message=f"wp-config.php permissions ({mode}) may be too permissive",
+            severity="medium"
+        ))
+
+
 # =============================================================================
 # Project Backups
 # =============================================================================
@@ -1072,7 +1220,8 @@ async def get_project_backups(
     project_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_active_user)],
-    limit: int = 20
+    page: int = 1,
+    page_size: int = 10
 ):
     """
     Get all backups for a project.
@@ -1093,29 +1242,540 @@ async def get_project_backups(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     
-    # Get backups ordered by newest first
+    page = max(page, 1)
+    page_size = max(min(page_size, 100), 1)
+    offset = (page - 1) * page_size
+
+    total_result = await db.execute(
+        select(func.count(Backup.id)).where(Backup.project_id == project_id)
+    )
+    total = total_result.scalar_one()
+
     backups_result = await db.execute(
         select(Backup)
         .where(Backup.project_id == project_id)
         .order_by(Backup.created_at.desc())
-        .limit(limit)
+        .offset(offset)
+        .limit(page_size)
+    )
+    backups = backups_result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": b.id,
+                "name": b.name,
+                "backup_type": b.backup_type.value if b.backup_type else None,
+                "status": b.status.value if b.status else "unknown",
+                "storage_type": b.storage_type.value if b.storage_type else "local",
+                "file_path": b.storage_path,
+                "size_bytes": b.size_bytes,
+                "error_message": b.error_message,
+                "notes": b.notes,
+                "storage_file_id": b.storage_file_id,
+                "drive_folder_id": b.drive_folder_id,
+                "gdrive_file_id": b.storage_file_id,
+                "gdrive_link": f"https://drive.google.com/drive/folders/{b.drive_folder_id}" if b.drive_folder_id and b.storage_type.value == "google_drive" else None,
+                "created_at": b.created_at.isoformat() if b.created_at else None,
+                "project_name": project.name
+            }
+            for b in backups
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size
+    }
+
+
+@router.get("/{project_id}/environments/{env_id}/backups")
+async def get_environment_backups(
+    project_id: int,
+    env_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    page: int = 1,
+    page_size: int = 10
+):
+    """
+    Get backups for a specific environment.
+    """
+    from ....db.models.backup import Backup
+    
+    # Verify project access
+    project_result = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.owner_id == current_user.id
+        )
+    )
+    project = project_result.scalar_one_or_none()
+    
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Verify environment exists
+    env_result = await db.execute(
+        select(ProjectServer).where(
+            ProjectServer.id == env_id,
+            ProjectServer.project_id == project_id
+        )
+    )
+    if not env_result.scalar_one_or_none():
+         raise HTTPException(status_code=404, detail="Environment not found")
+    
+    page = max(page, 1)
+    page_size = max(min(page_size, 100), 1)
+    offset = (page - 1) * page_size
+
+    total_result = await db.execute(
+        select(func.count(Backup.id)).where(
+            Backup.project_id == project_id,
+            Backup.project_server_id == env_id
+        )
+    )
+    total = total_result.scalar_one()
+
+    backups_result = await db.execute(
+        select(Backup)
+        .where(
+            Backup.project_id == project_id,
+            Backup.project_server_id == env_id
+        )
+        .order_by(Backup.created_at.desc())
+        .offset(offset)
+        .limit(page_size)
     )
     backups = backups_result.scalars().all()
     
-    return [
-        {
-            "id": b.id,
-            "name": b.name,
-            "backup_type": b.backup_type.value if b.backup_type else None,
-            "status": b.status.value if b.status else "unknown",
-            "storage_type": b.storage_type.value if b.storage_type else "local",
-            "file_path": b.file_path,
-            "size_bytes": b.size_bytes,
-            "gdrive_file_id": getattr(b, 'gdrive_file_id', None),
-            "created_at": b.created_at.isoformat() if b.created_at else None
+    return {
+        "items": [
+            {
+                "id": b.id,
+                "name": b.name,
+                "backup_type": b.backup_type.value if b.backup_type else None,
+                "status": b.status.value if b.status else "unknown",
+                "storage_type": b.storage_type.value if b.storage_type else "local",
+                "file_path": b.storage_path,
+                "size_bytes": b.size_bytes,
+                "error_message": b.error_message,
+                "notes": b.notes,
+                "storage_file_id": b.storage_file_id,
+                "drive_folder_id": b.drive_folder_id,
+                "gdrive_file_id": b.storage_file_id,
+                "gdrive_link": f"https://drive.google.com/drive/folders/{b.drive_folder_id}" if b.drive_folder_id and b.storage_type.value == "google_drive" else None,
+                "created_at": b.created_at.isoformat() if b.created_at else None,
+                "project_name": project.name
+            }
+            for b in backups
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size
+    }
+
+
+@router.post("/{project_id}/environments/{env_id}/backups", status_code=status.HTTP_202_ACCEPTED)
+async def create_environment_backup(
+    project_id: int,
+    env_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    backup_type: str = "database",
+    storage_type: str = "gdrive",
+):
+    """
+    Create a backup for a specific environment.
+    """
+    import traceback
+    
+    try:
+        logger.info(f"Starting environment backup backup for project {project_id}, env {env_id}")
+        from ....db.models.backup import Backup
+        from sqlalchemy.orm import joinedload
+        from ....db.models.backup import BackupType as DBBackupType, BackupStatus as DBBackupStatus, BackupStorageType as StorageType
+        
+        # Verify project and environment
+        project_result = await db.execute(
+            select(Project).where(
+                Project.id == project_id,
+                Project.owner_id == current_user.id
+            )
+        )
+        project = project_result.scalar_one_or_none()
+        
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        env_result = await db.execute(
+            select(ProjectServer).where(
+                ProjectServer.id == env_id,
+                ProjectServer.project_id == project_id
+            ).options(joinedload(ProjectServer.server))
+        )
+        env_link = env_result.scalar_one_or_none()
+
+        if not env_link:
+            raise HTTPException(status_code=404, detail="Environment not found")
+
+        # Determine initial storage type/badge
+        # Import correctly from forge.db.models.backup (4 levels up from api/routes/admin)
+        from ....db.models.backup import BackupStorageType as StorageType, Backup, BackupType as DBBackupType, BackupStatus as DBBackupStatus
+        
+        initial_storage_type = StorageType.LOCAL
+        if storage_type in ["gdrive", "both"]:
+            initial_storage_type = StorageType.GOOGLE_DRIVE
+        elif storage_type == "s3":
+            initial_storage_type = StorageType.S3
+
+        # Create PENDING backup record
+        backup_record = Backup(
+            project_id=project_id,
+            name=f"Backup {env_link.environment.upper()} - {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
+            backup_type=DBBackupType(backup_type), # Use passed type
+            status=DBBackupStatus.PENDING,
+            storage_type=initial_storage_type, # Set initial badge derived from request
+            storage_path="pending", # Placeholder until completed
+            created_at=datetime.utcnow(),
+            started_at=datetime.utcnow(),
+            created_by_id=current_user.id,
+            project_server_id=env_id
+        )
+        
+        db.add(backup_record)
+        await db.commit()
+        await db.refresh(backup_record)
+        
+        # Queue Celery task
+        try:
+            from ....tasks.backup_tasks import create_environment_backup_task
+            from ....services.backup.storage.gdrive import GoogleDriveStorage
+            
+            storage_backends = []
+            
+            # Use requested storage type
+            if storage_type == "local":
+                storage_backends = ["local"]
+            elif storage_type == "gdrive":
+                # Check availability
+                if project.gdrive_connected:
+                    storage_backends = ["gdrive"]
+                else:
+                    try:
+                        is_configured, _ = await GoogleDriveStorage(remote_name="gdrive").check_configured()
+                        if is_configured:
+                            storage_backends = ["gdrive"]
+                        else:
+                            # Fallback if requested GDrive but not available? 
+                            # User said "always google drive", so maybe fail or warn?
+                            # For now, let's try GDrive and let task fail if not configured
+                            storage_backends = ["gdrive"]
+                    except:
+                        storage_backends = ["gdrive"]
+            elif storage_type == "both":
+                 storage_backends = ["local"]
+                 if project.gdrive_connected:
+                     storage_backends.append("gdrive")
+                 else:
+                     try:
+                         is_configured, _ = await GoogleDriveStorage(remote_name="gdrive").check_configured()
+                         if is_configured:
+                             storage_backends.append("gdrive")
+                     except:
+                         pass
+            else:
+                 # Default behavior (smart detection)
+                 if project.gdrive_connected:
+                     storage_backends.append("gdrive")
+                 else:
+                     try:
+                         is_configured, _ = await GoogleDriveStorage(remote_name="gdrive").check_configured()
+                         if is_configured:
+                             storage_backends.append("gdrive")
+                     except:
+                         pass
+                 
+                 if not storage_backends:
+                     storage_backends = ["local"]
+            
+            # Deduplicate
+            storage_backends = list(set(storage_backends))
+            
+            # NUCLEAR FIX: Explicitly pass the configured folder ID to avoid any ambiguity in the worker
+            override_folder_id = None
+            if env_link: # Ensure env_link is available in this scope
+                 override_folder_id = env_link.gdrive_backups_folder_id
+                 if override_folder_id:
+                     logger.info(f"Queueing environment backup with override folder: {override_folder_id}")
+
+            create_environment_backup_task.delay(
+                project_id=project_id,
+                env_id=env_id,
+                backup_id=backup_record.id,
+                backup_type=backup_type,
+                storage_backends=storage_backends,
+                override_gdrive_folder_id=override_folder_id
+            )
+            logger.info(f"Queued backup task for backup {backup_record.id} with backends: {storage_backends}")
+            
+        except ImportError:
+            logger.error("Celery worker import failed")
+            # Fallback (optional, or just fail) - simplified to keep consistent with async flow
+            
+        return {
+            "status": "accepted", 
+            "backup_id": backup_record.id,
+            "message": "Backup started in background"
         }
-        for b in backups
-    ]
+
+    except Exception as e:
+        logger.error(f"Error creating environment backup: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{project_id}/backups/download")
+async def download_backup(
+    project_id: int,
+    path: str,
+    storage: str = "local",
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
+    current_user: Annotated[User, Depends(get_current_active_user)] = None
+):
+    """
+    Download a backup file.
+    Streams the file from the storage backend.
+    """
+    from ....services.backup.backup_service import BackupService
+    
+    # Verify project access
+    project_result = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.owner_id == current_user.id
+        )
+    )
+    if not project_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    service = BackupService(db)
+    
+    try:
+        # Get config for storage if needed
+        # For GDrive, we need the remote name
+        storage_config = {}
+        if storage == "gdrive":
+             config = get_dashboard_config()
+             storage_config["gdrive_remote"] = getattr(config, "gdrive_rclone_remote", "gdrive")
+             # Base folder shouldn't matter for absolute paths (which list_files returns relative to base, but GDrive handles IDs/paths)
+             # Wait, list_files returns paths relative to base folder if prefix was used?
+             # My updated list_files returns relative path if prefix was used.
+             # But download expects a path that works with the storage backend.
+             # GDrive download uses _get_remote_path which prepends base_folder.
+             # The path coming from list_backups is relative to base_folder.
+             # So passing it back to download should work fine.
+             storage_config["gdrive_folder"] = "" # We want raw path processing
+
+        local_path, temp_dir = await service.download_backup_stream(
+            backup_path=path,
+            storage_backend=storage,
+            storage_config=storage_config
+        )
+        
+        # Filename from path
+        filename = Path(path).name
+        
+        def iterfile():
+            try:
+                with open(local_path, mode="rb") as file_like:
+                    while chunk := file_like.read(1024 * 1024): # 1MB chunks
+                        yield chunk
+            finally:
+                # Cleanup temp directory after streaming
+                import shutil
+                if temp_dir.exists():
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+
+        return StreamingResponse(
+            iterfile(), 
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+        
+    except Exception as e:
+        logger.error(f"Error downloading backup: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{project_id}/drive/backups/index")
+async def get_project_drive_backup_index(
+    project_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    environment: Optional[str] = None
+):
+    """
+    Return Drive backup index grouped by environment and timestamp.
+    Handles per-environment folder overrides.
+    """
+    project_result = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.owner_id == current_user.id
+        )
+    )
+    project = project_result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # 1. Configuration & Overrides
+    config = get_dashboard_config()
+    remote_name = getattr(config, "gdrive_rclone_remote", "gdrive")
+    base_path = (getattr(config, "gdrive_base_path", "WebDev/Projects") or "").strip("/")
+
+    # Default Project Root
+    default_backup_root = (project.gdrive_backups_folder_id or "").strip("/")
+    if not default_backup_root:
+        project_name = project.name or project.slug
+        if not project_name:
+             # Should not happen for valid project
+             project_name = f"project-{project.id}"
+        default_backup_root = f"{base_path}/{project_name}/Backups".strip("/")
+
+    # Fetch Environment Overrides
+    stmt = select(ProjectServer).where(ProjectServer.project_id == project_id)
+    project_envs = (await db.execute(stmt)).scalars().all()
+    
+    env_overrides = {
+        ps.environment.value: ps.gdrive_backups_folder_id 
+        for ps in project_envs 
+        if ps.gdrive_backups_folder_id
+    }
+
+    # 2. Storage Setup
+    # We use a default storage initialized at root (or base path)
+    # Note: We initialize at base_folder="" to allow full path manipulation
+    default_storage = GoogleDriveStorage(remote_name=remote_name, base_folder="")
+    
+    # Check if configured
+    is_configured, msg = await default_storage.check_configured()
+    if not is_configured:
+         # Only fail if we strictly rely on default storage?
+         # If using overrides solely, maybe we can proceed?
+         # But usually global config is required for rclone to work at all.
+         raise HTTPException(status_code=400, detail=msg)
+
+    # 3. Discover Environment Folders
+    found_envs = set()
+
+    # A) Check Default Root
+    try:
+        paths = await default_storage.list_directories(
+            prefix=default_backup_root, 
+            max_results=200,
+            recursive=False
+        )
+        for p in paths:
+            # p is full path e.g. "Root/Backups/staging"
+            # Extract just the env name
+            if p.startswith(default_backup_root + "/"):
+                name = p[len(default_backup_root)+1:]
+                found_envs.add(name)
+            elif default_backup_root == "" and "/" not in p:
+                found_envs.add(p)
+    except:
+        pass # Path might not exist yet
+
+    # B) Add Overrides
+    for e in env_overrides.keys():
+        found_envs.add(e)
+    
+    # Filter targets
+    targets = sorted(list(found_envs))
+    if environment:
+        targets = [t for t in targets if t == environment]
+    
+    # Helper to scan a folder
+    async def _first_file(storage_backend, path: str) -> Optional[Dict[str, Any]]:
+        files = await storage_backend.list_files(prefix=path, max_results=1)
+        if not files:
+            return None
+        
+        file_data = files[0]
+        file_id = file_data.get("id")
+        web_link = f"https://drive.google.com/file/d/{file_id}/view?usp=sharing" if file_id else None
+        
+        return {
+            "path": file_data["path"],
+            "name": file_data["name"],
+            "size": file_data.get("size", 0),
+            "mod_time": file_data.get("mod_time"),
+            "id": file_id,
+            "link": web_link,
+        }
+
+    index: Dict[str, List[Dict[str, Any]]] = {}
+
+    for env_name in targets:
+        # Determine context
+        if env_name in env_overrides:
+            folder_id = env_overrides[env_name]
+            # Storage rooted at the override ID
+            env_storage = GoogleDriveStorage(remote_name=remote_name, base_folder=folder_id)
+            search_prefix = "" # Root of ID
+            folder_link = f"https://drive.google.com/drive/folders/{folder_id}"
+        else:
+            env_storage = default_storage
+            search_prefix = f"{default_backup_root}/{env_name}".strip("/")
+            folder_link = None # We'd need to fetch ID to link it, complex for now
+
+        # List Timestamps
+        try:
+            # Note: with base_folder=ID, list_directories returns names inside it
+            # With base_folder="", list_directories returns names inside search_prefix, prepended with search_prefix
+            logger.info(f"Scanning env '{env_name}': folder_id={env_overrides.get(env_name)}, prefix='{search_prefix}'")
+            ts_paths = await env_storage.list_directories(
+                prefix=search_prefix,
+                max_results=50, # Limit history
+                recursive=False
+            )
+            logger.info(f"Found {len(ts_paths)} timestamp folders for '{env_name}': {ts_paths[:5] if ts_paths else 'none'}")
+        except Exception as e:
+            logger.error(f"Error listing directories for env '{env_name}': {e}")
+            ts_paths = []
+
+        entries = []
+        # Sort paths (lexicographically usually works for timestamps like YYYYMMDD)
+        ts_paths.sort(reverse=True)
+
+        for ts_path in ts_paths:
+            # Extract simple timestamp name
+            # If search_prefix="", ts_path="2024..." -> name="2024..."
+            # If search_prefix="A/B", ts_path="A/B/2024..." -> name="2024..."
+            if search_prefix and ts_path.startswith(search_prefix + "/"):
+                ts_name = ts_path[len(search_prefix)+1:]
+            else:
+                ts_name = ts_path
+
+            # Get metadata for DB and Files
+            # Paths are relative to storage root
+            db_meta = await _first_file(env_storage, f"{ts_path}/db")
+            files_meta = await _first_file(env_storage, f"{ts_path}/files")
+            
+            if db_meta or files_meta:
+                 entries.append({
+                     "timestamp": ts_name,
+                     "db": db_meta,
+                     "files": files_meta,
+                     "folder_link": folder_link 
+                 })
+        
+        index[env_name] = entries
+
+    if environment:
+        return {"environments": {environment: index.get(environment, [])}}
+
+    return {"environments": index, "backup_root": default_backup_root}
 
 
 # =============================================================================
@@ -1133,11 +1793,13 @@ class DriveSettingsUpdate(BaseModel):
 class DriveSettingsRead(BaseModel):
     """Schema for reading project Drive settings."""
     gdrive_connected: bool
-    gdrive_folder_id: Optional[str]
-    gdrive_backups_folder_id: Optional[str]
-    gdrive_assets_folder_id: Optional[str]
-    gdrive_docs_folder_id: Optional[str]
-    gdrive_last_sync: Optional[datetime]
+    gdrive_global_configured: bool = False
+    gdrive_global_remote: Optional[str] = None
+    gdrive_folder_id: Optional[str] = None
+    gdrive_backups_folder_id: Optional[str] = None
+    gdrive_assets_folder_id: Optional[str] = None
+    gdrive_docs_folder_id: Optional[str] = None
+    gdrive_last_sync: Optional[datetime] = None
 
 
 @router.get("/{project_id}/drive", response_model=DriveSettingsRead)
@@ -1155,8 +1817,17 @@ async def get_project_drive_settings(
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
         
+        # Check global status
+        config = get_dashboard_config()
+        remote_name = getattr(config, "gdrive_rclone_remote", "gdrive")
+        base_path = getattr(config, "gdrive_base_path", "WebDev/Projects")
+        storage = GoogleDriveStorage(remote_name=remote_name, base_folder=base_path)
+        global_configured, _ = await storage.check_configured()
+        
         return DriveSettingsRead(
             gdrive_connected=project.gdrive_connected,
+            gdrive_global_configured=global_configured,
+            gdrive_global_remote=remote_name if global_configured else None,
             gdrive_folder_id=project.gdrive_folder_id,
             gdrive_backups_folder_id=project.gdrive_backups_folder_id,
             gdrive_assets_folder_id=project.gdrive_assets_folder_id,
@@ -1221,6 +1892,71 @@ async def update_project_drive_settings(
     except Exception as e:
         logger.error(f"Error updating Drive settings: {e}")
         await db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{project_id}/whois/refresh")
+async def refresh_project_whois(
+    project_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)]
+):
+    """Refresh WHOIS data for the project's primary domain."""
+    try:
+        result = await db.execute(
+            select(Project).where(
+                Project.id == project_id,
+                Project.owner_id == current_user.id
+            )
+        )
+        project = result.scalar_one_or_none()
+
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        service = DomainService(db)
+
+        result = await db.execute(
+            select(Domain).where(Domain.project_id == project.id)
+        )
+        domain = result.scalars().first()
+
+        if not domain:
+            candidate_url = project.wp_home or project.name
+            domain_name = service.extract_domain_from_url(candidate_url) if candidate_url else None
+            if not domain_name or not project.client_id:
+                raise HTTPException(
+                    status_code=404,
+                    detail="No domain record found for this project"
+                )
+
+            domain = await service.sync_domain_from_url(
+                domain_name,
+                client_id=project.client_id,
+                project_id=project.id,
+                check_whois=False
+            )
+
+        domain = await service.fetch_whois(domain.id, force=True, raise_on_error=True)
+        if not domain:
+            raise HTTPException(status_code=404, detail="Domain not found")
+
+        return {
+            "status": "success",
+            "domain_id": domain.id,
+            "domain_name": domain.domain_name,
+            "expiry_date": domain.expiry_date.isoformat() if domain.expiry_date else None,
+            "registration_date": domain.registration_date.isoformat() if domain.registration_date else None,
+            "registrar_name": domain.registrar_name,
+            "last_whois_check": domain.last_whois_check.isoformat() if domain.last_whois_check else None,
+        }
+    except RuntimeError as e:
+        logger.error(f"WHOIS refresh unavailable for project {project_id}: {e}")
+        raise HTTPException(status_code=503, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"WHOIS refresh failed for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1593,10 +2329,26 @@ async def restart_ddev(project_name: str):
 async def get_project_plugins(
     project_name: str,
     db: Annotated[AsyncSession, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_active_user)]
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    environment: Optional[str] = Query(None, description="Environment to target (production/staging/development)")
 ):
     """Get plugins for a project (supports both local DDEV and remote servers)."""
     try:
+        def _dedupe_plugins(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            seen: dict[str, Dict[str, Any]] = {}
+            for plugin in items:
+                key = (
+                    plugin.get("name")
+                    or plugin.get("plugin")
+                    or plugin.get("slug")
+                    or ""
+                ).strip().lower()
+                if not key:
+                    key = json.dumps(plugin, sort_keys=True)
+                if key not in seen:
+                    seen[key] = plugin
+            return [seen[k] for k in sorted(seen.keys())]
+
         # First try local project
         project = _get_project(project_name)
         if project:
@@ -1609,9 +2361,12 @@ async def get_project_plugins(
             
             if result.returncode == 0:
                 plugins = json.loads(result.stdout)
-                return {"plugins": plugins, "source": "local"}
-            else:
-                return {"plugins": [], "error": result.stderr, "source": "local"}
+                return {"plugins": _dedupe_plugins(plugins), "source": "local"}
+            error_msg = (result.stderr or "Plugin list failed").strip()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to fetch plugins: {error_msg[:200]}"
+            )
         
         # Try database project (remote server)
         db_project = await _get_db_project(project_name, db)
@@ -1619,9 +2374,12 @@ async def get_project_plugins(
             raise HTTPException(status_code=404, detail=f"Project {project_name} not found")
         
         # Get project-server link
-        project_server = await _get_project_server(db_project.id, db)
+        project_server = await _get_project_server(db_project.id, db, environment=environment)
         if not project_server:
-            return {"plugins": [], "error": "No server linked to this project. Link a server first.", "source": "remote"}
+            raise HTTPException(
+                status_code=400,
+                detail="No server linked to this project. Link a server first."
+            )
         
         # Get server details
         server_result = await db.execute(
@@ -1629,24 +2387,30 @@ async def get_project_plugins(
         )
         server = server_result.scalar_one_or_none()
         if not server:
-            return {"plugins": [], "error": "Server not found", "source": "remote"}
+            raise HTTPException(status_code=404, detail="Server not found")
         
-        # Run WP-CLI remotely via SSH
+        # Run WP-CLI remotely via SSH using centralized client
         result = await _run_remote_wp_cli(
             server, 
             project_server.wp_path, 
-            "plugin list --format=json",
-            current_user.id
+            "plugin list --format=json --allow-root",
+            current_user.id,
+            db,
+            project_server  # Pass environment for SSH credential overrides
         )
         
         if result['success']:
             try:
                 plugins = json.loads(result['output'])
-                return {"plugins": plugins, "source": "remote"}
+                return {"plugins": _dedupe_plugins(plugins), "source": "remote"}
             except json.JSONDecodeError:
-                return {"plugins": [], "error": "Invalid JSON response from server", "source": "remote"}
-        else:
-            return {"plugins": [], "error": result['error'] or "Failed to fetch plugins", "source": "remote"}
+                raise HTTPException(
+                    status_code=502,
+                    detail="Invalid JSON response from server"
+                )
+
+        error_msg = (result.get('error') or "Failed to fetch plugins").strip()
+        raise HTTPException(status_code=502, detail=error_msg[:200])
 
     except HTTPException:
         raise
@@ -1656,27 +2420,119 @@ async def get_project_plugins(
 
 
 @router.post("/{project_name}/plugins/{plugin_name}/update")
-async def update_project_plugin(project_name: str, plugin_name: str):
-    """Update a specific plugin."""
+async def update_project_plugin(
+    project_name: str,
+    plugin_name: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    environment: Optional[str] = Query(None, description="Environment to target (production/staging/development)")
+):
+    """Update a specific plugin (local or remote)."""
     try:
         project = _get_project(project_name)
-        if not project:
+        if project:
+            project_dir = Path(project.directory)
+            result = subprocess.run(
+                ["ddev", "wp", "plugin", "update", plugin_name],
+                cwd=str(project_dir),
+                capture_output=True, text=True, timeout=60
+            )
+            
+            if result.returncode == 0:
+                return {"status": "success", "message": f"Plugin {plugin_name} updated"}
+            else:
+                return {"status": "error", "message": result.stderr}
+
+        db_project = await _get_db_project(project_name, db)
+        if not db_project:
             raise HTTPException(status_code=404, detail=f"Project {project_name} not found")
 
-        project_dir = Path(project.directory)
-        result = subprocess.run(
-            ["ddev", "wp", "plugin", "update", plugin_name],
-            cwd=str(project_dir),
-            capture_output=True, text=True, timeout=60
-        )
-        
-        if result.returncode == 0:
-            return {"status": "success", "message": f"Plugin {plugin_name} updated"}
-        else:
-            return {"status": "error", "message": result.stderr}
+        project_server = await _get_project_server(db_project.id, db, environment=environment)
+        if not project_server:
+            raise HTTPException(status_code=400, detail="No server linked to this project")
 
+        server_result = await db.execute(
+            select(Server).where(Server.id == project_server.server_id)
+        )
+        server = server_result.scalar_one_or_none()
+        if not server:
+            raise HTTPException(status_code=404, detail="Server not found")
+
+        result = await _run_remote_wp_cli(
+            server,
+            project_server.wp_path,
+            f"plugin update {plugin_name} --allow-root",
+            current_user.id,
+            db,
+            project_server
+        )
+
+        if result["success"]:
+            return {"status": "success", "message": f"Plugin {plugin_name} updated"}
+        return {"status": "error", "message": result.get("error") or "Plugin update failed"}
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error updating plugin {plugin_name} for {project_name}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{project_name}/plugins/update-all")
+async def update_all_project_plugins(
+    project_name: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    environment: Optional[str] = Query(None, description="Environment to target (production/staging/development)")
+):
+    """Update all plugins (local or remote)."""
+    try:
+        project = _get_project(project_name)
+        if project:
+            project_dir = Path(project.directory)
+            result = subprocess.run(
+                ["ddev", "wp", "plugin", "update", "--all"],
+                cwd=str(project_dir),
+                capture_output=True, text=True, timeout=300
+            )
+            
+            if result.returncode == 0:
+                return {"status": "success", "message": "All plugins updated"}
+            else:
+                return {"status": "error", "message": result.stderr}
+
+        db_project = await _get_db_project(project_name, db)
+        if not db_project:
+            raise HTTPException(status_code=404, detail=f"Project {project_name} not found")
+
+        project_server = await _get_project_server(db_project.id, db, environment=environment)
+        if not project_server:
+            raise HTTPException(status_code=400, detail="No server linked to this project")
+
+        server_result = await db.execute(
+            select(Server).where(Server.id == project_server.server_id)
+        )
+        server = server_result.scalar_one_or_none()
+        if not server:
+            raise HTTPException(status_code=404, detail="Server not found")
+
+        result = await _run_remote_wp_cli(
+            server,
+            project_server.wp_path,
+            "plugin update --all --allow-root",
+            current_user.id,
+            db,
+            project_server
+        )
+
+        if result["success"]:
+            return {"status": "success", "message": "All plugins updated"}
+        return {"status": "error", "message": result.get("error") or "Plugin update failed"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating plugins for {project_name}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1685,7 +2541,8 @@ async def update_project_plugin(project_name: str, plugin_name: str):
 async def get_project_themes(
     project_name: str,
     db: Annotated[AsyncSession, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_active_user)]
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    environment: Optional[str] = Query(None, description="Environment to target (production/staging/development)")
 ):
     """Get themes for a project (supports both local DDEV and remote servers)."""
     try:
@@ -1711,7 +2568,7 @@ async def get_project_themes(
             raise HTTPException(status_code=404, detail=f"Project {project_name} not found")
         
         # Get project-server link
-        project_server = await _get_project_server(db_project.id, db)
+        project_server = await _get_project_server(db_project.id, db, environment=environment)
         if not project_server:
             return {"themes": [], "error": "No server linked to this project", "source": "remote"}
         
@@ -1727,8 +2584,10 @@ async def get_project_themes(
         result = await _run_remote_wp_cli(
             server, 
             project_server.wp_path, 
-            "theme list --format=json",
-            current_user.id
+            "theme list --format=json --allow-root",
+            current_user.id,
+            db,
+            project_server  # Pass environment for SSH credential overrides
         )
         
         if result['success']:
@@ -1747,27 +2606,177 @@ async def get_project_themes(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# WordPress Core
-@router.post("/{project_name}/wordpress/update")
-async def update_wordpress_core(project_name: str):
-    """Update WordPress core."""
+@router.post("/{project_name}/themes/{theme_name}/update")
+async def update_project_theme(
+    project_name: str,
+    theme_name: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    environment: Optional[str] = Query(None, description="Environment to target (production/staging/development)")
+):
+    """Update a specific theme (local or remote)."""
     try:
         project = _get_project(project_name)
-        if not project:
+        if project:
+            project_dir = Path(project.directory)
+            result = subprocess.run(
+                ["ddev", "wp", "theme", "update", theme_name],
+                cwd=str(project_dir),
+                capture_output=True, text=True, timeout=60
+            )
+            
+            if result.returncode == 0:
+                return {"status": "success", "message": f"Theme {theme_name} updated"}
+            else:
+                return {"status": "error", "message": result.stderr}
+
+        db_project = await _get_db_project(project_name, db)
+        if not db_project:
             raise HTTPException(status_code=404, detail=f"Project {project_name} not found")
 
-        project_dir = Path(project.directory)
-        result = subprocess.run(
-            ["ddev", "wp", "core", "update"],
-            cwd=str(project_dir),
-            capture_output=True, text=True, timeout=120
-        )
-        
-        if result.returncode == 0:
-            return {"status": "success", "message": "WordPress core updated"}
-        else:
-            return {"status": "error", "message": result.stderr}
+        project_server = await _get_project_server(db_project.id, db, environment=environment)
+        if not project_server:
+            raise HTTPException(status_code=400, detail="No server linked to this project")
 
+        server_result = await db.execute(
+            select(Server).where(Server.id == project_server.server_id)
+        )
+        server = server_result.scalar_one_or_none()
+        if not server:
+            raise HTTPException(status_code=404, detail="Server not found")
+
+        result = await _run_remote_wp_cli(
+            server,
+            project_server.wp_path,
+            f"theme update {theme_name} --allow-root",
+            current_user.id,
+            db,
+            project_server
+        )
+
+        if result["success"]:
+            return {"status": "success", "message": f"Theme {theme_name} updated"}
+        return {"status": "error", "message": result.get("error") or "Theme update failed"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating theme {theme_name} for {project_name}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{project_name}/themes/update-all")
+async def update_all_project_themes(
+    project_name: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    environment: Optional[str] = Query(None, description="Environment to target (production/staging/development)")
+):
+    """Update all themes (local or remote)."""
+    try:
+        project = _get_project(project_name)
+        if project:
+            project_dir = Path(project.directory)
+            result = subprocess.run(
+                ["ddev", "wp", "theme", "update", "--all"],
+                cwd=str(project_dir),
+                capture_output=True, text=True, timeout=300
+            )
+            
+            if result.returncode == 0:
+                return {"status": "success", "message": "All themes updated"}
+            else:
+                return {"status": "error", "message": result.stderr}
+
+        db_project = await _get_db_project(project_name, db)
+        if not db_project:
+            raise HTTPException(status_code=404, detail=f"Project {project_name} not found")
+
+        project_server = await _get_project_server(db_project.id, db, environment=environment)
+        if not project_server:
+            raise HTTPException(status_code=400, detail="No server linked to this project")
+
+        server_result = await db.execute(
+            select(Server).where(Server.id == project_server.server_id)
+        )
+        server = server_result.scalar_one_or_none()
+        if not server:
+            raise HTTPException(status_code=404, detail="Server not found")
+
+        result = await _run_remote_wp_cli(
+            server,
+            project_server.wp_path,
+            "theme update --all --allow-root",
+            current_user.id,
+            db,
+            project_server
+        )
+
+        if result["success"]:
+            return {"status": "success", "message": "All themes updated"}
+        return {"status": "error", "message": result.get("error") or "Theme update failed"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating themes for {project_name}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# WordPress Core
+@router.post("/{project_name}/wordpress/update")
+async def update_wordpress_core(
+    project_name: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    environment: Optional[str] = Query(None, description="Environment to target (production/staging/development)")
+):
+    """Update WordPress core (local or remote)."""
+    try:
+        project = _get_project(project_name)
+        if project:
+            project_dir = Path(project.directory)
+            result = subprocess.run(
+                ["ddev", "wp", "core", "update"],
+                cwd=str(project_dir),
+                capture_output=True, text=True, timeout=120
+            )
+            
+            if result.returncode == 0:
+                return {"status": "success", "message": "WordPress core updated"}
+            else:
+                return {"status": "error", "message": result.stderr}
+
+        db_project = await _get_db_project(project_name, db)
+        if not db_project:
+            raise HTTPException(status_code=404, detail=f"Project {project_name} not found")
+
+        project_server = await _get_project_server(db_project.id, db, environment=environment)
+        if not project_server:
+            raise HTTPException(status_code=400, detail="No server linked to this project")
+
+        server_result = await db.execute(
+            select(Server).where(Server.id == project_server.server_id)
+        )
+        server = server_result.scalar_one_or_none()
+        if not server:
+            raise HTTPException(status_code=404, detail="Server not found")
+
+        result = await _run_remote_wp_cli(
+            server,
+            project_server.wp_path,
+            "core update --allow-root",
+            current_user.id,
+            db,
+            project_server
+        )
+
+        if result["success"]:
+            return {"status": "success", "message": "WordPress core updated"}
+        return {"status": "error", "message": result.get("error") or "Core update failed"}
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error updating WordPress for {project_name}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1775,11 +2784,12 @@ async def update_wordpress_core(project_name: str):
 
 # Task status
 @router.get("/tasks/{task_id}")
-async def get_task_status_endpoint(task_id: str):
+async def get_background_task_status(
+    task_id: str,
+    current_user: Annotated[User, Depends(get_current_active_user)]
+):
     """Get status of a background task."""
-    if task_id not in task_status:
-        raise HTTPException(status_code=404, detail="Task not found")
-    return task_status[task_id]
+    return get_task_status(task_id)
 
 
 # Local Development endpoints
@@ -2018,5 +3028,138 @@ async def setup_local(project_name: str, setup_options: Dict[str, Any] = None):
         raise
     except Exception as e:
         logger.error(f"Error setting up DDEV for {project_name}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==============================================================================
+# Environment Management
+# ==============================================================================
+
+@router.put("/{project_id}/environments/{env_id}", response_model=Dict[str, Any])
+async def update_environment(
+    project_id: int,
+    env_id: int,
+    env_update: ProjectServerUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)]
+):
+    """
+    Update an existing environment link.
+    """
+    # Verify environment exists and belongs to project
+    result = await db.execute(
+        select(ProjectServer).where(
+            ProjectServer.id == env_id,
+            ProjectServer.project_id == project_id
+        )
+    )
+    project_server = result.scalar_one_or_none()
+    
+    if not project_server:
+        raise HTTPException(status_code=404, detail="Environment not found")
+        
+    # Update fields
+    update_data = env_update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(project_server, field, value)
+
+    await db.commit()
+    await db.refresh(project_server)
+    
+    return {
+        "status": "success", 
+        "data": ProjectServerRead.model_validate(project_server)
+    }
+
+
+# ==============================================================================
+# WordPress User Management
+# ==============================================================================
+
+async def _get_wp_service(
+    project_id: int, 
+    env_id: int, 
+    db: AsyncSession, 
+    user: User
+) -> WordPressService:
+    """Helper to get initialized WordPressService."""
+    from ....services.ssh_service import SSHKeyService
+    # Get environment
+    result = await db.execute(
+        select(ProjectServer, Server).join(Server).where(
+            ProjectServer.id == env_id,
+            ProjectServer.project_id == project_id,
+            Server.owner_id == user.id
+        )
+    )
+    row = result.first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Environment or server not found")
+        
+    project_server, server = row
+
+    system_key = await SSHKeyService.get_system_key(db)
+    system_private_key = system_key.get("private_key") if system_key else None
+    return WordPressService(
+        server,
+        project_server.wp_path,
+        db,
+        system_private_key=system_private_key,
+    )
+
+
+@router.get("/{project_id}/environments/{env_id}/users", response_model=List[WPUser])
+async def list_environment_users(
+    project_id: int,
+    env_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)]
+):
+    """List WordPress users for an environment."""
+    service = await _get_wp_service(project_id, env_id, db, current_user)
+    try:
+        return await service.list_users()
+    except Exception as e:
+        logger.error(f"Failed to list users: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to list users: {str(e)}")
+
+
+@router.post("/{project_id}/environments/{env_id}/users", response_model=WPUser)
+async def create_environment_user(
+    project_id: int,
+    env_id: int,
+    user_data: WPUserCreate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)]
+):
+    """Create a new WordPress user in an environment."""
+    service = await _get_wp_service(project_id, env_id, db, current_user)
+    try:
+        return await service.create_user(
+            user_data.user_login,
+            user_data.user_email,
+            user_data.role,
+            user_data.send_email
+        )
+    except Exception as e:
+        logger.error(f"Failed to create user: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{project_id}/environments/{env_id}/users/{user_id}/login", response_model=MagicLoginResponse)
+async def magic_login(
+    project_id: int,
+    env_id: int,
+    user_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)]
+):
+    """Generate a magic login URL for a user."""
+    service = await _get_wp_service(project_id, env_id, db, current_user)
+    try:
+        url = await service.get_magic_login_url(user_id)
+        return MagicLoginResponse(url=url)
+    except Exception as e:
+        logger.error(f"Failed to generate magic login: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 

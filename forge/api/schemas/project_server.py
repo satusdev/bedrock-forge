@@ -11,15 +11,22 @@ from ...db.models.project_server import ServerEnvironment
 class ProjectServerBase(BaseModel):
     """Base project-server link fields."""
     server_id: int
-    environment: ServerEnvironment = ServerEnvironment.STAGING
+    environment: ServerEnvironment = ServerEnvironment.staging
     wp_path: str = Field(min_length=1, max_length=500)
     wp_url: str = Field(min_length=1, max_length=500)
     notes: str | None = None
     is_primary: bool = True
+    ssh_user: str | None = None
+    ssh_key_path: str | None = None
+    gdrive_backups_folder_id: str | None = None
+    database_name: str | None = None
+    database_user: str | None = None
+    database_password: str | None = None
 
 
 class ProjectServerCreate(ProjectServerBase):
     """Schema for linking a server to a project."""
+    gdrive_backups_folder_id: str | None = None
     pass
 
 
@@ -30,6 +37,12 @@ class ProjectServerUpdate(BaseModel):
     wp_url: str | None = None
     notes: str | None = None
     is_primary: bool | None = None
+    ssh_user: str | None = None
+    ssh_key_path: str | None = None
+    gdrive_backups_folder_id: str | None = None
+    database_name: str | None = None
+    database_user: str | None = None
+    database_password: str | None = None
 
 
 class ProjectServerRead(ProjectServerBase):
@@ -37,6 +50,7 @@ class ProjectServerRead(ProjectServerBase):
     id: int
     project_id: int
     server_name: str | None = None  # Populated from relationship
+    gdrive_backups_folder_id: str | None = None
     created_at: datetime
     updated_at: datetime
 

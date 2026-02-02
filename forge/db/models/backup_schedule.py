@@ -11,11 +11,14 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import TYPE_CHECKING, Any
 
 from ..base import Base, TimestampMixin
-from .backup import BackupType, BackupStorageType
+from .backup import BackupStorageType
+from forge.core.backup_types import BackupType
 
 if TYPE_CHECKING:
     from .user import User
     from .project import Project
+    from .project_server import ProjectServer
+
 
 
 class ScheduleFrequency(str, PyEnum):
@@ -112,17 +115,23 @@ class BackupSchedule(Base, TimestampMixin):
     project_id: Mapped[int] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    environment_id: Mapped[int | None] = mapped_column(
+        ForeignKey("project_servers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_by_id: Mapped[int] = mapped_column(
         ForeignKey("users.id"), nullable=False
     )
+
     
     # Relationships
     project: Mapped["Project"] = relationship(
         "Project", back_populates="backup_schedules"
     )
+    environment: Mapped["ProjectServer"] = relationship("ProjectServer")
     created_by: Mapped["User"] = relationship(
         "User", back_populates="backup_schedules"
     )
+
     
     def __repr__(self) -> str:
         return f"<BackupSchedule(id={self.id}, name='{self.name}', frequency={self.frequency}, status={self.status})>"
