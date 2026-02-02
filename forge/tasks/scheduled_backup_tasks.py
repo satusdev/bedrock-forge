@@ -4,7 +4,6 @@ Scheduled backup tasks for Celery Beat integration.
 These tasks work with the BackupSchedule model to execute
 automated backups based on configured schedules.
 """
-import asyncio
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -14,20 +13,14 @@ from celery import shared_task
 from ..db import AsyncSessionLocal
 from ..services.backup import (
     BackupConfig,
+    BackupConfigFactory,
     BackupSchedulerService,
     BackupService,
     RetentionService,
 )
+from ..services.backup.backup_service import normalize_storage_backend
 from ..utils.logging import logger
-
-
-def run_async(coro):
-    """Helper to run async code in sync context."""
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
+from ..utils.asyncio_utils import run_async
 
 
 @shared_task(
@@ -47,7 +40,12 @@ def process_due_schedules(self):
 
 
 async def _process_due_schedules() -> dict:
-    """Process due backup schedules."""
+    """Process due backup schedules by delegating to _execute_single_backup."""
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+    from ..db.models.backup_schedule import BackupSchedule
+    from ..db.models.project_server import ProjectServer
+    
     results = {
         "processed": 0,
         "success": 0,
@@ -69,84 +67,53 @@ async def _process_due_schedules() -> dict:
         
         for schedule in due_schedules:
             results["processed"] += 1
-            schedule_id = str(schedule.id)
+            schedule_id = schedule.id
             
             try:
-                # Get project path
-                if not schedule.project:
-                    logger.warning(f"Schedule {schedule_id} has no project")
-                    await scheduler.record_run(
-                        schedule.id,
-                        success=False,
-                        error_message="No project associated with schedule",
-                    )
-                    results["failed"] += 1
-                    continue
+                # Delegate to unified execution function
+                result = await _execute_single_backup(schedule_id, force=True)
                 
-                project_path = Path(schedule.project.local_path or "")
-                if not project_path.exists():
-                    logger.warning(
-                        f"Project path does not exist: {project_path}"
-                    )
-                    await scheduler.record_run(
-                        schedule.id,
-                        success=False,
-                        error_message=f"Project path not found: {project_path}",
-                    )
-                    results["failed"] += 1
-                    continue
-                
-                # Create backup config - map model backup_type to BackupType enum
-                config = BackupConfig(
-                    backup_type=schedule.backup_type,
-                    storage_backends=[schedule.storage_type.value],
-                )
-                
-                # Execute backup
-                backup_service = BackupService(db)
-                result = await backup_service.create_backup(
-                    project_path=project_path,
-                    schedule=schedule,
-                    config=config,
-                )
-                
-                # Record result
-                await scheduler.record_run(
-                    schedule.id,
-                    success=result.success,
-                    error_message=result.error,
-                )
-                
-                if result.success:
+                if result.get("success"):
                     results["success"] += 1
-                    logger.info(
-                        f"Backup completed for schedule {schedule_id}: "
-                        f"{result.size_bytes} bytes"
+                    logger.info(f"Backup queued for schedule {schedule_id}")
+                    
+                    # Record success and update next_run
+                    await scheduler.record_run(
+                        schedule_id,
+                        success=True,
+                        error_message=None,
                     )
                     
-                    # Apply retention policy
+                    # Apply retention policy asynchronously
                     retention = RetentionService(db)
-                    ret_result = await retention.apply_retention(
-                        schedule, storage_type=schedule.storage_type.value
-                    )
-                    if ret_result.deleted_count > 0:
-                        logger.info(
-                            f"Retention cleanup for {schedule_id}: "
-                            f"deleted {ret_result.deleted_count} backups"
+                    try:
+                        ret_result = await retention.apply_retention(
+                            schedule, storage_type=normalize_storage_backend(schedule.storage_type)
                         )
+                        if ret_result.deleted_count > 0:
+                            logger.info(
+                                f"Retention cleanup for {schedule_id}: "
+                                f"deleted {ret_result.deleted_count} backups"
+                            )
+                    except Exception as ret_err:
+                        logger.warning(f"Retention cleanup failed for {schedule_id}: {ret_err}")
                 else:
                     results["failed"] += 1
-                    logger.error(
-                        f"Backup failed for schedule {schedule_id}: "
-                        f"{result.error}"
+                    error_msg = result.get("error", "Unknown error")
+                    logger.error(f"Backup failed for schedule {schedule_id}: {error_msg}")
+                    
+                    await scheduler.record_run(
+                        schedule_id,
+                        success=False,
+                        error_message=error_msg,
                     )
                 
                 results["schedules"].append({
-                    "schedule_id": schedule_id,
-                    "project": schedule.project.name,
-                    "success": result.success,
-                    "error": result.error,
-                    "size_bytes": result.size_bytes,
+                    "schedule_id": str(schedule_id),
+                    "project": schedule.project.name if schedule.project else "Unknown",
+                    "success": result.get("success", False),
+                    "error": result.get("error"),
+                    "backup_id": result.get("backup_id"),
                 })
                 
             except Exception as e:
@@ -155,7 +122,7 @@ async def _process_due_schedules() -> dict:
                 
                 try:
                     await scheduler.record_run(
-                        schedule.id,
+                        schedule_id,
                         success=False,
                         error_message=str(e),
                     )
@@ -163,7 +130,7 @@ async def _process_due_schedules() -> dict:
                     pass
                 
                 results["schedules"].append({
-                    "schedule_id": schedule_id,
+                    "schedule_id": str(schedule_id),
                     "success": False,
                     "error": str(e),
                 })
@@ -199,15 +166,27 @@ def execute_single_backup(
 
 
 async def _execute_single_backup(schedule_id: int, force: bool = False) -> dict:
-    """Execute backup for a specific schedule."""
+    """Execute backup for a specific schedule by creating a Backup record and delegating."""
+    from datetime import datetime
+    from sqlalchemy import select
+    from sqlalchemy.orm import joinedload, selectinload
+    from ..db.models.backup import Backup, BackupStatus, BackupStorageType
+    from ..db.models.backup_schedule import BackupSchedule
+    from ..db.models.project_server import ProjectServer
+    from .backup_tasks import create_environment_backup_task
+    
     async with AsyncSessionLocal() as db:
-        scheduler = BackupSchedulerService(db)
-        backup_service = BackupService(db)
-        
-        schedule = await scheduler.get_schedule(
-            schedule_id,
-            include_project=True,
+        # Load schedule with all relationships
+        stmt = (
+            select(BackupSchedule)
+            .where(BackupSchedule.id == schedule_id)
+            .options(
+                selectinload(BackupSchedule.project),
+                selectinload(BackupSchedule.environment).selectinload(ProjectServer.server)
+            )
         )
+        result = await db.execute(stmt)
+        schedule = result.scalar_one_or_none()
         
         if not schedule:
             return {
@@ -221,29 +200,74 @@ async def _execute_single_backup(schedule_id: int, force: bool = False) -> dict:
                 "error": "No project associated with schedule",
             }
         
-        project_path = Path(schedule.project.local_path or "")
+        env = schedule.environment
+        if not env:
+            return {
+                "success": False, 
+                "error": "No environment linked to schedule",
+            }
         
-        # Create config
-        config = BackupConfig(
+        logger.info(f"Creating backup record for schedule {schedule_id} ({schedule.name})")
+        
+        # Determine storage backend
+        storage_type_str = normalize_storage_backend(schedule.storage_type)
+        storage_type = BackupStorageType.GOOGLE_DRIVE if storage_type_str == "gdrive" else (
+            BackupStorageType.S3 if storage_type_str == "s3" else BackupStorageType.LOCAL
+        )
+        
+        # Determine backup type string
+        backup_type_str = schedule.backup_type.value if hasattr(schedule.backup_type, 'value') else str(schedule.backup_type)
+        
+        # Generate backup name
+        env_label = env.environment.value.upper() if hasattr(env.environment, 'value') else str(env.environment).upper()
+        backup_name = f"Backup {env_label} - {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"
+        
+        # Create Backup record
+        backup = Backup(
+            project_id=schedule.project_id,
+            created_by_id=schedule.created_by_id,
+            name=backup_name,
             backup_type=schedule.backup_type,
-            storage_backends=[schedule.storage_type.value],
+            storage_type=storage_type,
+            storage_path="",  # Will be populated by task
+            status=BackupStatus.PENDING,
+            notes=f"Scheduled backup: {schedule.name}",
+            project_server_id=env.id,
+            started_at=datetime.utcnow()
+        )
+        db.add(backup)
+        await db.flush()
+        await db.refresh(backup)
+        
+        backup_id = backup.id
+        await db.commit()
+        
+        logger.info(f"Created backup record {backup_id}, delegating to create_environment_backup_task")
+        
+        # Determine storage backends
+        storage_backends = ["gdrive"] if storage_type_str == "gdrive" else (
+            ["s3"] if storage_type_str == "s3" else ["local"]
         )
         
-        # Execute backup
-        result = await backup_service.create_backup(
-            project_path=project_path,
-            schedule=schedule,
-            config=config,
+        # Get override folder ID if set on environment
+        override_folder_id = env.gdrive_backups_folder_id if env else None
+        
+        # Delegate to the unified backup task
+        create_environment_backup_task.delay(
+            project_id=schedule.project_id,
+            env_id=env.id,
+            backup_id=backup_id,
+            backup_type=backup_type_str,
+            storage_backends=storage_backends,
+            override_gdrive_folder_id=override_folder_id
         )
         
-        # Record result
-        await scheduler.record_run(
-            schedule.id,
-            success=result.success,
-            error_message=result.error,
-        )
-        
-        return result.to_dict()
+        return {
+            "success": True,
+            "message": "Backup started in background",
+            "backup_id": backup_id,
+            "schedule_id": schedule_id
+        }
 
 @shared_task(name="forge.tasks.scheduled_backup_tasks.cleanup_orphaned_backups")
 def cleanup_orphaned_backups(storage_type: str = "local"):
@@ -303,7 +327,7 @@ async def _apply_retention_all() -> dict:
             try:
                 # Apply retention for the schedule's storage type
                 ret_result = await retention.apply_retention(
-                    schedule, storage_type=schedule.storage_type.value
+                    schedule, storage_type=normalize_storage_backend(schedule.storage_type)
                 )
                 results["deleted_total"] += ret_result.deleted_count
                 results["freed_bytes"] += ret_result.deleted_size_bytes

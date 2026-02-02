@@ -15,15 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import AsyncSessionLocal, Server
 from ..db.models.server import ServerStatus
 from ..utils.logging import logger
-
-
-def run_async(coro):
-    """Helper to run async code in sync context."""
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
+from ..utils.asyncio_utils import run_async
 
 
 async def _check_server_ssh(server_id: int) -> dict:
@@ -227,6 +219,8 @@ def _get_ssh_cmd(server, extra_args: list = None, project_server: ProjectServer 
                 else server.ssh_user)
     ssh_key = (project_server.ssh_key_path if project_server and project_server.ssh_key_path 
                else server.ssh_key_path)
+    if ssh_key:
+        ssh_key = os.path.expanduser(ssh_key)
     
     cmd = [
         "ssh",
@@ -254,6 +248,8 @@ def _get_scp_cmd(server, source: str, dest: str, download: bool = True, project_
                 else server.ssh_user)
     ssh_key = (project_server.ssh_key_path if project_server and project_server.ssh_key_path 
                else server.ssh_key_path)
+    if ssh_key:
+        ssh_key = os.path.expanduser(ssh_key)
     
     cmd = [
         "scp",
@@ -642,6 +638,146 @@ async def _sync_database_push(
             return {"success": False, "error": str(e)[:200]}
 
 
+async def _sync_database_remote_to_remote(
+    source_ps_id: int,
+    target_ps_id: int,
+    search_replace: bool = True
+) -> dict:
+    """
+    Sync database between two remote environments.
+
+    Steps:
+    1. Export DB on source
+    2. Download to local temp
+    3. Upload to target
+    4. Import on target
+    5. Run search-replace on target
+    """
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(ProjectServer).where(ProjectServer.id == source_ps_id)
+        )
+        source_ps = result.scalar_one_or_none()
+        if not source_ps:
+            return {"success": False, "error": "Source project-server not found"}
+
+        result = await db.execute(
+            select(ProjectServer).where(ProjectServer.id == target_ps_id)
+        )
+        target_ps = result.scalar_one_or_none()
+        if not target_ps:
+            return {"success": False, "error": "Target project-server not found"}
+
+        result = await db.execute(
+            select(Server).where(Server.id == source_ps.server_id)
+        )
+        source_server = result.scalar_one_or_none()
+        if not source_server:
+            return {"success": False, "error": "Source server not found"}
+
+        result = await db.execute(
+            select(Server).where(Server.id == target_ps.server_id)
+        )
+        target_server = result.scalar_one_or_none()
+        if not target_server:
+            return {"success": False, "error": "Target server not found"}
+
+    try:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        remote_source_sql = f"/tmp/db_export_{timestamp}.sql"
+        local_sql = f"/tmp/db_transfer_{timestamp}.sql"
+        remote_target_sql = f"/tmp/db_import_{timestamp}.sql"
+
+        # Export on source
+        export_cmd = _get_db_export_cmd(source_server.panel_type, source_ps.wp_path, remote_source_sql)
+        ssh_cmd = _get_ssh_cmd(source_server, project_server=source_ps)
+        ssh_cmd.append(export_cmd)
+
+        proc = await asyncio.create_subprocess_exec(
+            *ssh_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+        if proc.returncode != 0:
+            return {"success": False, "error": f"Source export failed: {stderr.decode()[:200]}"}
+
+        # Download to local
+        scp_cmd = _get_scp_cmd(source_server, remote_source_sql, local_sql, download=True, project_server=source_ps)
+        proc = await asyncio.create_subprocess_exec(
+            *scp_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+        if proc.returncode != 0:
+            return {"success": False, "error": f"Download failed: {stderr.decode()[:200]}"}
+
+        # Upload to target
+        scp_cmd = _get_scp_cmd(target_server, local_sql, remote_target_sql, download=False, project_server=target_ps)
+        proc = await asyncio.create_subprocess_exec(
+            *scp_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+        if proc.returncode != 0:
+            return {"success": False, "error": f"Upload failed: {stderr.decode()[:200]}"}
+
+        # Import on target
+        import_cmd = _get_db_import_cmd(target_server.panel_type, target_ps.wp_path, remote_target_sql)
+        ssh_cmd = _get_ssh_cmd(target_server, project_server=target_ps)
+        ssh_cmd.append(import_cmd)
+
+        proc = await asyncio.create_subprocess_exec(
+            *ssh_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+        if proc.returncode != 0:
+            return {"success": False, "error": f"Import failed: {stderr.decode()[:200]}"}
+
+        # Search-replace URLs on target
+        if search_replace and source_ps.wp_url and target_ps.wp_url:
+            sr_cmd = f"cd {target_ps.wp_path} && wp search-replace '{source_ps.wp_url}' '{target_ps.wp_url}' --all-tables --allow-root"
+            ssh_cmd = _get_ssh_cmd(target_server, project_server=target_ps)
+            ssh_cmd.append(sr_cmd)
+            proc = await asyncio.create_subprocess_exec(
+                *ssh_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            await proc.communicate()
+
+        # Cleanup
+        cleanup_cmd = _get_ssh_cmd(source_server, project_server=source_ps)
+        cleanup_cmd.append(f"rm -f {remote_source_sql}")
+        await asyncio.create_subprocess_exec(*cleanup_cmd)
+
+        cleanup_cmd = _get_ssh_cmd(target_server, project_server=target_ps)
+        cleanup_cmd.append(f"rm -f {remote_target_sql}")
+        await asyncio.create_subprocess_exec(*cleanup_cmd)
+
+        try:
+            os.unlink(local_sql)
+        except:
+            pass
+
+        return {
+            "success": True,
+            "message": "Database synced between environments",
+            "source": source_ps.environment.value,
+            "target": target_ps.environment.value
+        }
+
+    except asyncio.TimeoutError:
+        return {"success": False, "error": "Operation timed out"}
+    except Exception as e:
+        logger.error(f"Remote-to-remote database sync error: {e}")
+        return {"success": False, "error": str(e)[:200]}
+
+
 @shared_task(name="forge.tasks.sync_tasks.sync_database_push")
 def sync_database_push(
     project_server_id: int,
@@ -941,8 +1077,9 @@ async def _full_environment_sync(
                 server.id, source_ps_id, local_path, search_replace=True
             )
         else:
-            # Push to remote (would need different logic)
-            results["database"] = {"success": False, "error": "Server-to-server not yet supported"}
+            results["database"] = await _sync_database_remote_to_remote(
+                source_ps_id, target_ps_id, search_replace=True
+            )
     
     # Build list of paths to sync
     paths = []
@@ -958,7 +1095,12 @@ async def _full_environment_sync(
         if target_ps_id is None:
             file_result = await _sync_files_pull(source_ps_id, paths, dry_run)
         else:
-            file_result = await _sync_files_push(target_ps_id, paths, dry_run)
+            pull_result = await _sync_files_pull(source_ps_id, paths, dry_run)
+            push_result = await _sync_files_push(target_ps_id, paths, dry_run)
+            file_result = {
+                "success": pull_result.get("success") and push_result.get("success"),
+                "results": (pull_result.get("results") or []) + (push_result.get("results") or [])
+            }
         
         for path in paths:
             path_result = next(

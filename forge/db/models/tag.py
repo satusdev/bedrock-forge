@@ -8,11 +8,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import TYPE_CHECKING, List
 
 from ..base import Base, TimestampMixin
-from .project_tag import project_tags, server_tags
+from .project_tag import project_tags, server_tags, client_tags
 
 if TYPE_CHECKING:
     from .project import Project
     from .server import Server
+    from .client import Client
 
 
 class Tag(Base, TimestampMixin):
@@ -42,6 +43,9 @@ class Tag(Base, TimestampMixin):
     )
     servers: Mapped[List["Server"]] = relationship(
         "Server", secondary=server_tags, back_populates="tag_objects"
+    )
+    clients: Mapped[List["Client"]] = relationship(
+        "Client", secondary=client_tags, back_populates="tag_objects"
     )
     
     def __repr__(self) -> str:

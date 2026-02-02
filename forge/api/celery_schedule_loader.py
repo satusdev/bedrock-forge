@@ -4,7 +4,6 @@ Celery Beat Database Scheduler.
 Loads backup schedules from the database and syncs them with Celery Beat.
 This enables dynamic schedule management via the dashboard/API.
 """
-import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
@@ -17,25 +16,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from sqlalchemy.orm import selectinload
 
 from ..db.models.backup_schedule import BackupSchedule, ScheduleStatus, ScheduleFrequency
+from ..utils.asyncio_utils import run_async
 
 
 logger = logging.getLogger(__name__)
-
-
-def run_async(coro):
-    """Helper to run async code in sync Celery context."""
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # Create new loop if current one is running
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(asyncio.run, coro)
-                return future.result()
-        return loop.run_until_complete(coro)
-    except RuntimeError:
-        # No event loop exists, create one
-        return asyncio.run(coro)
 
 
 def schedule_to_crontab(schedule: BackupSchedule) -> crontab:
@@ -105,7 +89,7 @@ class DatabaseScheduler(Scheduler):
     def __init__(self, *args, **kwargs):
         """Initialize the database scheduler."""
         self._db_schedules: Dict[str, Dict[str, Any]] = {}
-        self._last_sync: Optional[datetime] = None
+        self._last_sync: Optional[float] = None
         self._engine = None
         self._session_factory = None
         
@@ -152,6 +136,7 @@ class DatabaseScheduler(Scheduler):
     
     def _sync_schedules(self):
         """Sync schedules from database to Celery Beat."""
+        import time
         try:
             schedules = run_async(self._load_schedules_from_db())
             
@@ -188,7 +173,7 @@ class DatabaseScheduler(Scheduler):
             
             # Update internal schedule dict
             self._db_schedules = new_schedules
-            self._last_sync = datetime.utcnow()
+            self._last_sync = time.time()
             
             logger.info(f"Synced {len(new_schedules)} backup schedules from database")
             
@@ -201,9 +186,14 @@ class DatabaseScheduler(Scheduler):
         self._sync_schedules()
         
         # Add static schedules (monitoring tasks, etc.)
-        self.merge_inplace(self.app.conf.beat_schedule or {})
+        static_schedule = self.app.conf.beat_schedule or {}
+        logger.info(f"Loading {len(static_schedule)} static entries from beat_schedule")
+        logger.debug(f"Static keys: {list(static_schedule.keys())}")
+        
+        self.merge_inplace(static_schedule)
         
         # Add database schedules
+        logger.info(f"Loading {len(self._db_schedules)} database schedules")
         self.merge_inplace(self._db_schedules)
     
     def tick(self):
@@ -212,11 +202,12 @@ class DatabaseScheduler(Scheduler):
         
         We use this to periodically refresh schedules from the database.
         """
+        import time
         # Check if we should sync
-        now = datetime.utcnow()
+        now = time.time()
         if (
             self._last_sync is None or
-            (now - self._last_sync).total_seconds() >= self.sync_every
+            (now - self._last_sync) >= self.sync_every
         ):
             self._sync_schedules()
             

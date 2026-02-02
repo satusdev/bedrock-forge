@@ -16,7 +16,7 @@ from sqlalchemy.orm import selectinload
 from ....db import get_db, User, Server, Project
 from ....db.models.project_server import ProjectServer, ServerEnvironment
 from ....utils.logging import logger
-from ...deps import get_current_active_user, task_status, update_task_status
+from ...deps import get_current_active_user, update_task_status
 from ...schemas.project_server import (
     ProjectServerCreate,
     ProjectServerUpdate,
@@ -111,6 +111,7 @@ async def list_project_servers(
             notes=link.notes,
             is_primary=link.is_primary,
             server_name=link.server.name if link.server else None,
+            gdrive_backups_folder_id=link.gdrive_backups_folder_id,
             created_at=link.created_at,
             updated_at=link.updated_at
         )
@@ -186,7 +187,11 @@ async def link_server_to_project(
         wp_path=link_data.wp_path,
         wp_url=link_data.wp_url,
         notes=link_data.notes,
-        is_primary=link_data.is_primary
+        is_primary=link_data.is_primary,
+        # New fields
+        ssh_user=link_data.ssh_user,
+        ssh_key_path=link_data.ssh_key_path,
+        gdrive_backups_folder_id=link_data.gdrive_backups_folder_id
     )
     db.add(link)
     await db.flush()
@@ -258,6 +263,19 @@ async def update_project_server(
         link.wp_url = update_data.wp_url
     if update_data.notes is not None:
         link.notes = update_data.notes
+    if update_data.ssh_user is not None:
+        link.ssh_user = update_data.ssh_user
+    if update_data.ssh_key_path is not None:
+        link.ssh_key_path = update_data.ssh_key_path
+    if update_data.gdrive_backups_folder_id is not None:
+        link.gdrive_backups_folder_id = update_data.gdrive_backups_folder_id
+    if update_data.database_name is not None:
+        link.database_name = update_data.database_name
+    if update_data.database_user is not None:
+        link.database_user = update_data.database_user
+    if update_data.database_password is not None:
+        link.database_password = update_data.database_password
+    
     if update_data.is_primary is not None:
         # If setting as primary, unset other primaries for same environment
         if update_data.is_primary:

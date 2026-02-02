@@ -3,19 +3,20 @@ Backup services package.
 
 Provides backup creation, scheduling, storage management, and retention policies.
 """
-from .backup_service import (
+from forge.core.backup_types import (
     BackupConfig,
     BackupResult,
-    BackupService,
     BackupStatus,
     BackupType,
 )
+from .backup_service import BackupService
 from .retention_service import (
     RetentionPolicy,
     RetentionResult,
     RetentionService,
     RetentionStrategy,
 )
+from .config_factory import BackupConfigFactory
 from .scheduler_service import BackupSchedulerService
 from .storage import (
     BackupStorage,
@@ -29,6 +30,7 @@ from .storage import (
 __all__ = [
     # Backup service
     "BackupConfig",
+    "BackupConfigFactory",
     "BackupResult",
     "BackupService",
     "BackupStatus",

@@ -38,6 +38,9 @@ class BackupRead(BaseModel):
     
     status: BackupStatus
     error_message: Optional[str] = None
+    storage_file_id: Optional[str] = None
+    gdrive_link: Optional[str] = None
+    logs: Optional[str] = None
     
     started_at: datetime
     completed_at: Optional[datetime] = None
@@ -63,6 +66,8 @@ class ScheduleCreate(BaseModel):
     """Schema for creating a new backup schedule."""
     name: str = Field(..., min_length=1, max_length=255, description="Schedule name")
     project_id: int = Field(..., description="Project to backup")
+    environment_id: Optional[int] = Field(None, description="Environment to backup")
+
     
     # Schedule timing
     frequency: ScheduleFrequency = Field(
@@ -102,6 +107,8 @@ class ScheduleCreate(BaseModel):
 class ScheduleUpdate(BaseModel):
     """Schema for updating a backup schedule."""
     name: Optional[str] = Field(None, min_length=1, max_length=255)
+    environment_id: Optional[int] = None
+
     
     # Schedule timing
     frequency: Optional[ScheduleFrequency] = None
@@ -134,8 +141,11 @@ class ScheduleRead(BaseModel):
     description: Optional[str] = None
     project_id: int
     project_name: Optional[str] = None
+    environment_id: Optional[int] = None
+    environment_name: Optional[str] = None
     
     # Schedule timing
+
     frequency: ScheduleFrequency
     hour: int
     minute: int

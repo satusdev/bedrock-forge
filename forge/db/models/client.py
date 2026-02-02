@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from .domain import Domain
     from .client_user import ClientUser
     from .ticket import Ticket
+    from .tag import Tag
 
 
 class BillingStatus(str, PyEnum):
@@ -53,6 +54,7 @@ class Client(Base, TimestampMixin):
     state: Mapped[str | None] = mapped_column(String(100), nullable=True)
     postal_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
     country: Mapped[str] = mapped_column(String(100), default="US")
+    website: Mapped[str | None] = mapped_column(String(255), nullable=True)
     
     # Billing configuration
     billing_status: Mapped[BillingStatus] = mapped_column(
@@ -104,6 +106,11 @@ class Client(Base, TimestampMixin):
     )
     tickets: Mapped[List["Ticket"]] = relationship(
         "Ticket", back_populates="client", cascade="all, delete-orphan"
+    )
+
+    # Tag relationships (many-to-many)
+    tag_objects: Mapped[List["Tag"]] = relationship(
+        "Tag", secondary="client_tags", back_populates="clients"
     )
     
     def __repr__(self) -> str:

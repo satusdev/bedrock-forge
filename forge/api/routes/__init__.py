@@ -27,6 +27,8 @@ from .admin.packages import router as packages_router
 from .admin.deployments import router as deployments_router
 from .admin.schedules import router as schedules_router
 from .admin.settings import router as settings_router
+from .admin.migrations import router as migrations_router
+from .admin.analytics import router as analytics_router
 
 # New routes - Phase 2-3
 from .public.status_page import router as status_page_router
@@ -70,6 +72,8 @@ api_router.include_router(packages_router, prefix="/packages", tags=["Hosting Pa
 api_router.include_router(deployments_router, prefix="/deployments", tags=["Deployments"])
 api_router.include_router(schedules_router, prefix="/schedules", tags=["Schedules"])
 api_router.include_router(settings_router, prefix="/settings", tags=["Settings"])
+api_router.include_router(migrations_router, prefix="/migrations", tags=["Migrations"])
+api_router.include_router(analytics_router, prefix="/analytics", tags=["Analytics"])
 api_router.include_router(cloudflare_router, prefix="/cloudflare", tags=["Cloudflare"])
 
 # New routes - Phase 2-3
@@ -87,6 +91,10 @@ api_router.include_router(import_projects_router, prefix="/servers", tags=["Impo
 # Notification channels
 from .admin.notifications import router as notifications_router
 api_router.include_router(notifications_router, prefix="/notifications", tags=["Notifications"])
+
+# Rclone configuration
+from .admin.rclone_config import router as rclone_config_router
+api_router.include_router(rclone_config_router, prefix="/rclone", tags=["Rclone Configuration"])
 
 __all__ = ["api_router"]
 

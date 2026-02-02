@@ -3,9 +3,10 @@ Hosting Package API routes.
 
 Manages hosting package definitions with pricing tiers.
 """
-from fastapi import APIRouter, HTTPException, Depends
-from sqlalchemy.orm import Session
-from typing import Dict, Any, List, Optional
+from fastapi import APIRouter, HTTPException, Depends, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, update, delete
+from typing import Dict, Any, List, Optional, Annotated
 from pydantic import BaseModel
 
 from ....utils.logging import logger
@@ -30,6 +31,9 @@ class PackageCreate(BaseModel):
     yearly_price: float = 0.0
     biennial_price: float = 0.0
     setup_fee: float = 0.0
+    currency: str = "USD"
+    hosting_yearly_price: float = 0.0
+    support_monthly_price: float = 0.0
     features: Optional[List[str]] = None
     is_featured: bool = False
 
@@ -47,24 +51,120 @@ class PackageUpdate(BaseModel):
     yearly_price: Optional[float] = None
     biennial_price: Optional[float] = None
     setup_fee: Optional[float] = None
+    currency: Optional[str] = None
+    hosting_yearly_price: Optional[float] = None
+    support_monthly_price: Optional[float] = None
     features: Optional[List[str]] = None
     is_active: Optional[bool] = None
     is_featured: Optional[bool] = None
 
 
+async def _seed_default_packages(db: AsyncSession) -> None:
+    """Seed default LYD hosting/support packages if none exist."""
+    count_stmt = select(func.count()).select_from(HostingPackage)
+    total = (await db.execute(count_stmt)).scalar() or 0
+    if total > 0:
+        return
+
+    defaults = [
+        {
+            "name": "Starter",
+            "slug": "starter",
+            "description": "Starter hosting plan",
+            "hosting_yearly_price": 350.0,
+            "support_monthly_price": 500.0,
+            "disk_space_gb": 10,
+            "bandwidth_gb": 100,
+            "domains_limit": 1,
+            "databases_limit": 1,
+            "email_accounts_limit": 5,
+            "currency": "LYD",
+            "sort_order": 1,
+        },
+        {
+            "name": "Bronze",
+            "slug": "bronze",
+            "description": "Bronze hosting plan",
+            "hosting_yearly_price": 500.0,
+            "support_monthly_price": 700.0,
+            "disk_space_gb": 20,
+            "bandwidth_gb": 200,
+            "domains_limit": 3,
+            "databases_limit": 3,
+            "email_accounts_limit": 10,
+            "currency": "LYD",
+            "sort_order": 2,
+        },
+        {
+            "name": "Silver",
+            "slug": "silver",
+            "description": "Silver hosting plan",
+            "hosting_yearly_price": 700.0,
+            "support_monthly_price": 1000.0,
+            "disk_space_gb": 50,
+            "bandwidth_gb": 500,
+            "domains_limit": 5,
+            "databases_limit": 5,
+            "email_accounts_limit": 20,
+            "currency": "LYD",
+            "sort_order": 3,
+        },
+        {
+            "name": "Gold",
+            "slug": "gold",
+            "description": "Gold hosting plan",
+            "hosting_yearly_price": 1000.0,
+            "support_monthly_price": 1500.0,
+            "disk_space_gb": 100,
+            "bandwidth_gb": 1000,
+            "domains_limit": 10,
+            "databases_limit": 10,
+            "email_accounts_limit": 50,
+            "currency": "LYD",
+            "sort_order": 4,
+            "is_featured": True,
+        },
+    ]
+
+    for item in defaults:
+        package = HostingPackage(
+            name=item["name"],
+            slug=item["slug"],
+            description=item["description"],
+            disk_space_gb=item["disk_space_gb"],
+            bandwidth_gb=item["bandwidth_gb"],
+            domains_limit=item["domains_limit"],
+            databases_limit=item["databases_limit"],
+            email_accounts_limit=item["email_accounts_limit"],
+            monthly_price=0.0,
+            yearly_price=item["hosting_yearly_price"],
+            currency=item["currency"],
+            hosting_yearly_price=item["hosting_yearly_price"],
+            support_monthly_price=item["support_monthly_price"],
+            is_featured=item.get("is_featured", False),
+            sort_order=item["sort_order"],
+        )
+        db.add(package)
+
+    await db.commit()
+
+
 @router.get("/")
 async def list_packages(
     is_active: bool = True,
-    db: Session = Depends(get_db)
+    db: Annotated[AsyncSession, Depends(get_db)] = None
 ):
     """List all hosting packages."""
     try:
-        query = db.query(HostingPackage)
+        await _seed_default_packages(db)
+        stmt = select(HostingPackage)
         
         if is_active is not None:
-            query = query.filter(HostingPackage.is_active == is_active)
+            stmt = stmt.where(HostingPackage.is_active == is_active)
         
-        packages = query.order_by(HostingPackage.sort_order, HostingPackage.yearly_price).all()
+        stmt = stmt.order_by(HostingPackage.sort_order, HostingPackage.yearly_price)
+        result = await db.execute(stmt)
+        packages = result.scalars().all()
         
         return {
             "packages": [
@@ -83,6 +183,9 @@ async def list_packages(
                     "yearly_price": p.yearly_price,
                     "biennial_price": p.biennial_price,
                     "setup_fee": p.setup_fee,
+                    "currency": p.currency,
+                    "hosting_yearly_price": p.hosting_yearly_price,
+                    "support_monthly_price": p.support_monthly_price,
                     "features": p.features_list,
                     "is_active": p.is_active,
                     "is_featured": p.is_featured,
@@ -92,15 +195,17 @@ async def list_packages(
             ]
         }
     except Exception as e:
-        logger.warning(f"Error listing packages (returning empty): {e}")
+        logger.error(f"Error listing packages: {e}")
         return {"packages": []}
 
 
 @router.get("/{package_id}")
-async def get_package(package_id: int, db: Session = Depends(get_db)):
+async def get_package(package_id: int, db: Annotated[AsyncSession, Depends(get_db)] = None):
     """Get package details."""
     try:
-        package = db.query(HostingPackage).filter(HostingPackage.id == package_id).first()
+        stmt = select(HostingPackage).where(HostingPackage.id == package_id)
+        result = await db.execute(stmt)
+        package = result.scalar_one_or_none()
         
         if not package:
             raise HTTPException(status_code=404, detail="Package not found")
@@ -126,6 +231,8 @@ async def get_package(package_id: int, db: Session = Depends(get_db)):
             "biennial_price": package.biennial_price,
             "setup_fee": package.setup_fee,
             "currency": package.currency,
+            "hosting_yearly_price": package.hosting_yearly_price,
+            "support_monthly_price": package.support_monthly_price,
             "features": package.features_list,
             "is_active": package.is_active,
             "is_featured": package.is_featured,
@@ -151,12 +258,13 @@ async def get_package(package_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/")
-async def create_package(data: PackageCreate, db: Session = Depends(get_db)):
+async def create_package(data: PackageCreate, db: Annotated[AsyncSession, Depends(get_db)] = None):
     """Create a new hosting package."""
     try:
         # Check for duplicate slug
-        existing = db.query(HostingPackage).filter(HostingPackage.slug == data.slug).first()
-        if existing:
+        stmt = select(HostingPackage).where(HostingPackage.slug == data.slug)
+        result = await db.execute(stmt)
+        if result.scalar_one_or_none():
             raise HTTPException(status_code=400, detail="Package with this slug already exists")
         
         package = HostingPackage(
@@ -173,6 +281,9 @@ async def create_package(data: PackageCreate, db: Session = Depends(get_db)):
             yearly_price=data.yearly_price,
             biennial_price=data.biennial_price,
             setup_fee=data.setup_fee,
+            currency=data.currency,
+            hosting_yearly_price=data.hosting_yearly_price,
+            support_monthly_price=data.support_monthly_price,
             is_featured=data.is_featured,
             is_active=True
         )
@@ -181,8 +292,8 @@ async def create_package(data: PackageCreate, db: Session = Depends(get_db)):
             package.features_list = data.features
         
         db.add(package)
-        db.commit()
-        db.refresh(package)
+        await db.commit()
+        await db.refresh(package)
         
         return {
             "status": "success",
@@ -192,7 +303,7 @@ async def create_package(data: PackageCreate, db: Session = Depends(get_db)):
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error creating package: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -201,11 +312,13 @@ async def create_package(data: PackageCreate, db: Session = Depends(get_db)):
 async def update_package(
     package_id: int,
     updates: PackageUpdate,
-    db: Session = Depends(get_db)
+    db: Annotated[AsyncSession, Depends(get_db)] = None
 ):
     """Update hosting package."""
     try:
-        package = db.query(HostingPackage).filter(HostingPackage.id == package_id).first()
+        stmt = select(HostingPackage).where(HostingPackage.id == package_id)
+        result = await db.execute(stmt)
+        package = result.scalar_one_or_none()
         
         if not package:
             raise HTTPException(status_code=404, detail="Package not found")
@@ -219,7 +332,7 @@ async def update_package(
         for field, value in update_data.items():
             setattr(package, field, value)
         
-        db.commit()
+        await db.commit()
         
         return {
             "status": "success",
@@ -228,22 +341,24 @@ async def update_package(
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error updating package {package_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.delete("/{package_id}")
-async def deactivate_package(package_id: int, db: Session = Depends(get_db)):
+async def deactivate_package(package_id: int, db: Annotated[AsyncSession, Depends(get_db)] = None):
     """Deactivate a hosting package (soft delete)."""
     try:
-        package = db.query(HostingPackage).filter(HostingPackage.id == package_id).first()
+        stmt = select(HostingPackage).where(HostingPackage.id == package_id)
+        result = await db.execute(stmt)
+        package = result.scalar_one_or_none()
         
         if not package:
             raise HTTPException(status_code=404, detail="Package not found")
         
         package.is_active = False
-        db.commit()
+        await db.commit()
         
         return {
             "status": "success",
@@ -252,6 +367,6 @@ async def deactivate_package(package_id: int, db: Session = Depends(get_db)):
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error deactivating package {package_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))

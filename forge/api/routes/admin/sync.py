@@ -18,7 +18,7 @@ from ....db import get_db, User, Server, Project
 from ....db.models.project_server import ProjectServer
 from ....db.models.server import PanelType
 from ....utils.logging import logger
-from ...deps import get_current_active_user, task_status, update_task_status
+from ...deps import get_current_active_user, get_task_status, update_task_status
 
 router = APIRouter()
 
@@ -358,9 +358,9 @@ async def get_sync_status(
     
     Returns current status, progress, and any results or errors.
     """
-    # Check in-memory task status first
-    if task_id in task_status:
-        status_info = task_status[task_id]
+    # Check task status (now stored in Redis)
+    status_info = get_task_status(task_id)
+    if status_info.get("status") != "unknown":
         return SyncStatusResponse(
             task_id=task_id,
             status=status_info.get("status", "unknown"),

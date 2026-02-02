@@ -94,3 +94,53 @@ class SSHKeyService:
         if setting:
             return setting.get_value()
         return None
+
+    @classmethod
+    async def get_configured_client(
+        cls, 
+        db: AsyncSession, 
+        server,  # ProjectServer or Server model
+        ssh_user: Optional[str] = None,
+        ssh_key_path: Optional[str] = None
+    ):
+        """
+        Get a configured SSHClient for a server, handling credential fallback.
+        
+        Priority:
+        1. Specific args provided (ssh_user, ssh_key_path)
+        2. Server/Environment specific configuration
+        3. System-wide fallback key (if no password/key on server)
+        """
+        from forge.utils.ssh import SSHClient
+        
+        host = server.hostname
+        port = server.ssh_port or 22
+        
+        # User resolution
+        user = ssh_user or server.ssh_user
+        
+        # Key resolution
+        key_path = ssh_key_path or server.ssh_key_path
+        password = server.ssh_password
+        private_key = server.ssh_private_key
+        
+        # Fallback to System SSH Key if no credentials provided
+        if not password and not key_path and not private_key:
+            system_keys = await cls.get_system_key(db)
+            if system_keys and system_keys.get("private_key"):
+                private_key = system_keys["private_key"]
+                logger.info(f"Using system SSH key for {host}")
+                
+        if not user:
+            # Maybe default to 'root' or similar if absolutely nothing? 
+            # Or let SSHClient fail naturally.
+            pass
+
+        return SSHClient(
+            host=host, 
+            user=user, 
+            port=port,
+            key_path=key_path,
+            password=password,
+            private_key=private_key
+        )

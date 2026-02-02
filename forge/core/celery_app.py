@@ -23,21 +23,33 @@ celery_app.conf.update(
     result_serializer="json",
     
     # Timezone
-    timezone="UTC",
+    timezone=settings.APP_TIMEZONE,
     enable_utc=True,
     
     # Task settings
     task_track_started=True,
     task_time_limit=3600,  # 1 hour max
     task_soft_time_limit=3300,  # Soft limit 55 minutes
+
+    # Worker settings
+    worker_prefetch_multiplier=1,  # Disable prefetching for long tasks
+    worker_concurrency=4,
     
     # Result backend settings
     result_expires=86400,  # 24 hours
+
+    # Beat scheduler - use in-memory scheduler with DB polling task
+    beat_max_loop_interval=60,  # Check for new schedules every minute
     
     # Task routing
     task_routes={
         "forge.tasks.monitor_tasks.*": {"queue": "monitoring"},
+        "forge.tasks.server_monitors.*": {"queue": "monitoring"},
         "forge.tasks.backup_tasks.*": {"queue": "backups"},
+        "forge.tasks.scheduled_backup_tasks.*": {"queue": "backups"},
+        "forge.tasks.celery_tasks.*": {"queue": "backups"},
+        "forge.tasks.deploy_tasks.*": {"queue": "deploy"},
+        "forge.tasks.clone_tasks.*": {"queue": "clone"},
         "forge.tasks.sync_tasks.*": {"queue": "sync"},
     },
     
@@ -59,16 +71,38 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(minute=0),
     },
     
-    # Daily backups - 2 AM
-    "daily-backups": {
-        "task": "forge.tasks.backup_tasks.run_scheduled_backups",
-        "schedule": crontab(minute=0, hour=2),
+    # Scheduled backups are handled by scheduled_backup_tasks.process_due_schedules
+
+    # Process due schedules (checks DB every minute)
+    "process-backup-schedules": {
+        "task": "forge.tasks.scheduled_backup_tasks.process_due_schedules",
+        "schedule": 60.0,
     },
     
     # Weekly cleanup - Sunday 3 AM
     "weekly-cleanup": {
         "task": "forge.tasks.backup_tasks.cleanup_old_backups",
         "schedule": crontab(minute=0, hour=3, day_of_week=0),
+    },
+
+    # Cleanup orphaned backups daily
+    "cleanup-orphaned-backups": {
+        "task": "forge.tasks.scheduled_backup_tasks.cleanup_orphaned_backups",
+        "schedule": crontab(minute=30, hour=3),
+        "args": ("local",),
+    },
+
+    # Apply retention policies hourly
+    "apply-retention-policies": {
+        "task": "forge.tasks.scheduled_backup_tasks.apply_retention_all",
+        "schedule": crontab(minute=0),
+    },
+
+    # Backup monitoring every 6 hours
+    "backup-monitoring": {
+        "task": "forge.tasks.celery_tasks.backup_monitor",
+        "schedule": crontab(minute=0, hour="*/6"),
+        "args": (".",),
     },
     
     # Calculate uptime stats - daily at midnight
@@ -107,7 +141,12 @@ celery_app.conf.beat_schedule = {
 celery_app.autodiscover_tasks([
     "forge.tasks.monitor_tasks",
     "forge.tasks.backup_tasks",
+    "forge.tasks.scheduled_backup_tasks",
+    "forge.tasks.celery_tasks",
+    "forge.tasks.deploy_tasks",
+    "forge.tasks.clone_tasks",
     "forge.tasks.sync_tasks",
+    "forge.tasks.server_monitors",
     "forge.tasks.wp_tasks",
     "forge.tasks.expiry_tasks",
 ])

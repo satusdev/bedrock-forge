@@ -1,7 +1,7 @@
 """
-Amazon S3 storage backend.
+Amazon S3 storage backend using rclone.
 
-Stores backups in S3-compatible object storage using AWS CLI.
+Stores backups in S3-compatible object storage via rclone remote.
 """
 import asyncio
 import json
@@ -16,92 +16,79 @@ from .base import BackupStorage, StorageConfig, StorageResult
 
 class S3Storage(BackupStorage):
     """
-    Amazon S3 storage backend using AWS CLI.
+    S3 storage backend using rclone.
     
-    Supports S3 and S3-compatible storage (MinIO, DigitalOcean Spaces, etc.).
+    Requires rclone to be installed and configured with an S3 remote.
     """
     
     def __init__(
         self,
-        bucket: str,
+        remote_name: str = "s3",
+        bucket: str = "",
         prefix: str = "forge-backups",
-        region: str = "us-east-1",
-        endpoint_url: Optional[str] = None,
-        access_key_id: Optional[str] = None,
-        secret_access_key: Optional[str] = None,
         config: Optional[StorageConfig] = None,
+        rclone_config_path: Optional[str] = None,
     ):
         """
         Initialize S3 storage.
         
         Args:
+            remote_name: Name of the rclone remote (must be configured)
             bucket: S3 bucket name
             prefix: Prefix (folder) within the bucket
-            region: AWS region
-            endpoint_url: Custom endpoint for S3-compatible storage
-            access_key_id: AWS access key (or use env/credentials file)
-            secret_access_key: AWS secret key (or use env/credentials file)
             config: Storage configuration
         """
         super().__init__(config)
+        self.remote_name = remote_name
         self.bucket = bucket
         self.prefix = prefix.strip("/")
-        self.region = region
-        self.endpoint_url = endpoint_url
-        self.access_key_id = access_key_id
-        self.secret_access_key = secret_access_key
-        self._aws_path: Optional[str] = None
+        self._rclone_path: Optional[str] = None
+        self.rclone_config_path = rclone_config_path or os.getenv("RCLONE_CONFIG")
     
     @property
-    def aws_path(self) -> str:
-        """Get path to AWS CLI binary."""
-        if self._aws_path is None:
-            self._aws_path = shutil.which("aws") or "aws"
-        return self._aws_path
+    def rclone_path(self) -> str:
+        """Get path to rclone binary."""
+        if self._rclone_path is None:
+            self._rclone_path = shutil.which("rclone") or "rclone"
+        return self._rclone_path
     
-    def _get_s3_uri(self, path: str) -> str:
-        """Build full S3 URI."""
-        full_path = f"{self.prefix}/{path}".strip("/")
-        return f"s3://{self.bucket}/{full_path}"
-    
-    def _get_env(self) -> dict:
-        """Get environment variables for AWS CLI."""
-        env = os.environ.copy()
+    def _build_remote_path(self, path: str = "") -> str:
+        """Build full rclone remote path."""
+        # Format: remote:bucket/prefix/path
+        base_path = f"{self.bucket}/{self.prefix}".strip("/")
+        suffix = (path or "").strip("/")
         
-        if self.access_key_id:
-            env["AWS_ACCESS_KEY_ID"] = self.access_key_id
-        if self.secret_access_key:
-            env["AWS_SECRET_ACCESS_KEY"] = self.secret_access_key
-        if self.region:
-            env["AWS_DEFAULT_REGION"] = self.region
-        
-        return env
+        if base_path and suffix:
+            combined = f"{base_path}/{suffix}"
+        elif base_path:
+            combined = base_path
+        else:
+            combined = suffix
+
+        return f"{self.remote_name}:{combined}"
+
+    def get_remote_path(self, path: str = "") -> str:
+        """Public helper to build remote path."""
+        return self._build_remote_path(path)
     
-    def _get_endpoint_args(self) -> list[str]:
-        """Get endpoint URL arguments if configured."""
-        if self.endpoint_url:
-            return ["--endpoint-url", self.endpoint_url]
-        return []
-    
-    async def _run_aws(
+    async def _run_rclone(
         self,
         *args: str,
         check: bool = True,
     ) -> tuple[bool, str, str]:
         """
-        Run AWS CLI command asynchronously.
-        
-        Returns:
-            Tuple of (success, stdout, stderr)
+        Run rclone command asynchronously.
         """
-        cmd = [self.aws_path, *self._get_endpoint_args(), *args]
+        cmd = [self.rclone_path]
+        if self.rclone_config_path:
+            cmd.extend(["--config", self.rclone_config_path])
+        cmd.extend(args)
         
         try:
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env=self._get_env(),
             )
             stdout, stderr = await process.communicate()
             
@@ -120,28 +107,23 @@ class S3Storage(BackupStorage):
         remote_path: str,
         metadata: Optional[dict] = None,
     ) -> StorageResult:
-        """Upload file to S3."""
+        """Upload file to S3 using rclone."""
         try:
-            s3_uri = self._get_s3_uri(remote_path)
+            full_remote = self._build_remote_path(remote_path)
             
-            # Build metadata args
-            metadata_args = []
-            if metadata:
-                metadata_str = ",".join(f"{k}={v}" for k, v in metadata.items())
-                metadata_args = ["--metadata", metadata_str]
-            
-            success, stdout, stderr = await self._run_aws(
-                "s3", "cp",
+            # Use rclone copyto
+            success, stdout, stderr = await self._run_rclone(
+                "copyto",
                 str(local_path),
-                s3_uri,
-                *metadata_args,
+                full_remote,
+                "--progress",
             )
             
             if not success:
                 return StorageResult(
                     success=False,
                     path=remote_path,
-                    error=f"S3 upload failed: {stderr}",
+                    error=f"rclone S3 upload failed: {stderr}",
                 )
             
             size = local_path.stat().st_size
@@ -152,8 +134,8 @@ class S3Storage(BackupStorage):
                 size_bytes=size,
                 metadata={
                     **(metadata or {}),
+                    "s3_remote": self.remote_name,
                     "s3_bucket": self.bucket,
-                    "s3_uri": s3_uri,
                     "uploaded_at": datetime.utcnow().isoformat(),
                 },
             )
@@ -170,23 +152,24 @@ class S3Storage(BackupStorage):
         remote_path: str,
         local_path: Path,
     ) -> StorageResult:
-        """Download file from S3."""
+        """Download file from S3 using rclone."""
         try:
-            s3_uri = self._get_s3_uri(remote_path)
+            full_remote = self._build_remote_path(remote_path)
             
             local_path.parent.mkdir(parents=True, exist_ok=True)
             
-            success, stdout, stderr = await self._run_aws(
-                "s3", "cp",
-                s3_uri,
+            success, stdout, stderr = await self._run_rclone(
+                "copyto",
+                full_remote,
                 str(local_path),
+                "--progress",
             )
             
             if not success:
                 return StorageResult(
                     success=False,
                     path=remote_path,
-                    error=f"S3 download failed: {stderr}",
+                    error=f"rclone S3 download failed: {stderr}",
                 )
             
             return StorageResult(
@@ -203,18 +186,17 @@ class S3Storage(BackupStorage):
             )
     
     async def delete(self, remote_path: str) -> StorageResult:
-        """Delete file from S3."""
+        """Delete file from S3 using rclone."""
         try:
-            s3_uri = self._get_s3_uri(remote_path)
+            full_remote = self._build_remote_path(remote_path)
             
-            success, stdout, stderr = await self._run_aws(
-                "s3", "rm",
-                s3_uri,
+            success, stdout, stderr = await self._run_rclone(
+                "deletefile",
+                full_remote,
             )
             
             if not success:
-                # Check if file didn't exist (not an error for delete)
-                if "does not exist" in stderr.lower():
+                if "not found" in stderr.lower():
                     return StorageResult(
                         success=True,
                         path=remote_path,
@@ -222,7 +204,7 @@ class S3Storage(BackupStorage):
                 return StorageResult(
                     success=False,
                     path=remote_path,
-                    error=f"S3 delete failed: {stderr}",
+                    error=f"rclone S3 delete failed: {stderr}",
                 )
             
             return StorageResult(
@@ -241,193 +223,96 @@ class S3Storage(BackupStorage):
         self,
         prefix: str = "",
         max_results: int = 100,
-    ) -> list[str]:
-        """List files in S3 bucket/prefix."""
+    ) -> list[dict]:
+        """
+        List files in S3 bucket using rclone.
+        """
         try:
-            search_prefix = f"{self.prefix}/{prefix}".strip("/")
-            s3_uri = f"s3://{self.bucket}/{search_prefix}"
+            # listjson on bucket/prefix
+            search_path = f"{prefix}" if prefix else ""
+            full_remote = self._build_remote_path(search_path)
             
-            success, stdout, stderr = await self._run_aws(
-                "s3", "ls",
-                s3_uri,
+            success, stdout, stderr = await self._run_rclone(
+                "lsjson",
+                full_remote,
                 "--recursive",
+                "--files-only",
+                "--no-mimetype",
             )
             
             if not success:
                 return []
             
-            # Parse output - format: "2024-01-01 12:00:00 1234 path/to/file"
+            entries = json.loads(stdout)
+            
             files = []
-            base_prefix = f"{self.prefix}/" if self.prefix else ""
-            
-            for line in stdout.strip().split("\n"):
-                if not line.strip():
+            for entry in entries:
+                if entry.get("IsDir"):
                     continue
-                parts = line.split()
-                if len(parts) >= 4:
-                    # Path is everything after date, time, size
-                    file_path = " ".join(parts[3:])
-                    # Remove base prefix to get relative path
-                    if file_path.startswith(base_prefix):
-                        file_path = file_path[len(base_prefix):]
-                    files.append(file_path)
-                    if len(files) >= max_results:
-                        break
+                    
+                rel_path = entry.get("Path", "")
+                if prefix:
+                    rel_path = f"{prefix}/{rel_path}"
+                
+                files.append({
+                    "path": rel_path,
+                    "name": entry.get("Name", ""),
+                    "size": entry.get("Size", 0),
+                    "mod_time": entry.get("ModTime", ""),
+                })
             
-            return sorted(files, reverse=True)
+            files.sort(key=lambda x: x.get("mod_time") or "", reverse=True)
+            
+            return files[:max_results]
             
         except Exception:
             return []
     
     async def exists(self, remote_path: str) -> bool:
-        """Check if file exists in S3."""
+        """Check if file exists."""
         try:
-            s3_uri = self._get_s3_uri(remote_path)
-            
-            success, stdout, stderr = await self._run_aws(
-                "s3", "ls",
-                s3_uri,
+            full_remote = self._build_remote_path(remote_path)
+            success, stdout, stderr = await self._run_rclone(
+                "lsf",
+                full_remote,
                 check=False,
             )
-            
             return success and bool(stdout.strip())
-            
         except Exception:
             return False
     
     async def get_size(self, remote_path: str) -> int:
-        """Get file size from S3."""
+        """Get file size."""
         try:
-            s3_uri = self._get_s3_uri(remote_path)
-            
-            success, stdout, stderr = await self._run_aws(
-                "s3", "ls",
-                s3_uri,
+            full_remote = self._build_remote_path(remote_path)
+            success, stdout, stderr = await self._run_rclone(
+                "size",
+                full_remote,
+                "--json",
             )
-            
-            if not success or not stdout.strip():
+            if not success:
                 return 0
-            
-            # Parse output - format: "2024-01-01 12:00:00 1234 filename"
-            parts = stdout.strip().split()
-            if len(parts) >= 3:
-                return int(parts[2])
-            return 0
-            
+            data = json.loads(stdout)
+            return data.get("bytes", 0)
         except Exception:
             return 0
-    
+            
     async def check_configured(self) -> tuple[bool, str]:
-        """
-        Check if AWS CLI is configured and bucket is accessible.
-        
-        Returns:
-            Tuple of (is_configured, message)
-        """
+        """Check if rclone remote is configured."""
         try:
-            # Check if AWS CLI is installed
-            if not shutil.which("aws"):
-                return False, "AWS CLI is not installed"
+            if not shutil.which("rclone"):
+                return False, "rclone is not installed"
             
-            # Check if we can access the bucket
-            success, stdout, stderr = await self._run_aws(
-                "s3", "ls",
-                f"s3://{self.bucket}",
-                "--max-items", "1",
-            )
-            
+            success, stdout, stderr = await self._run_rclone("listremotes")
             if not success:
-                if "NoSuchBucket" in stderr:
-                    return False, f"Bucket '{self.bucket}' does not exist"
-                if "AccessDenied" in stderr:
-                    return False, f"Access denied to bucket '{self.bucket}'"
-                return False, f"Failed to access bucket: {stderr}"
+                return False, f"Failed to list remotes: {stderr}"
             
-            return True, f"S3 bucket '{self.bucket}' is accessible"
+            remotes = stdout.strip().split("\n")
+            expected_remote = f"{self.remote_name}:"
             
+            if expected_remote not in remotes:
+                return False, f"Remote '{self.remote_name}' not configured"
+            
+            return True, f"Remote '{self.remote_name}' is configured"
         except Exception as e:
             return False, str(e)
-    
-    async def get_bucket_info(self) -> Optional[dict]:
-        """
-        Get S3 bucket information.
-        
-        Returns:
-            Dict with bucket info or None if unavailable
-        """
-        try:
-            # Get bucket location
-            success, stdout, stderr = await self._run_aws(
-                "s3api", "get-bucket-location",
-                "--bucket", self.bucket,
-                "--output", "json",
-            )
-            
-            if not success:
-                return None
-            
-            location = json.loads(stdout)
-            
-            return {
-                "bucket": self.bucket,
-                "region": location.get("LocationConstraint") or "us-east-1",
-                "prefix": self.prefix,
-            }
-            
-        except Exception:
-            return None
-    
-    async def set_lifecycle_policy(
-        self,
-        days_to_expire: int,
-        prefix: Optional[str] = None,
-    ) -> bool:
-        """
-        Set S3 lifecycle policy for automatic deletion.
-        
-        Args:
-            days_to_expire: Days until objects are deleted
-            prefix: Optional prefix to limit policy scope
-            
-        Returns:
-            True if policy was set successfully
-        """
-        try:
-            policy_prefix = f"{self.prefix}/{prefix}".strip("/") if prefix else self.prefix
-            
-            lifecycle_config = {
-                "Rules": [
-                    {
-                        "ID": "forge-backup-retention",
-                        "Status": "Enabled",
-                        "Filter": {
-                            "Prefix": policy_prefix,
-                        },
-                        "Expiration": {
-                            "Days": days_to_expire,
-                        },
-                    }
-                ]
-            }
-            
-            # Write config to temp file
-            import tempfile
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-                json.dump(lifecycle_config, f)
-                config_file = f.name
-            
-            try:
-                success, stdout, stderr = await self._run_aws(
-                    "s3api", "put-bucket-lifecycle-configuration",
-                    "--bucket", self.bucket,
-                    "--lifecycle-configuration", f"file://{config_file}",
-                )
-                
-                return success
-                
-            finally:
-                # Clean up temp file
-                Path(config_file).unlink(missing_ok=True)
-            
-        except Exception:
-            return False

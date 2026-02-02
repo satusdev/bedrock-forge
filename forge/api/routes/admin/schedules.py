@@ -11,7 +11,10 @@ from sqlalchemy import select, func
 
 from ....db import get_db
 from ....db.models import User, BackupSchedule, ScheduleStatus, ScheduleFrequency
+from ....db.models.project_server import ProjectServer
+from sqlalchemy.orm import selectinload
 from ....services.backup import BackupSchedulerService, BackupService
+from ....services.backup.backup_service import normalize_storage_backend
 from ...deps import get_current_active_user
 from ...schemas.backup import (
     ScheduleCreate,
@@ -41,7 +44,10 @@ def _schedule_to_response(schedule: BackupSchedule) -> ScheduleRead:
         description=schedule.description,
         project_id=schedule.project_id,
         project_name=schedule.project.name if schedule.project else None,
+        environment_id=schedule.environment_id,
+        environment_name=str(schedule.environment.environment) if schedule.environment and schedule.environment.environment else None,
         frequency=schedule.frequency,
+
         hour=schedule.hour,
         minute=schedule.minute,
         day_of_week=schedule.day_of_week,
@@ -110,6 +116,18 @@ async def create_schedule(
     current_user: User = Depends(get_current_active_user),
 ):
     """Create a new backup schedule."""
+    if not data.environment_id:
+        raise HTTPException(status_code=400, detail="Environment is required for scheduled backups")
+
+    env_result = await db.execute(
+        select(ProjectServer).where(
+            ProjectServer.id == data.environment_id,
+            ProjectServer.project_id == data.project_id,
+        )
+    )
+    if not env_result.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Environment not found for project")
+
     scheduler = BackupSchedulerService(db)
     
     schedule = await scheduler.create_schedule(
@@ -129,7 +147,20 @@ async def create_schedule(
         retention_days=data.retention_days,
         description=data.description,
         config=data.config,
+        environment_id=data.environment_id,
     )
+
+    # Reload with relationships to avoid MissingGreenlet in _schedule_to_response
+    stmt = (
+        select(BackupSchedule)
+        .where(BackupSchedule.id == schedule.id)
+        .options(
+            selectinload(BackupSchedule.project),
+            selectinload(BackupSchedule.environment)
+        )
+    )
+    result = await db.execute(stmt)
+    schedule = result.scalar_one()
     
     return _schedule_to_response(schedule)
 
@@ -159,6 +190,19 @@ async def update_schedule(
 ):
     """Update a backup schedule."""
     scheduler = BackupSchedulerService(db)
+
+    if data.environment_id is not None:
+        schedule = await scheduler.get_schedule(schedule_id)
+        if not schedule:
+            raise HTTPException(status_code=404, detail="Schedule not found")
+        env_result = await db.execute(
+            select(ProjectServer).where(
+                ProjectServer.id == data.environment_id,
+                ProjectServer.project_id == schedule.project_id,
+            )
+        )
+        if not env_result.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Environment not found for project")
     
     # Get non-None values from update data
     updates = {k: v for k, v in data.model_dump().items() if v is not None}
@@ -167,6 +211,18 @@ async def update_schedule(
     
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
+
+    # Reload with relationships
+    stmt = (
+        select(BackupSchedule)
+        .where(BackupSchedule.id == schedule.id)
+        .options(
+            selectinload(BackupSchedule.project),
+            selectinload(BackupSchedule.environment)
+        )
+    )
+    result = await db.execute(stmt)
+    schedule = result.scalar_one()
     
     return _schedule_to_response(schedule)
 
@@ -199,6 +255,18 @@ async def pause_schedule(
     
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
+
+    # Reload with relationships
+    stmt = (
+        select(BackupSchedule)
+        .where(BackupSchedule.id == schedule.id)
+        .options(
+            selectinload(BackupSchedule.project),
+            selectinload(BackupSchedule.environment)
+        )
+    )
+    result = await db.execute(stmt)
+    schedule = result.scalar_one()
     
     return _schedule_to_response(schedule)
 
@@ -215,6 +283,18 @@ async def resume_schedule(
     
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
+
+    # Reload with relationships
+    stmt = (
+        select(BackupSchedule)
+        .where(BackupSchedule.id == schedule.id)
+        .options(
+            selectinload(BackupSchedule.project),
+            selectinload(BackupSchedule.environment)
+        )
+    )
+    result = await db.execute(stmt)
+    schedule = result.scalar_one()
     
     return _schedule_to_response(schedule)
 
@@ -226,41 +306,90 @@ async def run_schedule_now(
     current_user: User = Depends(get_current_active_user),
 ):
     """Manually trigger a backup schedule to run now."""
-    scheduler = BackupSchedulerService(db)
-    schedule = await scheduler.get_schedule(schedule_id)
+    from datetime import datetime
+    from sqlalchemy.orm import selectinload
+    from ....db.models.backup import Backup, BackupStatus, BackupStorageType
+    from ....db.models.project_server import ProjectServer
+    from ....services.backup.backup_service import normalize_storage_backend
+    
+    # Load schedule with relationships
+    stmt = (
+        select(BackupSchedule)
+        .where(BackupSchedule.id == schedule_id)
+        .options(
+            selectinload(BackupSchedule.project),
+            selectinload(BackupSchedule.environment).selectinload(ProjectServer.server)
+        )
+    )
+    result = await db.execute(stmt)
+    schedule = result.scalar_one_or_none()
     
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
     
-    try:
-        # Execute backup directly
-        backup_service = BackupService(db)
-        backup = await backup_service.create_backup(
-            project_id=schedule.project_id,
-            backup_type=schedule.backup_type,
-            storage_type=schedule.storage_type,
-            created_by_id=current_user.id,
-            config=schedule.config,
-            schedule_id=schedule.id,
-        )
-        
-        # Record the run
-        await scheduler.record_run(schedule_id, success=True)
-        
-        return ScheduleRunResponse(
-            success=True,
-            message="Backup completed successfully",
-            schedule_id=schedule_id,
-            backup_id=backup.id,
-        )
-        
-    except Exception as e:
-        # Record failure
-        await scheduler.record_run(schedule_id, success=False, error_message=str(e))
-        
-        return ScheduleRunResponse(
-            success=False,
-            message=f"Backup failed: {str(e)}",
-            schedule_id=schedule_id,
-        )
-
+    if not schedule.project:
+        raise HTTPException(status_code=400, detail="No project associated with schedule")
+    
+    env = schedule.environment
+    if not env:
+        raise HTTPException(status_code=400, detail="No environment linked to schedule")
+    
+    # Determine storage backend
+    storage_type_str = normalize_storage_backend(schedule.storage_type)
+    storage_type = BackupStorageType.GOOGLE_DRIVE if storage_type_str == "gdrive" else (
+        BackupStorageType.S3 if storage_type_str == "s3" else BackupStorageType.LOCAL
+    )
+    
+    # Determine backup type string
+    backup_type_str = schedule.backup_type.value if hasattr(schedule.backup_type, 'value') else str(schedule.backup_type)
+    
+    # Generate backup name
+    env_label = env.environment.value.upper() if hasattr(env.environment, 'value') else str(env.environment).upper()
+    backup_name = f"Backup {env_label} - {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"
+    
+    # Create Backup record
+    backup = Backup(
+        project_id=schedule.project_id,
+        created_by_id=current_user.id,
+        name=backup_name,
+        backup_type=schedule.backup_type,
+        storage_type=storage_type,
+        storage_path="",  # Will be populated by task
+        status=BackupStatus.PENDING,
+        notes=f"Scheduled backup: {schedule.name}",
+        project_server_id=env.id,
+        started_at=datetime.utcnow()
+    )
+    db.add(backup)
+    await db.flush()
+    await db.refresh(backup)
+    
+    backup_id = backup.id
+    await db.commit()
+    
+    # Determine storage backends
+    storage_backends = ["gdrive"] if storage_type_str == "gdrive" else (
+        ["s3"] if storage_type_str == "s3" else ["local"]
+    )
+    
+    # Get override folder ID if set on environment
+    override_folder_id = env.gdrive_backups_folder_id if env else None
+    
+    # Trigger backup via Celery task
+    from forge.tasks.backup_tasks import create_environment_backup_task
+    
+    create_environment_backup_task.delay(
+        project_id=schedule.project_id,
+        env_id=env.id,
+        backup_id=backup_id,
+        backup_type=backup_type_str,
+        storage_backends=storage_backends,
+        override_gdrive_folder_id=override_folder_id
+    )
+    
+    return {
+        "success": True, 
+        "message": "Backup started in background", 
+        "schedule_id": schedule_id,
+        "backup_id": backup_id
+    }

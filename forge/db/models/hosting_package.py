@@ -45,6 +45,10 @@ class HostingPackage(Base, TimestampMixin):
     biennial_price: Mapped[float] = mapped_column(Float, default=0.0)
     setup_fee: Mapped[float] = mapped_column(Float, default=0.0)
     currency: Mapped[str] = mapped_column(String(3), default="USD")
+
+    # Hosting/support split pricing
+    hosting_yearly_price: Mapped[float] = mapped_column(Float, default=0.0)
+    support_monthly_price: Mapped[float] = mapped_column(Float, default=0.0)
     
     # Features (JSON array of feature strings)
     features: Mapped[str | None] = mapped_column(Text, nullable=True)

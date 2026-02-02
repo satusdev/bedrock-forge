@@ -1,7 +1,7 @@
 """
 Project-Tag junction table for many-to-many relationship.
 
-Links projects and servers to tags for organization.
+Links projects, servers, and clients to tags for organization.
 """
 from sqlalchemy import Table, Column, Integer, ForeignKey
 
@@ -21,5 +21,13 @@ server_tags = Table(
     "server_tags",
     Base.metadata,
     Column("server_id", Integer, ForeignKey("servers.id", ondelete="CASCADE"), primary_key=True),
+    Column("tag_id", Integer, ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True),
+)
+
+# Junction table for Client-Tag many-to-many
+client_tags = Table(
+    "client_tags",
+    Base.metadata,
+    Column("client_id", Integer, ForeignKey("clients.id", ondelete="CASCADE"), primary_key=True),
     Column("tag_id", Integer, ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True),
 )

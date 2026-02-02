@@ -201,6 +201,28 @@ DEMO_MONITORS = [
         "interval_seconds": 300,
         "timeout_seconds": 30,
     },
+    {
+        "name": "Staging Panel",
+        "url": "https://cp.staging.ly:8090",
+        "monitor_type": "uptime",
+        "interval_seconds": 300,
+        "timeout_seconds": 30,
+    },
+]
+
+DEMO_CLIENTS = [
+    {
+        "name": "Lamah Internal",
+        "email": "internal@lamah.com",
+        "notes": "Internal deployments and self-owned projects.",
+        "status": "active",
+    },
+    {
+        "name": "Acme Corp",
+        "email": "contact@acme.com", 
+        "notes": "Demo client.",
+        "status": "active",
+    }
 ]
 
 

@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Annotated, List
 import asyncio
 import subprocess
+import httpx
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -225,6 +226,108 @@ async def get_panel_login_url(
         "username": username,
         "password": password,
         "instructions": "Use these credentials to log in to the control panel."
+    }
+    
+async def _generate_cyberpanel_session(panel_url: str, username: str, password: str) -> dict:
+    base_url = panel_url.rstrip("/")
+    endpoint = f"{base_url}/api/verifyLogin"
+
+    async with httpx.AsyncClient(timeout=15.0, verify=False) as client:
+        response = await client.post(endpoint, json={"username": username, "password": password})
+        if response.status_code == status.HTTP_404_NOT_FOUND:
+            return {"session_url": None, "session_token": None, "raw": {}}
+        response.raise_for_status()
+        data = response.json() if response.content else {}
+
+    session_url = None
+    for key in ("loginURL", "loginUrl", "login_url", "session_url", "url"):
+        if isinstance(data.get(key), str) and data.get(key):
+            session_url = data[key]
+            break
+
+    session_token = data.get("token") or data.get("access_token")
+    if not session_url and session_token:
+        session_url = f"{base_url}/?token={session_token}"
+
+    return {
+        "session_url": session_url,
+        "session_token": session_token,
+        "raw": data,
+    }
+
+
+@router.post("/{server_id}/panel/session-url")
+async def get_panel_session_url(
+    server_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_active_user)]
+):
+    """
+    Generate a CyberPanel session URL.
+
+    Attempts to authenticate against the panel API and returns a session URL or token.
+    """
+    from ....utils.crypto import decrypt_credential
+
+    result = await db.execute(
+        select(Server).where(
+            Server.id == server_id,
+            Server.owner_id == current_user.id
+        )
+    )
+    server = result.scalar_one_or_none()
+
+    if not server:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Server not found"
+        )
+
+    if not server.panel_url:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No panel URL configured for this server"
+        )
+
+    if not server.panel_username or not server.panel_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Panel credentials not configured. Add username and password to server settings."
+        )
+
+    if not server.panel_type or server.panel_type.value != "cyberpanel":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Session URL generation is only supported for CyberPanel servers"
+        )
+
+    try:
+        username = decrypt_credential(server.panel_username, str(server.owner_id))
+        password = decrypt_credential(server.panel_password, str(server.owner_id))
+    except Exception:
+        username = server.panel_username
+        password = server.panel_password
+
+    panel_url = server.panel_url.rstrip("/")
+
+    try:
+        session_data = await _generate_cyberpanel_session(panel_url, username, password)
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to generate CyberPanel session: {exc}"
+        )
+
+    return {
+        "server_id": server.id,
+        "server_name": server.name,
+        "panel_type": server.panel_type.value if server.panel_type else None,
+        "panel_url": panel_url,
+        "login_url": f"{panel_url}/",
+        "username": username,
+        "password": password,
+        "session_url": session_data.get("session_url"),
+        "session_token": session_data.get("session_token"),
     }
 
 
@@ -584,6 +687,18 @@ async def scan_server_wordpress_sites(
                             # Go up to project root for WP-CLI
                             site_info["wp_path"] = wp_dir.split('/web/app')[0]
                     
+                    # Check for .env in parent directory (Bedrock signature for /public_html/web structures)
+                    if not site_info["is_bedrock"]:
+                        parent_dir = wp_dir.rsplit('/', 1)[0] if '/' in wp_dir else ''
+                        if parent_dir:
+                            env_check = ssh.run(
+                                f"test -f '{parent_dir}/.env' && echo 'bedrock' || echo ''",
+                                warn=True
+                            )
+                            if 'bedrock' in env_check.stdout.lower():
+                                site_info["is_bedrock"] = True
+                                site_info["wp_path"] = parent_dir  # Bedrock root is parent
+                    
                     # Extract domain from path (works for CyberPanel /home/domain.com/public_html)
                     path_parts = wp_dir.split('/')
                     for i, part in enumerate(path_parts):
@@ -780,20 +895,37 @@ async def read_server_env(
         raise HTTPException(status_code=404, detail="Server not found")
     
     try:
-        # Setup SSH connection
-        ssh_config = {
-            "host": server.ip_address,
-            "port": server.ssh_port or 22,
-            "user": server.ssh_user,
-        }
+        # Get SSH credentials with proper decryption
+        ssh_password = server.ssh_password
+        ssh_key_path = server.ssh_key_path
+        ssh_private_key = server.ssh_private_key
         
-        if server.ssh_key_path:
-            ssh_config["key_file"] = server.ssh_key_path
-        elif server.ssh_key:
-            ssh_config["private_key"] = decrypt_credential(server.ssh_key)
-        elif server.ssh_password:
-            ssh_config["password"] = decrypt_credential(server.ssh_password)
-        else:
+        if server.owner_id:
+            if ssh_password:
+                try:
+                    ssh_password = decrypt_credential(ssh_password, str(server.owner_id))
+                except:
+                    pass
+            if ssh_key_path:
+                try:
+                    ssh_key_path = decrypt_credential(ssh_key_path, str(server.owner_id))
+                except:
+                    pass
+            if ssh_private_key:
+                try:
+                    ssh_private_key = decrypt_credential(ssh_private_key, str(server.owner_id))
+                except:
+                    pass
+        
+        # Fallback to system SSH key
+        if not ssh_password and not ssh_key_path and not ssh_private_key:
+            from forge.services.ssh_service import SSHKeyService
+            system_keys = await SSHKeyService.get_system_key(db)
+            if system_keys and system_keys.get("private_key"):
+                ssh_private_key = system_keys["private_key"]
+        
+        # Check if we have any credentials
+        if not ssh_password and not ssh_key_path and not ssh_private_key:
             raise HTTPException(
                 status_code=400,
                 detail="Server has no SSH credentials configured"
@@ -801,16 +933,31 @@ async def read_server_env(
         
         # Connect and read .env file
         def _read_env():
-            ssh = SSHConnection(**ssh_config)
-            ssh.connect()
-            try:
+            with SSHConnection(
+                server.hostname,
+                server.ssh_user,
+                ssh_key_path,
+                server.ssh_port,
+                ssh_password,
+                ssh_private_key
+            ) as ssh:
+                # Try direct path first
                 env_path = f"{path.rstrip('/')}/.env"
-                result = ssh.run(f"cat {env_path}", check=False)
-                if result.returncode != 0:
+                logger.info(f"Reading env from {env_path}")
+                result = ssh.run(f"cat {env_path}", warn=True)
+                
+                # If not found, try parent directory (Bedrock standard structure)
+                if not result.stdout and '/' in path.rstrip('/'):
+                    parent_path = path.rstrip('/').rsplit('/', 1)[0]
+                    env_path = f"{parent_path}/.env"
+                    logger.info(f"Trying parent env from {env_path}")
+                    result = ssh.run(f"cat {env_path}", warn=True)
+                
+                if not result.stdout:
+                    logger.warning(f"Failed to find .env at {env_path}")
                     return {"success": False, "error": f".env file not found at {env_path}"}
+                
                 return {"success": True, "content": result.stdout}
-            finally:
-                ssh.close()
         
         loop = asyncio.get_event_loop()
         read_result = await loop.run_in_executor(None, _read_env)

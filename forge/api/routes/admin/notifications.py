@@ -3,10 +3,12 @@ Notification channels API routes.
 
 Manages notification channels (Slack, Email, etc.) for alerts.
 """
-from fastapi import APIRouter, HTTPException, Depends
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-from typing import Dict, Any, List, Optional
+from datetime import date, datetime, timedelta, timezone
+from fastapi import APIRouter, HTTPException, Depends, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, update, delete
+from sqlalchemy.orm import selectinload
+from typing import Dict, Any, List, Optional, Annotated
 from pydantic import BaseModel
 import json
 
@@ -43,22 +45,24 @@ class TestNotificationRequest(BaseModel):
 
 @router.get("/")
 async def list_notification_channels(
-    db: Session = Depends(get_db),
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
     current_user: User = Depends(get_current_user)
 ):
     """List all notification channels for the current user."""
     try:
-        query = db.query(NotificationChannel).filter(
+        stmt = select(NotificationChannel).where(
             NotificationChannel.owner_id == current_user.id
-        )
-        channels = query.order_by(NotificationChannel.created_at.desc()).all()
+        ).order_by(NotificationChannel.created_at.desc())
+        
+        result = await db.execute(stmt)
+        channels = result.scalars().all()
         
         return {
             "channels": [
                 {
                     "id": ch.id,
                     "name": ch.name,
-                    "channel_type": ch.channel_type.value,
+                    "channel_type": ch.channel_type.value if ch.channel_type else "email",
                     "config": json.loads(ch.config) if ch.config else {},
                     "is_active": ch.is_active,
                     "last_sent_at": ch.last_sent_at.isoformat() if ch.last_sent_at else None,
@@ -77,15 +81,17 @@ async def list_notification_channels(
 @router.get("/{channel_id}")
 async def get_notification_channel(
     channel_id: int,
-    db: Session = Depends(get_db),
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
     current_user: User = Depends(get_current_user)
 ):
     """Get a specific notification channel."""
     try:
-        channel = db.query(NotificationChannel).filter(
+        stmt = select(NotificationChannel).where(
             NotificationChannel.id == channel_id,
             NotificationChannel.owner_id == current_user.id
-        ).first()
+        )
+        result = await db.execute(stmt)
+        channel = result.scalar_one_or_none()
         
         if not channel:
             raise HTTPException(status_code=404, detail="Channel not found")
@@ -114,7 +120,7 @@ async def get_notification_channel(
 @router.post("/")
 async def create_notification_channel(
     channel_data: NotificationChannelCreate,
-    db: Session = Depends(get_db),
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
     current_user: User = Depends(get_current_user)
 ):
     """Create a new notification channel."""
@@ -131,8 +137,8 @@ async def create_notification_channel(
         )
         
         db.add(channel)
-        db.commit()
-        db.refresh(channel)
+        await db.commit()
+        await db.refresh(channel)
         
         return {
             "status": "success",
@@ -151,15 +157,17 @@ async def create_notification_channel(
 async def update_notification_channel(
     channel_id: int,
     updates: NotificationChannelUpdate,
-    db: Session = Depends(get_db),
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
     current_user: User = Depends(get_current_user)
 ):
     """Update a notification channel."""
     try:
-        channel = db.query(NotificationChannel).filter(
+        stmt = select(NotificationChannel).where(
             NotificationChannel.id == channel_id,
             NotificationChannel.owner_id == current_user.id
-        ).first()
+        )
+        result = await db.execute(stmt)
+        channel = result.scalar_one_or_none()
         
         if not channel:
             raise HTTPException(status_code=404, detail="Channel not found")
@@ -174,7 +182,7 @@ async def update_notification_channel(
         if updates.is_active is not None:
             channel.is_active = updates.is_active
         
-        db.commit()
+        await db.commit()
         
         return {
             "status": "success",
@@ -183,7 +191,7 @@ async def update_notification_channel(
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error updating notification channel {channel_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -191,21 +199,23 @@ async def update_notification_channel(
 @router.delete("/{channel_id}")
 async def delete_notification_channel(
     channel_id: int,
-    db: Session = Depends(get_db),
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
     current_user: User = Depends(get_current_user)
 ):
     """Delete a notification channel."""
     try:
-        channel = db.query(NotificationChannel).filter(
+        stmt = select(NotificationChannel).where(
             NotificationChannel.id == channel_id,
             NotificationChannel.owner_id == current_user.id
-        ).first()
+        )
+        result = await db.execute(stmt)
+        channel = result.scalar_one_or_none()
         
         if not channel:
             raise HTTPException(status_code=404, detail="Channel not found")
         
-        db.delete(channel)
-        db.commit()
+        await db.delete(channel)
+        await db.commit()
         
         return {
             "status": "success",
@@ -214,7 +224,7 @@ async def delete_notification_channel(
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error deleting notification channel {channel_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -222,17 +232,19 @@ async def delete_notification_channel(
 @router.post("/test")
 async def test_notification(
     request: TestNotificationRequest,
-    db: Session = Depends(get_db),
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
     current_user: User = Depends(get_current_user)
 ):
     """Test a notification channel."""
     try:
         if request.channel_id:
             # Test existing channel
-            channel = db.query(NotificationChannel).filter(
+            stmt = select(NotificationChannel).where(
                 NotificationChannel.id == request.channel_id,
                 NotificationChannel.owner_id == current_user.id
-            ).first()
+            )
+            result = await db.execute(stmt)
+            channel = result.scalar_one_or_none()
             
             if not channel:
                 raise HTTPException(status_code=404, detail="Channel not found")
