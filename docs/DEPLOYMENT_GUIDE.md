@@ -1,6 +1,7 @@
 # Deployment Guide
 
-Comprehensive guide to deploying WordPress sites with Bedrock Forge, including strategies, workflows, and best practices.
+Comprehensive guide to deploying WordPress sites with Bedrock Forge, including
+strategies, workflows, and best practices.
 
 ## 📋 Table of Contents
 
@@ -19,7 +20,72 @@ Comprehensive guide to deploying WordPress sites with Bedrock Forge, including s
 
 ## 🎯 Overview
 
-Bedrock Forge provides robust deployment capabilities for WordPress sites with multiple strategies, automatic rollback, and comprehensive monitoring. This guide covers everything from basic deployments to advanced multi-environment workflows.
+Bedrock Forge provides robust deployment capabilities for WordPress sites with
+multiple strategies, automatic rollback, and comprehensive monitoring. This
+guide covers everything from basic deployments to advanced multi-environment
+workflows.
+
+## 🧭 aaPanel Single-Domain Reverse Proxy (Dashboard + API)
+
+Use this when you only need the Forge dashboard and API on the same domain (e.g.
+`forge.staging.ly`). This mirrors the routing used in
+[deploy/nginx.conf](../deploy/nginx.conf) and SPA behavior in
+[deploy/nginx-dashboard.conf](../deploy/nginx-dashboard.conf).
+
+### ✅ Target routing (single domain)
+
+- `/` → Dashboard (Vite/SPA)
+- `/api` → Forge API service
+- `/ws` → WebSocket endpoint (API)
+- `/health` → API health check
+
+### ✅ aaPanel steps
+
+1. Create a site for the domain (e.g. `forge.staging.ly`).
+2. Enable SSL on the site (Let’s Encrypt or your certificate).
+3. Go to **Website → Reverse Proxy** and add rules:
+   - `/` → Dashboard upstream (e.g. `http://127.0.0.1:3000` or container port)
+   - `/api` → API upstream (e.g. `http://127.0.0.1:8000` or container port)
+   - `/ws` → API upstream **with WebSocket enabled**
+   - `/health` → API upstream
+4. Ensure the dashboard proxy supports SPA fallback (equivalent to
+   `try_files ... /index.html`).
+
+### ✅ Reference Nginx locations
+
+If aaPanel allows custom Nginx config blocks, use these as the base and replace
+upstreams:
+
+```nginx
+location /api {
+  proxy_pass http://API_UPSTREAM;
+  proxy_set_header Host $host;
+  proxy_set_header X-Real-IP $remote_addr;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+location /ws {
+  proxy_http_version 1.1;
+  proxy_set_header Upgrade $http_upgrade;
+  proxy_set_header Connection "upgrade";
+  proxy_pass http://API_UPSTREAM;
+}
+
+location /health {
+  proxy_pass http://API_UPSTREAM;
+}
+
+location / {
+  proxy_pass http://DASHBOARD_UPSTREAM;
+}
+```
+
+### ✅ Ports to use
+
+Use the ports defined in
+[deploy/docker-compose.yml](../deploy/docker-compose.yml). If you deployed
+without Docker, use your system service ports.
 
 ### Key Features
 
@@ -43,6 +109,7 @@ rollback_on_failure: true
 ```
 
 **Characteristics:**
+
 - All files updated simultaneously
 - Automatic backup before deployment
 - Instant rollback on failure
@@ -50,6 +117,7 @@ rollback_on_failure: true
 - Minimal downtime (few seconds)
 
 **Use Cases:**
+
 - Small to medium sites
 - Frequent deployments
 - High availability requirements
@@ -65,6 +133,7 @@ max_failure_rate: 10
 ```
 
 **Characteristics:**
+
 - Gradual server updates
 - Continuous availability
 - Batch-based deployment
@@ -72,6 +141,7 @@ max_failure_rate: 10
 - Can handle partial failures
 
 **Use Cases:**
+
 - Large sites with multiple servers
 - High traffic sites
 - Load balanced environments
@@ -87,6 +157,7 @@ keep_old_version: true
 ```
 
 **Characteristics:**
+
 - Complete replica deployment
 - Zero downtime deployment
 - Instant traffic switching
@@ -94,6 +165,7 @@ keep_old_version: true
 - DNS or load balancer switching
 
 **Use Cases:**
+
 - Enterprise applications
 - Mission-critical sites
 - Zero tolerance for downtime
@@ -206,43 +278,33 @@ python3 -m forge deploy push mysite production \
 ```yaml
 # .forge/config.json - Custom deployment configuration
 {
-  "deployment": {
-    "strategy": "custom",
-    "backup": {
-      "enabled": true,
-      "type": "full",
-      "retention": 3
+  'deployment':
+    {
+      'strategy': 'custom',
+      'backup': { 'enabled': true, 'type': 'full', 'retention': 3 },
+      'health_checks':
+        [
+          {
+            'type': 'http',
+            'url': 'https://mysite.com/health',
+            'timeout': 30,
+            'expected_status': 200,
+          },
+          { 'type': 'database', 'query': 'SELECT 1', 'timeout': 10 },
+        ],
+      'hooks':
+        {
+          'pre_deploy': ['npm run build', 'php artisan config:cache'],
+          'post_deploy':
+            [
+              'wp cache flush',
+              'wp search-index rebuild',
+              'curl -X POST https://hooks.slack.com/your-webhook',
+            ],
+        },
+      'rollback':
+        { 'enabled': true, 'automatic': true, 'backup_current': true },
     },
-    "health_checks": [
-      {
-        "type": "http",
-        "url": "https://mysite.com/health",
-        "timeout": 30,
-        "expected_status": 200
-      },
-      {
-        "type": "database",
-        "query": "SELECT 1",
-        "timeout": 10
-      }
-    ],
-    "hooks": {
-      "pre_deploy": [
-        "npm run build",
-        "php artisan config:cache"
-      ],
-      "post_deploy": [
-        "wp cache flush",
-        "wp search-index rebuild",
-        "curl -X POST https://hooks.slack.com/your-webhook"
-      ]
-    },
-    "rollback": {
-      "enabled": true,
-      "automatic": true,
-      "backup_current": true
-    }
-  }
 }
 ```
 
@@ -286,20 +348,18 @@ python3 -m forge deploy status mysite production \
 ```yaml
 # .forge/environments/production.json
 {
-  "deployment": {
-    "strategy": "blue-green",
-    "blue_environment": "production-blue",
-    "green_environment": "production-green",
-    "switch_method": "dns",
-    "health_check_grace_period": 300,
-    "keep_old_version": 86400,
-    "dns_provider": "cloudflare",
-    "load_balancer": {
-      "type": "nginx",
-      "health_check_path": "/health",
-      "timeout": 30
-    }
-  }
+  'deployment':
+    {
+      'strategy': 'blue-green',
+      'blue_environment': 'production-blue',
+      'green_environment': 'production-green',
+      'switch_method': 'dns',
+      'health_check_grace_period': 300,
+      'keep_old_version': 86400,
+      'dns_provider': 'cloudflare',
+      'load_balancer':
+        { 'type': 'nginx', 'health_check_path': '/health', 'timeout': 30 },
+    },
 }
 ```
 
@@ -356,41 +416,38 @@ python3 -m forge deploy push mysite production \
 ```yaml
 # Environment-specific deployment settings
 {
-  "environments": {
-    "staging": {
-      "deployment": {
-        "strategy": "atomic",
-        "backup": false,
-        "health_checks": false,
-        "hooks": {
-          "post_deploy": [
-            "wp search-index rebuild"
-          ]
-        }
-      }
+  'environments':
+    {
+      'staging':
+        {
+          'deployment':
+            {
+              'strategy': 'atomic',
+              'backup': false,
+              'health_checks': false,
+              'hooks': { 'post_deploy': ['wp search-index rebuild'] },
+            },
+        },
+      'production':
+        {
+          'deployment':
+            {
+              'strategy': 'blue-green',
+              'backup': true,
+              'health_checks':
+                [{ 'type': 'http', 'url': 'https://mysite.com/health' }],
+              'hooks':
+                {
+                  'pre_deploy': ['npm run build:production'],
+                  'post_deploy':
+                    [
+                      'wp cache flush',
+                      'curl -X POST https://hooks.slack.com/production-webhook',
+                    ],
+                },
+            },
+        },
     },
-    "production": {
-      "deployment": {
-        "strategy": "blue-green",
-        "backup": true,
-        "health_checks": [
-          {
-            "type": "http",
-            "url": "https://mysite.com/health"
-          }
-        ],
-        "hooks": {
-          "pre_deploy": [
-            "npm run build:production"
-          ],
-          "post_deploy": [
-            "wp cache flush",
-            "curl -X POST https://hooks.slack.com/production-webhook"
-          ]
-        }
-      }
-    }
-  }
 }
 ```
 
@@ -413,28 +470,31 @@ python3 -m forge deploy push mysite production \
 ```yaml
 # .forge/config.json
 {
-  "deployment": {
-    "hooks": {
-      "pre_deploy": [
+  'deployment':
+    {
+      'hooks':
         {
-          "name": "Build Assets",
-          "command": "npm run build",
-          "timeout": 300,
-          "continue_on_error": false
+          'pre_deploy':
+            [
+              {
+                'name': 'Build Assets',
+                'command': 'npm run build',
+                'timeout': 300,
+                'continue_on_error': false,
+              },
+              {
+                'name': 'Clear Caches',
+                'command': 'wp cache flush',
+                'environment': 'local',
+              },
+              {
+                'name': 'Database Backup',
+                'command': 'wp db export /tmp/pre-deploy.sql',
+                'backup_required': true,
+              },
+            ],
         },
-        {
-          "name": "Clear Caches",
-          "command": "wp cache flush",
-          "environment": "local"
-        },
-        {
-          "name": "Database Backup",
-          "command": "wp db export /tmp/pre-deploy.sql",
-          "backup_required": true
-        }
-      ]
-    }
-  }
+    },
 }
 ```
 
@@ -442,35 +502,38 @@ python3 -m forge deploy push mysite production \
 
 ```yaml
 {
-  "deployment": {
-    "hooks": {
-      "post_deploy": [
+  'deployment':
+    {
+      'hooks':
         {
-          "name": "Run Migrations",
-          "command": "wp migrate up",
-          "timeout": 600,
-          "rollback_on_error": true
+          'post_deploy':
+            [
+              {
+                'name': 'Run Migrations',
+                'command': 'wp migrate up',
+                'timeout': 600,
+                'rollback_on_error': true,
+              },
+              {
+                'name': 'Update Search Index',
+                'command': 'wp search-index rebuild',
+                'async': true,
+              },
+              {
+                'name': 'Performance Test',
+                'command': 'python3 -m forge monitor performance mysite',
+                'async': true,
+                'timeout': 1800,
+              },
+              {
+                'name': 'Notification',
+                'command': 'curl -X POST https://hooks.slack.com/your-webhook',
+                'async': true,
+                'continue_on_error': true,
+              },
+            ],
         },
-        {
-          "name": "Update Search Index",
-          "command": "wp search-index rebuild",
-          "async": true
-        },
-        {
-          "name": "Performance Test",
-          "command": "python3 -m forge monitor performance mysite",
-          "async": true,
-          "timeout": 1800
-        },
-        {
-          "name": "Notification",
-          "command": "curl -X POST https://hooks.slack.com/your-webhook",
-          "async": true,
-          "continue_on_error": true
-        }
-      ]
-    }
-  }
+    },
 }
 ```
 
@@ -506,39 +569,41 @@ echo "Pre-deployment hooks completed successfully"
 
 ```yaml
 {
-  "deployment": {
-    "health_checks": [
-      {
-        "name": "HTTP Health Check",
-        "type": "http",
-        "url": "https://mysite.com/health",
-        "method": "GET",
-        "expected_status": 200,
-        "timeout": 30,
-        "attempts": 3,
-        "interval": 10
-      },
-      {
-        "name": "Database Health Check",
-        "type": "database",
-        "query": "SELECT 1",
-        "timeout": 10,
-        "expected_result": "1"
-      },
-      {
-        "name": "WordPress Health Check",
-        "type": "wordpress",
-        "endpoint": "/wp-json/wp/v2",
-        "expected_plugins": ["cache-enabler", "seo-tool"]
-      },
-      {
-        "name": "Performance Check",
-        "type": "performance",
-        "max_load_time": 5,
-        "max_memory_usage": 256
-      }
-    ]
-  }
+  'deployment':
+    {
+      'health_checks':
+        [
+          {
+            'name': 'HTTP Health Check',
+            'type': 'http',
+            'url': 'https://mysite.com/health',
+            'method': 'GET',
+            'expected_status': 200,
+            'timeout': 30,
+            'attempts': 3,
+            'interval': 10,
+          },
+          {
+            'name': 'Database Health Check',
+            'type': 'database',
+            'query': 'SELECT 1',
+            'timeout': 10,
+            'expected_result': '1',
+          },
+          {
+            'name': 'WordPress Health Check',
+            'type': 'wordpress',
+            'endpoint': '/wp-json/wp/v2',
+            'expected_plugins': ['cache-enabler', 'seo-tool'],
+          },
+          {
+            'name': 'Performance Check',
+            'type': 'performance',
+            'max_load_time': 5,
+            'max_memory_usage': 256,
+          },
+        ],
+    },
 }
 ```
 
@@ -593,29 +658,25 @@ python3 -m forge deploy metrics mysite production \
 
 ```yaml
 {
-  "deployment": {
-    "assets": {
-      "optimization": {
-        "enabled": true,
-        "images": {
-          "compress": true,
-          "formats": ["webp", "avif"],
-          "quality": 85,
-          "progressive": true
+  'deployment':
+    {
+      'assets':
+        {
+          'optimization':
+            {
+              'enabled': true,
+              'images':
+                {
+                  'compress': true,
+                  'formats': ['webp', 'avif'],
+                  'quality': 85,
+                  'progressive': true,
+                },
+              'css': { 'minify': true, 'combine': true, 'critical': true },
+              'js': { 'minify': true, 'combine': true, 'es6': true },
+            },
         },
-        "css": {
-          "minify": true,
-          "combine": true,
-          "critical": true
-        },
-        "js": {
-          "minify": true,
-          "combine": true,
-          "es6": true
-        }
-      }
-    }
-  }
+    },
 }
 ```
 
@@ -623,36 +684,28 @@ python3 -m forge deploy metrics mysite production \
 
 ```yaml
 {
-  "deployment": {
-    "caching": {
-      "enabled": true,
-      "strategies": {
-        "page_cache": {
-          "enabled": true,
-          "provider": "redis",
-          "ttl": 3600
+  'deployment':
+    {
+      'caching':
+        {
+          'enabled': true,
+          'strategies':
+            {
+              'page_cache':
+                { 'enabled': true, 'provider': 'redis', 'ttl': 3600 },
+              'object_cache':
+                { 'enabled': true, 'provider': 'redis', 'persistent': true },
+              'cdn':
+                {
+                  'enabled': true,
+                  'provider': 'cloudflare',
+                  'purge_on_deploy': true,
+                },
+            },
+          'purge':
+            { 'on_deploy': true, 'urls': ['/', '/wp-json/', '/sitemap.xml'] },
         },
-        "object_cache": {
-          "enabled": true,
-          "provider": "redis",
-          "persistent": true
-        },
-        "cdn": {
-          "enabled": true,
-          "provider": "cloudflare",
-          "purge_on_deploy": true
-        }
-      },
-      "purge": {
-        "on_deploy": true,
-        "urls": [
-          "/",
-          "/wp-json/",
-          "/sitemap.xml"
-        ]
-      }
-    }
-  }
+    },
 }
 ```
 
@@ -688,31 +741,23 @@ python3 -m forge deploy push mysite production \
 
 ```yaml
 {
-  "deployment": {
-    "security": {
-      "file_permissions": {
-        "files": 644,
-        "directories": 755,
-        "wp-config": 600
-      },
-      "access_control": {
-        "restrict_admin_ip": true,
-        "allowed_ips": ["192.168.1.0/24"],
-        "disable_xml_rpc": true,
-        "disable_file_edit": true
-      },
-      "ssl": {
-        "force_ssl": true,
-        "hsts": true,
-        "certificate_check": true
-      },
-      "backup": {
-        "encryption": true,
-        "retention": 30,
-        "offsite": true
-      }
-    }
-  }
+  'deployment':
+    {
+      'security':
+        {
+          'file_permissions':
+            { 'files': 644, 'directories': 755, 'wp-config': 600 },
+          'access_control':
+            {
+              'restrict_admin_ip': true,
+              'allowed_ips': ['192.168.1.0/24'],
+              'disable_xml_rpc': true,
+              'disable_file_edit': true,
+            },
+          'ssl': { 'force_ssl': true, 'hsts': true, 'certificate_check': true },
+          'backup': { 'encryption': true, 'retention': 30, 'offsite': true },
+        },
+    },
 }
 ```
 
@@ -749,13 +794,13 @@ python3 -m forge deploy push mysite production \
 
 ### Common Deployment Issues
 
-| Issue | Cause | Solution |
-|-------|-------|----------|
-| Permission Denied | File permissions incorrect | Set proper file permissions |
-| Database Connection Failed | Wrong credentials | Verify database configuration |
-| SSL Certificate Error | Certificate expired/invalid | Renew SSL certificate |
-| Health Check Failed | Application not ready | Check application logs |
-| Timeout During Deployment | Network issues or large files | Increase timeout or optimize deployment |
+| Issue                      | Cause                         | Solution                                |
+| -------------------------- | ----------------------------- | --------------------------------------- |
+| Permission Denied          | File permissions incorrect    | Set proper file permissions             |
+| Database Connection Failed | Wrong credentials             | Verify database configuration           |
+| SSL Certificate Error      | Certificate expired/invalid   | Renew SSL certificate                   |
+| Health Check Failed        | Application not ready         | Check application logs                  |
+| Timeout During Deployment  | Network issues or large files | Increase timeout or optimize deployment |
 
 ### Debug Deployment
 
@@ -858,8 +903,8 @@ if __name__ == "__main__":
 
 ```yaml
 # .forge/templates/e-commerce-deployment.yaml
-name: "E-commerce Deployment"
-description: "Optimized deployment for e-commerce sites"
+name: 'E-commerce Deployment'
+description: 'Optimized deployment for e-commerce sites'
 
 strategy: blue-green
 backup:
@@ -869,7 +914,7 @@ backup:
 
 health_checks:
   - type: http
-    url: "${url}/health"
+    url: '${url}/health'
     expected_status: 200
   - type: e-commerce
     check_cart_functionality: true
@@ -877,13 +922,13 @@ health_checks:
 
 hooks:
   pre_deploy:
-    - command: "npm run build:production"
+    - command: 'npm run build:production'
       timeout: 600
-    - command: "wp cache flush"
+    - command: 'wp cache flush'
   post_deploy:
-    - command: "wp e-commerce flush-caches"
-    - command: "wp search-index rebuild"
-    - command: "curl -X POST ${SLACK_WEBHOOK}"
+    - command: 'wp e-commerce flush-caches'
+    - command: 'wp search-index rebuild'
+    - command: 'curl -X POST ${SLACK_WEBHOOK}'
 
 security:
   ssl: true
@@ -927,6 +972,7 @@ class CICDIntegration:
 ---
 
 For more information:
+
 - [Configuration Guide](CONFIGURATION.md)
 - [Command Reference](COMMANDS.md)
 - [Troubleshooting Guide](TROUBLESHOOTING.md)

@@ -1,10 +1,12 @@
 # Backup and Restore Guide
 
-This guide covers comprehensive backup and restore procedures for your Bedrock Forge WordPress projects.
+This guide covers comprehensive backup and restore procedures for your Bedrock
+Forge WordPress projects.
 
 ## Overview
 
-Bedrock Forge provides automated backup capabilities with Google Drive integration, manual backup options, and complete restore functionality.
+Bedrock Forge provides automated backup capabilities with Google Drive
+integration, manual backup options, and complete restore functionality.
 
 ## Backup Architecture
 
@@ -18,12 +20,12 @@ Bedrock Forge provides automated backup capabilities with Google Drive integrati
 
 ### Backup Types
 
-| Type | Description | Frequency | Storage |
-|------|-------------|-----------|---------|
+| Type         | Description                  | Frequency            | Storage       |
+| ------------ | ---------------------------- | -------------------- | ------------- |
 | **Database** | MySQL/MariaDB database dumps | Before major changes | Local + Cloud |
-| **Files** | Complete WordPress files | Weekly | Local + Cloud |
-| **Config** | Configuration files | On change | Local + Cloud |
-| **Plugins** | Plugin-specific data | As needed | Local + Cloud |
+| **Files**    | Complete WordPress files     | Weekly               | Local + Cloud |
+| **Config**   | Configuration files          | On change            | Local + Cloud |
+| **Plugins**  | Plugin-specific data         | As needed            | Local + Cloud |
 
 ## Configuration
 
@@ -31,8 +33,12 @@ Bedrock Forge provides automated backup capabilities with Google Drive integrati
 
 ```bash
 # Google Drive Integration
-GOOGLE_DRIVE_CREDENTIALS_JSON=path/to/credentials.json
-GOOGLE_DRIVE_FOLDER_ID=your_folder_id
+GOOGLE_CLIENT_ID=your_google_oauth_client_id
+GOOGLE_CLIENT_SECRET=your_google_oauth_client_secret
+GOOGLE_OAUTH_REDIRECT_URI=http://localhost:3000/settings
+
+# Optional: rclone config location (for Drive storage backend)
+RCLONE_CONFIG=/home/you/.config/rclone/rclone.conf
 
 # Backup Settings
 BACKUP_SCHEDULE=daily
@@ -46,46 +52,64 @@ BACKUP_LOCAL_RETENTION=7
 BACKUP_REMOTE_RETENTION=30
 ```
 
+### Browser OAuth (Recommended)
+
+Connect Google Drive from the dashboard Settings → Integrations. The OAuth
+tokens are stored in the database and can be used to generate an optional
+`rclone.conf` via the “Enable rclone” button.
+
+### Google Drive Backup Folder Structure
+
+Backups are stored as separate compressed DB and files archives under a
+project/environment/timestamp structure:
+
+```
+projects/{project}/backups/staging/{YYYYMMDD_HHMMSS}/db/{db.sql.gz}
+projects/{project}/backups/staging/{YYYYMMDD_HHMMSS}/files/{files.tar.gz}
+
+projects/{project}/backups/production/{YYYYMMDD_HHMMSS}/db/{db.sql.gz}
+projects/{project}/backups/production/{YYYYMMDD_HHMMSS}/files/{files.tar.gz}
+```
+
+### Restore From Drive
+
+Use the project page Backup tab to select environment and timestamp, then
+restore to a target environment. The workflow restores files, imports the
+database, runs URL search-replace if provided, and executes Bedrock maintenance
+steps (composer + plugin updates as configured).
+
 ### Backup Configuration File
 
 Create `.forge/config/backup.json`:
 
 ```json
 {
-  "backup": {
-    "enabled": true,
-    "schedule": "daily",
-    "compression": true,
-    "encryption": false,
-    "retention": {
-      "local": 7,
-      "remote": 30,
-      "max_size_gb": 5
-    },
-    "storage": {
-      "local": {
-        "enabled": true,
-        "path": ".forge/backups/"
-      },
-      "google_drive": {
-        "enabled": true,
-        "credentials_file": "credentials.json",
-        "folder_id": "your_folder_id"
-      }
-    },
-    "exclude": {
-      "files": [
-        ".git/*",
-        "node_modules/*",
-        "*.log",
-        ".forge/tmp/*"
-      ],
-      "database": [
-        "wp_sessions",
-        "wp_options_transient_*"
-      ]
-    }
-  }
+	"backup": {
+		"enabled": true,
+		"schedule": "daily",
+		"compression": true,
+		"encryption": false,
+		"retention": {
+			"local": 7,
+			"remote": 30,
+			"max_size_gb": 5
+		},
+		"storage": {
+			"local": {
+				"enabled": true,
+				"path": ".forge/backups/"
+			},
+			"google_drive": {
+				"enabled": true,
+				"credentials_file": "credentials.json",
+				"folder_id": "your_folder_id"
+			}
+		},
+		"exclude": {
+			"files": [".git/*", "node_modules/*", "*.log", ".forge/tmp/*"],
+			"database": ["wp_sessions", "wp_options_transient_*"]
+		}
+	}
 }
 ```
 
@@ -149,6 +173,7 @@ forge backup create --post-hook "curl -X POST https://hooks.slack.com/backup-suc
 ### Setup Google Drive
 
 1. **Create Google Cloud Project**:
+
    ```bash
    # Visit: https://console.cloud.google.com/
    # Create new project
@@ -157,6 +182,7 @@ forge backup create --post-hook "curl -X POST https://hooks.slack.com/backup-suc
    ```
 
 2. **Configure Credentials**:
+
    ```bash
    # Download credentials JSON
    mv ~/Downloads/credentials.json .forge/config/
@@ -234,6 +260,7 @@ forge backup restore --type full --backup-id latest --environment staging
 ### Complete Site Recovery
 
 1. **Assess Damage**:
+
    ```bash
    # Check backup availability
    forge backup list --all-types
@@ -243,6 +270,7 @@ forge backup restore --type full --backup-id latest --environment staging
    ```
 
 2. **Prepare Environment**:
+
    ```bash
    # Clean corrupted installation
    forge local destroy --confirm
@@ -252,6 +280,7 @@ forge backup restore --type full --backup-id latest --environment staging
    ```
 
 3. **Restore from Backup**:
+
    ```bash
    # Restore database
    forge backup restore --type database --backup-id latest
@@ -336,15 +365,15 @@ forge backup cleanup --force --older-than 7d
 # Recommended backup schedule
 backup_schedule:
   - type: database
-    frequency: "0 2 * * *"  # Daily at 2 AM
+    frequency: '0 2 * * *' # Daily at 2 AM
     retention: 30 days
 
   - type: files
-    frequency: "0 3 * * 0"  # Weekly Sunday at 3 AM
+    frequency: '0 3 * * 0' # Weekly Sunday at 3 AM
     retention: 90 days
 
   - type: config
-    frequency: "after_deploy"
+    frequency: 'after_deploy'
     retention: 180 days
 ```
 
@@ -360,6 +389,7 @@ backup_schedule:
 ### Common Issues
 
 **Backup Creation Failed**:
+
 ```bash
 # Check disk space
 df -h
@@ -372,6 +402,7 @@ forge config show --section backup
 ```
 
 **Google Drive Sync Failed**:
+
 ```bash
 # Test connection
 forge backup test-google-drive
@@ -384,6 +415,7 @@ forge backup google-drive-quota
 ```
 
 **Restore Failed**:
+
 ```bash
 # Verify backup integrity
 forge backup verify --backup-id <id>
@@ -476,4 +508,5 @@ forge.backup.download_from_google_drive(backup_id='2024-01-15-full.tar.gz')
 remote_backups = forge.backup.list_remote()
 ```
 
-This comprehensive backup and restore guide ensures your WordPress projects are protected and can be quickly recovered in case of any issues.
+This comprehensive backup and restore guide ensures your WordPress projects are
+protected and can be quickly recovered in case of any issues.

@@ -2,14 +2,17 @@
 
 ## 📋 Overview
 
-This checklist provides comprehensive testing scenarios for all Bedrock Forge CLI features to ensure smooth operation and identify potential issues before release.
+This checklist provides comprehensive testing scenarios for all Bedrock Forge
+CLI features to ensure smooth operation and identify potential issues before
+release.
 
 ## 🎯 Testing Objectives
 
 - **Functionality**: Verify all commands execute without errors
 - **Integration**: Test external API and system integrations
 - **Performance**: Validate command execution speed and resource usage
-- **User Experience**: Ensure intuitive command structure and helpful error messages
+- **User Experience**: Ensure intuitive command structure and helpful error
+  messages
 - **Edge Cases**: Test error handling and invalid inputs
 
 ---
@@ -19,6 +22,7 @@ This checklist provides comprehensive testing scenarios for all Bedrock Forge CL
 ### 1.1 Basic Commands (Priority: Critical)
 
 #### Global Commands
+
 ```bash
 # Test version command
 forge version
@@ -38,6 +42,7 @@ forge --dry-run info --help
 ```
 
 #### Installation Health Check
+
 ```bash
 # Run comprehensive health check
 forge config doctor
@@ -54,6 +59,7 @@ forge config doctor
 ### 1.2 Configuration Management (Priority: Critical)
 
 #### Configuration Setup
+
 ```bash
 # Interactive configuration setup
 forge config setup --interactive
@@ -74,6 +80,7 @@ forge config show
 ```
 
 #### Configuration Operations
+
 ```bash
 # List providers
 forge config list-providers
@@ -107,6 +114,7 @@ forge config reset
 ### 2.1 DDEV Integration (Priority: High)
 
 #### Local Project Management
+
 ```bash
 # Initialize local project
 forge local init --name "test-project"
@@ -130,6 +138,7 @@ forge local destroy
 ```
 
 #### Local Development Features
+
 ```bash
 # Install WordPress
 forge local install-wordpress --version="6.4"
@@ -151,6 +160,7 @@ forge local performance-test
 ### 3.1 Server Provisioning (Priority: High)
 
 #### Hetzner Integration
+
 ```bash
 # List available servers
 forge provision list-servers --provider hetzner
@@ -174,6 +184,7 @@ forge provision delete-server --name "test-server"
 ```
 
 #### SSH Configuration
+
 ```bash
 # Test SSH connectivity
 forge provision test-ssh --server "test-server"
@@ -187,6 +198,7 @@ forge provision setup-ssh --server "test-server"
 ### 3.2 Deployment Automation (Priority: High)
 
 #### Basic Deployment
+
 ```bash
 # Deploy to staging
 forge deploy --env staging --dry-run
@@ -202,6 +214,7 @@ forge deploy --env production --branch "main"
 ```
 
 #### Rollback Operations
+
 ```bash
 # List deployment history
 forge deploy --history
@@ -219,6 +232,7 @@ forge deploy rollback --env production --version "previous"
 ### 4.1 Performance Testing (Priority: Medium)
 
 #### Lighthouse Integration
+
 ```bash
 # Run performance audit
 forge performance audit --url "https://example.com"
@@ -234,6 +248,7 @@ forge performance monitor --duration="1h"
 ```
 
 #### Database Optimization
+
 ```bash
 # Analyze database
 forge database analyze
@@ -251,6 +266,7 @@ forge database backup --compress
 ### 4.2 Caching Strategies (Priority: Medium)
 
 #### Cache Management
+
 ```bash
 # Clear all caches
 forge cache clear --all
@@ -268,6 +284,7 @@ forge cache stats
 ### 4.3 CDN Integration (Priority: Medium)
 
 #### Cloudflare Integration
+
 ```bash
 # Setup CDN
 forge cdn setup --provider cloudflare --domain "example.com"
@@ -285,6 +302,7 @@ forge cdn analytics --period="7d"
 ### 4.4 Image Optimization (Priority: Low)
 
 #### Image Processing
+
 ```bash
 # Optimize images
 forge image optimize --directory "/var/www/html/wp-content/uploads"
@@ -306,6 +324,7 @@ forge image analyze --directory "/path/to/images"
 ### 5.1 Real-time Monitoring (Priority: Medium)
 
 #### System Monitoring
+
 ```bash
 # Start monitoring
 forge monitoring start --services "web,db,cache"
@@ -321,6 +340,7 @@ forge monitoring report --period="24h"
 ```
 
 #### Alert Configuration
+
 ```bash
 # Setup alerts
 forge monitoring setup-alerts --email "admin@example.com"
@@ -334,6 +354,7 @@ forge monitoring test-alerts
 ### 5.2 Analytics Integration (Priority: Low)
 
 #### Google Analytics
+
 ```bash
 # Connect Google Analytics
 forge analytics connect --provider google --property-id "123456789"
@@ -349,6 +370,7 @@ forge analytics conversions --period="30d"
 ```
 
 #### WordPress Stats
+
 ```bash
 # WordPress analytics
 forge analytics wordpress --period="7d"
@@ -357,19 +379,30 @@ forge analytics wordpress --period="7d"
 
 ### 5.3 SEO Monitoring (Priority: Low)
 
-#### SEO Analysis
-```bash
-# SEO audit
-forge seo audit --url "https://example.com"
-# Expected: Comprehensive SEO analysis
+#### SEO Analysis (Experimental)
 
-# Keyword tracking
-forge seo keywords --add "bedrock wordpress" --track
-# Expected: Add keywords to tracking list
+> Note: SEO CLI uses simulated data unless Google Search Console is configured.
+
+```bash
+# SEO performance analysis
+forge seo analyze --project "mysite" --days 30
+# Expected: SEO metrics output (simulated if no GSC)
+
+# Keyword list and rankings
+forge seo keywords --project "mysite" --days 30 --limit 20
+# Expected: Keyword table (simulated if no GSC)
+
+# Track a specific keyword
+forge seo track --project "mysite" "bedrock wordpress"
+# Expected: Tracking summary (simulated if no GSC)
 
 # Competitor analysis
-forge seo competitors --add "competitor.com" --analyze
-# Expected: Competitor SEO analysis
+forge seo competitors --project "mysite" --days 30
+# Expected: Competitor summary (simulated if no GSC)
+
+# Backlink profile
+forge seo backlinks --project "mysite" --days 30
+# Expected: Backlink summary (simulated if no GSC)
 ```
 
 ---
@@ -379,6 +412,7 @@ forge seo competitors --add "competitor.com" --analyze
 ### 6.1 Database Operations (Priority: Medium)
 
 #### Database Backup & Restore
+
 ```bash
 # Create backup
 forge database backup --compress --encrypt
@@ -394,6 +428,7 @@ forge database restore --backup "backup_2024_01_15.sql.gz"
 ```
 
 #### Database Migration
+
 ```bash
 # Migration check
 forge database migration-check
@@ -407,6 +442,7 @@ forge database migrate
 ### 6.2 Sync Operations (Priority: High)
 
 #### Data Synchronization
+
 ```bash
 # Sync files to staging
 forge sync files --from local --to staging
@@ -422,6 +458,7 @@ forge sync full --from production --to staging
 ```
 
 #### Backup Operations
+
 ```bash
 # Create backup
 forge sync backup --env production --full
@@ -439,6 +476,7 @@ forge sync restore --backup "backup_2024_01_15.tar.gz"
 ### 7.1 CI/CD Integration (Priority: Medium)
 
 #### GitHub Actions
+
 ```bash
 # Setup CI/CD
 forge ci setup --platform github
@@ -450,6 +488,7 @@ forge ci test --branch "feature/test"
 ```
 
 #### API Server
+
 ```bash
 # Start API server
 forge api start --port 8080
@@ -467,6 +506,7 @@ forge api stop
 ### 7.2 Plugin Management (Priority: Low)
 
 #### Plugin Operations
+
 ```bash
 # List plugins
 forge plugins list
@@ -484,6 +524,7 @@ forge plugins update --all
 ### 7.3 Workflow Automation (Priority: Medium)
 
 #### Workflow Management
+
 ```bash
 # List workflows
 forge workflow list
@@ -505,6 +546,7 @@ forge workflow create --name "custom" --steps "backup,deploy,test"
 ### 8.1 Input Validation (Priority: High)
 
 #### Invalid Commands
+
 ```bash
 # Test invalid command
 forge invalid-command
@@ -520,6 +562,7 @@ forge provision create-server
 ```
 
 #### Network Issues
+
 ```bash
 # Test without internet connection
 # Disconnect network and run:
@@ -534,6 +577,7 @@ forge config setup --hetzner-token="invalid"
 ### 8.2 Permission Issues (Priority: High)
 
 #### File Permissions
+
 ```bash
 # Test with insufficient permissions
 # Create read-only directory and run:
@@ -553,6 +597,7 @@ forge provision test-ssh
 ### 9.1 Prerequisites Checklist
 
 #### System Requirements
+
 - [ ] Python 3.9+ installed
 - [ ] pip package manager available
 - [ ] Git installed and configured
@@ -562,12 +607,14 @@ forge provision test-ssh
 - [ ] Internet connectivity for external APIs
 
 #### API Credentials
+
 - [ ] Hetzner API token (for server provisioning)
 - [ ] Cloudflare API token (for CDN management)
 - [ ] Google Analytics credentials (for analytics)
 - [ ] Test WordPress site with admin access
 
 #### Test Environment
+
 - [ ] Clean development environment
 - [ ] Backup of existing configurations
 - [ ] Test domains available (optional)
@@ -576,6 +623,7 @@ forge provision test-ssh
 ### 9.2 Test Data Preparation
 
 #### WordPress Test Site
+
 ```bash
 # Create test WordPress installation with:
 - Sample content (posts, pages, media)
@@ -586,6 +634,7 @@ forge provision test-ssh
 ```
 
 #### Server Test Environment
+
 ```bash
 # Prepare test server with:
 - SSH key authentication
@@ -602,6 +651,7 @@ forge provision test-ssh
 ### 10.1 Common Issues
 
 #### Installation Problems
+
 ```bash
 # CLI not found in PATH
 export PATH="$HOME/.local/bin:$PATH"
@@ -617,6 +667,7 @@ pip install -e .
 ```
 
 #### Configuration Issues
+
 ```bash
 # Reset corrupted configuration
 forge config reset
@@ -629,6 +680,7 @@ forge provision test-ssh --server test-server
 ```
 
 #### Deployment Issues
+
 ```bash
 # Check deployment logs
 forge deploy --env staging --verbose
@@ -644,6 +696,7 @@ git log --oneline -5
 ### 10.2 Debug Mode
 
 #### Enable Debug Logging
+
 ```bash
 # Run with verbose output
 forge --verbose command-name
@@ -663,6 +716,7 @@ tail -f ~/.bedrock-forge/logs/forge.log
 ### 11.1 Testing Log
 
 #### Test Execution Template
+
 ```
 Date: [Date]
 Tester: [Name]
@@ -701,6 +755,7 @@ Recommendations:
 ### 11.2 Performance Benchmarks
 
 #### Command Execution Times
+
 ```
 Expected Performance:
 - forge version: < 1 second
@@ -717,6 +772,7 @@ Expected Performance:
 ### 12.1 Release Readiness
 
 #### Must Pass (Critical)
+
 - [ ] All core commands execute without errors
 - [ ] Configuration management works correctly
 - [ ] Help system is comprehensive and accessible
@@ -724,6 +780,7 @@ Expected Performance:
 - [ ] Installation and setup work smoothly
 
 #### Should Pass (High Priority)
+
 - [ ] Local development integration works
 - [ ] Basic deployment functionality works
 - [ ] Configuration import/export works
@@ -731,6 +788,7 @@ Expected Performance:
 - [ ] Performance testing executes successfully
 
 #### Nice to Have (Medium Priority)
+
 - [ ] All external API integrations work
 - [ ] Advanced features work correctly
 - [ ] Performance benchmarks are met
@@ -739,18 +797,21 @@ Expected Performance:
 ### 12.2 Quality Gates
 
 #### Functionality Gates
+
 - [ ] 95% of commands execute successfully
 - [ ] All critical paths work end-to-end
 - [ ] Configuration system is robust
 - [ ] Error handling covers common scenarios
 
 #### Performance Gates
+
 - [ ] Commands execute within expected time limits
 - [ ] Memory usage stays within acceptable limits
 - [ ] Resource cleanup works correctly
 - [ ] Concurrent operations don't interfere
 
 #### Usability Gates
+
 - [ ] Commands are discoverable and intuitive
 - [ ] Help documentation is comprehensive
 - [ ] Error messages guide users to solutions
@@ -761,17 +822,20 @@ Expected Performance:
 ## 📞 13. Support Resources
 
 ### 13.1 Documentation
+
 - [ ] User Guide: `docs/USER_GUIDE.md`
 - [ ] API Reference: `docs/API_REFERENCE.md`
 - [ ] Troubleshooting: `docs/TROUBLESHOOTING.md`
 - [ ] Frequently Asked Questions: `docs/FAQ.md`
 
 ### 13.2 Community Support
+
 - [ ] GitHub Issues: [Repository Issues Link]
 - [ ] Discord Community: [Discord Link]
 - [ ] Documentation Site: [Documentation URL]
 
 ### 13.3 Escalation Process
+
 1. Check troubleshooting guide
 2. Search existing GitHub issues
 3. Create new issue with detailed information
@@ -782,24 +846,26 @@ Expected Performance:
 ## 📝 14. Notes & Observations
 
 ### 14.1 Testing Environment Notes
+
 - Record specific environment setup details
 - Note any special configurations required
 - Document any workarounds used
 
 ### 14.2 Known Limitations
+
 - List any features not fully tested
 - Document any known issues
 - Note any platform-specific limitations
 
 ### 14.3 Improvement Suggestions
+
 - Record ideas for CLI improvements
 - Note areas where user experience could be enhanced
 - Suggest additional testing scenarios
 
 ---
 
-**Last Updated**: [Date]
-**Next Review**: [Date]
-**Maintainer**: [Name]
+**Last Updated**: [Date] **Next Review**: [Date] **Maintainer**: [Name]
 
-*This checklist should be updated regularly as new features are added and existing ones are modified.*
+_This checklist should be updated regularly as new features are added and
+existing ones are modified._
