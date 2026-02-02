@@ -5,7 +5,9 @@ This module contains client management endpoints with database integration.
 """
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends
-from sqlalchemy.orm import Session
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, EmailStr
 
@@ -47,7 +49,7 @@ class ClientUpdate(BaseModel):
     billing_status: Optional[BillingStatus] = None
     contract_start: Optional[datetime] = None
     contract_end: Optional[datetime] = None
-    monthly_retainer: Optional[float] = None
+    monthly_rate: Optional[float] = None
 
 
 @router.get("/")
@@ -56,25 +58,33 @@ async def get_all_clients(
     status: Optional[BillingStatus] = None,
     limit: int = 50,
     offset: int = 0,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """Get all clients with optional filtering."""
     try:
-        query = db.query(Client)
+        stmt = select(Client)
         
         if search:
             search_term = f"%{search}%"
-            query = query.filter(
+            stmt = stmt.where(
                 (Client.name.ilike(search_term)) |
                 (Client.company.ilike(search_term)) |
                 (Client.email.ilike(search_term))
             )
         
         if status:
-            query = query.filter(Client.billing_status == status)
+            stmt = stmt.where(Client.billing_status == status)
         
-        total = query.count()
-        clients = query.order_by(Client.name).offset(offset).limit(limit).all()
+        # Get total count (simple approximate count or separate query)
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total = (await db.execute(count_stmt)).scalar() or 0
+        
+        # Get paginated results with eager loading for counts
+        stmt = stmt.order_by(Client.name).offset(offset).limit(limit)
+        stmt = stmt.options(selectinload(Client.projects), selectinload(Client.invoices))
+        
+        result = await db.execute(stmt)
+        clients = result.scalars().all()
         
         return {
             "clients": [
@@ -87,7 +97,9 @@ async def get_all_clients(
                     "billing_status": c.billing_status.value if c.billing_status else None,
                     "project_count": len(c.projects) if c.projects else 0,
                     "invoice_count": len(c.invoices) if c.invoices else 0,
-                    "monthly_retainer": c.monthly_retainer,
+                    "monthly_retainer": c.monthly_rate,
+                    "currency": c.currency,
+                    "projects": [{"id": p.id, "project_name": p.name} for p in (c.projects or [])],
                     "created_at": c.created_at.isoformat() if c.created_at else None
                 }
                 for c in clients
@@ -102,10 +114,15 @@ async def get_all_clients(
 
 
 @router.get("/{client_id}")
-async def get_client(client_id: int, db: Session = Depends(get_db)):
+async def get_client(client_id: int, db: AsyncSession = Depends(get_db)):
     """Get client by ID with full details."""
     try:
-        client = db.query(Client).filter(Client.id == client_id).first()
+        stmt = select(Client).where(Client.id == client_id).options(
+            selectinload(Client.projects),
+            selectinload(Client.invoices)
+        )
+        result = await db.execute(stmt)
+        client = result.scalars().first()
         
         if not client:
             raise HTTPException(status_code=404, detail="Client not found")
@@ -128,12 +145,12 @@ async def get_client(client_id: int, db: Session = Depends(get_db)):
             "contract_start": client.contract_start.isoformat() if client.contract_start else None,
             "contract_end": client.contract_end.isoformat() if client.contract_end else None,
             "contract_terms": client.contract_terms,
-            "monthly_retainer": client.monthly_retainer,
+            "monthly_retainer": client.monthly_rate,
             "invoice_prefix": client.invoice_prefix,
             "created_at": client.created_at.isoformat() if client.created_at else None,
             "updated_at": client.updated_at.isoformat() if client.updated_at else None,
             "projects": [
-                {"id": p.id, "name": p.name, "status": p.status.value}
+                {"id": p.id, "project_name": p.name, "status": p.status.value}
                 for p in (client.projects or [])
             ],
             "recent_invoices": [
@@ -154,11 +171,12 @@ async def get_client(client_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/")
-async def create_client(client_data: ClientCreate, db: Session = Depends(get_db)):
+async def create_client(client_data: ClientCreate, db: AsyncSession = Depends(get_db)):
     """Create a new client."""
     try:
         # Check for duplicate email
-        existing = db.query(Client).filter(Client.email == client_data.email).first()
+        result = await db.execute(select(Client).where(Client.email == client_data.email))
+        existing = result.scalars().first()
         if existing:
             raise HTTPException(status_code=400, detail="Client with this email already exists")
         
@@ -171,15 +189,16 @@ async def create_client(client_data: ClientCreate, db: Session = Depends(get_db)
             address=client_data.address,
             website=client_data.website,
             notes=client_data.notes,
-            payment_terms=client_data.payment_terms,
+            payment_terms=str(client_data.payment_terms),
             currency=client_data.currency,
             tax_rate=client_data.tax_rate,
-            billing_status=BillingStatus.ACTIVE
+            billing_status=BillingStatus.ACTIVE,
+            owner_id=1  # Default to admin user 1, as authentication is not fully wired for owner assignment yet
         )
         
         db.add(client)
-        db.commit()
-        db.refresh(client)
+        await db.commit()
+        await db.refresh(client)
         
         return {
             "status": "success",
@@ -189,7 +208,7 @@ async def create_client(client_data: ClientCreate, db: Session = Depends(get_db)
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error creating client: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -198,11 +217,12 @@ async def create_client(client_data: ClientCreate, db: Session = Depends(get_db)
 async def update_client(
     client_id: int, 
     updates: ClientUpdate, 
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """Update an existing client."""
     try:
-        client = db.query(Client).filter(Client.id == client_id).first()
+        result = await db.execute(select(Client).where(Client.id == client_id))
+        client = result.scalars().first()
         
         if not client:
             raise HTTPException(status_code=404, detail="Client not found")
@@ -212,7 +232,7 @@ async def update_client(
         for field, value in update_data.items():
             setattr(client, field, value)
         
-        db.commit()
+        await db.commit()
         
         return {
             "status": "success",
@@ -221,16 +241,18 @@ async def update_client(
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error updating client {client_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.delete("/{client_id}")
-async def delete_client(client_id: int, db: Session = Depends(get_db)):
+async def delete_client(client_id: int, db: AsyncSession = Depends(get_db)):
     """Delete a client (soft delete by setting inactive)."""
     try:
-        client = db.query(Client).filter(Client.id == client_id).first()
+        stmt = select(Client).where(Client.id == client_id).options(selectinload(Client.projects))
+        result = await db.execute(stmt)
+        client = result.scalars().first()
         
         if not client:
             raise HTTPException(status_code=404, detail="Client not found")
@@ -244,7 +266,7 @@ async def delete_client(client_id: int, db: Session = Depends(get_db)):
         
         # Soft delete - set to inactive
         client.billing_status = BillingStatus.INACTIVE
-        db.commit()
+        await db.commit()
         
         return {
             "status": "success",
@@ -253,16 +275,18 @@ async def delete_client(client_id: int, db: Session = Depends(get_db)):
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error deleting client {client_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/{client_id}/projects")
-async def get_client_projects(client_id: int, db: Session = Depends(get_db)):
+async def get_client_projects(client_id: int, db: AsyncSession = Depends(get_db)):
     """Get all projects for a client."""
     try:
-        client = db.query(Client).filter(Client.id == client_id).first()
+        stmt = select(Client).where(Client.id == client_id).options(selectinload(Client.projects))
+        result = await db.execute(stmt)
+        client = result.scalars().first()
         
         if not client:
             raise HTTPException(status_code=404, detail="Client not found")
@@ -290,17 +314,18 @@ async def get_client_projects(client_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/{client_id}/invoices")
-async def get_client_invoices(client_id: int, db: Session = Depends(get_db)):
+async def get_client_invoices(client_id: int, db: AsyncSession = Depends(get_db)):
     """Get all invoices for a client."""
     try:
-        client = db.query(Client).filter(Client.id == client_id).first()
+        result = await db.execute(select(Client).where(Client.id == client_id))
+        client = result.scalars().first()
         
         if not client:
             raise HTTPException(status_code=404, detail="Client not found")
         
-        invoices = db.query(Invoice).filter(Invoice.client_id == client_id).order_by(
-            Invoice.issue_date.desc()
-        ).all()
+        stmt = select(Invoice).where(Invoice.client_id == client_id).order_by(Invoice.issue_date.desc())
+        result = await db.execute(stmt)
+        invoices = result.scalars().all()
         
         return {
             "client_id": client_id,
@@ -331,20 +356,22 @@ async def get_client_invoices(client_id: int, db: Session = Depends(get_db)):
 async def assign_project_to_client(
     client_id: int, 
     project_id: int, 
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """Assign a project to a client."""
     try:
-        client = db.query(Client).filter(Client.id == client_id).first()
+        result = await db.execute(select(Client).where(Client.id == client_id))
+        client = result.scalars().first()
         if not client:
             raise HTTPException(status_code=404, detail="Client not found")
         
-        project = db.query(Project).filter(Project.id == project_id).first()
+        result = await db.execute(select(Project).where(Project.id == project_id))
+        project = result.scalars().first()
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
         
         project.client_id = client_id
-        db.commit()
+        await db.commit()
         
         return {
             "status": "success",
@@ -353,7 +380,7 @@ async def assign_project_to_client(
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error assigning project to client: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -362,20 +389,21 @@ async def assign_project_to_client(
 async def unassign_project_from_client(
     client_id: int, 
     project_id: int, 
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """Remove project from client."""
     try:
-        project = db.query(Project).filter(
+        result = await db.execute(select(Project).where(
             Project.id == project_id, 
             Project.client_id == client_id
-        ).first()
+        ))
+        project = result.scalars().first()
         
         if not project:
             raise HTTPException(status_code=404, detail="Project not found for this client")
         
         project.client_id = None
-        db.commit()
+        await db.commit()
         
         return {
             "status": "success",
@@ -384,7 +412,7 @@ async def unassign_project_from_client(
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error unassigning project from client: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 

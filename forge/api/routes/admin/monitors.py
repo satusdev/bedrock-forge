@@ -272,7 +272,7 @@ async def toggle_monitor_pause(
 # ============================================================================
 
 import uuid
-from ...deps import task_status, update_task_status
+from ...deps import update_task_status
 
 
 class MonitorCheckResult(BaseModel):
@@ -357,7 +357,7 @@ async def trigger_monitor_check(
     # Queue Celery task
     try:
         from ....tasks.monitor_tasks import check_single_monitor
-        check_single_monitor.delay(monitor_id=monitor_id)
+        check_single_monitor.delay(monitor_id=monitor_id, task_id=task_id)
     except ImportError:
         update_task_status(task_id, "pending", "Celery worker required")
     

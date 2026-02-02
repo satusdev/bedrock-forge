@@ -29,7 +29,8 @@ from .starter_repo import StarterRepo
 from .oauth_token import OAuthToken, OAuthProvider
 from .tag import Tag
 from .role import Role, Permission
-from .project_tag import project_tags, server_tags
+from .project_tag import project_tags, server_tags, client_tags
+from .analytics_report import AnalyticsReport, AnalyticsReportType
 
 __all__ = [
     # Models
@@ -113,10 +114,14 @@ __all__ = [
     # OAuth
     "OAuthToken",
     "OAuthProvider",
+    # Analytics
+    "AnalyticsReport",
+    "AnalyticsReportType",
     # Tags
     "Tag",
     "project_tags",
     "server_tags",
+    "client_tags",
     # Roles & Permissions
     "Role",
     "Permission",

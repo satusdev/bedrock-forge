@@ -4,8 +4,9 @@ Backup scheduler service.
 Manages backup schedules and integrates with Celery Beat for
 automated backup execution.
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from croniter import croniter
 from sqlalchemy import and_, or_, select, update
@@ -19,6 +20,7 @@ from forge.db.models.backup_schedule import (
 )
 from forge.db.models.backup import BackupType, BackupStorageType
 from forge.db.models.project import Project
+from forge.core.config import settings
 
 
 class BackupSchedulerService:
@@ -46,12 +48,13 @@ class BackupSchedulerService:
         minute: int = 0,
         day_of_week: Optional[int] = None,
         day_of_month: Optional[int] = None,
-        timezone: str = "UTC",
+        timezone: str = settings.APP_TIMEZONE,
         retention_count: int = 7,
         retention_days: Optional[int] = None,
         config: Optional[dict] = None,
         enabled: bool = True,
         description: Optional[str] = None,
+        environment_id: Optional[int] = None,
     ) -> BackupSchedule:
         """
         Create a new backup schedule.
@@ -74,6 +77,7 @@ class BackupSchedulerService:
             config: Additional configuration
             enabled: Whether schedule is active
             description: Optional description
+            environment_id: Optional environment ID to link schedule for
             
         Returns:
             Created BackupSchedule instance
@@ -86,6 +90,7 @@ class BackupSchedulerService:
         # Create schedule
         schedule = BackupSchedule(
             project_id=project_id,
+            environment_id=environment_id,
             created_by_id=created_by_id,
             name=name,
             description=description,
@@ -103,6 +108,7 @@ class BackupSchedulerService:
             config=config or {},
             status=ScheduleStatus.ACTIVE if enabled else ScheduleStatus.PAUSED,
         )
+
         
         # Calculate next run time
         schedule.next_run_at = self._calculate_next_run(schedule)
@@ -137,8 +143,17 @@ class BackupSchedulerService:
             if hasattr(schedule, key) and value is not None:
                 setattr(schedule, key, value)
         
-        # Recalculate next run if frequency changed
-        if "frequency" in updates or "cron_expression" in updates:
+        # Recalculate next run if scheduling fields changed
+        scheduling_fields = {
+            "frequency",
+            "cron_expression",
+            "hour",
+            "minute",
+            "day_of_week",
+            "day_of_month",
+            "timezone",
+        }
+        if scheduling_fields.intersection(updates.keys()):
             schedule.next_run_at = self._calculate_next_run(schedule)
         
         schedule.updated_at = datetime.utcnow()
@@ -169,7 +184,7 @@ class BackupSchedulerService:
     async def get_schedule(
         self,
         schedule_id: int,
-        include_project: bool = False,
+        include_project: bool = True,
     ) -> Optional[BackupSchedule]:
         """
         Get a backup schedule by ID.
@@ -184,9 +199,15 @@ class BackupSchedulerService:
         stmt = select(BackupSchedule).where(BackupSchedule.id == schedule_id)
         
         if include_project:
-            stmt = stmt.options(selectinload(BackupSchedule.project))
+            from forge.db.models.project_server import ProjectServer
+            stmt = stmt.options(
+                selectinload(BackupSchedule.project),
+                selectinload(BackupSchedule.environment).selectinload(ProjectServer.server),
+                selectinload(BackupSchedule.environment).selectinload(ProjectServer.project)
+            )
         
         result = await self.db.execute(stmt)
+
         return result.scalar_one_or_none()
     
     async def list_schedules(
@@ -194,7 +215,7 @@ class BackupSchedulerService:
         project_id: Optional[int] = None,
         user_id: Optional[int] = None,
         status: Optional[ScheduleStatus] = None,
-        include_project: bool = False,
+        include_project: bool = True,
         limit: int = 50,
         offset: int = 0,
     ) -> list[BackupSchedule]:
@@ -227,7 +248,10 @@ class BackupSchedulerService:
             stmt = stmt.where(and_(*conditions))
         
         if include_project:
-            stmt = stmt.options(selectinload(BackupSchedule.project))
+            stmt = stmt.options(
+                selectinload(BackupSchedule.project),
+                selectinload(BackupSchedule.environment)
+            )
         
         stmt = stmt.order_by(BackupSchedule.created_at.desc())
         stmt = stmt.limit(limit).offset(offset)
@@ -248,15 +272,21 @@ class BackupSchedulerService:
         Returns:
             List of schedules due for execution
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         buffer = timedelta(minutes=buffer_minutes)
         
         stmt = select(BackupSchedule).where(
             and_(
                 BackupSchedule.status == ScheduleStatus.ACTIVE,
-                BackupSchedule.next_run_at <= now + buffer,
+                or_(
+                    BackupSchedule.next_run_at.is_(None),
+                    BackupSchedule.next_run_at <= now + buffer,
+                ),
             )
-        ).options(selectinload(BackupSchedule.project))
+        ).options(
+            selectinload(BackupSchedule.project),
+            selectinload(BackupSchedule.environment)
+        )
         
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
@@ -306,7 +336,7 @@ class BackupSchedulerService:
         if not schedule:
             return None
         
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         
         schedule.last_run_at = now
         schedule.run_count += 1
@@ -346,14 +376,29 @@ class BackupSchedulerService:
         Returns:
             Next scheduled run time
         """
-        base_time = from_time or datetime.utcnow()
+        tz_name = schedule.timezone or settings.APP_TIMEZONE
+        try:
+            schedule_tz = ZoneInfo(tz_name)
+        except Exception:
+            schedule_tz = timezone.utc
+
+        if from_time is None:
+            base_time = datetime.now(schedule_tz)
+        else:
+            base_time = from_time
+            if base_time.tzinfo is None:
+                base_time = base_time.replace(tzinfo=timezone.utc)
+            base_time = base_time.astimezone(schedule_tz)
         
         # Get cron expression - use method from model
         cron_expr = schedule.cron_expression or schedule.get_cron_schedule()
         
         # Use croniter to calculate next run
         cron = croniter(cron_expr, base_time)
-        return cron.get_next(datetime)
+        next_local = cron.get_next(datetime)
+        if next_local.tzinfo is None:
+            next_local = next_local.replace(tzinfo=schedule_tz)
+        return next_local.astimezone(timezone.utc)
     
     async def get_schedule_stats(
         self,
@@ -397,7 +442,7 @@ class BackupSchedulerService:
             "total_failures": total_failures,
             "pending_runs": sum(
                 1 for s in schedules
-                if s.next_run_at and s.next_run_at <= datetime.utcnow() + timedelta(hours=1)
+                if s.next_run_at and s.next_run_at <= datetime.now(timezone.utc) + timedelta(hours=1)
             ),
         }
     
@@ -421,13 +466,13 @@ class BackupSchedulerService:
             raise ValueError(f"Schedule {schedule_id} not found")
         
         # Set next_run_at to now
-        schedule.next_run_at = datetime.utcnow()
+        schedule.next_run_at = datetime.now(timezone.utc)
         
         # Ensure it's active
         if schedule.status == ScheduleStatus.PAUSED:
             schedule.status = ScheduleStatus.ACTIVE
         
-        schedule.updated_at = datetime.utcnow()
+        schedule.updated_at = datetime.now(timezone.utc)
         
         await self.db.commit()
         await self.db.refresh(schedule)

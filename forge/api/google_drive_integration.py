@@ -498,14 +498,15 @@ class GoogleDriveService:
             query = "trashed=false"
             if folder_id:
                 query += f" and '{folder_id}' in parents"
-
             if file_types:
-                type_query = " or ".join([f"mimeType='{mimeType}'" for mimeType in file_types])
+                type_query = " or ".join(
+                    [f"mimeType='{mimeType}'" for mimeType in file_types]
+                )
                 query += f" and ({type_query})"
 
             results = self.service.files().list(
                 q=query,
-                fields="files(id,name,size,mimeType,createdTime,modifiedTime,parents)"
+                fields="files(id,name,size,mimeType,createdTime,modifiedTime,parents)",
             ).execute()
 
             files = []
@@ -526,6 +527,133 @@ class GoogleDriveService:
         except Exception as e:
             logger.error(f"Failed to list files: {e}")
             return []
+
+    def get_storage_usage(self) -> Dict[str, Any]:
+        """Get Google Drive storage usage."""
+        if not self.is_authenticated():
+            return {}
+        try:
+            about = self.service.about().get(fields="storageQuota").execute()
+            return about.get("storageQuota", {})
+        except Exception as e:
+            logger.error(f"Failed to get storage usage: {e}")
+            return {}
+
+    def _list_drive_children(
+        self,
+        folder_id: str,
+        mime_type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """List direct children of a Drive folder."""
+        if not self.is_authenticated():
+            return []
+
+        query = f"'{folder_id}' in parents and trashed=false"
+        if mime_type:
+            query += f" and mimeType='{mime_type}'"
+
+        files: List[Dict[str, Any]] = []
+        page_token = None
+
+        try:
+            while True:
+                response = self.service.files().list(
+                    q=query,
+                    fields="nextPageToken, files(id,name,size,mimeType,createdTime,modifiedTime)",
+                    pageToken=page_token,
+                ).execute()
+
+                for item in response.get("files", []):
+                    files.append({
+                        "id": item.get("id"),
+                        "name": item.get("name"),
+                        "size": int(item.get("size", 0)) if item.get("size") else 0,
+                        "mime_type": item.get("mimeType"),
+                        "created_time": item.get("createdTime"),
+                        "modified_time": item.get("modifiedTime"),
+                    })
+
+                page_token = response.get("nextPageToken")
+                if not page_token:
+                    break
+        except Exception as e:
+            logger.error(f"Failed to list Drive children: {e}")
+            return []
+
+        return files
+
+    def _get_backup_files(
+        self,
+        backups_folder_id: str,
+        environment: str,
+        timestamp: str,
+    ) -> Dict[str, Any]:
+        """Get DB and files backup records for a specific environment and timestamp."""
+        folder_mime = 'application/vnd.google-apps.folder'
+        env_folders = self._list_drive_children(backups_folder_id, folder_mime)
+        env_folder = next((f for f in env_folders if f.get("name") == environment), None)
+        if not env_folder:
+            return {}
+
+        ts_folders = self._list_drive_children(env_folder["id"], folder_mime)
+        ts_folder = next((f for f in ts_folders if f.get("name") == timestamp), None)
+        if not ts_folder:
+            return {}
+
+        type_folders = self._list_drive_children(ts_folder["id"], folder_mime)
+        db_folder = next((f for f in type_folders if f.get("name") == "db"), None)
+        files_folder = next((f for f in type_folders if f.get("name") == "files"), None)
+
+        def _first_file(folder_id: Optional[str]) -> Optional[Dict[str, Any]]:
+            if not folder_id:
+                return None
+            children = self._list_drive_children(folder_id)
+            files_only = [c for c in children if c.get("mime_type") != folder_mime]
+            return files_only[0] if files_only else None
+
+        return {
+            "db": _first_file(db_folder["id"] if db_folder else None),
+            "files": _first_file(files_folder["id"] if files_folder else None)
+        }
+
+    def list_backup_index(self, backups_folder_id: str) -> Dict[str, List[Dict[str, Any]]]:
+        """List backup folders by environment and timestamp."""
+        if not self.is_authenticated():
+            return {}
+
+        folder_mime = 'application/vnd.google-apps.folder'
+        env_folders = self._list_drive_children(backups_folder_id, folder_mime)
+        index: Dict[str, List[Dict[str, Any]]] = {}
+
+        for env in env_folders:
+            env_name = env.get("name")
+            if not env_name:
+                continue
+            ts_folders = self._list_drive_children(env["id"], folder_mime)
+            ts_folders = sorted(ts_folders, key=lambda f: f.get("name", ""), reverse=True)
+
+            entries = []
+            for ts in ts_folders:
+                ts_name = ts.get("name")
+                if not ts_name:
+                    continue
+                files = self._get_backup_files(backups_folder_id, env_name, ts_name)
+                entries.append({
+                    "timestamp": ts_name,
+                    "db": files.get("db"),
+                    "files": files.get("files")
+                })
+
+            index[env_name] = entries
+
+        return index
+
+    def get_backup_files(self, backups_folder_id: str, environment: str, timestamp: str) -> Dict[str, Any]:
+        """Get DB and files backup metadata for an environment and timestamp."""
+        if not self.is_authenticated():
+            return {}
+
+        return self._get_backup_files(backups_folder_id, environment, timestamp)
 
     def delete_file(self, file_id: str) -> bool:
         """

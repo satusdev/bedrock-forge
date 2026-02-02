@@ -2,8 +2,8 @@
 Project Pydantic schemas for API operations.
 """
 from datetime import datetime
-from typing import Optional, List
-from pydantic import BaseModel, Field
+from typing import Optional, List, Any
+from pydantic import BaseModel, Field, field_validator
 
 from ...db.models.project import ProjectStatus
 from ...db.models.project_server import ServerEnvironment
@@ -86,11 +86,22 @@ class ProjectSummary(BaseModel):
 class EnvironmentCreate(BaseModel):
     """Schema for linking an environment to a server."""
     environment: ServerEnvironment = Field(description="staging or production")
+
+    @field_validator("environment", mode="before")
+    @classmethod
+    def case_insensitive_environment(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            return v.lower()
+        return v
     server_id: int = Field(description="Server to deploy on")
     
     # WordPress location
     wp_url: str = Field(min_length=1, max_length=500, description="Site URL")
     wp_path: str = Field(min_length=1, max_length=500, description="WordPress root path on server")
+    
+    # SSH credentials
+    ssh_user: Optional[str] = Field(None, max_length=100)
+    ssh_key_path: Optional[str] = Field(None, max_length=500)
     
     # Database credentials
     database_name: str = Field(min_length=1, max_length=64)
@@ -99,6 +110,7 @@ class EnvironmentCreate(BaseModel):
     
     # Optional
     backup_path: Optional[str] = Field(None, max_length=500)
+    gdrive_backups_folder_id: Optional[str] = Field(None, max_length=255)
     notes: Optional[str] = Field(None, max_length=1000)
 
 
@@ -106,10 +118,13 @@ class EnvironmentUpdate(BaseModel):
     """Schema for updating an environment link."""
     wp_url: Optional[str] = None
     wp_path: Optional[str] = None
+    ssh_user: Optional[str] = None
+    ssh_key_path: Optional[str] = None
     database_name: Optional[str] = None
     database_user: Optional[str] = None
     database_password: Optional[str] = None
     backup_path: Optional[str] = None
+    gdrive_backups_folder_id: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -123,11 +138,15 @@ class EnvironmentRead(BaseModel):
     
     wp_url: str
     wp_path: str
+    ssh_user: Optional[str] = None
+    ssh_key_path: Optional[str] = None
     
-    # Database (exclude password)
+    # Database
     database_name: Optional[str] = None
     database_user: Optional[str] = None
+    database_password: Optional[str] = None
     backup_path: Optional[str] = None
+    gdrive_backups_folder_id: Optional[str] = None
     notes: Optional[str] = None
     
     is_primary: bool = True

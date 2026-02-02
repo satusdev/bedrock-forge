@@ -294,11 +294,11 @@ async def import_website(
     
     # Map environment string to enum
     env_map = {
-        "staging": ServerEnvironment.STAGING,
-        "production": ServerEnvironment.PRODUCTION,
-        "development": ServerEnvironment.DEVELOPMENT
+        "staging": ServerEnvironment.staging,
+        "production": ServerEnvironment.production,
+        "development": ServerEnvironment.development
     }
-    environment = env_map.get(request.environment.lower(), ServerEnvironment.PRODUCTION)
+    environment = env_map.get(request.environment.lower(), ServerEnvironment.production)
     
     # Create ProjectServer link
     wp_url = f"https://{request.domain}"

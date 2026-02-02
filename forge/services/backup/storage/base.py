@@ -16,6 +16,7 @@ class StorageResult:
     path: str
     size_bytes: int = 0
     error: Optional[str] = None
+    storage_file_id: Optional[str] = None
     metadata: Optional[dict] = None
 
 

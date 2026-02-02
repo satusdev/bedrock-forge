@@ -14,15 +14,7 @@ from celery import shared_task
 from ..db import AsyncSessionLocal, Server
 from ..db.models.server import ServerStatus
 from ..utils.logging import logger
-
-
-def run_async(coro):
-    """Helper to run async code in sync context."""
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
+from ..utils.asyncio_utils import run_async
 
 
 def ping_host(hostname: str, count: int = 3, timeout: int = 5) -> dict:

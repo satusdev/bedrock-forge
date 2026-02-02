@@ -59,6 +59,10 @@ class DashboardConfig(BaseModel):
     show_project_health_scores: bool = Field(default=True, description="Show health scores")
     show_backup_status: bool = Field(default=True, description="Show backup status")
 
+    # Google Drive (rclone) settings
+    gdrive_rclone_remote: str = Field(default="gdrive", description="rclone remote name")
+    gdrive_base_path: str = Field(default="WebDev/Projects", description="Base path for Drive backups")
+
     # API settings
     api_rate_limit: int = Field(default=100, description="API rate limit per minute")
     request_timeout: int = Field(default=30, description="Request timeout in seconds")

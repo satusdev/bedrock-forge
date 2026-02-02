@@ -3,10 +3,12 @@ Invoice API routes.
 
 This module contains invoice management endpoints with database integration.
 """
-from datetime import date, datetime, timedelta
-from fastapi import APIRouter, HTTPException, Depends
-from sqlalchemy.orm import Session
-from typing import Dict, Any, List, Optional
+from datetime import date, datetime, timedelta, timezone
+from fastapi import APIRouter, HTTPException, Depends, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, update, delete
+from sqlalchemy.orm import selectinload, joinedload
+from typing import Dict, Any, List, Optional, Annotated
 from pydantic import BaseModel
 
 from ....utils.logging import logger
@@ -52,13 +54,15 @@ class PaymentRecord(BaseModel):
     payment_reference: Optional[str] = None
 
 
-def generate_invoice_number(db: Session) -> str:
+async def generate_invoice_number(db: AsyncSession) -> str:
     """Generate unique invoice number."""
     prefix = datetime.now().strftime("INV-%Y%m-")
     
     # Get the count of invoices this month
     month_start = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    count = db.query(Invoice).filter(Invoice.created_at >= month_start).count()
+    
+    stmt = select(func.count()).select_from(Invoice).where(Invoice.created_at >= month_start)
+    count = (await db.execute(stmt)).scalar() or 0
     
     return f"{prefix}{count + 1:04d}"
 
@@ -69,19 +73,25 @@ async def list_invoices(
     client_id: Optional[int] = None,
     limit: int = 50,
     offset: int = 0,
-    db: Session = Depends(get_db)
+    db: Annotated[AsyncSession, Depends(get_db)] = None
 ):
     """List all invoices with optional filters."""
     try:
-        query = db.query(Invoice)
+        stmt = select(Invoice)
         
         if status:
-            query = query.filter(Invoice.status == status)
+            stmt = stmt.where(Invoice.status == status)
         if client_id:
-            query = query.filter(Invoice.client_id == client_id)
+            stmt = stmt.where(Invoice.client_id == client_id)
         
-        total = query.count()
-        invoices = query.order_by(Invoice.created_at.desc()).offset(offset).limit(limit).all()
+        # Count total
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total = (await db.execute(count_stmt)).scalar() or 0
+        
+        # Get results
+        stmt = stmt.order_by(Invoice.created_at.desc()).offset(offset).limit(limit)
+        result = await db.execute(stmt)
+        invoices = result.scalars().all()
         
         return {
             "invoices": [
@@ -89,7 +99,7 @@ async def list_invoices(
                     "id": inv.id,
                     "invoice_number": inv.invoice_number,
                     "client_id": inv.client_id,
-                    "status": inv.status.value,
+                    "status": inv.status.value if inv.status else "draft",
                     "issue_date": inv.issue_date.isoformat() if inv.issue_date else None,
                     "due_date": inv.due_date.isoformat() if inv.due_date else None,
                     "total": inv.total,
@@ -108,10 +118,12 @@ async def list_invoices(
 
 
 @router.get("/{invoice_id}")
-async def get_invoice(invoice_id: int, db: Session = Depends(get_db)):
+async def get_invoice(invoice_id: int, db: Annotated[AsyncSession, Depends(get_db)] = None):
     """Get detailed invoice by ID."""
     try:
-        invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+        stmt = select(Invoice).where(Invoice.id == invoice_id).options(selectinload(Invoice.items))
+        result = await db.execute(stmt)
+        invoice = result.scalar_one_or_none()
         
         if not invoice:
             raise HTTPException(status_code=404, detail="Invoice not found")
@@ -120,7 +132,7 @@ async def get_invoice(invoice_id: int, db: Session = Depends(get_db)):
             "id": invoice.id,
             "invoice_number": invoice.invoice_number,
             "client_id": invoice.client_id,
-            "status": invoice.status.value,
+            "status": invoice.status.value if invoice.status else "draft",
             "issue_date": invoice.issue_date.isoformat() if invoice.issue_date else None,
             "due_date": invoice.due_date.isoformat() if invoice.due_date else None,
             "paid_date": invoice.paid_date.isoformat() if invoice.paid_date else None,
@@ -157,16 +169,18 @@ async def get_invoice(invoice_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/")
-async def create_invoice(invoice_data: InvoiceCreate, db: Session = Depends(get_db)):
+async def create_invoice(invoice_data: InvoiceCreate, db: Annotated[AsyncSession, Depends(get_db)] = None):
     """Create a new invoice."""
     try:
         # Verify client exists
-        client = db.query(Client).filter(Client.id == invoice_data.client_id).first()
+        client_stmt = select(Client).where(Client.id == invoice_data.client_id)
+        client_result = await db.execute(client_stmt)
+        client = client_result.scalar_one_or_none()
         if not client:
             raise HTTPException(status_code=404, detail="Client not found")
         
         # Generate invoice number
-        invoice_number = generate_invoice_number(db)
+        invoice_number = await generate_invoice_number(db)
         
         # Set dates
         issue_date = invoice_data.issue_date or date.today()
@@ -187,7 +201,7 @@ async def create_invoice(invoice_data: InvoiceCreate, db: Session = Depends(get_
         )
         
         db.add(invoice)
-        db.flush()  # Get the invoice ID
+        await db.flush()  # Get the invoice ID
         
         # Add line items
         for item_data in invoice_data.items:
@@ -201,13 +215,22 @@ async def create_invoice(invoice_data: InvoiceCreate, db: Session = Depends(get_
                 project_id=item_data.project_id
             )
             db.add(item)
-            invoice.items.append(item)
+            # Relationship append might trigger lazy load in some cases, so just add to DB
+            # and let calculate_totals handle it if it uses the loaded items
+        
+        # Ensure items are available for calculation
+        await db.flush()
+        
+        # Reload invoice with items for calculation
+        stmt = select(Invoice).where(Invoice.id == invoice.id).options(selectinload(Invoice.items))
+        invoice_result = await db.execute(stmt)
+        invoice = invoice_result.scalar_one()
         
         # Calculate totals
         invoice.calculate_totals()
         
-        db.commit()
-        db.refresh(invoice)
+        await db.commit()
+        await db.refresh(invoice)
         
         return {
             "status": "success",
@@ -219,7 +242,7 @@ async def create_invoice(invoice_data: InvoiceCreate, db: Session = Depends(get_
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error creating invoice: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -228,11 +251,13 @@ async def create_invoice(invoice_data: InvoiceCreate, db: Session = Depends(get_
 async def update_invoice(
     invoice_id: int, 
     updates: InvoiceUpdate, 
-    db: Session = Depends(get_db)
+    db: Annotated[AsyncSession, Depends(get_db)] = None
 ):
     """Update an invoice."""
     try:
-        invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+        stmt = select(Invoice).where(Invoice.id == invoice_id).options(selectinload(Invoice.items))
+        result = await db.execute(stmt)
+        invoice = result.scalar_one_or_none()
         
         if not invoice:
             raise HTTPException(status_code=404, detail="Invoice not found")
@@ -260,7 +285,7 @@ async def update_invoice(
         if updates.terms is not None:
             invoice.terms = updates.terms
         
-        db.commit()
+        await db.commit()
         
         return {
             "status": "success",
@@ -269,16 +294,18 @@ async def update_invoice(
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error updating invoice {invoice_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.delete("/{invoice_id}")
-async def delete_invoice(invoice_id: int, db: Session = Depends(get_db)):
+async def delete_invoice(invoice_id: int, db: Annotated[AsyncSession, Depends(get_db)] = None):
     """Delete a draft invoice."""
     try:
-        invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+        stmt = select(Invoice).where(Invoice.id == invoice_id)
+        result = await db.execute(stmt)
+        invoice = result.scalar_one_or_none()
         
         if not invoice:
             raise HTTPException(status_code=404, detail="Invoice not found")
@@ -289,8 +316,8 @@ async def delete_invoice(invoice_id: int, db: Session = Depends(get_db)):
                 detail="Only draft invoices can be deleted"
             )
         
-        db.delete(invoice)
-        db.commit()
+        await db.delete(invoice)
+        await db.commit()
         
         return {
             "status": "success",
@@ -299,16 +326,18 @@ async def delete_invoice(invoice_id: int, db: Session = Depends(get_db)):
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error deleting invoice {invoice_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/{invoice_id}/send")
-async def send_invoice(invoice_id: int, db: Session = Depends(get_db)):
+async def send_invoice(invoice_id: int, db: Annotated[AsyncSession, Depends(get_db)] = None):
     """Mark invoice as sent/pending."""
     try:
-        invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+        stmt = select(Invoice).where(Invoice.id == invoice_id)
+        result = await db.execute(stmt)
+        invoice = result.scalar_one_or_none()
         
         if not invoice:
             raise HTTPException(status_code=404, detail="Invoice not found")
@@ -320,7 +349,7 @@ async def send_invoice(invoice_id: int, db: Session = Depends(get_db)):
             )
         
         invoice.status = InvoiceStatus.PENDING
-        db.commit()
+        await db.commit()
         
         # TODO: Send email notification to client
         
@@ -331,7 +360,7 @@ async def send_invoice(invoice_id: int, db: Session = Depends(get_db)):
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error sending invoice {invoice_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -340,11 +369,13 @@ async def send_invoice(invoice_id: int, db: Session = Depends(get_db)):
 async def record_payment(
     invoice_id: int, 
     payment: PaymentRecord, 
-    db: Session = Depends(get_db)
+    db: Annotated[AsyncSession, Depends(get_db)] = None
 ):
     """Record a payment against an invoice."""
     try:
-        invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+        stmt = select(Invoice).where(Invoice.id == invoice_id)
+        result = await db.execute(stmt)
+        invoice = result.scalar_one_or_none()
         
         if not invoice:
             raise HTTPException(status_code=404, detail="Invoice not found")
@@ -365,7 +396,7 @@ async def record_payment(
             invoice.status = InvoiceStatus.PAID
             invoice.paid_date = date.today()
         
-        db.commit()
+        await db.commit()
         
         return {
             "status": "success",
@@ -376,25 +407,30 @@ async def record_payment(
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error recording payment for invoice {invoice_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/{invoice_id}/pdf")
-async def get_invoice_pdf(invoice_id: int, db: Session = Depends(get_db)):
+async def get_invoice_pdf(invoice_id: int, db: Annotated[AsyncSession, Depends(get_db)] = None):
     """Generate PDF for invoice."""
     from fastapi.responses import Response
     from ....services.invoice_pdf import invoice_pdf_generator
     
     try:
-        invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+        stmt = select(Invoice).where(Invoice.id == invoice_id).options(
+            joinedload(Invoice.client),
+            selectinload(Invoice.items)
+        )
+        result = await db.execute(stmt)
+        invoice = result.scalar_one_or_none()
         
         if not invoice:
             raise HTTPException(status_code=404, detail="Invoice not found")
         
         # Get client info
-        client = db.query(Client).filter(Client.id == invoice.client_id).first()
+        client = invoice.client
         client_name = client.name if client else "Unknown"
         client_address = None
         if client:
@@ -449,14 +485,16 @@ async def get_invoice_pdf(invoice_id: int, db: Session = Depends(get_db)):
 @router.get("/stats/summary")
 async def get_invoice_stats(
     period_days: int = 30,
-    db: Session = Depends(get_db)
+    db: Annotated[AsyncSession, Depends(get_db)] = None
 ):
     """Get invoice statistics summary."""
     try:
         period_start = datetime.now() - timedelta(days=period_days)
         
         # Get invoices in period
-        invoices = db.query(Invoice).filter(Invoice.created_at >= period_start).all()
+        stmt = select(Invoice).where(Invoice.created_at >= period_start)
+        result = await db.execute(stmt)
+        invoices = result.scalars().all()
         
         total_invoiced = sum(inv.total for inv in invoices)
         total_paid = sum(inv.amount_paid for inv in invoices)

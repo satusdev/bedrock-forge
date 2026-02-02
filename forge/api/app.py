@@ -35,7 +35,7 @@ async def lifespan(app: FastAPI):
     
     # Log Celery Beat info
     logger.info(
-        "Backup schedules will be loaded from database by Celery Beat DatabaseScheduler. "
+        "Backup schedules are processed by scheduled_backup_tasks.process_due_schedules. "
         "Start Celery Beat with: celery -A forge.api.celery_worker beat --loglevel=info"
     )
     

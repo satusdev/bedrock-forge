@@ -21,6 +21,7 @@ from .models import (
     ProjectServer,
     WPCredential,
     OAuthToken,
+    AnalyticsReport,
     # Enums
     ProjectStatus,
     EnvironmentType,
@@ -36,6 +37,7 @@ from .models import (
     MonitorStatus,
     ServerEnvironment,
     OAuthProvider,
+    AnalyticsReportType,
 )
 
 __all__ = [
@@ -59,6 +61,7 @@ __all__ = [
     "ProjectServer",
     "WPCredential",
     "OAuthToken",
+    "AnalyticsReport",
     # Enums
     "ProjectStatus",
     "EnvironmentType",
@@ -74,4 +77,5 @@ __all__ = [
     "MonitorStatus",
     "ServerEnvironment",
     "OAuthProvider",
+    "AnalyticsReportType",
 ]

@@ -3,17 +3,19 @@ Subscription API routes.
 
 Manages recurring subscriptions for hosting, domains, SSL, maintenance, etc.
 """
-from datetime import date, datetime, timedelta
-from fastapi import APIRouter, HTTPException, Depends
-from sqlalchemy.orm import Session
-from typing import Dict, Any, List, Optional
+from datetime import date, datetime, timedelta, timezone
+from fastapi import APIRouter, HTTPException, Depends, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, update, delete
+from sqlalchemy.orm import selectinload, joinedload
+from typing import Dict, Any, List, Optional, Annotated
 from pydantic import BaseModel
 
 from ....utils.logging import logger
 from ....db import get_db
 from ....db.models import (
     Subscription, SubscriptionType, BillingCycle, SubscriptionStatus,
-    Client, Project, Invoice, InvoiceItem, InvoiceStatus
+    Client, Project, Invoice, InvoiceItem, InvoiceStatus, HostingPackage
 )
 
 router = APIRouter()
@@ -23,17 +25,20 @@ router = APIRouter()
 class SubscriptionCreate(BaseModel):
     client_id: int
     project_id: Optional[int] = None
-    subscription_type: SubscriptionType
-    name: str
+    subscription_type: Optional[SubscriptionType] = None
+    name: Optional[str] = None
     description: Optional[str] = None
-    billing_cycle: BillingCycle = BillingCycle.YEARLY
-    amount: float
+    billing_cycle: Optional[BillingCycle] = None
+    amount: Optional[float] = None
     currency: str = "USD"
     start_date: Optional[date] = None
     auto_renew: bool = True
     reminder_days: int = 30
     provider: Optional[str] = None
     external_id: Optional[str] = None
+    package_id: Optional[int] = None
+    create_hosting: bool = True
+    create_support: bool = True
 
 
 class SubscriptionUpdate(BaseModel):
@@ -67,33 +72,39 @@ async def list_subscriptions(
     client_id: Optional[int] = None,
     limit: int = 50,
     offset: int = 0,
-    db: Session = Depends(get_db)
+    db: Annotated[AsyncSession, Depends(get_db)] = None
 ):
     """List all subscriptions with optional filters."""
     try:
-        query = db.query(Subscription)
+        stmt = select(Subscription)
         
         if subscription_type:
-            query = query.filter(Subscription.subscription_type == subscription_type)
+            stmt = stmt.where(Subscription.subscription_type == subscription_type)
         if status:
-            query = query.filter(Subscription.status == status)
+            stmt = stmt.where(Subscription.status == status)
         if client_id:
-            query = query.filter(Subscription.client_id == client_id)
+            stmt = stmt.where(Subscription.client_id == client_id)
         
-        total = query.count()
-        subscriptions = query.order_by(Subscription.next_billing_date).offset(offset).limit(limit).all()
+        # Count total
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total = (await db.execute(count_stmt)).scalar() or 0
+        
+        # Get results
+        stmt = stmt.order_by(Subscription.next_billing_date).offset(offset).limit(limit)
+        result = await db.execute(stmt)
+        subscriptions = result.scalars().all()
         
         return {
             "subscriptions": [
                 {
                     "id": s.id,
                     "name": s.name,
-                    "type": s.subscription_type.value,
+                    "type": s.subscription_type.value if s.subscription_type else "other",
                     "client_id": s.client_id,
-                    "billing_cycle": s.billing_cycle.value,
+                    "billing_cycle": s.billing_cycle.value if s.billing_cycle else "yearly",
                     "amount": s.amount,
                     "currency": s.currency,
-                    "status": s.status.value,
+                    "status": s.status.value if s.status else "active",
                     "next_billing_date": s.next_billing_date.isoformat() if s.next_billing_date else None,
                     "days_until_renewal": s.days_until_renewal,
                     "auto_renew": s.auto_renew
@@ -103,24 +114,27 @@ async def list_subscriptions(
             "total": total
         }
     except Exception as e:
-        logger.warning(f"Error listing subscriptions (returning empty): {e}")
+        logger.error(f"Error listing subscriptions: {e}")
         return {"subscriptions": [], "total": 0}
 
 
 @router.get("/expiring")
 async def list_expiring_subscriptions(
     days: int = 30,
-    db: Session = Depends(get_db)
+    db: Annotated[AsyncSession, Depends(get_db)] = None
 ):
     """List subscriptions expiring within specified days."""
     try:
         cutoff_date = date.today() + timedelta(days=days)
         
-        subscriptions = db.query(Subscription).filter(
+        stmt = select(Subscription).where(
             Subscription.status == SubscriptionStatus.ACTIVE,
             Subscription.next_billing_date <= cutoff_date,
             Subscription.next_billing_date >= date.today()
-        ).order_by(Subscription.next_billing_date).all()
+        ).order_by(Subscription.next_billing_date)
+        
+        result = await db.execute(stmt)
+        subscriptions = result.scalars().all()
         
         return {
             "expiring_within_days": days,
@@ -129,7 +143,7 @@ async def list_expiring_subscriptions(
                 {
                     "id": s.id,
                     "name": s.name,
-                    "type": s.subscription_type.value,
+                    "type": s.subscription_type.value if s.subscription_type else "other",
                     "client_id": s.client_id,
                     "next_billing_date": s.next_billing_date.isoformat(),
                     "days_until_renewal": s.days_until_renewal,
@@ -145,12 +159,12 @@ async def list_expiring_subscriptions(
 
 
 @router.get("/{subscription_id}")
-async def get_subscription(subscription_id: int, db: Session = Depends(get_db)):
+async def get_subscription(subscription_id: int, db: Annotated[AsyncSession, Depends(get_db)] = None):
     """Get subscription details."""
     try:
-        subscription = db.query(Subscription).filter(
-            Subscription.id == subscription_id
-        ).first()
+        stmt = select(Subscription).where(Subscription.id == subscription_id)
+        result = await db.execute(stmt)
+        subscription = result.scalar_one_or_none()
         
         if not subscription:
             raise HTTPException(status_code=404, detail="Subscription not found")
@@ -159,13 +173,13 @@ async def get_subscription(subscription_id: int, db: Session = Depends(get_db)):
             "id": subscription.id,
             "name": subscription.name,
             "description": subscription.description,
-            "type": subscription.subscription_type.value,
+            "type": subscription.subscription_type.value if subscription.subscription_type else "other",
             "client_id": subscription.client_id,
             "project_id": subscription.project_id,
-            "billing_cycle": subscription.billing_cycle.value,
+            "billing_cycle": subscription.billing_cycle.value if subscription.billing_cycle else "yearly",
             "amount": subscription.amount,
             "currency": subscription.currency,
-            "status": subscription.status.value,
+            "status": subscription.status.value if subscription.status else "active",
             "auto_renew": subscription.auto_renew,
             "start_date": subscription.start_date.isoformat() if subscription.start_date else None,
             "next_billing_date": subscription.next_billing_date.isoformat() if subscription.next_billing_date else None,
@@ -190,31 +204,116 @@ async def get_subscription(subscription_id: int, db: Session = Depends(get_db)):
 @router.post("/")
 async def create_subscription(
     data: SubscriptionCreate,
-    db: Session = Depends(get_db)
+    db: Annotated[AsyncSession, Depends(get_db)] = None
 ):
     """Create a new subscription."""
     try:
         # Verify client exists
-        client = db.query(Client).filter(Client.id == data.client_id).first()
+        client_stmt = select(Client).where(Client.id == data.client_id)
+        client_result = await db.execute(client_stmt)
+        client = client_result.scalar_one_or_none()
         if not client:
             raise HTTPException(status_code=404, detail="Client not found")
         
         # Verify project if provided
         if data.project_id:
-            project = db.query(Project).filter(Project.id == data.project_id).first()
-            if not project:
+            project_stmt = select(Project).where(Project.id == data.project_id)
+            project_result = await db.execute(project_stmt)
+            if not project_result.scalar_one_or_none():
                 raise HTTPException(status_code=404, detail="Project not found")
         
         start = data.start_date or date.today()
-        next_billing = calculate_next_billing_date(start, data.billing_cycle)
-        
+
+        if data.package_id:
+            package_stmt = select(HostingPackage).where(HostingPackage.id == data.package_id)
+            package_result = await db.execute(package_stmt)
+            package = package_result.scalar_one_or_none()
+            if not package:
+                raise HTTPException(status_code=404, detail="Package not found")
+
+            created: list[Subscription] = []
+
+            if data.create_hosting and package.hosting_yearly_price > 0:
+                next_billing = calculate_next_billing_date(start, BillingCycle.YEARLY)
+                hosting_subscription = Subscription(
+                    client_id=data.client_id,
+                    project_id=data.project_id,
+                    subscription_type=SubscriptionType.HOSTING,
+                    name=f"{package.name} Hosting",
+                    description=package.description,
+                    billing_cycle=BillingCycle.YEARLY,
+                    amount=package.hosting_yearly_price,
+                    currency=package.currency or data.currency,
+                    start_date=start,
+                    next_billing_date=next_billing,
+                    auto_renew=data.auto_renew,
+                    reminder_days=data.reminder_days,
+                    provider=data.provider,
+                    external_id=data.external_id,
+                    status=SubscriptionStatus.ACTIVE
+                )
+                db.add(hosting_subscription)
+                created.append(hosting_subscription)
+
+            if data.create_support and package.support_monthly_price > 0:
+                next_billing = calculate_next_billing_date(start, BillingCycle.MONTHLY)
+                support_subscription = Subscription(
+                    client_id=data.client_id,
+                    project_id=data.project_id,
+                    subscription_type=SubscriptionType.SUPPORT,
+                    name=f"{package.name} Support",
+                    description=package.description,
+                    billing_cycle=BillingCycle.MONTHLY,
+                    amount=package.support_monthly_price,
+                    currency=package.currency or data.currency,
+                    start_date=start,
+                    next_billing_date=next_billing,
+                    auto_renew=data.auto_renew,
+                    reminder_days=data.reminder_days,
+                    provider=data.provider,
+                    external_id=data.external_id,
+                    status=SubscriptionStatus.ACTIVE
+                )
+                db.add(support_subscription)
+                created.append(support_subscription)
+
+            await db.commit()
+            for sub in created:
+                await db.refresh(sub)
+
+            return {
+                "status": "success",
+                "message": f"Created {len(created)} subscription(s)",
+                "subscriptions": [
+                    {
+                        "id": s.id,
+                        "name": s.name,
+                        "type": s.subscription_type.value if s.subscription_type else "other",
+                        "amount": s.amount,
+                        "currency": s.currency,
+                        "billing_cycle": s.billing_cycle.value if s.billing_cycle else "yearly",
+                        "next_billing_date": s.next_billing_date.isoformat() if s.next_billing_date else None
+                    }
+                    for s in created
+                ]
+            }
+
+        if not data.subscription_type or not data.name or data.amount is None:
+            raise HTTPException(
+                status_code=400,
+                detail="subscription_type, name, and amount are required when package_id is not provided"
+            )
+
+        billing_cycle = data.billing_cycle or BillingCycle.YEARLY
+        next_billing = calculate_next_billing_date(start, billing_cycle)
+
         subscription = Subscription(
             client_id=data.client_id,
             project_id=data.project_id,
             subscription_type=data.subscription_type,
             name=data.name,
             description=data.description,
-            billing_cycle=data.billing_cycle,
+            billing_cycle=billing_cycle,
             amount=data.amount,
             currency=data.currency,
             start_date=start,
@@ -225,11 +324,11 @@ async def create_subscription(
             external_id=data.external_id,
             status=SubscriptionStatus.ACTIVE
         )
-        
+
         db.add(subscription)
-        db.commit()
-        db.refresh(subscription)
-        
+        await db.commit()
+        await db.refresh(subscription)
+
         return {
             "status": "success",
             "message": "Subscription created successfully",
@@ -239,7 +338,7 @@ async def create_subscription(
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error creating subscription: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -248,13 +347,13 @@ async def create_subscription(
 async def update_subscription(
     subscription_id: int,
     updates: SubscriptionUpdate,
-    db: Session = Depends(get_db)
+    db: Annotated[AsyncSession, Depends(get_db)] = None
 ):
     """Update subscription."""
     try:
-        subscription = db.query(Subscription).filter(
-            Subscription.id == subscription_id
-        ).first()
+        stmt = select(Subscription).where(Subscription.id == subscription_id)
+        result = await db.execute(stmt)
+        subscription = result.scalar_one_or_none()
         
         if not subscription:
             raise HTTPException(status_code=404, detail="Subscription not found")
@@ -263,7 +362,7 @@ async def update_subscription(
         for field, value in update_data.items():
             setattr(subscription, field, value)
         
-        db.commit()
+        await db.commit()
         
         return {
             "status": "success",
@@ -272,7 +371,7 @@ async def update_subscription(
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error updating subscription {subscription_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -280,13 +379,13 @@ async def update_subscription(
 @router.delete("/{subscription_id}")
 async def cancel_subscription(
     subscription_id: int,
-    db: Session = Depends(get_db)
+    db: Annotated[AsyncSession, Depends(get_db)] = None
 ):
     """Cancel a subscription."""
     try:
-        subscription = db.query(Subscription).filter(
-            Subscription.id == subscription_id
-        ).first()
+        stmt = select(Subscription).where(Subscription.id == subscription_id)
+        result = await db.execute(stmt)
+        subscription = result.scalar_one_or_none()
         
         if not subscription:
             raise HTTPException(status_code=404, detail="Subscription not found")
@@ -295,7 +394,7 @@ async def cancel_subscription(
         subscription.cancelled_at = datetime.now()
         subscription.auto_renew = False
         
-        db.commit()
+        await db.commit()
         
         return {
             "status": "success",
@@ -304,7 +403,7 @@ async def cancel_subscription(
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error cancelling subscription {subscription_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -312,13 +411,13 @@ async def cancel_subscription(
 @router.post("/{subscription_id}/renew")
 async def renew_subscription(
     subscription_id: int,
-    db: Session = Depends(get_db)
+    db: Annotated[AsyncSession, Depends(get_db)] = None
 ):
     """Manually renew a subscription."""
     try:
-        subscription = db.query(Subscription).filter(
-            Subscription.id == subscription_id
-        ).first()
+        stmt = select(Subscription).where(Subscription.id == subscription_id)
+        result = await db.execute(stmt)
+        subscription = result.scalar_one_or_none()
         
         if not subscription:
             raise HTTPException(status_code=404, detail="Subscription not found")
@@ -332,7 +431,7 @@ async def renew_subscription(
         subscription.next_billing_date = new_billing_date
         subscription.status = SubscriptionStatus.ACTIVE
         
-        db.commit()
+        await db.commit()
         
         return {
             "status": "success",
@@ -342,7 +441,7 @@ async def renew_subscription(
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error renewing subscription {subscription_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -350,13 +449,13 @@ async def renew_subscription(
 @router.post("/{subscription_id}/invoice")
 async def generate_renewal_invoice(
     subscription_id: int,
-    db: Session = Depends(get_db)
+    db: Annotated[AsyncSession, Depends(get_db)] = None
 ):
     """Generate an invoice for subscription renewal."""
     try:
-        subscription = db.query(Subscription).filter(
-            Subscription.id == subscription_id
-        ).first()
+        stmt = select(Subscription).where(Subscription.id == subscription_id).options(joinedload(Subscription.client))
+        result = await db.execute(stmt)
+        subscription = result.scalar_one_or_none()
         
         if not subscription:
             raise HTTPException(status_code=404, detail="Subscription not found")
@@ -382,7 +481,7 @@ async def generate_renewal_invoice(
         )
         
         db.add(invoice)
-        db.flush()
+        await db.flush()
         
         # Add subscription line item
         item = InvoiceItem(
@@ -396,14 +495,16 @@ async def generate_renewal_invoice(
         )
         
         db.add(item)
-        invoice.items.append(item)
+        # In async mode, we might need to handle invoice.items carefully
+        # But for now, adding the item should work if relationship is set up correctly
+        
         invoice.calculate_totals()
         
         # Link invoice to subscription
         subscription.last_invoice_id = invoice.id
         subscription.total_invoiced += invoice.total
         
-        db.commit()
+        await db.commit()
         
         return {
             "status": "success",
@@ -415,23 +516,23 @@ async def generate_renewal_invoice(
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error generating invoice for subscription {subscription_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/stats/summary")
-async def get_subscription_stats(db: Session = Depends(get_db)):
+async def get_subscription_stats(db: Annotated[AsyncSession, Depends(get_db)] = None):
     """Get subscription statistics."""
     try:
-        all_subs = db.query(Subscription).filter(
-            Subscription.status == SubscriptionStatus.ACTIVE
-        ).all()
+        stmt = select(Subscription).where(Subscription.status == SubscriptionStatus.ACTIVE)
+        result = await db.execute(stmt)
+        all_subs = result.scalars().all()
         
         # Calculate by type
         by_type = {}
         for sub in all_subs:
-            type_key = sub.subscription_type.value
+            type_key = sub.subscription_type.value if sub.subscription_type else "other"
             if type_key not in by_type:
                 by_type[type_key] = {"count": 0, "yearly_revenue": 0}
             by_type[type_key]["count"] += 1

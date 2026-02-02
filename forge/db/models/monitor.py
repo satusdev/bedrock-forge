@@ -50,7 +50,7 @@ class Monitor(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     
     monitor_type: Mapped[MonitorType] = mapped_column(
-        Enum(MonitorType, values_callable=lambda obj: [e.value for e in obj]), default=MonitorType.UPTIME
+        Enum(MonitorType), default=MonitorType.UPTIME
     )
     url: Mapped[str] = mapped_column(String(500), nullable=False)
     
@@ -79,7 +79,7 @@ class Monitor(Base, TimestampMixin):
         DateTime(timezone=True), nullable=True
     )
     last_status: Mapped[MonitorStatus | None] = mapped_column(
-        Enum(MonitorStatus, values_callable=lambda obj: [e.value for e in obj]), nullable=True
+        Enum(MonitorStatus), nullable=True
     )
     last_response_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     uptime_percentage: Mapped[float | None] = mapped_column(Float, nullable=True)

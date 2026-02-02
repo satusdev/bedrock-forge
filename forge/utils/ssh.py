@@ -13,7 +13,7 @@ class SSHConnection:
     def __init__(self, host: str, user: str, key_path: Optional[str] = None, port: int = 22, password: Optional[str] = None, private_key: Optional[str] = None):
         self.host = host
         self.user = user
-        self.key_path = key_path
+        self.key_path = os.path.expanduser(key_path) if key_path else None
         self.private_key = private_key
         # Removed default fallback to ~/.ssh/id_rsa to prevent FileNotFoundError in container environments
         self.password = password
@@ -43,12 +43,15 @@ class SSHConnection:
             }
             
             if self.key_path:
+                logger.info(f"SSH auth: using key file {self.key_path}")
                 connect_kwargs["key_filename"] = self.key_path
             
             if self.password:
+                logger.info("SSH auth: using password")
                 connect_kwargs["password"] = self.password
 
             if self.private_key:
+                logger.info("SSH auth: using in-memory private key")
                 # Try to load as Ed25519 then RSA
                 pkey = None
                 try:
@@ -127,3 +130,7 @@ class SSHConnection:
             sftp.close()
         except Exception as e:
             raise ForgeError(f"Upload failed: {e}")
+
+# Alias for compatibility
+SSHClient = SSHConnection
+

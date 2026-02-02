@@ -3,15 +3,18 @@ Domain API routes.
 
 Manages domain registration tracking, expiry dates, and WHOIS data.
 """
-from datetime import date, datetime, timedelta
-from fastapi import APIRouter, HTTPException, Depends
-from sqlalchemy.orm import Session
-from typing import Dict, Any, List, Optional
+from datetime import date, datetime, timedelta, timezone
+from fastapi import APIRouter, HTTPException, Depends, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, update, delete
+from sqlalchemy.orm import selectinload
+from typing import Dict, Any, List, Optional, Annotated
 from pydantic import BaseModel
 
 from ....utils.logging import logger
 from ....db import get_db
 from ....db.models import Domain, DomainStatus, Registrar, Client, Project
+from ....services.domain_service import DomainService
 
 router = APIRouter()
 
@@ -62,21 +65,27 @@ async def list_domains(
     registrar: Optional[Registrar] = None,
     limit: int = 50,
     offset: int = 0,
-    db: Session = Depends(get_db)
+    db: Annotated[AsyncSession, Depends(get_db)] = None
 ):
     """List all domains with optional filters."""
     try:
-        query = db.query(Domain)
+        stmt = select(Domain)
         
         if status:
-            query = query.filter(Domain.status == status)
+            stmt = stmt.where(Domain.status == status)
         if client_id:
-            query = query.filter(Domain.client_id == client_id)
+            stmt = stmt.where(Domain.client_id == client_id)
         if registrar:
-            query = query.filter(Domain.registrar == registrar)
+            stmt = stmt.where(Domain.registrar == registrar)
         
-        total = query.count()
-        domains = query.order_by(Domain.expiry_date).offset(offset).limit(limit).all()
+        # Count total
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total = (await db.execute(count_stmt)).scalar() or 0
+        
+        # Get results
+        stmt = stmt.order_by(Domain.expiry_date).offset(offset).limit(limit)
+        result = await db.execute(stmt)
+        domains = result.scalars().all()
         
         return {
             "domains": [
@@ -85,8 +94,8 @@ async def list_domains(
                     "domain_name": d.domain_name,
                     "tld": d.tld,
                     "client_id": d.client_id,
-                    "registrar": d.registrar.value,
-                    "status": d.status.value,
+                    "registrar": d.registrar.value if d.registrar else "other",
+                    "status": d.status.value if d.status else "active",
                     "expiry_date": d.expiry_date.isoformat() if d.expiry_date else None,
                     "days_until_expiry": d.days_until_expiry,
                     "auto_renew": d.auto_renew,
@@ -97,24 +106,29 @@ async def list_domains(
             "total": total
         }
     except Exception as e:
-        logger.warning(f"Error listing domains (returning empty): {e}")
+        logger.error(f"Error listing domains: {e}")
+        import traceback
+        traceback.print_exc()
         return {"domains": [], "total": 0}
 
 
 @router.get("/expiring")
 async def list_expiring_domains(
     days: int = 60,
-    db: Session = Depends(get_db)
+    db: Annotated[AsyncSession, Depends(get_db)] = None
 ):
     """List domains expiring within specified days."""
     try:
         cutoff_date = date.today() + timedelta(days=days)
         
-        domains = db.query(Domain).filter(
+        stmt = select(Domain).where(
             Domain.status == DomainStatus.ACTIVE,
             Domain.expiry_date <= cutoff_date,
             Domain.expiry_date >= date.today()
-        ).order_by(Domain.expiry_date).all()
+        ).order_by(Domain.expiry_date)
+        
+        result = await db.execute(stmt)
+        domains = result.scalars().all()
         
         return {
             "expiring_within_days": days,
@@ -126,7 +140,7 @@ async def list_expiring_domains(
                     "client_id": d.client_id,
                     "expiry_date": d.expiry_date.isoformat(),
                     "days_until_expiry": d.days_until_expiry,
-                    "registrar": d.registrar.value,
+                    "registrar": d.registrar.value if d.registrar else "other",
                     "auto_renew": d.auto_renew,
                     "annual_cost": d.annual_cost
                 }
@@ -139,10 +153,12 @@ async def list_expiring_domains(
 
 
 @router.get("/{domain_id}")
-async def get_domain(domain_id: int, db: Session = Depends(get_db)):
+async def get_domain(domain_id: int, db: Annotated[AsyncSession, Depends(get_db)] = None):
     """Get domain details."""
     try:
-        domain = db.query(Domain).filter(Domain.id == domain_id).first()
+        stmt = select(Domain).where(Domain.id == domain_id).options(selectinload(Domain.ssl_certificates))
+        result = await db.execute(stmt)
+        domain = result.scalar_one_or_none()
         
         if not domain:
             raise HTTPException(status_code=404, detail="Domain not found")
@@ -161,10 +177,10 @@ async def get_domain(domain_id: int, db: Session = Depends(get_db)):
             "tld": domain.tld,
             "client_id": domain.client_id,
             "project_id": domain.project_id,
-            "registrar": domain.registrar.value,
+            "registrar": domain.registrar.value if domain.registrar else "other",
             "registrar_name": domain.registrar_name,
             "registrar_url": domain.registrar_url,
-            "status": domain.status.value,
+            "status": domain.status.value if domain.status else "active",
             "registration_date": domain.registration_date.isoformat() if domain.registration_date else None,
             "expiry_date": domain.expiry_date.isoformat() if domain.expiry_date else None,
             "last_renewed": domain.last_renewed.isoformat() if domain.last_renewed else None,
@@ -181,7 +197,7 @@ async def get_domain(domain_id: int, db: Session = Depends(get_db)):
             "ssl_certificates": [
                 {
                     "id": cert.id,
-                    "provider": cert.provider.value,
+                    "provider": cert.provider.value if cert.provider else "other",
                     "expiry_date": cert.expiry_date.isoformat(),
                     "is_active": cert.is_active
                 }
@@ -196,18 +212,53 @@ async def get_domain(domain_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/{domain_id}/whois/refresh")
+async def refresh_domain_whois(
+    domain_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)] = None
+):
+    """Refresh WHOIS data on demand."""
+    try:
+        service = DomainService(db)
+        domain = await service.fetch_whois(domain_id, force=True, raise_on_error=True)
+
+        if not domain:
+            raise HTTPException(status_code=404, detail="Domain not found")
+
+        return {
+            "status": "success",
+            "domain_id": domain.id,
+            "domain_name": domain.domain_name,
+            "expiry_date": domain.expiry_date.isoformat() if domain.expiry_date else None,
+            "registration_date": domain.registration_date.isoformat() if domain.registration_date else None,
+            "registrar_name": domain.registrar_name,
+            "last_whois_check": domain.last_whois_check.isoformat() if domain.last_whois_check else None,
+        }
+    except RuntimeError as e:
+        logger.error(f"WHOIS refresh unavailable for domain {domain_id}: {e}")
+        raise HTTPException(status_code=503, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"WHOIS refresh failed for domain {domain_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/")
-async def create_domain(data: DomainCreate, db: Session = Depends(get_db)):
+async def create_domain(data: DomainCreate, db: Annotated[AsyncSession, Depends(get_db)] = None):
     """Add a new domain to track."""
     try:
         # Verify client exists
-        client = db.query(Client).filter(Client.id == data.client_id).first()
+        client_stmt = select(Client).where(Client.id == data.client_id)
+        client_result = await db.execute(client_stmt)
+        client = client_result.scalar_one_or_none()
         if not client:
             raise HTTPException(status_code=404, detail="Client not found")
         
         # Check for duplicate domain
-        existing = db.query(Domain).filter(Domain.domain_name == data.domain_name.lower()).first()
-        if existing:
+        existing_stmt = select(Domain).where(Domain.domain_name == data.domain_name.lower())
+        existing_result = await db.execute(existing_stmt)
+        if existing_result.scalar_one_or_none():
             raise HTTPException(status_code=400, detail="Domain already exists")
         
         import json
@@ -232,8 +283,8 @@ async def create_domain(data: DomainCreate, db: Session = Depends(get_db)):
         )
         
         db.add(domain)
-        db.commit()
-        db.refresh(domain)
+        await db.commit()
+        await db.refresh(domain)
         
         return {
             "status": "success",
@@ -243,7 +294,7 @@ async def create_domain(data: DomainCreate, db: Session = Depends(get_db)):
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error creating domain: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -252,11 +303,13 @@ async def create_domain(data: DomainCreate, db: Session = Depends(get_db)):
 async def update_domain(
     domain_id: int,
     updates: DomainUpdate,
-    db: Session = Depends(get_db)
+    db: Annotated[AsyncSession, Depends(get_db)] = None
 ):
     """Update domain information."""
     try:
-        domain = db.query(Domain).filter(Domain.id == domain_id).first()
+        stmt = select(Domain).where(Domain.id == domain_id)
+        result = await db.execute(stmt)
+        domain = result.scalar_one_or_none()
         
         if not domain:
             raise HTTPException(status_code=404, detail="Domain not found")
@@ -271,7 +324,7 @@ async def update_domain(
         for field, value in update_data.items():
             setattr(domain, field, value)
         
-        db.commit()
+        await db.commit()
         
         return {
             "status": "success",
@@ -280,22 +333,24 @@ async def update_domain(
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error updating domain {domain_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.delete("/{domain_id}")
-async def delete_domain(domain_id: int, db: Session = Depends(get_db)):
+async def delete_domain(domain_id: int, db: Annotated[AsyncSession, Depends(get_db)] = None):
     """Remove domain from tracking."""
     try:
-        domain = db.query(Domain).filter(Domain.id == domain_id).first()
+        stmt = select(Domain).where(Domain.id == domain_id)
+        result = await db.execute(stmt)
+        domain = result.scalar_one_or_none()
         
         if not domain:
             raise HTTPException(status_code=404, detail="Domain not found")
         
-        db.delete(domain)
-        db.commit()
+        await db.delete(domain)
+        await db.commit()
         
         return {
             "status": "success",
@@ -304,7 +359,7 @@ async def delete_domain(domain_id: int, db: Session = Depends(get_db)):
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error deleting domain {domain_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -313,11 +368,13 @@ async def delete_domain(domain_id: int, db: Session = Depends(get_db)):
 async def mark_domain_renewed(
     domain_id: int,
     years: int = 1,
-    db: Session = Depends(get_db)
+    db: Annotated[AsyncSession, Depends(get_db)] = None
 ):
     """Mark domain as renewed."""
     try:
-        domain = db.query(Domain).filter(Domain.id == domain_id).first()
+        stmt = select(Domain).where(Domain.id == domain_id)
+        result = await db.execute(stmt)
+        domain = result.scalar_one_or_none()
         
         if not domain:
             raise HTTPException(status_code=404, detail="Domain not found")
@@ -328,7 +385,7 @@ async def mark_domain_renewed(
         domain.last_renewed = date.today()
         domain.status = DomainStatus.ACTIVE
         
-        db.commit()
+        await db.commit()
         
         return {
             "status": "success",
@@ -338,29 +395,29 @@ async def mark_domain_renewed(
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         logger.error(f"Error renewing domain {domain_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/stats/summary")
-async def get_domain_stats(db: Session = Depends(get_db)):
+async def get_domain_stats(db: Annotated[AsyncSession, Depends(get_db)] = None):
     """Get domain statistics."""
     try:
-        all_domains = db.query(Domain).filter(
-            Domain.status == DomainStatus.ACTIVE
-        ).all()
+        stmt = select(Domain).where(Domain.status == DomainStatus.ACTIVE)
+        result = await db.execute(stmt)
+        all_domains = result.scalars().all()
         
         # Calculate by registrar
         by_registrar = {}
         total_cost = 0
         for d in all_domains:
-            reg_key = d.registrar.value
+            reg_key = d.registrar.value if d.registrar else "other"
             if reg_key not in by_registrar:
                 by_registrar[reg_key] = {"count": 0, "annual_cost": 0}
             by_registrar[reg_key]["count"] += 1
-            by_registrar[reg_key]["annual_cost"] += d.annual_cost
-            total_cost += d.annual_cost
+            by_registrar[reg_key]["annual_cost"] += d.annual_cost or 0
+            total_cost += d.annual_cost or 0
         
         expiring_60 = len([d for d in all_domains if d.days_until_expiry <= 60])
         expiring_30 = len([d for d in all_domains if d.days_until_expiry <= 30])

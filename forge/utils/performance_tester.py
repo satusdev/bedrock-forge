@@ -9,7 +9,7 @@ import json
 import asyncio
 import subprocess
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, asdict
 import tempfile
@@ -160,11 +160,18 @@ class PerformanceTester:
         url: str,
         device: str = "desktop",
         headless: bool = True,
-        form_factor: str = "desktop",
+        form_factor: Optional[str] = None,
         throttling: bool = True
     ) -> PerformanceTestResult:
         """Run Lighthouse performance test."""
-        logger.info(f"Running Lighthouse test for {url} on {device}")
+        resolved_device = (device or "desktop").lower()
+        resolved_form_factor = (form_factor or resolved_device).lower()
+        if resolved_form_factor not in {"desktop", "mobile"}:
+            resolved_form_factor = "desktop"
+        if resolved_device not in {"desktop", "mobile"}:
+            resolved_device = resolved_form_factor
+
+        logger.info(f"Running Lighthouse test for {url} on {resolved_device}")
 
         start_time = datetime.now()
 
@@ -177,21 +184,29 @@ class PerformanceTester:
                 temp_path = temp_file.name
 
             # Build Lighthouse command
+            chrome_flags = "--headless --no-sandbox --disable-dev-shm-usage" if headless else "--no-sandbox"
             cmd = [
                 "npx", "lighthouse",
                 url,
                 "--output=json",
                 f"--output-path={temp_path}",
-                "--chrome-flags='--headless'" if headless else "",
-                f"--form-factor={form_factor}",
+                f"--chrome-flags='{chrome_flags}'",
+                f"--form-factor={resolved_form_factor}",
                 "--throttling-method=provided" if throttling else "--throttling-method=provided"
             ]
 
             # Add device-specific settings
-            if device == "mobile":
+            if resolved_form_factor == "mobile":
                 cmd.extend([
-                    "--screenEmulation.mobile",
+                    "--screenEmulation.mobile=true",
+                    "--screenEmulation.width=412",
+                    "--screenEmulation.height=823",
+                    "--screenEmulation.deviceScaleFactor=2.625",
                     "--emulatedUserAgent=Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36"
+                ])
+            else:
+                cmd.extend([
+                    "--screenEmulation.mobile=false",
                 ])
 
             # Run Lighthouse
@@ -216,7 +231,7 @@ class PerformanceTester:
 
             # Process results
             test_result = self._parse_lighthouse_results(
-                lighthouse_data, url, device, start_time
+                lighthouse_data, url, resolved_device, start_time
             )
 
             # Save to database
@@ -317,6 +332,15 @@ class PerformanceTester:
         """Get numeric value from audit data."""
         return audits.get(audit_id, {}).get(key, default)
 
+    def _serialize_value(self, value: Any) -> Any:
+        if isinstance(value, (datetime, date)):
+            return value.isoformat()
+        if isinstance(value, dict):
+            return {k: self._serialize_value(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [self._serialize_value(v) for v in value]
+        return value
+
     async def _save_test_result(self, result: PerformanceTestResult) -> None:
         """Save test result to database."""
         with sqlite3.connect(self.db_path) as conn:
@@ -344,7 +368,7 @@ class PerformanceTester:
                 result.device,
                 result.test_duration,
                 json.dumps(result.recommendations),
-                json.dumps(asdict(result))
+                json.dumps(self._serialize_value(asdict(result)))
             ))
 
     def _generate_recommendations(self, result: PerformanceTestResult) -> List[str]:
