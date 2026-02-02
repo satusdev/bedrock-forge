@@ -218,12 +218,27 @@ export type BackupType = 'full' | 'database' | 'files';
 export type BackupStorageType = 'local' | 'google_drive' | 's3';
 export type BackupStatus = 'pending' | 'running' | 'completed' | 'failed';
 
+export type MigrationStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+export interface ProjectServerSummary {
+	id: number;
+	project_id: number;
+	server_id: number;
+	server_name?: string;
+	environment: string;
+	wp_path: string;
+	wp_url: string;
+	gdrive_backups_folder_id?: string;
+}
+
 export interface BackupSchedule {
 	id: number;
 	name: string;
 	description?: string;
 	project_id: number;
 	project_name?: string;
+	environment_id?: number;
+	environment_name?: string;
 
 	// Schedule timing
 	frequency: ScheduleFrequency;
@@ -255,6 +270,7 @@ export interface BackupSchedule {
 	// Timestamps
 	created_at: string;
 	updated_at: string;
+	config?: Record<string, any>;
 }
 
 export interface Backup {
@@ -267,6 +283,9 @@ export interface Backup {
 	storage_type: BackupStorageType | string;
 	file_path?: string;
 	storage_path?: string; // Alias for file_path
+	storage_file_id?: string;
+	drive_folder_id?: string;
+	gdrive_link?: string;
 	size_bytes?: number;
 
 	status: BackupStatus | string;
@@ -281,6 +300,7 @@ export interface Backup {
 export interface ScheduleCreateInput {
 	name: string;
 	project_id: number;
+	environment_id?: number;
 	frequency?: ScheduleFrequency;
 	hour?: number;
 	minute?: number;
@@ -293,10 +313,12 @@ export interface ScheduleCreateInput {
 	retention_count?: number;
 	retention_days?: number;
 	description?: string;
+	config?: Record<string, any>;
 }
 
 export interface ScheduleUpdateInput {
 	name?: string;
+	environment_id?: number;
 	frequency?: ScheduleFrequency;
 	hour?: number;
 	minute?: number;
@@ -310,4 +332,5 @@ export interface ScheduleUpdateInput {
 	retention_days?: number;
 	status?: ScheduleStatus;
 	description?: string;
+	config?: Record<string, any>;
 }

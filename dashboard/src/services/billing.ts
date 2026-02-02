@@ -14,14 +14,27 @@ export interface Subscription {
 }
 
 export interface CreateSubscriptionPayload {
-	name: string;
-	type: string; // 'maintenance', 'hosting', 'domain', 'ssl'
-	amount: number;
-	currency: string;
-	billing_cycle: string;
+	name?: string;
+	type?: string; // 'maintenance', 'hosting', 'domain', 'ssl'
+	amount?: number;
+	currency?: string;
+	billing_cycle?: string;
 	client_id: number;
 	project_id?: number;
 	start_date?: string;
+	package_id?: number;
+	create_hosting?: boolean;
+	create_support?: boolean;
+}
+
+export interface HostingPackage {
+	id: number;
+	name: string;
+	slug: string;
+	description?: string | null;
+	currency?: string;
+	hosting_yearly_price?: number;
+	support_monthly_price?: number;
 }
 
 export const billingService = {
@@ -67,6 +80,51 @@ export const billingService = {
 		}
 	},
 
+	createDomain: async (data: {
+		client_id: number;
+		domain_name: string;
+		registrar: string;
+		expiry_date: string;
+		registration_date?: string;
+		annual_cost?: number;
+		auto_renew?: boolean;
+		notes?: string;
+		dns_provider?: string;
+	}) => {
+		const response = await api.post('/domains/', data);
+		return response.data;
+	},
+
+	updateDomain: async (
+		id: number,
+		data: Partial<{
+			registrar: string;
+			expiry_date: string;
+			annual_cost: number;
+			auto_renew: boolean;
+			notes: string;
+			dns_provider: string;
+			status: string;
+		}>
+	) => {
+		const response = await api.put(`/domains/${id}`, data);
+		return response.data;
+	},
+
+	deleteDomain: async (id: number) => {
+		const response = await api.delete(`/domains/${id}`);
+		return response.data;
+	},
+	refreshDomainWhois: async (id: number) => {
+		const response = await api.post(`/domains/${id}/whois/refresh`);
+		return response.data;
+	},
+
+	renewDomain: async (id: number, years: number = 1) => {
+		const response = await api.post(`/domains/${id}/renew`, { years });
+		return response.data;
+	},
+
 	// SSL
 	getCertificates: async () => {
 		try {
@@ -76,6 +134,37 @@ export const billingService = {
 		} catch {
 			return [];
 		}
+	},
+
+	createCertificate: async (data: {
+		common_name: string;
+		provider: string;
+		issue_date: string;
+		expiry_date: string;
+		auto_renew?: boolean;
+		domain_id?: number;
+		notes?: string;
+	}) => {
+		const response = await api.post('/ssl/', data);
+		return response.data;
+	},
+
+	updateCertificate: async (
+		id: number,
+		data: Partial<{
+			provider: string;
+			expiry_date: string;
+			auto_renew: boolean;
+			notes: string;
+		}>
+	) => {
+		const response = await api.put(`/ssl/${id}`, data);
+		return response.data;
+	},
+
+	deleteCertificate: async (id: number) => {
+		const response = await api.delete(`/ssl/${id}`);
+		return response.data;
 	},
 
 	renewCertificate: async (id: number) => {
