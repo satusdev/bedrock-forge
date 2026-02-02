@@ -8,7 +8,7 @@ const API_BASE_URL =
 // Create axios instance
 const api = axios.create({
 	baseURL: API_BASE_URL,
-	timeout: 30000,
+	timeout: 60000,
 	headers: {
 		'Content-Type': 'application/json',
 	},
@@ -16,6 +16,29 @@ const api = axios.create({
 
 // Flag to use mock API when backend is not available
 let useMockApi = false;
+
+const getSafeErrorMessage = (
+	error: any,
+	fallback: string = 'An error occurred'
+): string => {
+	const detail =
+		error?.response?.data?.detail ??
+		error?.response?.data?.message ??
+		error?.message;
+
+	if (typeof detail === 'string') {
+		return detail;
+	}
+	if (Array.isArray(detail)) {
+		return detail
+			.map(item => (typeof item === 'string' ? item : JSON.stringify(item)))
+			.join(', ');
+	}
+	if (detail && typeof detail === 'object') {
+		return JSON.stringify(detail);
+	}
+	return fallback;
+};
 
 // Check if backend is available
 const checkBackendAvailability = async () => {
@@ -52,8 +75,7 @@ api.interceptors.response.use(
 	response => response,
 	async error => {
 		const originalRequest = error.config;
-		const message =
-			error.response?.data?.detail || error.message || 'An error occurred';
+		const message = getSafeErrorMessage(error);
 		const status = error.response?.status;
 		const errorCode = error.response?.data?.error_code;
 
@@ -153,6 +175,8 @@ api.interceptors.response.use(
 	}
 );
 
+export const getApiErrorMessage = getSafeErrorMessage;
+
 // Dashboard API
 export const dashboardApi = {
 	// Dashboard stats
@@ -161,6 +185,18 @@ export const dashboardApi = {
 		return useMockApi
 			? mockDashboardApi.getStats()
 			: api.get('/dashboard/stats');
+	},
+
+	// Public status page
+	getPublicStatus: async (projectId: number) => {
+		await checkBackendAvailability();
+		return api.get(`/status/${projectId}`);
+	},
+	getPublicStatusHistory: async (projectId: number, days: number = 30) => {
+		await checkBackendAvailability();
+		return api.get(`/status/${projectId}/history`, {
+			params: { days },
+		});
 	},
 
 	// Projects
@@ -192,10 +228,6 @@ export const dashboardApi = {
 		await checkBackendAvailability();
 		return api.delete(`/projects/${projectId}`);
 	},
-	getProjectTags: async () => {
-		await checkBackendAvailability();
-		return api.get('/projects/tags');
-	},
 
 	// Environment linking
 	getProjectEnvironments: async (projectId: number) => {
@@ -206,9 +238,64 @@ export const dashboardApi = {
 		await checkBackendAvailability();
 		return api.post(`/projects/${projectId}/environments`, envData);
 	},
+	updateEnvironment: async (projectId: number, envId: number, data: any) => {
+		await checkBackendAvailability();
+		return api.put(`/projects/${projectId}/environments/${envId}`, data);
+	},
+	getEnvironmentUsers: async (projectId: number, envId: number) => {
+		await checkBackendAvailability();
+		return api.get(`/projects/${projectId}/environments/${envId}/users`);
+	},
+	createEnvironmentUser: async (
+		projectId: number,
+		envId: number,
+		data: {
+			user_login: string;
+			user_email: string;
+			role?: string;
+			send_email?: boolean;
+		}
+	) => {
+		await checkBackendAvailability();
+		return api.post(`/projects/${projectId}/environments/${envId}/users`, data);
+	},
+	magicLogin: async (projectId: number, envId: number, userId: string) => {
+		await checkBackendAvailability();
+		return api.post(
+			`/projects/${projectId}/environments/${envId}/users/${userId}/login`
+		);
+	},
 	unlinkEnvironment: async (projectId: number, envId: number) => {
 		await checkBackendAvailability();
 		return api.delete(`/projects/${projectId}/environments/${envId}`);
+	},
+
+	// Backups - Environment specific
+	createEnvironmentBackup: async (
+		projectId: number,
+		envId: number,
+		backupType: string = 'database',
+		storageType: string = 'gdrive'
+	) => {
+		await checkBackendAvailability();
+		return api.post(
+			`/projects/${projectId}/environments/${envId}/backups`,
+			null,
+			{
+				params: {
+					backup_type: backupType,
+					storage_type: storageType,
+				},
+			}
+		);
+	},
+
+	// Security - Environment specific
+	scanEnvironment: async (projectId: number, envId: number) => {
+		await checkBackendAvailability();
+		return api.post(`/projects/${projectId}/security/scan`, null, {
+			params: { env_id: envId },
+		});
 	},
 
 	// Google Drive settings
@@ -300,41 +387,19 @@ export const dashboardApi = {
 			description,
 		}),
 
-	// Google Drive Integration
-	getGoogleDriveAuthStatus: async () => {
+	// Google Drive (rclone)
+	getDriveStatus: async () => {
 		await checkBackendAvailability();
 		return useMockApi
-			? mockDashboardApi.getGoogleDriveAuthStatus()
-			: api.get('/gdrive/auth/status');
+			? mockDashboardApi.getDriveStatus()
+			: api.get('/gdrive/status');
 	},
-	getGoogleDriveAuthUrl: (redirectUri?: string) =>
-		api.get('/gdrive/auth/url', { params: { redirect_uri: redirectUri } }),
-	authenticateGoogleDrive: (redirectUri?: string) =>
-		api.post('/gdrive/auth', null, { params: { redirect_uri: redirectUri } }),
-	completeGoogleDriveAuth: (
-		code: string,
-		state: string,
-		redirectUri?: string
-	) =>
-		api.post('/gdrive/auth/callback', {
-			code,
-			state,
-			redirect_uri: redirectUri,
-		}),
-	disconnectGoogleDrive: () => api.post('/gdrive/auth/disconnect'),
-	createDriveFolder: (folderName: string, parentFolderId?: string) =>
-		api.post('/gdrive/folder', {
-			folder_name: folderName,
-			parent_folder_id: parentFolderId,
-		}),
-	listDriveFiles: (folderId?: string, fileTypes?: string[]) =>
-		api.get('/gdrive/folder/files', {
-			params: { folder_id: folderId, file_types: fileTypes },
-		}),
-	uploadToDrive: (filePath: string, folderId?: string) =>
-		api.post('/gdrive/upload', { file_path: filePath, folder_id: folderId }),
-	downloadFromDrive: (fileId: string, outputPath: string) =>
-		api.post(`/gdrive/download/${fileId}`, { output_path: outputPath }),
+	listDriveFolders: (params?: {
+		query?: string;
+		path?: string;
+		shared_with_me?: boolean;
+		max_results?: number;
+	}) => api.get('/gdrive/folders', { params }),
 	getDriveStorageUsage: () => api.get('/gdrive/storage'),
 	setupProjectGoogleDrive: (projectName: string) =>
 		api.post(`/projects/${projectName}/google-drive/setup`),
@@ -380,26 +445,52 @@ export const dashboardApi = {
 		api.post(`/projects/${projectName}/google-drive-integration`, data),
 	updateClientInfo: (projectName: string, data: any) =>
 		api.post(`/projects/${projectName}/client-info`, data),
-	getProjectPlugins: (projectName: string) =>
-		api.get(`/projects/${projectName}/plugins`),
-	getProjectThemes: (projectName: string) =>
-		api.get(`/projects/${projectName}/themes`),
+	getProjectPlugins: (projectName: string, environment?: string) =>
+		api.get(`/projects/${projectName}/plugins`, {
+			params: environment ? { environment } : undefined,
+		}),
+	getProjectThemes: (projectName: string, environment?: string) =>
+		api.get(`/projects/${projectName}/themes`, {
+			params: environment ? { environment } : undefined,
+		}),
 
 	// Plugin Updates
-	updatePlugin: (projectName: string, pluginName: string) =>
-		api.post(`/projects/${projectName}/plugins/${pluginName}/update`),
-	updateAllPlugins: (projectName: string) =>
-		api.post(`/projects/${projectName}/plugins/update-all`),
+	updatePlugin: (
+		projectName: string,
+		pluginName: string,
+		environment?: string
+	) =>
+		api.post(
+			`/projects/${projectName}/plugins/${pluginName}/update`,
+			undefined,
+			{
+				params: environment ? { environment } : undefined,
+			}
+		),
+	updateAllPlugins: (projectName: string, environment?: string) =>
+		api.post(`/projects/${projectName}/plugins/update-all`, undefined, {
+			params: environment ? { environment } : undefined,
+		}),
 
 	// Theme Updates
-	updateProjectTheme: (projectName: string, themeName: string) =>
-		api.post(`/projects/${projectName}/themes/${themeName}/update`),
-	updateAllThemes: (projectName: string) =>
-		api.post(`/projects/${projectName}/themes/update-all`),
+	updateProjectTheme: (
+		projectName: string,
+		themeName: string,
+		environment?: string
+	) =>
+		api.post(`/projects/${projectName}/themes/${themeName}/update`, undefined, {
+			params: environment ? { environment } : undefined,
+		}),
+	updateAllThemes: (projectName: string, environment?: string) =>
+		api.post(`/projects/${projectName}/themes/update-all`, undefined, {
+			params: environment ? { environment } : undefined,
+		}),
 
 	// WordPress Core Updates
-	updateWordPressCore: (projectName: string) =>
-		api.post(`/projects/${projectName}/wordpress/update`),
+	updateWordPressCore: (projectName: string, environment?: string) =>
+		api.post(`/projects/${projectName}/wordpress/update`, undefined, {
+			params: environment ? { environment } : undefined,
+		}),
 
 	// Backup and Restore
 	createBackup: (projectName: string, options?: any) =>
@@ -454,6 +545,25 @@ export const dashboardApi = {
 	unassignClientFromProject: (projectName: string) =>
 		api.delete(`/projects/${projectName}/unassign-client`), // Keep specific if implemented in projects, but likely clients related
 
+	// Invoices
+	getInvoices: (params?: {
+		status?: string;
+		environment_id?: number;
+		client_id?: number;
+		limit?: number;
+		offset?: number;
+	}) => api.get('/invoices', { params }),
+	getInvoice: (invoiceId: number) => api.get(`/invoices/${invoiceId}`),
+	sendInvoice: (invoiceId: number) => api.post(`/invoices/${invoiceId}/send`),
+	updateInvoice: (invoiceId: number, data: { status?: string }) =>
+		api.put(`/invoices/${invoiceId}`, data),
+	recordInvoicePayment: (
+		invoiceId: number,
+		data: { amount: number; payment_method: string; payment_reference?: string }
+	) => api.post(`/invoices/${invoiceId}/payment`, data),
+	downloadInvoicePdf: (invoiceId: number) =>
+		api.get(`/invoices/${invoiceId}/pdf`, { responseType: 'blob' }),
+
 	// Deployments
 	promoteDeployment: (data: any) => api.post('/deployments/promote', data),
 	getDeploymentHistory: () => api.get('/deployments/history'),
@@ -479,6 +589,8 @@ export const dashboardApi = {
 		api.get(`/cyberpanel/servers/${serverId}/websites`),
 	getServerPanelLogin: (serverId: number) =>
 		api.get(`/servers/${serverId}/panel/login-url`),
+	getServerPanelSession: (serverId: number) =>
+		api.post(`/servers/${serverId}/panel/session-url`),
 	createCyberPanelWebsite: (serverId: number, data: any) =>
 		api.post(`/cyberpanel/servers/${serverId}/websites`, data),
 	deleteCyberPanelWebsite: (serverId: number, domain: string) =>
@@ -511,8 +623,23 @@ export const dashboardApi = {
 	) => api.post(`/projects/${projectId}/clone`, data),
 
 	// Project Backups
-	getProjectBackups: (projectId: number) =>
-		api.get(`/projects/${projectId}/backups`),
+	getProjectBackups: (
+		projectId: number,
+		page: number = 1,
+		pageSize: number = 10
+	) =>
+		api.get(`/projects/${projectId}/backups`, {
+			params: { page, page_size: pageSize },
+		}),
+	downloadProjectBackup: (
+		projectId: number,
+		path: string,
+		storage: string = 'local'
+	) =>
+		api.get(`/projects/${projectId}/backups/download`, {
+			params: { path, storage },
+			responseType: 'blob',
+		}),
 
 	// Import from CyberPanel
 	getServerWebsites: (serverId: number) =>
@@ -614,11 +741,15 @@ export const dashboardApi = {
 	getBackup: (backupId: number) => api.get(`/backups/${backupId}`),
 	createManualBackup: (data: {
 		project_id: number;
+		environment_id?: number;
 		backup_type?: string;
 		storage_type?: string;
 		name?: string;
 	}) => api.post('/backups', data),
-	deleteBackup: (backupId: number) => api.delete(`/backups/${backupId}`),
+	deleteBackup: (
+		backupId: number,
+		params?: { delete_file?: boolean; force?: boolean }
+	) => api.delete(`/backups/${backupId}`, { params }),
 	downloadBackup: (backupId: number) =>
 		api.get(`/backups/${backupId}/download`, { responseType: 'blob' }),
 	restoreBackupFile: (
@@ -628,6 +759,43 @@ export const dashboardApi = {
 
 	// Tasks
 	getTaskStatus: (taskId: string) => api.get(`/projects/tasks/${taskId}`),
+
+	// Project Servers
+	getProjectServers: (projectId: number) =>
+		api.get(`/projects/${projectId}/servers`),
+	getProjectDriveBackupIndex: (projectId: number, environment?: string) =>
+		api.get(`/projects/${projectId}/drive/backups/index`, {
+			params: { environment },
+		}),
+	refreshProjectWhois: (projectId: number) =>
+		api.post(`/projects/${projectId}/whois/refresh`),
+
+	// Migrations
+	runUrlMigration: (data: {
+		project_server_id: number;
+		source_url: string;
+		target_url: string;
+		backup_before?: boolean;
+		download_backup?: boolean;
+		dry_run?: boolean;
+	}) => api.post('/migrations/url-replace', data),
+	cloneFromDrive: (data: {
+		project_id: number;
+		target_server_id: number;
+		target_domain: string;
+		environment: string;
+		backup_timestamp: string;
+		source_url?: string;
+		target_url?: string;
+		create_cyberpanel_site?: boolean;
+		include_database?: boolean;
+		include_files?: boolean;
+		set_shell_user?: string;
+		run_composer_install?: boolean;
+		run_composer_update?: boolean;
+		run_wp_plugin_update?: boolean;
+		dry_run?: boolean;
+	}) => api.post('/migrations/drive/clone', data),
 
 	// Configuration
 	getDashboardConfig: async () => {
@@ -721,6 +889,16 @@ export const dashboardApi = {
 	updateTag: (id: number, data: any) => api.patch(`/tags/${id}`, data),
 	deleteTag: (id: number) => api.delete(`/tags/${id}`),
 	seedTags: () => api.post('/tags/seed'),
+	getProjectTags: (projectId: number) => api.get(`/tags/project/${projectId}`),
+	setProjectTags: (projectId: number, tagIds: number[]) =>
+		api.put(`/tags/project/${projectId}`, { tag_ids: tagIds }),
+	getClientTags: (clientId: number) => api.get(`/tags/client/${clientId}`),
+	setClientTags: (clientId: number, tagIds: number[]) =>
+		api.put(`/tags/client/${clientId}`, { tag_ids: tagIds }),
+	addClientTag: (clientId: number, tagId: number) =>
+		api.post(`/tags/client/${clientId}/add/${tagId}`),
+	removeClientTag: (clientId: number, tagId: number) =>
+		api.delete(`/tags/client/${clientId}/remove/${tagId}`),
 
 	// Notification Channels
 	getNotificationChannels: () => api.get('/notifications/'),
@@ -746,8 +924,39 @@ export const dashboardApi = {
 		config?: Record<string, any>;
 	}) => api.post('/notifications/test', data),
 
+	// Analytics
+	runGa4Report: (data: {
+		project_id: number;
+		environment_id?: number;
+		property_id?: string;
+		credentials_path?: string;
+		start_date?: string;
+		end_date?: string;
+		days?: number;
+	}) => api.post('/analytics/ga4/run', data),
+	runLighthouseReport: (data: {
+		project_id: number;
+		environment_id?: number;
+		url?: string;
+		device?: 'desktop' | 'mobile';
+	}) => api.post('/analytics/lighthouse/run', data),
+	getAnalyticsReports: (params: {
+		project_id: number;
+		environment_id?: number;
+		report_type?: 'ga4' | 'lighthouse';
+		limit?: number;
+	}) => api.get('/analytics/reports', { params }),
+	getAnalyticsReport: (reportId: number) =>
+		api.get(`/analytics/reports/${reportId}`),
+
 	// Health
 	getHealth: () => api.get('/dashboard/health'),
+
+	// WP Site Management
+	getWpSiteState: (projectServerId: number) =>
+		api.get(`/wp/sites/${projectServerId}/state`),
+	scanWpSite: (projectServerId: number) =>
+		api.post(`/wp/sites/${projectServerId}/scan`),
 
 	// Security Scan
 	runSecurityScan: (projectId: number) =>
@@ -762,12 +971,25 @@ export const dashboardApi = {
 	// Backup Restore by ID (supports Google Drive)
 	restoreBackupById: (backupId: number, target?: string) =>
 		api.post(`/backups/${backupId}/restore`, { target: target || 'local' }),
+
+	// Rclone Configuration
+	getRcloneRemotes: () => api.get('/rclone/remotes'),
+	authorizeRclone: (data: {
+		token: string;
+		remote_name?: string;
+		scope?: string;
+	}) => api.post('/rclone/authorize', data),
+	deleteRcloneRemote: (name: string) => api.delete(`/rclone/remotes/${name}`),
+	getRcloneInstallInstructions: () => api.get('/rclone/install-instructions'),
 };
 
 export const settingsApi = {
 	getSystemSSHKey: () => api.get('/settings/ssh-key'),
 	updateSystemSSHKey: (privateKey: string) =>
 		api.put('/settings/ssh-key', { private_key: privateKey }),
+	getRcloneRemotes: () => api.get('/rclone/remotes'),
+	deleteRcloneRemote: (name: string) => api.delete(`/rclone/remotes/${name}`),
+	configureS3Remote: (data: any) => api.post('/rclone/remotes/s3', data),
 };
 
 export default api;
