@@ -150,7 +150,7 @@ const ClientDetail: React.FC = () => {
 				tax_rate: options.tax_rate,
 				discount_amount: options.discount_amount,
 				notes: options.notes,
-				currency: client?.billing_info?.currency || 'USD',
+				currency: client?.currency || 'USD',
 			});
 			queryClient.invalidateQueries({ queryKey: ['invoices', clientId] });
 			setShowCreateInvoiceModal(false);
@@ -286,19 +286,19 @@ const ClientDetail: React.FC = () => {
 								<div className='flex justify-between border-b pb-2'>
 									<span className='text-gray-500'>Rate</span>
 									<span className='font-medium'>
-										{client.billing_info.currency} {client.billing_info.rate}
+										{client.currency} {client.monthly_retainer}
 									</span>
 								</div>
 								<div className='flex justify-between border-b pb-2'>
 									<span className='text-gray-500'>Cycle</span>
 									<span className='font-medium capitalize'>
-										{client.billing_info.billing_cycle}
+										monthly
 									</span>
 								</div>
 								<div className='flex justify-between border-b pb-2'>
 									<span className='text-gray-500'>Payment Method</span>
 									<span className='font-medium'>
-										{client.billing_info.payment_method || 'N/A'}
+										{client.payment_terms || 'N/A'}
 									</span>
 								</div>
 							</div>
@@ -525,7 +525,7 @@ const ClientDetail: React.FC = () => {
 				<CreateInvoiceModal
 					clientId={Number(clientId)}
 					services={services}
-					currency={client.billing_info?.currency || 'USD'}
+					currency={client.currency || 'USD'}
 					onClose={() => setShowCreateInvoiceModal(false)}
 					onSubmit={handleCreateInvoice}
 				/>

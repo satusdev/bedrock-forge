@@ -210,6 +210,7 @@ export default function Monitoring() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">URL</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Response</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Checked</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Uptime</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
                 </tr>
@@ -233,6 +234,13 @@ export default function Monitoring() {
                       ) : (
                         <span className="text-sm text-gray-400">-</span>
                       )}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-500">
+                        {monitor.last_check_at ? (
+                            new Date(monitor.last_check_at).toLocaleString()
+                        ) : (
+                            <span className="text-gray-400">-</span>
+                        )}
                     </td>
                     <td className="px-6 py-4">
                       <span className={`text-sm font-medium ${getUptimeColor(monitor.uptime_percentage)}`}>
