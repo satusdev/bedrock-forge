@@ -8,18 +8,23 @@ import CreateProjectWizard from './pages/CreateProjectWizard';
 import ProjectDetail from './pages/ProjectDetail';
 import Clients from './pages/Clients';
 import Backups from './pages/Backups';
+import Migrations from './pages/Migrations';
 import Settings from './pages/Settings';
 import Servers from './pages/Servers';
 import ServerDetail from './pages/ServerDetail';
 import Monitoring from './pages/Monitoring';
+import Analytics from './pages/Analytics';
 import Subscriptions from './pages/Subscriptions';
 import Packages from './pages/Packages';
+import Invoices from './pages/Invoices';
 import Domains from './pages/Domains';
 import SSL from './pages/SSL';
 import ClientDetail from './pages/ClientDetail';
 import AuditLogs from './pages/AuditLogs';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import ClientPortal from './pages/ClientPortal';
+import StatusPage from './pages/StatusPage';
 import Deployments from './pages/Deployments';
 import Schedules from './pages/Schedules';
 import Users from './pages/Users';
@@ -42,6 +47,9 @@ function App() {
 			{/* Public routes */}
 			<Route path='/login' element={<Login />} />
 			<Route path='/register' element={<Register />} />
+			<Route path='/portal' element={<ClientPortal />} />
+			<Route path='/status' element={<StatusPage />} />
+			<Route path='/status/:projectId' element={<StatusPage />} />
 
 			{/* Protected routes */}
 			<Route
@@ -60,8 +68,10 @@ function App() {
 								<Route path='/servers' element={<Servers />} />
 								<Route path='/servers/:serverId' element={<ServerDetail />} />
 								<Route path='/monitoring' element={<Monitoring />} />
+								<Route path='/analytics' element={<Analytics />} />
 
 								{/* Billing & Assets */}
+								<Route path='/billing/invoices' element={<Invoices />} />
 								<Route
 									path='/billing/subscriptions'
 									element={<Subscriptions />}
@@ -73,6 +83,7 @@ function App() {
 								<Route path='/clients' element={<Clients />} />
 								<Route path='/clients/:clientId' element={<ClientDetail />} />
 								<Route path='/backups' element={<Backups />} />
+								<Route path='/migrations' element={<Migrations />} />
 								<Route path='/audit-logs' element={<AuditLogs />} />
 								<Route path='/deployments' element={<Deployments />} />
 								<Route path='/schedules' element={<Schedules />} />

@@ -22,6 +22,7 @@ import {
 	MessageSquare,
 	HardDrive,
 	Github,
+	Folder,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Card from '@/components/ui/Card';
@@ -30,6 +31,7 @@ import Badge from '@/components/ui/Badge';
 import { dashboardApi, settingsApi } from '@/services/api';
 import { useTheme } from '@/contexts/ThemeContext';
 import { Key } from 'lucide-react';
+import S3IntegrationCard from '@/components/S3IntegrationCard';
 
 const Settings: React.FC = () => {
 	const queryClient = useQueryClient();
@@ -503,6 +505,12 @@ const Settings: React.FC = () => {
 
 							{/* Google Drive Integration */}
 							<GoogleDriveIntegrationCard />
+
+							{/* S3 Integration */}
+							<S3IntegrationCard />
+
+							{/* Storage Browser for testing */}
+							<StorageBrowserCard />
 
 							{/* GitHub Integration */}
 							<GitHubIntegrationCard />
@@ -1263,135 +1271,422 @@ const AddNotificationChannelModal: React.FC<
 // Google Drive Integration Card Component
 const GoogleDriveIntegrationCard: React.FC = () => {
 	const queryClient = useQueryClient();
-	const [isConnecting, setIsConnecting] = useState(false);
+	const [remoteName, setRemoteName] = useState('gdrive');
+	const [basePath, setBasePath] = useState('WebDev/Projects');
+	const [showSetupModal, setShowSetupModal] = useState(false);
 
-	const { data: gdriveStatus, isLoading } = useQuery({
+	const { data: gdriveStatus, isLoading: statusLoading } = useQuery({
 		queryKey: ['gdrive-status'],
-		queryFn: dashboardApi.getGoogleDriveAuthStatus,
+		queryFn: dashboardApi.getDriveStatus,
 	});
 
-	const disconnectMutation = useMutation({
-		mutationFn: dashboardApi.disconnectGoogleDrive,
+	const { data: configData } = useQuery({
+		queryKey: ['dashboard-config'],
+		queryFn: dashboardApi.getDashboardConfig,
+	});
+
+	const updateConfigMutation = useMutation({
+		mutationFn: dashboardApi.updateDashboardConfig,
 		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['dashboard-config'] });
 			queryClient.invalidateQueries({ queryKey: ['gdrive-status'] });
-			toast.success('Google Drive disconnected');
+			toast.success('Drive settings updated');
 		},
-		onError: () => toast.error('Failed to disconnect Google Drive'),
+		onError: (error: any) => {
+			toast.error(error.response?.data?.detail || 'Failed to update settings');
+		},
 	});
 
-	// Handle OAuth callback from URL
 	React.useEffect(() => {
-		const urlParams = new URLSearchParams(window.location.search);
-		const code = urlParams.get('code');
-		const state = urlParams.get('state');
-		const oauthProvider =
-			urlParams.get('oauth') || (state?.includes('google') ? 'google' : null);
+		if (!configData?.data) return;
+		setRemoteName(configData.data.gdrive_rclone_remote || 'gdrive');
+		setBasePath(configData.data.gdrive_base_path || 'WebDev/Projects');
+	}, [configData]);
 
-		if (code && (oauthProvider === 'google' || state)) {
-			// Complete the OAuth flow
-			setIsConnecting(true);
-			dashboardApi
-				.completeGoogleDriveAuth(
-					code,
-					state || '',
-					window.location.origin + '/settings'
-				)
-				.then(() => {
-					queryClient.invalidateQueries({ queryKey: ['gdrive-status'] });
-					toast.success('Google Drive connected successfully!');
-					// Clean URL
-					window.history.replaceState({}, document.title, '/settings');
-				})
-				.catch(err => {
-					toast.error(
-						'Failed to connect Google Drive: ' +
-							(err.response?.data?.detail || err.message)
-					);
-				})
-				.finally(() => setIsConnecting(false));
-		}
-	}, [queryClient]);
+	const handleSave = () => {
+		if (!configData?.data) return;
+		updateConfigMutation.mutate({
+			...configData.data,
+			gdrive_rclone_remote: remoteName.trim() || 'gdrive',
+			gdrive_base_path: basePath.trim() || 'WebDev/Projects',
+		});
+	};
 
-	const handleConnect = async () => {
-		try {
-			setIsConnecting(true);
-			const response = await dashboardApi.getGoogleDriveAuthUrl(
-				window.location.origin + '/settings?oauth=google'
-			);
-			if (response.data?.auth_url) {
-				window.location.href = response.data.auth_url;
+	const configured = gdriveStatus?.data?.configured;
+
+	return (
+		<>
+			<Card title='Google Drive Integration'>
+				<div className='space-y-4'>
+					<p className='text-sm text-gray-600 dark:text-gray-400'>
+						Configure rclone for Google Drive backups and folder browsing.
+					</p>
+
+					{statusLoading ? (
+						<div className='flex items-center'>
+							<Loader2 className='w-5 h-5 animate-spin text-gray-500' />
+							<span className='ml-2 text-sm text-gray-500'>
+								Checking status...
+							</span>
+						</div>
+					) : configured ? (
+						<div className='space-y-4'>
+							<div className='flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/20 rounded-lg'>
+								<div className='flex items-center'>
+									<HardDrive className='w-5 h-5 text-green-600 dark:text-green-400 mr-2' />
+									<div>
+										<span className='text-green-700 dark:text-green-300 font-medium'>
+											Connected
+										</span>
+										<p className='text-sm text-gray-500 dark:text-gray-400'>
+											Remote: {gdriveStatus?.data?.remote_name || remoteName}
+										</p>
+									</div>
+								</div>
+							</div>
+							<p className='text-xs text-gray-500'>
+								{gdriveStatus?.data?.message || 'rclone is configured'}
+							</p>
+						</div>
+					) : (
+						<div className='space-y-3'>
+							<div className='flex items-center justify-between p-3 text-amber-700 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-300 rounded-lg'>
+								<div className='flex items-center space-x-2'>
+									<HardDrive className='w-4 h-4' />
+									<span className='text-sm font-medium'>
+										{gdriveStatus?.data?.message ||
+											'Google Drive not configured'}
+									</span>
+								</div>
+								<Button
+									size='sm'
+									variant='primary'
+									onClick={() => setShowSetupModal(true)}
+								>
+									<Plus className='w-4 h-4 mr-1' />
+									Configure
+								</Button>
+							</div>
+						</div>
+					)}
+
+					<div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
+						<div>
+							<label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
+								rclone Remote Name
+							</label>
+							<input
+								value={remoteName}
+								onChange={e => setRemoteName(e.target.value)}
+								placeholder='gdrive'
+								className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-white dark:border-gray-600'
+							/>
+						</div>
+						<div>
+							<label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
+								Base Path
+							</label>
+							<input
+								value={basePath}
+								onChange={e => setBasePath(e.target.value)}
+								placeholder='WebDev/Projects'
+								className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-white dark:border-gray-600'
+							/>
+							<p className='text-xs text-gray-500 mt-1'>
+								Default path: {`gdrive:${basePath || 'WebDev/Projects'}`}
+							</p>
+						</div>
+					</div>
+
+					<div className='flex items-center gap-2'>
+						<Button
+							variant='primary'
+							onClick={handleSave}
+							disabled={updateConfigMutation.isPending}
+						>
+							{updateConfigMutation.isPending ? (
+								<Loader2 className='w-4 h-4 mr-2 animate-spin' />
+							) : (
+								<Save className='w-4 h-4 mr-2' />
+							)}
+							Save Settings
+						</Button>
+						<Button
+							variant='secondary'
+							onClick={() =>
+								queryClient.invalidateQueries({ queryKey: ['gdrive-status'] })
+							}
+						>
+							<RefreshCw className='w-4 h-4 mr-2' />
+							Refresh Status
+						</Button>
+						{configured && (
+							<Button
+								variant='secondary'
+								onClick={() => setShowSetupModal(true)}
+							>
+								Reconfigure
+							</Button>
+						)}
+					</div>
+				</div>
+			</Card>
+
+			{showSetupModal && (
+				<RcloneSetupModal
+					remoteName={remoteName}
+					onClose={() => setShowSetupModal(false)}
+					onSuccess={() => {
+						queryClient.invalidateQueries({ queryKey: ['gdrive-status'] });
+						queryClient.invalidateQueries({ queryKey: ['rclone-remotes'] });
+						setShowSetupModal(false);
+					}}
+				/>
+			)}
+		</>
+	);
+};
+
+// Rclone Setup Modal - 3-step wizard for headless authentication
+interface RcloneSetupModalProps {
+	remoteName: string;
+	onClose: () => void;
+	onSuccess: () => void;
+}
+
+const RcloneSetupModal: React.FC<RcloneSetupModalProps> = ({
+	remoteName,
+	onClose,
+	onSuccess,
+}) => {
+	const [step, setStep] = useState(1);
+	const [token, setToken] = useState('');
+	const [isSubmitting, setIsSubmitting] = useState(false);
+	const [copied, setCopied] = useState(false);
+
+	const authorizeCommand = 'rclone authorize "drive"';
+
+	const authorizeMutation = useMutation({
+		mutationFn: dashboardApi.authorizeRclone,
+		onSuccess: response => {
+			if (response.data.success) {
+				toast.success(
+					response.data.message || 'Google Drive configured successfully!'
+				);
+				onSuccess();
 			} else {
-				toast.error('Failed to get authorization URL');
-				setIsConnecting(false);
+				toast.error(response.data.message || 'Configuration failed');
 			}
-		} catch (error: any) {
-			toast.error(error.response?.data?.detail || 'Failed to start OAuth flow');
-			setIsConnecting(false);
+		},
+		onError: (error: any) => {
+			toast.error(error.response?.data?.detail || 'Failed to authorize rclone');
+		},
+		onSettled: () => {
+			setIsSubmitting(false);
+		},
+	});
+
+	const handleCopyCommand = async () => {
+		try {
+			await navigator.clipboard.writeText(authorizeCommand);
+			setCopied(true);
+			toast.success('Command copied to clipboard');
+			setTimeout(() => setCopied(false), 2000);
+		} catch {
+			toast.error('Failed to copy');
 		}
 	};
 
-	const connected = gdriveStatus?.data?.authenticated;
+	const handleSubmit = () => {
+		if (!token.trim()) {
+			toast.error('Please paste the token from rclone authorize');
+			return;
+		}
+
+		// Validate JSON format
+		try {
+			JSON.parse(token.trim());
+		} catch {
+			toast.error('Invalid token format. Please paste the entire JSON output.');
+			return;
+		}
+
+		setIsSubmitting(true);
+		authorizeMutation.mutate({
+			token: token.trim(),
+			remote_name: remoteName,
+			scope: 'drive',
+		});
+	};
 
 	return (
-		<Card title='Google Drive Integration'>
-			<div className='space-y-4'>
-				<p className='text-sm text-gray-600 dark:text-gray-400'>
-					Connect Google Drive for cloud backups and file storage.
-				</p>
+		<div className='fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50'>
+			<div className='bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto'>
+				<div className='flex items-center justify-between p-4 border-b dark:border-gray-700'>
+					<h2 className='text-xl font-semibold text-gray-900 dark:text-white'>
+						Configure Google Drive
+					</h2>
+					<button
+						onClick={onClose}
+						className='text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+					>
+						<X className='w-6 h-6' />
+					</button>
+				</div>
 
-				{isLoading ? (
-					<div className='flex items-center'>
-						<Loader2 className='w-5 h-5 animate-spin text-gray-500' />
-						<span className='ml-2 text-sm text-gray-500'>
-							Checking status...
-						</span>
-					</div>
-				) : connected ? (
-					<div className='space-y-4'>
-						<div className='flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/20 rounded-lg'>
-							<div className='flex items-center'>
-								<HardDrive className='w-5 h-5 text-green-600 dark:text-green-400 mr-2' />
+				{/* Progress Steps */}
+				<div className='flex items-center justify-center p-4 border-b dark:border-gray-700'>
+					{[1, 2, 3].map(s => (
+						<React.Fragment key={s}>
+							<div
+								className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+									step >= s
+										? 'bg-primary-600 text-white'
+										: 'bg-gray-200 dark:bg-gray-700 text-gray-500'
+								}`}
+							>
+								{step > s ? <Check className='w-4 h-4' /> : s}
+							</div>
+							{s < 3 && (
+								<div
+									className={`w-16 h-1 mx-2 ${
+										step > s ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-700'
+									}`}
+								/>
+							)}
+						</React.Fragment>
+					))}
+				</div>
+
+				<div className='p-6'>
+					{step === 1 && (
+						<div className='space-y-4'>
+							<h3 className='text-lg font-medium text-gray-900 dark:text-white'>
+								Step 1: Install rclone on your local machine
+							</h3>
+							<p className='text-sm text-gray-600 dark:text-gray-400'>
+								rclone must be installed on a computer with a web browser (not
+								in Docker).
+							</p>
+							<div className='bg-gray-50 dark:bg-gray-900 rounded-lg p-4 space-y-3'>
 								<div>
-									<span className='text-green-700 dark:text-green-300 font-medium'>
-										Connected
+									<span className='text-xs font-medium text-gray-500 uppercase'>
+										Linux/macOS:
 									</span>
-									{gdriveStatus?.data?.email && (
-										<p className='text-sm text-gray-500 dark:text-gray-400'>
-											{gdriveStatus.data.email}
-										</p>
-									)}
+									<code className='block mt-1 text-sm bg-gray-100 dark:bg-gray-800 p-2 rounded'>
+										curl https://rclone.org/install.sh | sudo bash
+									</code>
+								</div>
+								<div>
+									<span className='text-xs font-medium text-gray-500 uppercase'>
+										macOS (Homebrew):
+									</span>
+									<code className='block mt-1 text-sm bg-gray-100 dark:bg-gray-800 p-2 rounded'>
+										brew install rclone
+									</code>
+								</div>
+								<div>
+									<span className='text-xs font-medium text-gray-500 uppercase'>
+										Windows:
+									</span>
+									<p className='text-sm text-gray-600 dark:text-gray-400 mt-1'>
+										Download from{' '}
+										<a
+											href='https://rclone.org/downloads/'
+											target='_blank'
+											rel='noopener noreferrer'
+											className='text-primary-600 hover:underline'
+										>
+											rclone.org/downloads
+										</a>
+									</p>
 								</div>
 							</div>
-							<Button
-								variant='secondary'
-								size='sm'
-								onClick={() => disconnectMutation.mutate()}
-								disabled={disconnectMutation.isPending}
-							>
-								{disconnectMutation.isPending ? (
-									<Loader2 className='w-4 h-4 animate-spin' />
-								) : (
-									'Disconnect'
-								)}
-							</Button>
+							<div className='flex justify-end'>
+								<Button onClick={() => setStep(2)}>
+									Next <span className='ml-1'>→</span>
+								</Button>
+							</div>
 						</div>
-					</div>
-				) : (
-					<Button
-						variant='primary'
-						onClick={handleConnect}
-						disabled={isConnecting}
-					>
-						{isConnecting ? (
-							<Loader2 className='w-4 h-4 mr-2 animate-spin' />
-						) : (
-							<HardDrive className='w-4 h-4 mr-2' />
-						)}
-						Connect Google Drive
-					</Button>
-				)}
+					)}
+
+					{step === 2 && (
+						<div className='space-y-4'>
+							<h3 className='text-lg font-medium text-gray-900 dark:text-white'>
+								Step 2: Run the authorize command
+							</h3>
+							<p className='text-sm text-gray-600 dark:text-gray-400'>
+								Run this command on your local machine. It will open a browser
+								for Google authentication.
+							</p>
+							<div className='flex items-center gap-2'>
+								<code className='flex-1 text-sm bg-gray-100 dark:bg-gray-800 p-3 rounded-lg font-mono'>
+									{authorizeCommand}
+								</code>
+								<Button variant='secondary' onClick={handleCopyCommand}>
+									{copied ? <Check className='w-4 h-4' /> : 'Copy'}
+								</Button>
+							</div>
+							<div className='bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg'>
+								<p className='text-sm text-blue-700 dark:text-blue-300'>
+									<strong>After authenticating:</strong> rclone will display a
+									JSON token in your terminal. Copy the entire JSON output
+									(including the curly braces).
+								</p>
+							</div>
+							<div className='flex justify-between'>
+								<Button variant='secondary' onClick={() => setStep(1)}>
+									<span className='mr-1'>←</span> Back
+								</Button>
+								<Button onClick={() => setStep(3)}>
+									Next <span className='ml-1'>→</span>
+								</Button>
+							</div>
+						</div>
+					)}
+
+					{step === 3 && (
+						<div className='space-y-4'>
+							<h3 className='text-lg font-medium text-gray-900 dark:text-white'>
+								Step 3: Paste the token
+							</h3>
+							<p className='text-sm text-gray-600 dark:text-gray-400'>
+								Paste the JSON token that rclone displayed after authentication.
+							</p>
+							<div>
+								<label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
+									Token (JSON)
+								</label>
+								<textarea
+									value={token}
+									onChange={e => setToken(e.target.value)}
+									placeholder='{"access_token":"...", "token_type":"Bearer", "refresh_token":"...", "expiry":"..."}'
+									rows={5}
+									className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-white font-mono text-sm'
+								/>
+							</div>
+							<div className='flex justify-between'>
+								<Button variant='secondary' onClick={() => setStep(2)}>
+									<span className='mr-1'>←</span> Back
+								</Button>
+								<Button
+									variant='primary'
+									onClick={handleSubmit}
+									disabled={isSubmitting || !token.trim()}
+								>
+									{isSubmitting ? (
+										<Loader2 className='w-4 h-4 mr-2 animate-spin' />
+									) : (
+										<Check className='w-4 h-4 mr-2' />
+									)}
+									Complete Setup
+								</Button>
+							</div>
+						</div>
+					)}
+				</div>
 			</div>
-		</Card>
+		</div>
 	);
 };
 
@@ -1473,7 +1768,9 @@ const GitHubIntegrationCard: React.FC = () => {
 		} catch (error: any) {
 			// If OAuth not configured, fall back to PAT
 			if (error.response?.status === 400) {
-				toast.info('GitHub OAuth not configured. Use Personal Access Token.');
+				toast('GitHub OAuth not configured. Use Personal Access Token.', {
+					icon: 'ℹ️',
+				});
 				setShowTokenInput(true);
 			} else {
 				toast.error(
@@ -1593,6 +1890,93 @@ const GitHubIntegrationCard: React.FC = () => {
 						<Button variant='secondary' onClick={() => setShowTokenInput(true)}>
 							Use Token
 						</Button>
+					</div>
+				)}
+			</div>
+		</Card>
+	);
+};
+
+// Storage Browser Card for testing Drive configuration
+const StorageBrowserCard: React.FC = () => {
+	const [folders, setFolders] = useState<{ path: string; source?: string }[]>(
+		[]
+	);
+	const [isLoading, setIsLoading] = useState(false);
+	const [hasLoaded, setHasLoaded] = useState(false);
+
+	const handleBrowse = async () => {
+		setIsLoading(true);
+		try {
+			const response = await dashboardApi.listDriveFolders({
+				shared_with_me: true,
+				max_results: 100,
+			});
+			setFolders(response.data?.folders || []);
+			setHasLoaded(true);
+			if ((response.data?.folders || []).length === 0) {
+				toast('No folders found', { icon: '📂' });
+			}
+		} catch (error) {
+			console.error('Browse failed:', error);
+			toast.error('Failed to browse Drive folders');
+		} finally {
+			setIsLoading(false);
+		}
+	};
+
+	return (
+		<Card title='Storage Browser'>
+			<div className='space-y-4'>
+				<p className='text-sm text-gray-600 dark:text-gray-400'>
+					Test your Google Drive connection by browsing available folders.
+				</p>
+
+				<Button variant='secondary' onClick={handleBrowse} disabled={isLoading}>
+					{isLoading ? (
+						<>
+							<Loader2 className='w-4 h-4 mr-2 animate-spin' />
+							Loading...
+						</>
+					) : (
+						<>
+							<HardDrive className='w-4 h-4 mr-2' />
+							Browse Drive
+						</>
+					)}
+				</Button>
+
+				{hasLoaded && (
+					<div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-4'>
+						{folders.length === 0 ? (
+							<div className='col-span-full text-center py-8 text-gray-500'>
+								No folders found. Check your rclone configuration.
+							</div>
+						) : (
+							folders.map((folder, index) => (
+								<div
+									key={`${folder.path}-${index}`}
+									className='p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-primary-300 dark:hover:border-primary-600 transition-colors'
+								>
+									<div className='flex items-start gap-2'>
+										<Folder className='w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5' />
+										<div className='min-w-0 flex-1'>
+											<p className='text-sm font-medium text-gray-900 dark:text-white truncate'>
+												{folder.path.split('/').pop() || folder.path}
+											</p>
+											<p className='text-xs text-gray-500 truncate'>
+												{folder.path}
+											</p>
+											{folder.source && (
+												<span className='inline-block mt-1 px-2 py-0.5 text-xs rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'>
+													{folder.source}
+												</span>
+											)}
+										</div>
+									</div>
+								</div>
+							))
+						)}
 					</div>
 				)}
 			</div>

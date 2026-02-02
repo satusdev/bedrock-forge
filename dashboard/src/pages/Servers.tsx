@@ -25,7 +25,7 @@ import {
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
-import api from '../services/api';
+import api, { dashboardApi } from '../services/api';
 import toast from 'react-hot-toast';
 
 interface ServerData {
@@ -193,7 +193,7 @@ export default function Servers() {
 
 	// Verify Panel mutation
 	const verifyPanelMutation = useMutation({
-		mutationFn: (id: number) => api.verifyCyberPanel(id),
+		mutationFn: (id: number) => dashboardApi.verifyCyberPanel(id),
 		onSuccess: (response: any) => {
 			queryClient.invalidateQueries({ queryKey: ['servers'] });
 			if (response.data.verified) {
@@ -224,18 +224,24 @@ export default function Servers() {
 		onError: () => toast.error('Failed to scan server'),
 	});
 
-	// Get panel login URL
+	// Get panel session URL
 	const getPanelLoginMutation = useMutation({
-		mutationFn: (id: number) =>
-			api.get<{ login_url: string; username: string; password: string }>(
-				`/servers/${id}/panel/login-url`
-			),
+		mutationFn: async (id: number) => {
+			try {
+				return await api.post(`/servers/${id}/panel/session-url`);
+			} catch (error: any) {
+				return await api.get(`/servers/${id}/panel/login-url`);
+			}
+		},
 		onSuccess: (response: any) => {
 			const data = response.data;
-			// Open panel in new tab
-			window.open(data.panel_url, '_blank');
-			// Show credentials in a toast
-			toast.success(`Panel opened. User: ${data.username}`, { duration: 5000 });
+			const targetUrl = data.session_url || data.panel_url;
+			window.open(targetUrl, '_blank');
+			if (data.username) {
+				toast.success(`Panel opened. User: ${data.username}`, {
+					duration: 5000,
+				});
+			}
 		},
 		onError: (error: any) => {
 			const message =

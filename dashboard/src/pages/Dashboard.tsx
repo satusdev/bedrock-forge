@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
 	FolderKanban,
@@ -28,14 +28,14 @@ const Dashboard: React.FC = () => {
 		setProjects,
 		setGitHubAuthenticated,
 		setGoogleDriveAuthenticated,
+		googleDriveAuthenticated,
 	} = useDashboardStore();
+	const navigate = useNavigate();
 
 	// Modal states
 	const [showGitHubModal, setShowGitHubModal] = useState(false);
-	const [showGDriveModal, setShowGDriveModal] = useState(false);
 	const [gitHubToken, setGitHubToken] = useState('');
 	const [isConfiguring, setIsConfiguring] = useState(false);
-	const [gdriveAuthUrl, setGdriveAuthUrl] = useState('');
 
 	// Set up real-time updates
 	const { isConnected, subscribeToProject, unsubscribeFromProject } =
@@ -76,12 +76,12 @@ const Dashboard: React.FC = () => {
 		},
 	});
 
-	// Check Google Drive auth status
+	// Check Google Drive (rclone) status
 	useQuery({
-		queryKey: ['google-drive-auth-status'],
-		queryFn: dashboardApi.getGoogleDriveAuthStatus,
+		queryKey: ['google-drive-status'],
+		queryFn: dashboardApi.getDriveStatus,
 		onSuccess: (response: any) => {
-			setGoogleDriveAuthenticated(response.data.authenticated);
+			setGoogleDriveAuthenticated(response.data.configured);
 		},
 	});
 
@@ -152,28 +152,6 @@ const Dashboard: React.FC = () => {
 			setGitHubToken('');
 		} catch (error) {
 			console.error('GitHub config failed:', error);
-		} finally {
-			setIsConfiguring(false);
-		}
-	};
-
-	// Handler for Google Drive OAuth
-	const handleGoogleDriveAuth = async () => {
-		setIsConfiguring(true);
-		try {
-			const response = await dashboardApi.authenticateGoogleDrive();
-			const authUrl = response.data?.auth_url;
-			if (authUrl) {
-				setGdriveAuthUrl(authUrl);
-				// Open OAuth URL in new window
-				window.open(authUrl, '_blank', 'width=600,height=700');
-			}
-		} catch (error: any) {
-			console.error('Google Drive auth failed:', error);
-			const message =
-				error.response?.data?.detail ||
-				'Failed to start Google Drive authentication';
-			toast.error(message);
 		} finally {
 			setIsConfiguring(false);
 		}
@@ -430,28 +408,20 @@ const Dashboard: React.FC = () => {
 										Backup Storage
 									</h4>
 									<p className='text-xs text-gray-500 dark:text-gray-400'>
-										Automatic backups to Google Drive
+										rclone-based Drive backups
 									</p>
 								</div>
 							</div>
-							<Badge
-								variant={
-									stats?.data?.google_drive_authenticated
-										? 'success'
-										: 'warning'
-								}
-							>
-								{stats?.data?.google_drive_authenticated
-									? 'Connected'
-									: 'Not Connected'}
+							<Badge variant={googleDriveAuthenticated ? 'success' : 'warning'}>
+								{googleDriveAuthenticated ? 'Ready' : 'Not Configured'}
 							</Badge>
 						</div>
 						<Button
 							className='w-full'
 							variant='secondary'
-							onClick={() => setShowGDriveModal(true)}
+							onClick={() => navigate('/settings')}
 						>
-							Configure Google Drive
+							Open Drive Settings
 						</Button>
 					</div>
 				</Card>
@@ -499,61 +469,6 @@ const Dashboard: React.FC = () => {
 								disabled={isConfiguring || !gitHubToken.trim()}
 							>
 								{isConfiguring ? 'Connecting...' : 'Connect'}
-							</Button>
-						</div>
-					</div>
-				</div>
-			)}
-
-			{/* Google Drive Configuration Modal */}
-			{showGDriveModal && (
-				<div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
-					<div className='bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md p-6'>
-						<div className='flex items-center justify-between mb-4'>
-							<h3 className='text-lg font-semibold text-gray-900 dark:text-white'>
-								Configure Google Drive
-							</h3>
-							<button
-								onClick={() => setShowGDriveModal(false)}
-								className='text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
-							>
-								✕
-							</button>
-						</div>
-						<p className='text-sm text-gray-600 dark:text-gray-400 mb-4'>
-							Connect your Google Drive account to enable automatic backups.
-						</p>
-						{gdriveAuthUrl ? (
-							<div className='mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 rounded-lg text-sm'>
-								<p>
-									Authorization window opened. Complete the OAuth flow there.
-								</p>
-								<a
-									href={gdriveAuthUrl}
-									target='_blank'
-									rel='noopener noreferrer'
-									className='text-blue-600 dark:text-blue-400 underline mt-2 block'
-								>
-									Click here if the window didn't open
-								</a>
-							</div>
-						) : (
-							<p className='text-sm text-gray-500 dark:text-gray-400 mb-4'>
-								You'll be redirected to Google to authorize access.
-							</p>
-						)}
-						<div className='flex justify-end space-x-3'>
-							<Button
-								variant='outline'
-								onClick={() => {
-									setShowGDriveModal(false);
-									setGdriveAuthUrl('');
-								}}
-							>
-								Cancel
-							</Button>
-							<Button onClick={handleGoogleDriveAuth} disabled={isConfiguring}>
-								{isConfiguring ? 'Connecting...' : 'Start Authorization'}
 							</Button>
 						</div>
 					</div>
