@@ -31,6 +31,7 @@ from .tag import Tag
 from .role import Role, Permission
 from .project_tag import project_tags, server_tags, client_tags
 from .analytics_report import AnalyticsReport, AnalyticsReportType
+from .plugin_policy import PluginPolicy, ProjectPluginPolicy
 
 __all__ = [
     # Models
@@ -117,6 +118,8 @@ __all__ = [
     # Analytics
     "AnalyticsReport",
     "AnalyticsReportType",
+    "PluginPolicy",
+    "ProjectPluginPolicy",
     # Tags
     "Tag",
     "project_tags",

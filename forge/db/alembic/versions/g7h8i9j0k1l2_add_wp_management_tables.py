@@ -69,7 +69,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Remove WordPress management tables."""
-    op.drop_index('ix_wp_updates_project_server_id', 'wp_updates')
+    op.drop_index('ix_wp_updates_project_server_id', 'wp_updates', if_exists=True)
     op.drop_table('wp_updates')
     op.drop_table('wp_site_states')
     

@@ -84,13 +84,13 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     # ### Drop wp_credentials table ###
-    op.drop_index('ix_wp_credentials_user_id', 'wp_credentials')
-    op.drop_index('ix_wp_credentials_project_server_id', 'wp_credentials')
+    op.drop_index('ix_wp_credentials_user_id', 'wp_credentials', if_exists=True)
+    op.drop_index('ix_wp_credentials_project_server_id', 'wp_credentials', if_exists=True)
     op.drop_table('wp_credentials')
     
     # ### Drop project_servers table ###
-    op.drop_index('ix_project_servers_server_id', 'project_servers')
-    op.drop_index('ix_project_servers_project_id', 'project_servers')
+    op.drop_index('ix_project_servers_server_id', 'project_servers', if_exists=True)
+    op.drop_index('ix_project_servers_project_id', 'project_servers', if_exists=True)
     op.drop_table('project_servers')
     op.execute("DROP TYPE IF EXISTS serverenvironment")
     

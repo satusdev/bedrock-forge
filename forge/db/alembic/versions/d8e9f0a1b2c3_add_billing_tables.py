@@ -166,8 +166,8 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table('ssl_certificates')
-    op.drop_index(op.f('ix_domains_domain_name'), table_name='domains')
+    op.drop_index(op.f('ix_domains_domain_name'), table_name='domains', if_exists=True)
     op.drop_table('domains')
     op.drop_table('subscriptions')
-    op.drop_index(op.f('ix_hosting_packages_slug'), table_name='hosting_packages')
+    op.drop_index(op.f('ix_hosting_packages_slug'), table_name='hosting_packages', if_exists=True)
     op.drop_table('hosting_packages')

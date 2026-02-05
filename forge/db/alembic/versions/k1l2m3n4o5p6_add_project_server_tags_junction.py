@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'k1l2m3n4o5p6'
-down_revision: Union[str, None] = 'j0k1l2m3n4o5'
+down_revision: Union[str, None] = 'm1n2o3p4q5r6'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -47,9 +47,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index('ix_server_tags_tag_id', 'server_tags')
-    op.drop_index('ix_server_tags_server_id', 'server_tags')
-    op.drop_index('ix_project_tags_tag_id', 'project_tags')
-    op.drop_index('ix_project_tags_project_id', 'project_tags')
+    op.drop_index('ix_server_tags_tag_id', 'server_tags', if_exists=True)
+    op.drop_index('ix_server_tags_server_id', 'server_tags', if_exists=True)
+    op.drop_index('ix_project_tags_tag_id', 'project_tags', if_exists=True)
+    op.drop_index('ix_project_tags_project_id', 'project_tags', if_exists=True)
     op.drop_table('server_tags')
     op.drop_table('project_tags')

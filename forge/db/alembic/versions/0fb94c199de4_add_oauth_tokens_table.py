@@ -44,5 +44,5 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade schema - drop oauth_tokens table."""
-    op.drop_index('ix_oauth_tokens_user_provider', table_name='oauth_tokens')
+    op.drop_index('ix_oauth_tokens_user_provider', table_name='oauth_tokens', if_exists=True)
     op.drop_table('oauth_tokens')
