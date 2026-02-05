@@ -29,6 +29,7 @@ from .admin.schedules import router as schedules_router
 from .admin.settings import router as settings_router
 from .admin.migrations import router as migrations_router
 from .admin.analytics import router as analytics_router
+from .admin.plugin_policies import router as plugin_policies_router
 
 # New routes - Phase 2-3
 from .public.status_page import router as status_page_router
@@ -74,6 +75,7 @@ api_router.include_router(schedules_router, prefix="/schedules", tags=["Schedule
 api_router.include_router(settings_router, prefix="/settings", tags=["Settings"])
 api_router.include_router(migrations_router, prefix="/migrations", tags=["Migrations"])
 api_router.include_router(analytics_router, prefix="/analytics", tags=["Analytics"])
+api_router.include_router(plugin_policies_router, prefix="/plugin-policies", tags=["Plugin Policies"])
 api_router.include_router(cloudflare_router, prefix="/cloudflare", tags=["Cloudflare"])
 
 # New routes - Phase 2-3

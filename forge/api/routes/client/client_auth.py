@@ -6,7 +6,7 @@ Separate auth system for client users (not admin Users).
 from datetime import datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request, Header
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -42,6 +42,7 @@ class ClientToken(BaseModel):
     token_type: str = "bearer"
     client_id: int
     client_name: str
+    role: str
 
 
 class ClientUserProfile(BaseModel):
@@ -52,6 +53,7 @@ class ClientUserProfile(BaseModel):
     client_id: int
     client_name: str
     company: str | None
+    role: str
 
 
 class ClientLoginRequest(BaseModel):
@@ -169,7 +171,11 @@ async def client_login(
     
     # Create token
     access_token = create_client_access_token(
-        data={"sub": user.email, "client_id": client.id}
+        data={
+            "sub": user.email,
+            "client_id": client.id,
+            "role": user.role.value,
+        }
     )
     
     logger.info(f"Client user logged in: {user.email}")
@@ -177,17 +183,28 @@ async def client_login(
     return ClientToken(
         access_token=access_token,
         client_id=client.id,
-        client_name=client.name
+        client_name=client.name,
+        role=user.role.value,
     )
 
 
 @router.get("/me", response_model=ClientUserProfile)
 async def get_client_me(
-    token: str,
+    token: str | None = None,
+    authorization: str | None = Header(default=None),
     db: AsyncSession = Depends(get_db)
 ):
     """Get current client user profile."""
-    user = await get_current_client_user(token, db)
+    resolved_token = token
+    if not resolved_token and authorization and authorization.startswith("Bearer "):
+        resolved_token = authorization.replace("Bearer ", "")
+    if not resolved_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing credentials",
+        )
+
+    user = await get_current_client_user(resolved_token, db)
     
     result = await db.execute(
         select(Client).where(Client.id == user.client_id)
@@ -200,7 +217,49 @@ async def get_client_me(
         full_name=user.full_name,
         client_id=user.client_id,
         client_name=client.name if client else "Unknown",
-        company=client.company if client else None
+        company=client.company if client else None,
+        role=user.role.value,
+    )
+
+
+@router.post("/refresh", response_model=ClientToken)
+async def refresh_client_token(
+    authorization: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db)
+):
+    """Refresh client JWT using existing token."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing credentials",
+        )
+    token = authorization.replace("Bearer ", "")
+    user = await get_current_client_user(token, db)
+
+    result = await db.execute(
+        select(Client).where(Client.id == user.client_id)
+    )
+    client = result.scalar_one_or_none()
+
+    if not client:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Client account not found"
+        )
+
+    access_token = create_client_access_token(
+        data={
+            "sub": user.email,
+            "client_id": client.id,
+            "role": user.role.value,
+        }
+    )
+
+    return ClientToken(
+        access_token=access_token,
+        client_id=client.id,
+        client_name=client.name,
+        role=user.role.value,
     )
 
 

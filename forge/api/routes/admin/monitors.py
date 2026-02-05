@@ -12,6 +12,7 @@ from sqlalchemy import select
 from pydantic import BaseModel, Field
 
 from ....db import get_db, Monitor, User
+from ....db.models.project_server import ProjectServer
 from ....db.models.monitor import MonitorType, MonitorStatus
 from ....utils.logging import logger
 from ...deps import get_current_active_user
@@ -27,6 +28,7 @@ class MonitorCreate(BaseModel):
     interval_seconds: int = Field(default=300, ge=60, le=86400)
     timeout_seconds: int = Field(default=30, ge=5, le=120)
     project_id: int | None = None
+    project_server_id: int | None = None
 
 
 class MonitorUpdate(BaseModel):
@@ -50,6 +52,8 @@ class MonitorRead(BaseModel):
     last_response_time_ms: int | None
     uptime_percentage: float | None
     created_at: datetime
+    project_id: int | None = None
+    project_server_id: int | None = None
 
     class Config:
         from_attributes = True
@@ -57,7 +61,6 @@ class MonitorRead(BaseModel):
 
 class MonitorReadWithProject(MonitorRead):
     """Extended monitor response with project information."""
-    project_id: int | None = None
     project_name: str | None = None
 
 
@@ -120,6 +123,7 @@ async def list_monitors_by_project(
             uptime_percentage=monitor.uptime_percentage,
             created_at=monitor.created_at,
             project_id=project_id,
+            project_server_id=monitor.project_server_id,
             project_name=project.name
         ))
     
@@ -133,6 +137,23 @@ async def create_monitor(
     current_user: Annotated[User, Depends(get_current_active_user)]
 ):
     """Create a new monitor."""
+    if monitor_data.project_server_id:
+        from ....db.models.project import Project
+        result = await db.execute(
+            select(ProjectServer)
+            .join(Project)
+            .where(ProjectServer.id == monitor_data.project_server_id)
+            .where(Project.owner_id == current_user.id)
+        )
+        ps = result.scalar_one_or_none()
+        if not ps:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Project-server not found"
+            )
+        if monitor_data.project_id is None:
+            monitor_data.project_id = ps.project_id
+
     monitor = Monitor(
         name=monitor_data.name,
         monitor_type=monitor_data.monitor_type,
@@ -140,6 +161,7 @@ async def create_monitor(
         interval_seconds=monitor_data.interval_seconds,
         timeout_seconds=monitor_data.timeout_seconds,
         project_id=monitor_data.project_id,
+        project_server_id=monitor_data.project_server_id,
         created_by_id=current_user.id
     )
     db.add(monitor)
