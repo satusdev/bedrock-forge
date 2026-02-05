@@ -33,6 +33,7 @@ import {
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
+import SummaryCard from '@/components/ui/SummaryCard';
 import { dashboardApi } from '@/services/api';
 import toast from 'react-hot-toast';
 
@@ -498,72 +499,42 @@ const Projects: React.FC = () => {
 			{/* Stats Cards */}
 			{activeTab === 'remote' && (
 				<div className='grid grid-cols-1 md:grid-cols-4 gap-4'>
-					<Card>
-						<div className='flex items-center'>
-							<div className='p-2 bg-green-100 rounded-lg'>
-								<Activity className='w-5 h-5 text-green-600' />
-							</div>
-							<div className='ml-3'>
-								<p className='text-sm font-medium text-gray-500 dark:text-gray-400'>
-									Active
-								</p>
-								<p className='text-lg font-semibold text-gray-900 dark:text-white'>
-									{remoteProjects.filter(p => p.status === 'active').length}
-								</p>
-							</div>
-						</div>
-					</Card>
-					<Card>
-						<div className='flex items-center'>
-							<div className='p-2 bg-yellow-100 rounded-lg'>
-								<Pause className='w-5 h-5 text-yellow-600' />
-							</div>
-							<div className='ml-3'>
-								<p className='text-sm font-medium text-gray-500 dark:text-gray-400'>
-									Staging
-								</p>
-								<p className='text-lg font-semibold text-gray-900 dark:text-white'>
-									{
-										remoteProjects.filter(p => p.environment === 'staging')
-											.length
-									}
-								</p>
-							</div>
-						</div>
-					</Card>
-					<Card>
-						<div className='flex items-center'>
-							<div className='p-2 bg-red-100 rounded-lg'>
-								<AlertTriangle className='w-5 h-5 text-red-600' />
-							</div>
-							<div className='ml-3'>
-								<p className='text-sm font-medium text-gray-500 dark:text-gray-400'>
-									Production
-								</p>
-								<p className='text-lg font-semibold text-gray-900 dark:text-white'>
-									{
-										remoteProjects.filter(p => p.environment === 'production')
-											.length
-									}
-								</p>
-							</div>
-						</div>
-					</Card>
-					<Card>
-						<div className='flex items-center'>
-							<div className='p-2 bg-blue-100 rounded-lg'>
-								<Server className='w-5 h-5 text-blue-600' />
-							</div>
-							<div className='ml-3'>
-								<p className='text-sm font-medium text-gray-500 dark:text-gray-400'>
-									Total
-								</p>
-								<p className='text-lg font-semibold text-gray-900 dark:text-white'>
-									{remoteProjects.length}
-								</p>
-							</div>
-						</div>
-					</Card>
+					<SummaryCard
+						title='Active'
+						value={remoteProjects.filter(p => p.status === 'active').length}
+						icon={Activity}
+						iconClassName='w-5 h-5 text-green-600'
+						iconContainerClassName='p-2 bg-green-100 rounded-lg'
+						valueClassName='text-lg font-semibold text-gray-900 dark:text-white'
+					/>
+					<SummaryCard
+						title='Staging'
+						value={
+							remoteProjects.filter(p => p.environment === 'staging').length
+						}
+						icon={Pause}
+						iconClassName='w-5 h-5 text-yellow-600'
+						iconContainerClassName='p-2 bg-yellow-100 rounded-lg'
+						valueClassName='text-lg font-semibold text-gray-900 dark:text-white'
+					/>
+					<SummaryCard
+						title='Production'
+						value={
+							remoteProjects.filter(p => p.environment === 'production').length
+						}
+						icon={AlertTriangle}
+						iconClassName='w-5 h-5 text-red-600'
+						iconContainerClassName='p-2 bg-red-100 rounded-lg'
+						valueClassName='text-lg font-semibold text-gray-900 dark:text-white'
+					/>
+					<SummaryCard
+						title='Total'
+						value={remoteProjects.length}
+						icon={Server}
+						iconClassName='w-5 h-5 text-blue-600'
+						iconContainerClassName='p-2 bg-blue-100 rounded-lg'
+						valueClassName='text-lg font-semibold text-gray-900 dark:text-white'
+					/>
 				</div>
 			)}
 

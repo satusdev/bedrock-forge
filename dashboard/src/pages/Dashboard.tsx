@@ -16,6 +16,7 @@ import toast from 'react-hot-toast';
 import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
+import SummaryCard from '@/components/ui/SummaryCard';
 import { dashboardApi } from '@/services/api';
 import { useDashboardStore } from '@/store/useDashboardStore';
 import { useRealTimeUpdates } from '@/hooks/useRealTimeUpdates';
@@ -204,26 +205,16 @@ const Dashboard: React.FC = () => {
 
 			{/* Stats Grid */}
 			<div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6'>
-				{statCards.map(stat => {
-					const Icon = stat.icon;
-					return (
-						<Card key={stat.title}>
-							<div className='flex items-center'>
-								<div className={`p-3 rounded-lg ${stat.bgColor}`}>
-									<Icon className={`w-6 h-6 ${stat.color}`} />
-								</div>
-								<div className='ml-4'>
-									<p className='text-sm font-medium text-gray-500 dark:text-gray-400'>
-										{stat.title}
-									</p>
-									<p className='text-2xl font-bold text-gray-900 dark:text-white'>
-										{stat.value}
-									</p>
-								</div>
-							</div>
-						</Card>
-					);
-				})}
+				{statCards.map(stat => (
+					<SummaryCard
+						key={stat.title}
+						title={stat.title}
+						value={stat.value}
+						icon={stat.icon}
+						iconClassName={`w-6 h-6 ${stat.color}`}
+						iconContainerClassName={`p-3 rounded-lg ${stat.bgColor}`}
+					/>
+				))}
 			</div>
 
 			{/* Financial & Assets Overview */}

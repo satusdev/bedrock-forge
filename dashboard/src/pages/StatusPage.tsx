@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams, useSearchParams } from 'react-router-dom';
 import Card from '@/components/ui/Card';
@@ -27,6 +27,11 @@ interface StatusPageResponse {
 	overall_status: string;
 	monitors: MonitorStatusResponse[];
 	recent_incidents: IncidentSummary[];
+	incident_pagination: {
+		page: number;
+		page_size: number;
+		total: number;
+	};
 	last_updated: string;
 }
 
@@ -92,6 +97,8 @@ export default function StatusPage() {
 		projectIdParam || searchParams.get('project_id') || '';
 	const [projectId, setProjectId] = useState(initialProjectId);
 	const [days, setDays] = useState(30);
+	const [incidentPage, setIncidentPage] = useState(1);
+	const [incidentPageSize, setIncidentPageSize] = useState(5);
 
 	const numericProjectId = useMemo(() => {
 		const parsed = Number(projectId);
@@ -99,9 +106,17 @@ export default function StatusPage() {
 	}, [projectId]);
 
 	const statusQuery = useQuery({
-		queryKey: ['public-status', numericProjectId],
+		queryKey: [
+			'public-status',
+			numericProjectId,
+			incidentPage,
+			incidentPageSize,
+		],
 		queryFn: async () => {
-			const response = await dashboardApi.getPublicStatus(numericProjectId);
+			const response = await dashboardApi.getPublicStatus(numericProjectId, {
+				page: incidentPage,
+				page_size: incidentPageSize,
+			});
 			return response.data as StatusPageResponse;
 		},
 		enabled: numericProjectId > 0,
@@ -122,12 +137,33 @@ export default function StatusPage() {
 	const statusData = statusQuery.data;
 	const historyData = historyQuery.data;
 	const statusColor = STATUS_COLORS[statusData?.overall_status || 'unknown'];
+	const incidentPagination = statusData?.incident_pagination;
+	const incidentTotalPages = incidentPagination
+		? Math.max(
+				1,
+				Math.ceil(incidentPagination.total / incidentPagination.page_size)
+		  )
+		: 1;
+
+	useEffect(() => {
+		const projectName = statusData?.project_name || 'Status Page';
+		document.title = `${projectName} | Status`;
+		const description = 'Live service health and recent incidents.';
+		let meta = document.querySelector('meta[name="description"]');
+		if (!meta) {
+			meta = document.createElement('meta');
+			meta.setAttribute('name', 'description');
+			document.head.appendChild(meta);
+		}
+		meta.setAttribute('content', description);
+	}, [statusData?.project_name]);
 
 	const handleLoad = () => {
 		if (!projectId.trim()) return;
 		const nextParams = new URLSearchParams(searchParams);
 		nextParams.set('project_id', projectId.trim());
 		setSearchParams(nextParams);
+		setIncidentPage(1);
 	};
 
 	return (
@@ -294,6 +330,33 @@ export default function StatusPage() {
 														Duration:{' '}
 														{formatDuration(incident.duration_seconds)}
 													</div>
+													{incidentPagination && incidentTotalPages > 1 && (
+														<div className='flex items-center justify-between pt-2 text-xs text-gray-500'>
+															<button
+																className='px-2 py-1 border border-gray-200 rounded'
+																onClick={() =>
+																	setIncidentPage(p => Math.max(1, p - 1))
+																}
+																disabled={incidentPage <= 1}
+															>
+																Previous
+															</button>
+															<span>
+																Page {incidentPage} of {incidentTotalPages}
+															</span>
+															<button
+																className='px-2 py-1 border border-gray-200 rounded'
+																onClick={() =>
+																	setIncidentPage(p =>
+																		Math.min(incidentTotalPages, p + 1)
+																	)
+																}
+																disabled={incidentPage >= incidentTotalPages}
+															>
+																Next
+															</button>
+														</div>
+													)}
 												</div>
 											</div>
 										))

@@ -23,6 +23,7 @@ import { Backup, BackupType, BackupStorageType, BackupStatus } from '../types';
 import toast from 'react-hot-toast';
 import TaskLogModal from '../components/TaskLogModal';
 import Badge from '../components/ui/Badge';
+import { useTaskStatusPolling } from '../hooks/useTaskStatusPolling';
 
 interface Project {
 	id: number;
@@ -101,30 +102,23 @@ const Backups: React.FC = () => {
 		fetchProjects();
 	}, [filterProjectId, filterBackupType]);
 
+	const { taskStatus: restoreTaskStatus } = useTaskStatusPolling(
+		restoreTaskId,
+		{
+			onComplete: status => {
+				setRestoreStatus(status.status || 'unknown');
+				setRestoreMessage(status.message || '');
+				setRestoreProgress(status.progress || 0);
+			},
+		}
+	);
+
 	useEffect(() => {
-		if (!restoreTaskId) return;
-		let active = true;
-		const interval = setInterval(async () => {
-			try {
-				const response = await dashboardApi.getTaskStatus(restoreTaskId);
-				if (!active) return;
-				const data = response.data;
-				setRestoreStatus(data.status || 'unknown');
-				setRestoreMessage(data.message || '');
-				setRestoreProgress(data.progress || 0);
-				if (['completed', 'failed'].includes(data.status)) {
-					clearInterval(interval);
-				}
-			} catch (error) {
-				if (!active) return;
-				setRestoreStatus('unknown');
-			}
-		}, 2000);
-		return () => {
-			active = false;
-			clearInterval(interval);
-		};
-	}, [restoreTaskId]);
+		if (!restoreTaskStatus) return;
+		setRestoreStatus(restoreTaskStatus.status || 'unknown');
+		setRestoreMessage(restoreTaskStatus.message || '');
+		setRestoreProgress(restoreTaskStatus.progress || 0);
+	}, [restoreTaskStatus]);
 
 	useEffect(() => {
 		const projectParam = searchParams.get('project_id');

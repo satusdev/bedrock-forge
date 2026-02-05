@@ -1,18 +1,16 @@
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import { mockDashboardApi } from './mockApi';
-
-const API_BASE_URL =
-	import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1';
+import type {
+	ClientCreateInput,
+	ClientDetail,
+	ClientUpdateInput,
+	ClientsListResponse,
+} from '@/types';
+import { API_BASE_URL, createApiClient } from './apiClient';
 
 // Create axios instance
-const api = axios.create({
-	baseURL: API_BASE_URL,
-	timeout: 60000,
-	headers: {
-		'Content-Type': 'application/json',
-	},
-});
+const api = createApiClient({ tokenStorageKey: 'auth_token', timeout: 60000 });
 
 // Flag to use mock API when backend is not available
 let useMockApi = false;
@@ -54,21 +52,6 @@ const checkBackendAvailability = async () => {
 		useMockApi = false;
 	}
 };
-
-// Request interceptor
-api.interceptors.request.use(
-	config => {
-		// Add auth token if available
-		const token = localStorage.getItem('auth_token');
-		if (token) {
-			config.headers.Authorization = `Bearer ${token}`;
-		}
-		return config;
-	},
-	error => {
-		return Promise.reject(error);
-	}
-);
 
 // Response interceptor with token refresh
 api.interceptors.response.use(
@@ -188,9 +171,12 @@ export const dashboardApi = {
 	},
 
 	// Public status page
-	getPublicStatus: async (projectId: number) => {
+	getPublicStatus: async (
+		projectId: number,
+		params?: { page?: number; page_size?: number }
+	) => {
 		await checkBackendAvailability();
-		return api.get(`/status/${projectId}`);
+		return api.get(`/status/${projectId}`, { params });
 	},
 	getPublicStatusHistory: async (projectId: number, days: number = 30) => {
 		await checkBackendAvailability();
@@ -527,17 +513,61 @@ export const dashboardApi = {
 		offset?: number;
 		action?: string;
 		entity_type?: string;
+		entity_id?: string;
 		hours?: number;
 	}) => api.get('/activity', { params }),
 	getActivitySummary: (hours?: number) =>
 		api.get('/activity/summary', { params: { hours } }),
 
+	// WP-CLI runner
+	runWpCliCommand: (payload: {
+		project_server_id: number;
+		command: string;
+		args?: string[];
+	}) => api.post('/wp/commands/run', payload),
+
+	// Plugin policies
+	getGlobalPluginPolicy: () => api.get('/plugin-policies/global'),
+	updateGlobalPluginPolicy: (payload: {
+		name: string;
+		allowed_plugins: string[];
+		required_plugins: string[];
+		blocked_plugins: string[];
+		pinned_versions: Record<string, string>;
+		notes?: string;
+	}) => api.put('/plugin-policies/global', payload),
+	getProjectPluginPolicy: (projectId: number) =>
+		api.get(`/plugin-policies/projects/${projectId}`),
+	updateProjectPluginPolicy: (
+		projectId: number,
+		payload: {
+			inherit_default: boolean;
+			allowed_plugins: string[];
+			required_plugins: string[];
+			blocked_plugins: string[];
+			pinned_versions: Record<string, string>;
+			notes?: string;
+		}
+	) => api.put(`/plugin-policies/projects/${projectId}`, payload),
+	getEffectivePluginPolicy: (projectId: number) =>
+		api.get(`/plugin-policies/projects/${projectId}/effective`),
+	getPluginDrift: (projectServerId: number) =>
+		api.get(`/plugin-policies/project-servers/${projectServerId}/drift`),
+	getPluginBundles: () => api.get('/plugin-policies/bundles'),
+	applyBundleToGlobalPolicy: (bundleId: string) =>
+		api.post(`/plugin-policies/global/bundles/${bundleId}`),
+	applyBundleToProjectPolicy: (projectId: number, bundleId: string) =>
+		api.post(`/plugin-policies/projects/${projectId}/bundles/${bundleId}`),
+
 	// Clients
-	getClients: () => api.get('/clients'),
-	createClient: (clientData: any) => api.post('/clients', clientData),
-	updateClient: (clientId: string, clientData: any) =>
+	getClients: () => api.get<ClientsListResponse>('/clients'),
+	getClient: (clientId: number) =>
+		api.get<ClientDetail>(`/clients/${clientId}`),
+	createClient: (clientData: ClientCreateInput) =>
+		api.post('/clients', clientData),
+	updateClient: (clientId: number, clientData: ClientUpdateInput) =>
 		api.put(`/clients/${clientId}`, clientData),
-	deleteClient: (clientId: string) => api.delete(`/clients/${clientId}`),
+	deleteClient: (clientId: number) => api.delete(`/clients/${clientId}`),
 	assignClientToProject: (projectName: string, clientData: any) =>
 		api.post(`/clients/${clientData.id}/assign-project`, {
 			project_name: projectName,
