@@ -39,6 +39,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade schema."""
     with op.batch_alter_table("analytics_reports") as batch_op:
-        batch_op.drop_index("ix_analytics_reports_environment_id")
+        batch_op.drop_index("ix_analytics_reports_environment_id", if_exists=True)
         batch_op.drop_constraint("fk_analytics_reports_environment_id", type_="foreignkey")
         batch_op.drop_column("environment_id")

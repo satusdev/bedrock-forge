@@ -93,6 +93,9 @@ class ProjectServer(Base, TimestampMixin):
     wp_site_state: Mapped["WPSiteState | None"] = relationship(
         "WPSiteState", back_populates="project_server", uselist=False, cascade="all, delete-orphan"
     )
+    monitors: Mapped[list["Monitor"]] = relationship(
+        "Monitor", back_populates="project_server"
+    )
     
     def __repr__(self) -> str:
         return f"<ProjectServer(project_id={self.project_id}, server_id={self.server_id}, env={self.environment})>"
@@ -102,4 +105,5 @@ class ProjectServer(Base, TimestampMixin):
 if TYPE_CHECKING:
     from .wp_credential import WPCredential
     from .wp_site_management import WPSiteState
+    from .monitor import Monitor
 

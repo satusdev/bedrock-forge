@@ -105,9 +105,9 @@ def downgrade() -> None:
     """Remove cyberpanel_users table."""
     
     # Drop indexes
-    op.drop_index('ix_cyberpanel_users_status', 'cyberpanel_users')
-    op.drop_index('ix_cyberpanel_users_username', 'cyberpanel_users')
-    op.drop_index('ix_cyberpanel_users_server_id', 'cyberpanel_users')
+    op.drop_index('ix_cyberpanel_users_status', 'cyberpanel_users', if_exists=True)
+    op.drop_index('ix_cyberpanel_users_username', 'cyberpanel_users', if_exists=True)
+    op.drop_index('ix_cyberpanel_users_server_id', 'cyberpanel_users', if_exists=True)
     
     # Drop table
     op.drop_table('cyberpanel_users')

@@ -153,7 +153,8 @@ def seed(demo: bool, reset: bool, dry_run: bool, users_only: bool, servers_only:
 
 async def run_seeding(reset: bool, users_only: bool, servers_only: bool):
     """Execute the actual seeding process"""
-    from forge.db.session import async_session_factory
+    from sqlalchemy import select
+    from forge.db.session import AsyncSessionLocal
     from forge.db.seed_data import (
         get_seed_users,
         get_seed_roles,
@@ -161,51 +162,212 @@ async def run_seeding(reset: bool, users_only: bool, servers_only: bool):
         get_seed_projects,
         get_user_role_assignments,
     )
+    from forge.api.security import hash_password
+    from forge.db.models import (
+        User,
+        Role,
+        Permission,
+        Server,
+        ServerProvider,
+        ServerStatus,
+        PanelType,
+        Project,
+        ProjectStatus,
+        EnvironmentType,
+    )
+    from forge.db.models.role import DEFAULT_PERMISSIONS, role_permissions, user_roles
     
     console.print("\n[bold blue]Starting database seeding...[/bold blue]")
     
-    async with async_session_factory() as session:
+    async with AsyncSessionLocal() as session:
         try:
             if reset:
                 console.print("[yellow]Clearing existing data...[/yellow]")
                 # Add reset logic here if needed
             
+            permission_defaults = {p["code"]: p for p in DEFAULT_PERMISSIONS}
+
+            async def get_or_create_permission(code: str) -> Permission:
+                result = await session.execute(select(Permission).where(Permission.code == code))
+                permission = result.scalar_one_or_none()
+                if permission:
+                    return permission
+
+                meta = permission_defaults.get(code, {})
+                permission = Permission(
+                    code=code,
+                    name=meta.get("name", code),
+                    description=meta.get("description"),
+                    category=meta.get("category", "custom")
+                )
+                session.add(permission)
+                await session.flush()
+                return permission
+
+            async def generate_unique_username(base: str) -> str:
+                candidate = base
+                suffix = 1
+                while True:
+                    result = await session.execute(
+                        select(User).where(User.username == candidate)
+                    )
+                    if result.scalar_one_or_none() is None:
+                        return candidate
+                    candidate = f"{base}{suffix}"
+                    suffix += 1
+
             if not servers_only:
                 # Seed roles first
                 console.print("Seeding roles...")
                 roles = get_seed_roles()
-                # from forge.db.models.role import Role
-                # for role_data in roles:
-                #     role = Role(**role_data)
-                #     session.add(role)
+                role_map: dict[str, Role] = {}
+
+                for role_data in roles:
+                    result = await session.execute(
+                        select(Role).where(Role.name == role_data["name"])
+                    )
+                    role = result.scalar_one_or_none()
+                    if role is None:
+                        role = Role(
+                            name=role_data["name"],
+                            display_name=role_data.get("display_name") or role_data["name"].title(),
+                            description=role_data.get("description"),
+                            color=role_data.get("color", "#6366f1"),
+                            is_system=role_data.get("is_system", True)
+                        )
+                        session.add(role)
+                    await session.flush()
+
+                    permissions: list[Permission] = []
+                    for perm_code in role_data.get("permissions", []):
+                        permission = await get_or_create_permission(perm_code)
+                        permissions.append(permission)
+
+                    if permissions:
+                        await session.flush()
+                        await session.execute(
+                            role_permissions.delete().where(
+                                role_permissions.c.role_id == role.id
+                            )
+                        )
+                        await session.execute(
+                            role_permissions.insert(),
+                            [
+                                {"role_id": role.id, "permission_id": perm.id}
+                                for perm in permissions
+                            ]
+                        )
+                    role_map[role.name] = role
+
                 console.print(f"  [green]✓[/green] {len(roles)} roles")
-                
+
                 # Seed users
                 console.print("Seeding users...")
                 users = get_seed_users()
-                # from forge.db.models.user import User
-                # from forge.core.security import get_password_hash
-                # for user_data in users:
-                #     user_data["hashed_password"] = get_password_hash(user_data.pop("password"))
-                #     user = User(**user_data)
-                #     session.add(user)
+                user_map: dict[str, User] = {}
+
+                for user_data in users:
+                    email = user_data["email"]
+                    result = await session.execute(select(User).where(User.email == email))
+                    user = result.scalar_one_or_none()
+
+                    if user is None:
+                        username_base = email.split("@", 1)[0]
+                        username = await generate_unique_username(username_base)
+                        user = User(
+                            email=email,
+                            username=username,
+                            hashed_password=hash_password(user_data["password"]),
+                            full_name=user_data.get("full_name"),
+                            is_active=user_data.get("is_active", True),
+                            is_superuser=user_data.get("is_superuser", False)
+                        )
+                        session.add(user)
+                        await session.flush()
+                    else:
+                        user.full_name = user_data.get("full_name", user.full_name)
+                        user.is_active = user_data.get("is_active", user.is_active)
+                        user.is_superuser = user_data.get("is_superuser", user.is_superuser)
+                        if user_data.get("password"):
+                            user.hashed_password = hash_password(user_data["password"])
+
+                    user_map[email] = user
+
                 console.print(f"  [green]✓[/green] {len(users)} users")
-                
+
                 # Assign roles
                 assignments = get_user_role_assignments()
                 if assignments:
                     console.print("Assigning roles to users...")
+                    for assignment in assignments:
+                        user = user_map.get(assignment["email"])
+                        role = role_map.get(assignment["role"])
+                        if user and role:
+                            await session.execute(
+                                user_roles.delete().where(
+                                    user_roles.c.user_id == user.id
+                                )
+                            )
+                            await session.execute(
+                                user_roles.insert().values(
+                                    user_id=user.id,
+                                    role_id=role.id
+                                )
+                            )
                     console.print(f"  [green]✓[/green] {len(assignments)} assignments")
-            
+
             if not users_only:
                 # Seed servers
                 console.print("Seeding servers...")
                 servers = get_seed_servers()
+                owner = None
+                if "user_map" in locals() and user_map:
+                    owner = next(iter(user_map.values()))
+                else:
+                    result = await session.execute(select(User).order_by(User.id.asc()))
+                    owner = result.scalars().first()
+
+                for server_data in servers:
+                    result = await session.execute(
+                        select(Server).where(Server.hostname == server_data["hostname"])
+                    )
+                    server = result.scalar_one_or_none()
+                    if server is None:
+                        server = Server(
+                            name=server_data["name"],
+                            hostname=server_data["hostname"],
+                            provider=ServerProvider(server_data.get("provider", "custom")),
+                            status=ServerStatus(server_data.get("status", "offline")),
+                            ssh_user=server_data.get("ssh_user", "root"),
+                            ssh_port=server_data.get("ssh_port", 22),
+                            ssh_key_path=server_data.get("ssh_key_path"),
+                            panel_type=PanelType(server_data.get("panel_type", "none")),
+                            panel_url=server_data.get("panel_url"),
+                            owner_id=owner.id if owner else None,
+                        )
+                        session.add(server)
+
                 console.print(f"  [green]✓[/green] {len(servers)} servers")
-                
+
                 # Seed projects
                 console.print("Seeding projects...")
                 projects = get_seed_projects()
+                for project_data in projects:
+                    result = await session.execute(
+                        select(Project).where(Project.slug == project_data["slug"])
+                    )
+                    project = result.scalar_one_or_none()
+                    if project is None:
+                        project = Project(
+                            name=project_data["name"],
+                            slug=project_data["slug"],
+                            description=project_data.get("description"),
+                            path=project_data.get("directory", project_data.get("path", "/var/www")),
+                            status=ProjectStatus(project_data.get("status", "active")),
+                            environment=EnvironmentType(project_data.get("environment", "development")),
+                            owner_id=owner.id if owner else None,
+                        )
+                        session.add(project)
                 console.print(f"  [green]✓[/green] {len(projects)} projects")
             
             await session.commit()
