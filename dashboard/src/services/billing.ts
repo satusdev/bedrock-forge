@@ -59,6 +59,11 @@ export const billingService = {
 		return response.data;
 	},
 
+	generateInvoice: async (subscriptionId: number) => {
+		const response = await api.post(`/subscriptions/${subscriptionId}/invoice`);
+		return response.data;
+	},
+
 	cancelSubscription: async (id: number) => {
 		const response = await api.delete(`/subscriptions/${id}`);
 		return response.data;

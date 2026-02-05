@@ -1,24 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { dashboardApi } from '../services/api'; // Assuming getClients is here, might need getClient(id)
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { billingService } from '../services/billing';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
+import { useClient } from '@/hooks/useClients';
 import {
-	User,
 	Mail,
 	Phone,
 	Globe,
 	Building,
 	ArrowLeft,
-	CreditCard,
 	FileText,
-	Server,
-	Clock,
-	Edit,
 	Download,
 	Send,
 	Plus,
@@ -27,7 +22,6 @@ import {
 	Trash2,
 	CheckCircle,
 } from 'lucide-react';
-import { Client } from './Clients';
 
 interface InvoiceItem {
 	description: string;
@@ -53,34 +47,28 @@ const ClientDetail: React.FC = () => {
 	const { clientId } = useParams<{ clientId: string }>();
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
+	const parsedClientId =
+		clientId && !Number.isNaN(Number(clientId)) ? Number(clientId) : null;
 	const [activeTab, setActiveTab] = useState<
 		'overview' | 'services' | 'invoices'
 	>('overview');
 	const [showCreateInvoiceModal, setShowCreateInvoiceModal] = useState(false);
 	const [showPaymentModal, setShowPaymentModal] = useState<number | null>(null);
 
-	// In a real app we'd have a specific getClient(id) endpoint.
-	// For now, we'll fetch all and find (inefficient but works for prototype/small data)
-	// or assume we add getClient to API.
-	// Let's assume dashboardApi.getClient(id) exists or we add it.
-	// Looking at api.ts, there isn't a getClient(id) yet, only getClients().
-	// I'll simulate it by fetching all clients or adding the method.
-	// Since I can't easily change the backend *right now* to add the endpoint if it doesn't exist,
-	// I will use getClients and filter client-side for this step.
-
-	const { data: clientsData, isLoading } = useQuery({
-		queryKey: ['clients'],
-		queryFn: dashboardApi.getClients,
-	});
+	const { data: client, isLoading } = useClient(
+		parsedClientId,
+		!!parsedClientId
+	);
 
 	// Mock services/invoices data since backend endpoints might not fully support filtering by client yet
 	const [services, setServices] = useState<any[]>([]);
 
 	// Fetch invoices for this client
 	const { data: invoicesData, isLoading: invoicesLoading } = useQuery({
-		queryKey: ['invoices', clientId],
-		queryFn: () => billingService.getInvoices({ client_id: Number(clientId) }),
-		enabled: !!clientId,
+		queryKey: ['invoices', parsedClientId],
+		queryFn: () =>
+			billingService.getInvoices({ client_id: Number(parsedClientId) }),
+		enabled: !!parsedClientId,
 	});
 
 	useEffect(() => {
@@ -89,14 +77,15 @@ const ClientDetail: React.FC = () => {
 			// In reality: await billingService.getClientSubscriptions(clientId)
 			try {
 				const allSubs = await billingService.getSubscriptions();
-				// Filter mock
-				setServices(allSubs.filter(s => s.client_id.toString() === clientId));
+				setServices(
+					allSubs.filter(s => s.client_id === Number(parsedClientId))
+				);
 			} catch (e) {
 				console.error(e);
 			}
 		};
-		if (clientId) loadServices();
-	}, [clientId]);
+		if (parsedClientId) loadServices();
+	}, [parsedClientId]);
 
 	// Invoice handlers
 	const handleDownloadPdf = async (invoiceId: number) => {
@@ -120,7 +109,9 @@ const ClientDetail: React.FC = () => {
 		if (!confirm('Send this invoice to the client?')) return;
 		try {
 			await billingService.sendInvoice(invoiceId);
-			queryClient.invalidateQueries({ queryKey: ['invoices', clientId] });
+			queryClient.invalidateQueries({
+				queryKey: ['invoices', parsedClientId],
+			});
 			alert('Invoice sent successfully');
 		} catch (err) {
 			console.error('Error sending invoice:', err);
@@ -132,7 +123,9 @@ const ClientDetail: React.FC = () => {
 		if (!confirm('Are you sure you want to delete this draft invoice?')) return;
 		try {
 			await billingService.deleteInvoice(invoiceId);
-			queryClient.invalidateQueries({ queryKey: ['invoices', clientId] });
+			queryClient.invalidateQueries({
+				queryKey: ['invoices', parsedClientId],
+			});
 		} catch (err) {
 			console.error('Error deleting invoice:', err);
 			alert('Failed to delete invoice');
@@ -145,14 +138,16 @@ const ClientDetail: React.FC = () => {
 	) => {
 		try {
 			await billingService.createInvoice({
-				client_id: Number(clientId),
+				client_id: Number(parsedClientId),
 				items,
 				tax_rate: options.tax_rate,
 				discount_amount: options.discount_amount,
 				notes: options.notes,
 				currency: client?.currency || 'USD',
 			});
-			queryClient.invalidateQueries({ queryKey: ['invoices', clientId] });
+			queryClient.invalidateQueries({
+				queryKey: ['invoices', parsedClientId],
+			});
 			setShowCreateInvoiceModal(false);
 		} catch (err) {
 			console.error('Error creating invoice:', err);
@@ -172,7 +167,9 @@ const ClientDetail: React.FC = () => {
 				payment_method: method,
 				payment_reference: reference,
 			});
-			queryClient.invalidateQueries({ queryKey: ['invoices', clientId] });
+			queryClient.invalidateQueries({
+				queryKey: ['invoices', parsedClientId],
+			});
 			setShowPaymentModal(null);
 		} catch (err) {
 			console.error('Error recording payment:', err);
@@ -187,10 +184,6 @@ const ClientDetail: React.FC = () => {
 			</div>
 		);
 
-	const client = clientsData?.data?.clients?.find(
-		(c: Client) => c.id === clientId
-	);
-
 	if (!client) {
 		return <div className='p-8 text-center'>Client not found</div>;
 	}
@@ -202,8 +195,10 @@ const ClientDetail: React.FC = () => {
 					<ArrowLeft className='w-5 h-5 mr-1' /> Back
 				</Button>
 				<h1 className='text-2xl font-bold text-gray-900'>{client.name}</h1>
-				<Badge variant={client.active ? 'success' : 'default'}>
-					{client.active ? 'Active' : 'Inactive'}
+				<Badge
+					variant={client.billing_status === 'active' ? 'success' : 'default'}
+				>
+					{client.billing_status === 'active' ? 'Active' : 'Inactive'}
 				</Badge>
 			</div>
 
@@ -291,9 +286,7 @@ const ClientDetail: React.FC = () => {
 								</div>
 								<div className='flex justify-between border-b pb-2'>
 									<span className='text-gray-500'>Cycle</span>
-									<span className='font-medium capitalize'>
-										monthly
-									</span>
+									<span className='font-medium capitalize'>monthly</span>
 								</div>
 								<div className='flex justify-between border-b pb-2'>
 									<span className='text-gray-500'>Payment Method</span>

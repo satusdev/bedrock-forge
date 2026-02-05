@@ -5,6 +5,7 @@ import Card from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
+import SummaryCard from '../components/ui/SummaryCard';
 import {
 	RefreshCw,
 	Plus,
@@ -147,62 +148,41 @@ const SSL: React.FC = () => {
 
 			{/* Stats Cards */}
 			<div className='grid grid-cols-1 md:grid-cols-4 gap-4'>
-				<Card>
-					<div className='p-4 flex items-center justify-between'>
-						<div>
-							<p className='text-sm font-medium text-gray-600 dark:text-gray-400'>
-								Total
-							</p>
-							<p className='text-2xl font-bold text-gray-900 dark:text-white'>
-								{certificates.length}
-							</p>
-						</div>
-						<div className='bg-blue-100 dark:bg-blue-900/30 p-3 rounded-lg'>
-							<Shield className='w-6 h-6 text-blue-600 dark:text-blue-400' />
-						</div>
-					</div>
-				</Card>
-				<Card>
-					<div className='p-4 flex items-center justify-between'>
-						<div>
-							<p className='text-sm font-medium text-gray-600 dark:text-gray-400'>
-								Valid
-							</p>
-							<p className='text-2xl font-bold text-green-600'>{validCount}</p>
-						</div>
-						<div className='bg-green-100 dark:bg-green-900/30 p-3 rounded-lg'>
-							<CheckCircle className='w-6 h-6 text-green-600 dark:text-green-400' />
-						</div>
-					</div>
-				</Card>
-				<Card>
-					<div className='p-4 flex items-center justify-between'>
-						<div>
-							<p className='text-sm font-medium text-gray-600 dark:text-gray-400'>
-								Expiring Soon
-							</p>
-							<p className='text-2xl font-bold text-yellow-600'>
-								{expiringCount}
-							</p>
-						</div>
-						<div className='bg-yellow-100 dark:bg-yellow-900/30 p-3 rounded-lg'>
-							<AlertTriangle className='w-6 h-6 text-yellow-600 dark:text-yellow-400' />
-						</div>
-					</div>
-				</Card>
-				<Card>
-					<div className='p-4 flex items-center justify-between'>
-						<div>
-							<p className='text-sm font-medium text-gray-600 dark:text-gray-400'>
-								Expired
-							</p>
-							<p className='text-2xl font-bold text-red-600'>{expiredCount}</p>
-						</div>
-						<div className='bg-red-100 dark:bg-red-900/30 p-3 rounded-lg'>
-							<XCircle className='w-6 h-6 text-red-600 dark:text-red-400' />
-						</div>
-					</div>
-				</Card>
+				<SummaryCard
+					title='Total'
+					value={certificates.length}
+					icon={Shield}
+					iconPosition='right'
+					iconClassName='w-6 h-6 text-blue-600 dark:text-blue-400'
+					iconContainerClassName='bg-blue-100 dark:bg-blue-900/30 p-3 rounded-lg'
+				/>
+				<SummaryCard
+					title='Valid'
+					value={validCount}
+					icon={CheckCircle}
+					iconPosition='right'
+					valueClassName='text-2xl font-bold text-green-600'
+					iconClassName='w-6 h-6 text-green-600 dark:text-green-400'
+					iconContainerClassName='bg-green-100 dark:bg-green-900/30 p-3 rounded-lg'
+				/>
+				<SummaryCard
+					title='Expiring Soon'
+					value={expiringCount}
+					icon={AlertTriangle}
+					iconPosition='right'
+					valueClassName='text-2xl font-bold text-yellow-600'
+					iconClassName='w-6 h-6 text-yellow-600 dark:text-yellow-400'
+					iconContainerClassName='bg-yellow-100 dark:bg-yellow-900/30 p-3 rounded-lg'
+				/>
+				<SummaryCard
+					title='Expired'
+					value={expiredCount}
+					icon={XCircle}
+					iconPosition='right'
+					valueClassName='text-2xl font-bold text-red-600'
+					iconClassName='w-6 h-6 text-red-600 dark:text-red-400'
+					iconContainerClassName='bg-red-100 dark:bg-red-900/30 p-3 rounded-lg'
+				/>
 			</div>
 
 			{/* Certificates Table */}
@@ -264,7 +244,11 @@ const SSL: React.FC = () => {
 										</td>
 										<td className='px-6 py-4'>
 											<div
-												className={`text-sm ${cert.days_until_expiry <= 14 ? 'text-red-600 font-medium' : 'text-gray-900 dark:text-white'}`}
+												className={`text-sm ${
+													cert.days_until_expiry <= 14
+														? 'text-red-600 font-medium'
+														: 'text-gray-900 dark:text-white'
+												}`}
 											>
 												{cert.expiry_date}
 											</div>
@@ -340,7 +324,8 @@ const SSLModal: React.FC<SSLModalProps> = ({
 	const [formData, setFormData] = useState({
 		common_name: certificate?.common_name || '',
 		provider: certificate?.provider || 'letsencrypt',
-		issue_date: certificate?.issue_date || new Date().toISOString().split('T')[0],
+		issue_date:
+			certificate?.issue_date || new Date().toISOString().split('T')[0],
 		expiry_date: certificate?.expiry_date || '',
 		auto_renew: certificate?.auto_renew ?? true,
 		notes: certificate?.notes || '',
@@ -365,9 +350,7 @@ const SSLModal: React.FC<SSLModalProps> = ({
 			}
 			onSuccess();
 		} catch (error: any) {
-			toast.error(
-				error.response?.data?.detail || 'Failed to save certificate'
-			);
+			toast.error(error.response?.data?.detail || 'Failed to save certificate');
 		} finally {
 			setIsSubmitting(false);
 		}

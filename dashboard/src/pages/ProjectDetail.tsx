@@ -44,6 +44,7 @@ import BackupSchedulePanel from '../components/BackupSchedulePanel';
 import { dashboardApi, getApiErrorMessage } from '../services/api';
 import toast from 'react-hot-toast';
 import TaskLogModal from '../components/TaskLogModal';
+import { useTaskStatusPolling } from '../hooks/useTaskStatusPolling';
 
 type TabId =
 	| 'overview'
@@ -106,6 +107,46 @@ export default function ProjectDetail() {
 		'gdrive'
 	);
 
+	// WP-CLI Runner State
+	const [runnerEnvId, setRunnerEnvId] = useState<string>('');
+	const [runnerCommand, setRunnerCommand] = useState<string>('plugin list');
+	const [runnerArgs, setRunnerArgs] = useState<string>('');
+	const [runnerTaskId, setRunnerTaskId] = useState<string | null>(null);
+	const [runnerStatus, setRunnerStatus] = useState<any>(null);
+
+	const [globalPolicyForm, setGlobalPolicyForm] = useState({
+		name: 'Default Policy',
+		allowed: '',
+		required: '',
+		blocked: '',
+		pinned: '',
+		notes: '',
+	});
+	const [projectPolicyForm, setProjectPolicyForm] = useState({
+		inherit_default: true,
+		allowed: '',
+		required: '',
+		blocked: '',
+		pinned: '',
+		notes: '',
+	});
+	const [selectedBundleId, setSelectedBundleId] = useState<string>('');
+
+	const allowedWpCommands = [
+		'core version',
+		'core check-update',
+		'core update',
+		'plugin list',
+		'plugin status',
+		'plugin update',
+		'theme list',
+		'theme status',
+		'theme update',
+		'user list',
+		'option get',
+		'cache flush',
+	];
+
 	// Logs Modal State
 	const [logModal, setLogModal] = useState<{
 		isOpen: boolean;
@@ -143,6 +184,12 @@ export default function ProjectDetail() {
 		enabled: !!projectId,
 	});
 	const environments = (envData?.data || []) as Environment[];
+
+	useEffect(() => {
+		if (!runnerEnvId && environments.length > 0) {
+			setRunnerEnvId(String(environments[0].id));
+		}
+	}, [environments, runnerEnvId]);
 
 	// Fetch Drive settings
 	const { data: driveData } = useQuery({
@@ -187,6 +234,106 @@ export default function ProjectDetail() {
 		enabled: !!projectName && activeTab === 'plugins',
 	});
 
+	const { data: globalPolicyData } = useQuery({
+		queryKey: ['plugin-policy-global'],
+		queryFn: () => dashboardApi.getGlobalPluginPolicy(),
+		enabled: activeTab === 'plugins',
+	});
+
+	const { data: projectPolicyData } = useQuery({
+		queryKey: ['plugin-policy-project', projectId],
+		queryFn: async () => {
+			if (!projectId) return null;
+			try {
+				return await dashboardApi.getProjectPluginPolicy(projectId);
+			} catch (error: any) {
+				if (error?.response?.status === 404) {
+					return null;
+				}
+				throw error;
+			}
+		},
+		enabled: !!projectId && activeTab === 'plugins',
+	});
+
+	useEffect(() => {
+		const policy = globalPolicyData?.data;
+		if (!policy) return;
+		setGlobalPolicyForm(prev => ({
+			...prev,
+			name: policy.name || 'Default Policy',
+			allowed: listToText(policy.allowed_plugins),
+			required: listToText(policy.required_plugins),
+			blocked: listToText(policy.blocked_plugins),
+			pinned: pinnedToText(policy.pinned_versions),
+			notes: policy.notes || '',
+		}));
+	}, [globalPolicyData]);
+
+	useEffect(() => {
+		const policy = projectPolicyData?.data;
+		if (!policy) return;
+		setProjectPolicyForm(prev => ({
+			...prev,
+			inherit_default: policy.inherit_default ?? true,
+			allowed: listToText(policy.allowed_plugins),
+			required: listToText(policy.required_plugins),
+			blocked: listToText(policy.blocked_plugins),
+			pinned: pinnedToText(policy.pinned_versions),
+			notes: policy.notes || '',
+		}));
+	}, [projectPolicyData]);
+
+	const { data: effectivePolicyData } = useQuery({
+		queryKey: ['plugin-policy-effective', projectId],
+		queryFn: () => dashboardApi.getEffectivePluginPolicy(projectId!),
+		enabled: !!projectId && activeTab === 'plugins',
+	});
+
+	const { data: pluginBundlesData } = useQuery({
+		queryKey: ['plugin-policy-bundles'],
+		queryFn: () => dashboardApi.getPluginBundles(),
+		enabled: activeTab === 'plugins',
+	});
+
+	const { data: pluginDriftData } = useQuery({
+		queryKey: ['plugin-drift', runnerEnvId],
+		queryFn: () => dashboardApi.getPluginDrift(Number(runnerEnvId)),
+		enabled: !!runnerEnvId && activeTab === 'plugins',
+	});
+
+	const { data: wpCliHistory } = useQuery({
+		queryKey: ['wp-cli-history', runnerEnvId],
+		queryFn: () =>
+			dashboardApi.getAuditLogs({
+				limit: 10,
+				action: 'command',
+				entity_type: 'wp_cli',
+				entity_id: runnerEnvId || undefined,
+			}),
+		enabled: !!runnerEnvId && activeTab === 'plugins',
+	});
+
+	const runWpCliMutation = useMutation({
+		mutationFn: () =>
+			dashboardApi.runWpCliCommand({
+				project_server_id: Number(runnerEnvId),
+				command: runnerCommand,
+				args: runnerArgs.trim().split(/\s+/).filter(Boolean),
+			}),
+		onSuccess: response => {
+			setRunnerTaskId(response.data.task_id);
+			setRunnerStatus({ status: 'pending', message: 'Queued' });
+			queryClient.invalidateQueries({
+				queryKey: ['wp-cli-history', runnerEnvId],
+			});
+			toast.success('WP-CLI command queued');
+		},
+		onError: (error: any) => {
+			toast.error(getApiErrorMessage(error, 'Failed to queue WP-CLI command'));
+		},
+	});
+
 	// Action mutations
 	const actionMutation = useMutation({
 		mutationFn: ({ action }: { action: string }) =>
@@ -212,6 +359,107 @@ export default function ProjectDetail() {
 	});
 
 	// Backup creation mutation
+
+	const runWpCliDirectMutation = useMutation({
+		mutationFn: ({ command, args }: { command: string; args: string[] }) =>
+			dashboardApi.runWpCliCommand({
+				project_server_id: Number(runnerEnvId),
+				command,
+				args,
+			}),
+		onSuccess: response => {
+			setRunnerTaskId(response.data.task_id);
+			setRunnerStatus({ status: 'pending', message: 'Queued' });
+			queryClient.invalidateQueries({
+				queryKey: ['wp-cli-history', runnerEnvId],
+			});
+			toast.success('WP-CLI command queued');
+		},
+		onError: (error: any) => {
+			toast.error(getApiErrorMessage(error, 'Failed to queue WP-CLI command'));
+		},
+	});
+
+	const saveGlobalPolicyMutation = useMutation({
+		mutationFn: () =>
+			dashboardApi.updateGlobalPluginPolicy({
+				name: globalPolicyForm.name,
+				allowed_plugins: textToList(globalPolicyForm.allowed),
+				required_plugins: textToList(globalPolicyForm.required),
+				blocked_plugins: textToList(globalPolicyForm.blocked),
+				pinned_versions: textToPinned(globalPolicyForm.pinned),
+				notes: globalPolicyForm.notes || undefined,
+			}),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['plugin-policy-global'] });
+			queryClient.invalidateQueries({
+				queryKey: ['plugin-policy-effective', projectId],
+			});
+			toast.success('Global policy updated');
+		},
+		onError: (error: any) => {
+			toast.error(getApiErrorMessage(error, 'Failed to update global policy'));
+		},
+	});
+
+	const saveProjectPolicyMutation = useMutation({
+		mutationFn: () =>
+			dashboardApi.updateProjectPluginPolicy(projectId!, {
+				inherit_default: projectPolicyForm.inherit_default,
+				allowed_plugins: textToList(projectPolicyForm.allowed),
+				required_plugins: textToList(projectPolicyForm.required),
+				blocked_plugins: textToList(projectPolicyForm.blocked),
+				pinned_versions: textToPinned(projectPolicyForm.pinned),
+				notes: projectPolicyForm.notes || undefined,
+			}),
+		onSuccess: () => {
+			queryClient.invalidateQueries({
+				queryKey: ['plugin-policy-project', projectId],
+			});
+			queryClient.invalidateQueries({
+				queryKey: ['plugin-policy-effective', projectId],
+			});
+			toast.success('Project policy updated');
+		},
+		onError: (error: any) => {
+			toast.error(getApiErrorMessage(error, 'Failed to update project policy'));
+		},
+	});
+
+	const applyBundleToGlobalMutation = useMutation({
+		mutationFn: () => dashboardApi.applyBundleToGlobalPolicy(selectedBundleId),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ['plugin-policy-global'] });
+			queryClient.invalidateQueries({
+				queryKey: ['plugin-policy-effective', projectId],
+			});
+			toast.success('Bundle applied to global policy');
+		},
+		onError: (error: any) => {
+			toast.error(
+				getApiErrorMessage(error, 'Failed to apply bundle to global policy')
+			);
+		},
+	});
+
+	const applyBundleToProjectMutation = useMutation({
+		mutationFn: () =>
+			dashboardApi.applyBundleToProjectPolicy(projectId!, selectedBundleId),
+		onSuccess: () => {
+			queryClient.invalidateQueries({
+				queryKey: ['plugin-policy-project', projectId],
+			});
+			queryClient.invalidateQueries({
+				queryKey: ['plugin-policy-effective', projectId],
+			});
+			toast.success('Bundle applied to project policy');
+		},
+		onError: (error: any) => {
+			toast.error(
+				getApiErrorMessage(error, 'Failed to apply bundle to project policy')
+			);
+		},
+	});
 	const createBackupMutation = useMutation({
 		mutationFn: (data: { envId: number; type: string; storage: string }) =>
 			dashboardApi.createEnvironmentBackup(
@@ -440,6 +688,40 @@ export default function ProjectDetail() {
 		}
 	};
 
+	const parseAuditDetails = (details?: string) => {
+		if (!details) return null;
+		try {
+			return JSON.parse(details);
+		} catch {
+			return null;
+		}
+	};
+
+	const listToText = (list?: string[]) => (list || []).join('\n');
+	const textToList = (value: string) =>
+		value
+			.split(/[\n,]+/)
+			.map(item => item.trim())
+			.filter(Boolean);
+	const pinnedToText = (pinned?: Record<string, string>) =>
+		Object.entries(pinned || {})
+			.map(([slug, version]) => `${slug}=${version}`)
+			.join('\n');
+	const textToPinned = (value: string) => {
+		const output: Record<string, string> = {};
+		value
+			.split(/[\n,]+/)
+			.map(item => item.trim())
+			.filter(Boolean)
+			.forEach(item => {
+				const [slug, version] = item.split('=');
+				if (slug && version) {
+					output[slug.trim()] = version.trim();
+				}
+			});
+		return output;
+	};
+
 	const formatBackupTimestamp = (ts: string) => {
 		if (!ts) return '';
 		// If it looks like an ISO date (from DB)
@@ -572,22 +854,25 @@ export default function ProjectDetail() {
 		},
 	});
 
-	useEffect(() => {
-		if (!driveCloneTaskId) return;
-		const interval = setInterval(async () => {
-			try {
-				const response = await dashboardApi.getTaskStatus(driveCloneTaskId);
-				setDriveCloneStatus(response.data);
-				if (['completed', 'failed'].includes(response.data.status)) {
-					clearInterval(interval);
-				}
-			} catch {
-				clearInterval(interval);
-			}
-		}, 2000);
+	const { taskStatus: driveCloneTaskStatus } =
+		useTaskStatusPolling(driveCloneTaskId);
+	const { taskStatus: runnerTaskStatus } = useTaskStatusPolling(runnerTaskId, {
+		onComplete: () => {
+			queryClient.invalidateQueries({
+				queryKey: ['wp-cli-history', runnerEnvId],
+			});
+		},
+	});
 
-		return () => clearInterval(interval);
-	}, [driveCloneTaskId]);
+	useEffect(() => {
+		if (!driveCloneTaskStatus) return;
+		setDriveCloneStatus(driveCloneTaskStatus);
+	}, [driveCloneTaskStatus]);
+
+	useEffect(() => {
+		if (!runnerTaskStatus) return;
+		setRunnerStatus(runnerTaskStatus);
+	}, [runnerTaskStatus]);
 
 	// Backup download handler (using generic dashboardApi)
 	const handleDownloadBackup = async (backupId: number, backupName: string) => {
@@ -1355,6 +1640,628 @@ export default function ProjectDetail() {
 							})}
 						</div>
 					)}
+
+					<Card title='WP-CLI Runner'>
+						<div className='space-y-4'>
+							<div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
+								<div>
+									<label className='block text-xs text-gray-500 mb-1'>
+										Environment
+									</label>
+									<select
+										value={runnerEnvId}
+										onChange={e => setRunnerEnvId(e.target.value)}
+										className='w-full border rounded-md px-3 py-2 text-sm'
+									>
+										<option value=''>Select environment</option>
+										{environments.map(env => (
+											<option key={env.id} value={env.id}>
+												{env.environment.toUpperCase()} – {env.server_name}
+											</option>
+										))}
+									</select>
+								</div>
+								<div>
+									<label className='block text-xs text-gray-500 mb-1'>
+										Command
+									</label>
+									<select
+										value={runnerCommand}
+										onChange={e => setRunnerCommand(e.target.value)}
+										className='w-full border rounded-md px-3 py-2 text-sm'
+									>
+										{allowedWpCommands.map(command => (
+											<option key={command} value={command}>
+												{command}
+											</option>
+										))}
+									</select>
+								</div>
+							</div>
+
+							<div>
+								<label className='block text-xs text-gray-500 mb-1'>
+									Arguments
+								</label>
+								<input
+									value={runnerArgs}
+									onChange={e => setRunnerArgs(e.target.value)}
+									placeholder='--field=name --format=json'
+									className='w-full border rounded-md px-3 py-2 text-sm'
+								/>
+								<p className='text-xs text-gray-400 mt-1'>
+									Args are split on spaces before sending.
+								</p>
+							</div>
+
+							<div className='flex items-center justify-between'>
+								<Button
+									variant='primary'
+									disabled={!runnerEnvId || runWpCliMutation.isPending}
+									onClick={() => runWpCliMutation.mutate()}
+								>
+									<Terminal className='w-4 h-4 mr-2' />
+									Run Command
+								</Button>
+								{runnerStatus && (
+									<div className='text-xs text-gray-500'>
+										Status: {runnerStatus.status || 'pending'}
+										{runnerStatus.message ? ` — ${runnerStatus.message}` : ''}
+									</div>
+								)}
+							</div>
+
+							{runnerStatus?.result?.output && (
+								<div className='bg-gray-50 border rounded-md p-3 text-xs whitespace-pre-wrap'>
+									{runnerStatus.result.output}
+								</div>
+							)}
+
+							<div className='border-t pt-4'>
+								<h4 className='text-sm font-medium text-gray-900'>
+									Recent runs
+								</h4>
+								<div className='mt-2 space-y-2'>
+									{wpCliHistory?.data?.items?.length ? (
+										wpCliHistory.data.items.map((item: any) => {
+											const details = parseAuditDetails(item.details);
+											return (
+												<div
+													key={item.id}
+													className='flex items-start justify-between text-xs text-gray-600'
+												>
+													<div>
+														<div className='font-medium text-gray-800'>
+															wp {details?.command || 'command'}
+														</div>
+														{details?.args?.length ? (
+															<div className='text-gray-500'>
+																{details.args.join(' ')}
+															</div>
+														) : null}
+														<div className='text-gray-400'>
+															{new Date(item.created_at).toLocaleString()}
+														</div>
+													</div>
+													<div className='text-right'>
+														<Badge
+															variant={
+																details?.status === 'completed'
+																	? 'success'
+																	: details?.status === 'failed'
+																	? 'danger'
+																	: 'default'
+															}
+														>
+															{details?.status || 'queued'}
+														</Badge>
+													</div>
+												</div>
+											);
+										})
+									) : (
+										<p className='text-xs text-gray-400'>
+											No recent runs for this environment.
+										</p>
+									)}
+								</div>
+							</div>
+						</div>
+					</Card>
+
+					<Card title='Plugin Policy'>
+						<div className='space-y-6'>
+							<div className='border rounded-md p-4 bg-gray-50'>
+								<h4 className='text-sm font-medium text-gray-900'>
+									Apply Vendor Bundle
+								</h4>
+								<p className='text-xs text-gray-500 mt-1'>
+									Bundles append required plugins and pinned versions.
+								</p>
+								<div className='mt-3 grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-2'>
+									<select
+										value={selectedBundleId}
+										onChange={e => setSelectedBundleId(e.target.value)}
+										className='w-full border rounded-md px-3 py-2 text-sm'
+									>
+										<option value=''>Select bundle</option>
+										{pluginBundlesData?.data?.map((bundle: any) => (
+											<option key={bundle.id} value={bundle.id}>
+												{bundle.name}
+											</option>
+										))}
+									</select>
+									<Button
+										variant='secondary'
+										disabled={
+											!selectedBundleId || applyBundleToGlobalMutation.isPending
+										}
+										onClick={() => applyBundleToGlobalMutation.mutate()}
+									>
+										Apply to Global
+									</Button>
+									<Button
+										variant='secondary'
+										disabled={
+											!projectId ||
+											!selectedBundleId ||
+											applyBundleToProjectMutation.isPending
+										}
+										onClick={() => applyBundleToProjectMutation.mutate()}
+									>
+										Apply to Project
+									</Button>
+								</div>
+							</div>
+							<div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
+								<div className='space-y-3'>
+									<h4 className='text-sm font-medium text-gray-900'>
+										Global Default
+									</h4>
+									<div>
+										<label className='block text-xs text-gray-500 mb-1'>
+											Name
+										</label>
+										<input
+											value={globalPolicyForm.name}
+											onChange={e =>
+												setGlobalPolicyForm(prev => ({
+													...prev,
+													name: e.target.value,
+												}))
+											}
+											className='w-full border rounded-md px-3 py-2 text-sm'
+										/>
+									</div>
+									<div>
+										<label className='block text-xs text-gray-500 mb-1'>
+											Required plugins (one per line)
+										</label>
+										<textarea
+											value={globalPolicyForm.required}
+											onChange={e =>
+												setGlobalPolicyForm(prev => ({
+													...prev,
+													required: e.target.value,
+												}))
+											}
+											className='w-full border rounded-md px-3 py-2 text-sm'
+											rows={3}
+										/>
+									</div>
+									<div>
+										<label className='block text-xs text-gray-500 mb-1'>
+											Allowed plugins (optional allowlist)
+										</label>
+										<textarea
+											value={globalPolicyForm.allowed}
+											onChange={e =>
+												setGlobalPolicyForm(prev => ({
+													...prev,
+													allowed: e.target.value,
+												}))
+											}
+											className='w-full border rounded-md px-3 py-2 text-sm'
+											rows={3}
+										/>
+									</div>
+									<div>
+										<label className='block text-xs text-gray-500 mb-1'>
+											Blocked plugins
+										</label>
+										<textarea
+											value={globalPolicyForm.blocked}
+											onChange={e =>
+												setGlobalPolicyForm(prev => ({
+													...prev,
+													blocked: e.target.value,
+												}))
+											}
+											className='w-full border rounded-md px-3 py-2 text-sm'
+											rows={3}
+										/>
+									</div>
+									<div>
+										<label className='block text-xs text-gray-500 mb-1'>
+											Pinned versions (slug=version)
+										</label>
+										<textarea
+											value={globalPolicyForm.pinned}
+											onChange={e =>
+												setGlobalPolicyForm(prev => ({
+													...prev,
+													pinned: e.target.value,
+												}))
+											}
+											className='w-full border rounded-md px-3 py-2 text-sm'
+											rows={3}
+										/>
+									</div>
+									<div>
+										<label className='block text-xs text-gray-500 mb-1'>
+											Notes
+										</label>
+										<textarea
+											value={globalPolicyForm.notes}
+											onChange={e =>
+												setGlobalPolicyForm(prev => ({
+													...prev,
+													notes: e.target.value,
+												}))
+											}
+											className='w-full border rounded-md px-3 py-2 text-sm'
+											rows={2}
+										/>
+									</div>
+									<Button
+										variant='primary'
+										disabled={saveGlobalPolicyMutation.isPending}
+										onClick={() => saveGlobalPolicyMutation.mutate()}
+									>
+										Save Global Policy
+									</Button>
+								</div>
+
+								<div className='space-y-3'>
+									<h4 className='text-sm font-medium text-gray-900'>
+										Project Override
+									</h4>
+									<label className='flex items-center text-xs text-gray-600'>
+										<input
+											type='checkbox'
+											checked={projectPolicyForm.inherit_default}
+											onChange={e =>
+												setProjectPolicyForm(prev => ({
+													...prev,
+													inherit_default: e.target.checked,
+												}))
+											}
+											className='mr-2'
+										/>
+										Inherit global defaults
+									</label>
+									<div>
+										<label className='block text-xs text-gray-500 mb-1'>
+											Required plugins (override/add)
+										</label>
+										<textarea
+											value={projectPolicyForm.required}
+											onChange={e =>
+												setProjectPolicyForm(prev => ({
+													...prev,
+													required: e.target.value,
+												}))
+											}
+											className='w-full border rounded-md px-3 py-2 text-sm'
+											rows={3}
+										/>
+									</div>
+									<div>
+										<label className='block text-xs text-gray-500 mb-1'>
+											Allowed plugins
+										</label>
+										<textarea
+											value={projectPolicyForm.allowed}
+											onChange={e =>
+												setProjectPolicyForm(prev => ({
+													...prev,
+													allowed: e.target.value,
+												}))
+											}
+											className='w-full border rounded-md px-3 py-2 text-sm'
+											rows={3}
+										/>
+									</div>
+									<div>
+										<label className='block text-xs text-gray-500 mb-1'>
+											Blocked plugins
+										</label>
+										<textarea
+											value={projectPolicyForm.blocked}
+											onChange={e =>
+												setProjectPolicyForm(prev => ({
+													...prev,
+													blocked: e.target.value,
+												}))
+											}
+											className='w-full border rounded-md px-3 py-2 text-sm'
+											rows={3}
+										/>
+									</div>
+									<div>
+										<label className='block text-xs text-gray-500 mb-1'>
+											Pinned versions (slug=version)
+										</label>
+										<textarea
+											value={projectPolicyForm.pinned}
+											onChange={e =>
+												setProjectPolicyForm(prev => ({
+													...prev,
+													pinned: e.target.value,
+												}))
+											}
+											className='w-full border rounded-md px-3 py-2 text-sm'
+											rows={3}
+										/>
+									</div>
+									<div>
+										<label className='block text-xs text-gray-500 mb-1'>
+											Notes
+										</label>
+										<textarea
+											value={projectPolicyForm.notes}
+											onChange={e =>
+												setProjectPolicyForm(prev => ({
+													...prev,
+													notes: e.target.value,
+												}))
+											}
+											className='w-full border rounded-md px-3 py-2 text-sm'
+											rows={2}
+										/>
+									</div>
+									<Button
+										variant='primary'
+										disabled={!projectId || saveProjectPolicyMutation.isPending}
+										onClick={() => saveProjectPolicyMutation.mutate()}
+									>
+										Save Project Policy
+									</Button>
+								</div>
+							</div>
+
+							<div className='border-t pt-4'>
+								<h4 className='text-sm font-medium text-gray-900'>
+									Effective Policy
+								</h4>
+								{effectivePolicyData?.data ? (
+									<div className='text-xs text-gray-600 space-y-2 mt-2'>
+										<div>Source: {effectivePolicyData.data.source}</div>
+										<div>
+											Required:{' '}
+											{effectivePolicyData.data.required_plugins?.length || 0}
+										</div>
+										<div>
+											Allowed:{' '}
+											{effectivePolicyData.data.allowed_plugins?.length || 0}
+										</div>
+										<div>
+											Blocked:{' '}
+											{effectivePolicyData.data.blocked_plugins?.length || 0}
+										</div>
+										<div>
+											Pinned:{' '}
+											{
+												Object.keys(
+													effectivePolicyData.data.pinned_versions || {}
+												).length
+											}
+										</div>
+									</div>
+								) : (
+									<p className='text-xs text-gray-400 mt-2'>
+										No policy loaded.
+									</p>
+								)}
+							</div>
+
+							<div className='border-t pt-4'>
+								<h4 className='text-sm font-medium text-gray-900'>
+									Drift Check
+								</h4>
+								<p className='text-xs text-gray-500 mt-1'>
+									Uses the latest WP scan for the selected environment.
+								</p>
+								{pluginDriftData?.data ? (
+									<div className='mt-2 text-xs text-gray-600 space-y-2'>
+										<div>
+											Missing required:{' '}
+											{pluginDriftData.data.missing_required?.length || 0}
+										</div>
+										<div>
+											Blocked installed:{' '}
+											{pluginDriftData.data.blocked_installed?.length || 0}
+										</div>
+										<div>
+											Disallowed installed:{' '}
+											{pluginDriftData.data.disallowed_installed?.length || 0}
+										</div>
+										<div>
+											Version mismatches:{' '}
+											{
+												Object.keys(
+													pluginDriftData.data.version_mismatches || {}
+												).length
+											}
+										</div>
+
+										{pluginDriftData.data.missing_required?.length ? (
+											<div className='pt-2 border-t'>
+												<div className='text-xs font-medium text-gray-700'>
+													Missing required plugins
+												</div>
+												<div className='mt-1 space-y-2'>
+													{pluginDriftData.data.missing_required.map(
+														(plugin: string) => (
+															<div
+																key={plugin}
+																className='flex items-center justify-between'
+															>
+																<span>{plugin}</span>
+																<Button
+																	size='sm'
+																	variant='secondary'
+																	disabled={
+																		!runnerEnvId ||
+																		runWpCliDirectMutation.isPending
+																	}
+																	onClick={() =>
+																		runWpCliDirectMutation.mutate({
+																			command: 'plugin install',
+																			args: [plugin, '--activate'],
+																		})
+																	}
+																>
+																	Install
+																</Button>
+															</div>
+														)
+													)}
+												</div>
+											</div>
+										) : null}
+
+										{pluginDriftData.data.blocked_installed?.length ? (
+											<div className='pt-2 border-t'>
+												<div className='text-xs font-medium text-gray-700'>
+													Blocked plugins installed
+												</div>
+												<div className='mt-1 space-y-2'>
+													{pluginDriftData.data.blocked_installed.map(
+														(plugin: string) => (
+															<div
+																key={plugin}
+																className='flex items-center justify-between'
+															>
+																<span>{plugin}</span>
+																<Button
+																	size='sm'
+																	variant='secondary'
+																	disabled={
+																		!runnerEnvId ||
+																		runWpCliDirectMutation.isPending
+																	}
+																	onClick={() =>
+																		runWpCliDirectMutation.mutate({
+																			command: 'plugin deactivate',
+																			args: [plugin],
+																		})
+																	}
+																>
+																	Deactivate
+																</Button>
+															</div>
+														)
+													)}
+												</div>
+											</div>
+										) : null}
+
+										{pluginDriftData.data.disallowed_installed?.length ? (
+											<div className='pt-2 border-t'>
+												<div className='text-xs font-medium text-gray-700'>
+													Disallowed plugins installed
+												</div>
+												<div className='mt-1 space-y-2'>
+													{pluginDriftData.data.disallowed_installed.map(
+														(plugin: string) => (
+															<div
+																key={plugin}
+																className='flex items-center justify-between'
+															>
+																<span>{plugin}</span>
+																<Button
+																	size='sm'
+																	variant='secondary'
+																	disabled={
+																		!runnerEnvId ||
+																		runWpCliDirectMutation.isPending
+																	}
+																	onClick={() =>
+																		runWpCliDirectMutation.mutate({
+																			command: 'plugin deactivate',
+																			args: [plugin],
+																		})
+																	}
+																>
+																	Deactivate
+																</Button>
+															</div>
+														)
+													)}
+												</div>
+											</div>
+										) : null}
+
+										{Object.keys(pluginDriftData.data.version_mismatches || {})
+											.length ? (
+											<div className='pt-2 border-t'>
+												<div className='text-xs font-medium text-gray-700'>
+													Pinned version mismatches
+												</div>
+												<div className='mt-1 space-y-2'>
+													{Object.entries(
+														pluginDriftData.data.version_mismatches || {}
+													).map(
+														([plugin, currentVersion]: [string, string]) => {
+															const pinnedVersion =
+																effectivePolicyData?.data?.pinned_versions?.[
+																	plugin
+																];
+															return (
+																<div
+																	key={plugin}
+																	className='flex items-center justify-between'
+																>
+																	<span>
+																		{plugin} ({currentVersion})
+																	</span>
+																	<Button
+																		size='sm'
+																		variant='secondary'
+																		disabled={
+																			!runnerEnvId ||
+																			!pinnedVersion ||
+																			runWpCliDirectMutation.isPending
+																		}
+																		onClick={() =>
+																			runWpCliDirectMutation.mutate({
+																				command: 'plugin update',
+																				args: [
+																					plugin,
+																					`--version=${pinnedVersion}`,
+																				],
+																			})
+																		}
+																	>
+																		Update
+																	</Button>
+																</div>
+															);
+														}
+													)}
+												</div>
+											</div>
+										) : null}
+									</div>
+								) : (
+									<p className='text-xs text-gray-400 mt-2'>
+										Select an environment to view drift.
+									</p>
+								)}
+							</div>
+						</div>
+					</Card>
 
 					{/* Fallback for DDEV/Local plugins */}
 					{pluginsData?.data?.plugins?.length > 0 && (

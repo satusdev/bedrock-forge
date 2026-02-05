@@ -90,17 +90,117 @@ export interface ThemeInfo {
 	last_updated?: string;
 }
 
+export type ClientBillingStatus =
+	| 'active'
+	| 'inactive'
+	| 'trial'
+	| 'overdue'
+	| 'cancelled';
+
 export interface ClientInfo {
 	name: string;
 	email: string;
-	phone?: string;
+	phone?: string | null;
+	company?: string | null;
+	billing_status?: ClientBillingStatus | null;
+	monthly_rate?: number | null;
+	contract_start?: string | null;
+	contract_end?: string | null;
+	notes?: string | null;
+	contact_person?: string | null;
+}
+
+export interface ClientProjectSummary {
+	id: number;
+	project_name: string;
+	status?: string;
+}
+
+export interface ClientInvoiceSummary {
+	id: number;
+	invoice_number: string;
+	status: string;
+	total: number;
+}
+
+export interface ClientListItem {
+	id: number;
+	name: string;
+	company?: string | null;
+	email: string;
+	phone?: string | null;
+	billing_status?: ClientBillingStatus | null;
+	project_count: number;
+	invoice_count?: number;
+	monthly_retainer?: number | null;
+	currency?: string | null;
+	projects?: ClientProjectSummary[];
+	created_at?: string | null;
+}
+
+export interface ClientDetail {
+	id: number;
+	name: string;
+	company?: string | null;
+	email: string;
+	phone?: string | null;
+	billing_email?: string | null;
+	address?: string | null;
+	website?: string | null;
+	notes?: string | null;
+	billing_status?: ClientBillingStatus | null;
+	payment_terms?: string | null;
+	currency?: string | null;
+	tax_rate?: number | null;
+	auto_billing?: boolean | null;
+	contract_start?: string | null;
+	contract_end?: string | null;
+	contract_terms?: string | null;
+	monthly_retainer?: number | null;
+	invoice_prefix?: string | null;
+	created_at?: string | null;
+	updated_at?: string | null;
+	projects?: ClientProjectSummary[];
+	recent_invoices?: ClientInvoiceSummary[];
+}
+
+export interface ClientsListResponse {
+	clients: ClientListItem[];
+	total: number;
+	limit: number;
+	offset: number;
+}
+
+export interface ClientCreateInput {
+	name: string;
+	email: string;
 	company?: string;
-	billing_status: string;
-	monthly_rate: number;
+	phone?: string;
+	billing_email?: string;
+	address?: string;
+	website?: string;
+	notes?: string;
+	payment_terms?: number;
+	currency?: string;
+	tax_rate?: number;
+}
+
+export interface ClientUpdateInput {
+	name?: string;
+	email?: string;
+	company?: string;
+	phone?: string;
+	billing_email?: string;
+	address?: string;
+	website?: string;
+	notes?: string;
+	payment_terms?: number;
+	currency?: string;
+	tax_rate?: number;
+	billing_status?: ClientBillingStatus;
 	contract_start?: string;
 	contract_end?: string;
-	notes: string;
-	contact_person?: string;
+	monthly_rate?: number;
 }
 
 export interface BackupInfo {
