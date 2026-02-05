@@ -313,6 +313,10 @@ def doctor():
     from rich.panel import Panel
     from rich.table import Table
     from rich.text import Text
+    import asyncio
+    import sqlalchemy as sa
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from redis import Redis
 
     console = Console()
 
@@ -408,6 +412,41 @@ def doctor():
         venv_table.add_row("Virtual environment", "❌ Not found")
 
     console.print(venv_table)
+
+    # Check services
+    console.print("\n[bold]🧩 Service Health[/bold]")
+    service_table = Table()
+    service_table.add_column("Service", style="cyan")
+    service_table.add_column("Status", style="green")
+
+    db_url = os.getenv("DATABASE_URL")
+    if db_url:
+        async def _check_db():
+            engine = create_async_engine(db_url)
+            async with engine.connect() as conn:
+                await conn.execute(sa.text("SELECT 1"))
+            await engine.dispose()
+
+        try:
+            asyncio.run(_check_db())
+            service_table.add_row("Database", "✅ اتصال ناجح / Connected")
+        except Exception as e:
+            service_table.add_row("Database", f"❌ {str(e)[:80]}")
+    else:
+        service_table.add_row("Database", "⚠️ DATABASE_URL not set")
+
+    redis_url = os.getenv("REDIS_URL")
+    if redis_url:
+        try:
+            redis = Redis.from_url(redis_url, socket_connect_timeout=5)
+            redis.ping()
+            service_table.add_row("Redis", "✅ اتصال ناجح / Connected")
+        except Exception as e:
+            service_table.add_row("Redis", f"❌ {str(e)[:80]}")
+    else:
+        service_table.add_row("Redis", "⚠️ REDIS_URL not set")
+
+    console.print(service_table)
 
     # Check global command
     console.print("\n[bold]🔧 Global Command[/bold]")

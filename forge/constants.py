@@ -128,7 +128,7 @@ ENV_WP_ENV = "WP_ENV"
 
 # Validation patterns
 VALID_DDEV_ACTIONS = ["start", "stop", "status"]
-VALID_ENVIRONMENTS = ["development", "staging"]
+VALID_ENVIRONMENTS = ["development", "staging", "production"]
 
 # Progress messages
 PROGRESS_DESC_SCANNING = "Scanning for sites"

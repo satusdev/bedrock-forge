@@ -84,12 +84,22 @@ def create_app() -> FastAPI:
             "message": settings.APP_NAME,
             "version": "1.0.0",
             "docs": "/docs",
-            "health": "/health"
+            "health": "/health",
+            "api_health": f"{settings.API_V1_PREFIX}/health"
         }
 
     # Health check endpoint
     @app.get("/health")
     async def health_check():
+        return {
+            "status": "healthy",
+            "service": "bedrock-forge-api",
+            "version": "1.0.0",
+            "debug": settings.DEBUG
+        }
+
+    @app.get(f"{settings.API_V1_PREFIX}/health")
+    async def api_health_check():
         return {
             "status": "healthy",
             "service": "bedrock-forge-api",
