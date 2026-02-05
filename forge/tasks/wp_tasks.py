@@ -4,9 +4,10 @@ WordPress site management tasks for Celery.
 Background tasks for WP version scanning, updates, and management.
 """
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 import asyncio
 import json
+import shlex
 
 from celery import shared_task
 from sqlalchemy import select
@@ -18,6 +19,36 @@ from ..db.models.wp_site_management import WPSiteState, WPUpdate, UpdateType, Up
 from ..db.models.backup import Backup
 from ..utils.logging import logger
 from .sync_tasks import _get_ssh_cmd, run_async
+from ..api.deps import update_task_status
+from ..db.models.audit import AuditLog, AuditAction
+
+
+ALLOWED_WP_CLI_COMMANDS = {
+    "core version",
+    "core check-update",
+    "core update",
+    "plugin install",
+    "plugin activate",
+    "plugin deactivate",
+    "plugin uninstall",
+    "plugin list",
+    "plugin status",
+    "plugin update",
+    "theme list",
+    "theme status",
+    "theme update",
+    "user list",
+    "option get",
+    "cache flush",
+}
+
+
+def normalize_wp_cli_command(command: str) -> str:
+    return " ".join(command.lower().strip().split())
+
+
+def is_allowed_wp_cli_command(command: str) -> bool:
+    return normalize_wp_cli_command(command) in ALLOWED_WP_CLI_COMMANDS
 
 
 # ============================================================================
@@ -233,6 +264,227 @@ def scan_wp_site(project_server_id: int) -> dict:
     """Scan WordPress site for versions and available updates."""
     logger.info(f"Scanning WP site for PS {project_server_id}")
     return run_async(_scan_wp_site(project_server_id))
+
+
+# ============================================================================
+# Remote WP-CLI Command Runner
+# ============================================================================
+
+async def _run_wp_cli_command(
+    project_server_id: int,
+    command: str,
+    args: Optional[List[str]] = None,
+    task_id: Optional[str] = None,
+    user_id: Optional[int] = None
+) -> dict:
+    """Run an allowlisted WP-CLI command on a remote server."""
+    normalized_command = normalize_wp_cli_command(command)
+    if not is_allowed_wp_cli_command(normalized_command):
+        if task_id:
+            update_task_status(task_id, "failed", "Command not allowed")
+        if user_id:
+            async with AsyncSessionLocal() as db:
+                details = json.dumps({
+                    "command": normalized_command,
+                    "args": args or [],
+                    "status": "rejected",
+                    "task_id": task_id
+                })
+                db.add(AuditLog(
+                    user_id=user_id,
+                    action=AuditAction.COMMAND,
+                    entity_type="wp_cli",
+                    entity_id=str(project_server_id),
+                    details=details
+                ))
+                await db.commit()
+        return {"success": False, "error": "Command not allowed"}
+
+    if task_id:
+        update_task_status(task_id, "running", f"Running wp {normalized_command}...")
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(ProjectServer).where(ProjectServer.id == project_server_id)
+        )
+        ps = result.scalar_one_or_none()
+        if not ps:
+            if task_id:
+                update_task_status(task_id, "failed", "Project-server not found")
+            return {"success": False, "error": "Project-server not found"}
+
+        result = await db.execute(
+            select(Server).where(Server.id == ps.server_id)
+        )
+        server = result.scalar_one_or_none()
+        if not server:
+            if task_id:
+                update_task_status(task_id, "failed", "Server not found")
+            return {"success": False, "error": "Server not found"}
+
+        try:
+            ssh_base = _get_ssh_cmd(server, project_server=ps)
+
+            raw_wp_path = (ps.wp_path or "").rstrip("/")
+            if "/web/web" in raw_wp_path:
+                raw_wp_path = raw_wp_path.replace("/web/web", "/web")
+            cli_path = raw_wp_path
+            if raw_wp_path.endswith("/web/app"):
+                cli_path = raw_wp_path[:-8]
+            elif "/web/app" in raw_wp_path:
+                cli_path = raw_wp_path.split("/web/app")[0]
+            elif raw_wp_path.endswith("/web"):
+                cli_path = raw_wp_path[:-4]
+
+            wp_env = "PATH=$PATH:/usr/local/bin:/usr/bin:/bin"
+
+            wp_check_cmd = ssh_base + [f"{wp_env} command -v wp"]
+            proc = await asyncio.create_subprocess_exec(
+                *wp_check_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
+            if proc.returncode != 0 or not stdout.strip():
+                error = (
+                    "WP-CLI not found on the server. Install wp-cli and ensure it is in PATH "
+                    "(/usr/local/bin or /usr/bin)."
+                )
+                if task_id:
+                    update_task_status(task_id, "failed", error)
+                if user_id:
+                    details = json.dumps({
+                        "command": normalized_command,
+                        "args": args or [],
+                        "status": "failed",
+                        "error": error,
+                        "task_id": task_id
+                    })
+                    db.add(AuditLog(
+                        user_id=user_id,
+                        action=AuditAction.COMMAND,
+                        entity_type="wp_cli",
+                        entity_id=str(project_server_id),
+                        details=details
+                    ))
+                    await db.commit()
+                logger.error(
+                    f"WP-CLI not found for PS {project_server_id}: {stderr.decode()[:200]}"
+                )
+                return {"success": False, "error": error}
+
+            safe_args = " ".join(shlex.quote(arg) for arg in (args or []) if arg is not None)
+            cmd = f"{normalized_command} {safe_args}".strip()
+            full_cmd = f"cd {cli_path} && {wp_env} wp {cmd} --allow-root"
+
+            proc = await asyncio.create_subprocess_exec(
+                *(ssh_base + [full_cmd]),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
+            if proc.returncode != 0:
+                error = (stderr.decode() or "Command failed")[:500]
+                if task_id:
+                    update_task_status(task_id, "failed", error)
+                if user_id:
+                    details = json.dumps({
+                        "command": normalized_command,
+                        "args": args or [],
+                        "status": "failed",
+                        "error": error,
+                        "task_id": task_id
+                    })
+                    db.add(AuditLog(
+                        user_id=user_id,
+                        action=AuditAction.COMMAND,
+                        entity_type="wp_cli",
+                        entity_id=str(project_server_id),
+                        details=details
+                    ))
+                    await db.commit()
+                return {"success": False, "error": error}
+
+            output = (stdout.decode() or "").strip()
+            if task_id:
+                update_task_status(task_id, "completed", "Command completed", 100, {
+                    "output": output[:2000]
+                })
+            if user_id:
+                details = json.dumps({
+                    "command": normalized_command,
+                    "args": args or [],
+                    "status": "completed",
+                    "output": output[:2000],
+                    "task_id": task_id
+                })
+                db.add(AuditLog(
+                    user_id=user_id,
+                    action=AuditAction.COMMAND,
+                    entity_type="wp_cli",
+                    entity_id=str(project_server_id),
+                    details=details
+                ))
+                await db.commit()
+
+            return {"success": True, "output": output}
+
+        except asyncio.TimeoutError:
+            if task_id:
+                update_task_status(task_id, "failed", "Command timed out")
+            if user_id:
+                async with AsyncSessionLocal() as db:
+                    details = json.dumps({
+                        "command": normalized_command,
+                        "args": args or [],
+                        "status": "failed",
+                        "error": "Command timed out",
+                        "task_id": task_id
+                    })
+                    db.add(AuditLog(
+                        user_id=user_id,
+                        action=AuditAction.COMMAND,
+                        entity_type="wp_cli",
+                        entity_id=str(project_server_id),
+                        details=details
+                    ))
+                    await db.commit()
+            return {"success": False, "error": "Command timed out"}
+        except Exception as e:
+            logger.error(f"WP-CLI command error: {e}")
+            if task_id:
+                update_task_status(task_id, "failed", str(e)[:200])
+            if user_id:
+                async with AsyncSessionLocal() as db:
+                    details = json.dumps({
+                        "command": normalized_command,
+                        "args": args or [],
+                        "status": "failed",
+                        "error": str(e)[:200],
+                        "task_id": task_id
+                    })
+                    db.add(AuditLog(
+                        user_id=user_id,
+                        action=AuditAction.COMMAND,
+                        entity_type="wp_cli",
+                        entity_id=str(project_server_id),
+                        details=details
+                    ))
+                    await db.commit()
+            return {"success": False, "error": str(e)[:200]}
+
+
+@shared_task(name="forge.tasks.wp_tasks.run_wp_cli_command")
+def run_wp_cli_command(
+    project_server_id: int,
+    command: str,
+    args: Optional[List[str]] = None,
+    task_id: Optional[str] = None,
+    user_id: Optional[int] = None
+) -> dict:
+    """Run an allowlisted WP-CLI command on a remote server."""
+    logger.info(f"Running WP-CLI command for PS {project_server_id}: {command}")
+    return run_async(_run_wp_cli_command(project_server_id, command, args, task_id, user_id))
 
 
 # ============================================================================

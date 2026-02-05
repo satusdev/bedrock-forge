@@ -4,9 +4,11 @@ WordPress Management API routes.
 Provides endpoints for viewing WP site state and triggering updates.
 """
 from datetime import datetime
+import uuid
+import json
 from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException, status, Depends, BackgroundTasks
+from fastapi import APIRouter, HTTPException, status, Depends, BackgroundTasks, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -16,6 +18,7 @@ from ....db import get_db, User
 from ....db.models.project import Project
 from ....db.models.project_server import ProjectServer
 from ....db.models.wp_site_management import WPSiteState, WPUpdate, UpdateStatus
+from ....db.models.audit import AuditLog, AuditAction
 from ...deps import get_current_active_user, update_task_status
 from ....utils.logging import logger
 
@@ -90,6 +93,20 @@ class BulkUpdateResponse(BaseModel):
     """Response for bulk update."""
     task_id: str
     sites_queued: int
+    message: str
+
+
+class RunCommandRequest(BaseModel):
+    """Request to run a WP-CLI command."""
+    project_server_id: int
+    command: str
+    args: Optional[List[str]] = None
+
+
+class RunCommandResponse(BaseModel):
+    """Response for WP-CLI command run."""
+    task_id: str
+    status: str
     message: str
 
 
@@ -175,6 +192,64 @@ async def trigger_wp_scan(
         pass
     
     return {"status": "queued", "message": "WP scan queued"}
+
+
+@router.post("/runner/command", response_model=RunCommandResponse)
+async def run_wp_cli_command(
+    request: RunCommandRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Run an allowlisted WP-CLI command asynchronously."""
+    # Verify ownership
+    result = await db.execute(
+        select(ProjectServer)
+        .join(Project)
+        .where(ProjectServer.id == request.project_server_id)
+        .where(Project.owner_id == current_user.id)
+    )
+    ps = result.scalar_one_or_none()
+
+    if not ps:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project-server not found"
+        )
+
+    try:
+        from ....tasks.wp_tasks import (
+            run_wp_cli_command as run_wp_cli_command_task,
+            normalize_wp_cli_command,
+            ALLOWED_WP_CLI_COMMANDS
+        )
+    except ImportError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="WP-CLI runner unavailable"
+        )
+
+    normalized_command = normalize_wp_cli_command(request.command)
+    if normalized_command not in ALLOWED_WP_CLI_COMMANDS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Command not allowed"
+        )
+
+    task_id = str(uuid.uuid4())
+    update_task_status(task_id, "pending", f"Queued wp {normalized_command}")
+
+    run_wp_cli_command_task.delay(
+        project_server_id=request.project_server_id,
+        command=normalized_command,
+        args=request.args or [],
+        task_id=task_id
+    )
+
+    return RunCommandResponse(
+        task_id=task_id,
+        status="queued",
+        message="WP-CLI command queued"
+    )
 
 
 @router.get("/updates", response_model=PendingUpdatesResponse)
@@ -271,6 +346,70 @@ async def get_pending_updates(
         total_updates=len(updates),
         updates=updates
     )
+
+
+@router.post("/commands/run", response_model=RunCommandResponse)
+async def run_wp_cli_command(
+    payload: RunCommandRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Run an allowlisted WP-CLI command asynchronously."""
+    result = await db.execute(
+        select(ProjectServer)
+        .join(Project)
+        .where(ProjectServer.id == payload.project_server_id)
+        .where(Project.owner_id == current_user.id)
+    )
+    ps = result.scalar_one_or_none()
+
+    if not ps:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project-server not found"
+        )
+
+    task_id = str(uuid.uuid4())
+    update_task_status(task_id, "pending", f"Queued wp {payload.command}")
+
+    audit_details = {
+        "command": payload.command,
+        "args": payload.args or [],
+        "status": "queued",
+        "task_id": task_id
+    }
+    db.add(AuditLog(
+        user_id=current_user.id,
+        action=AuditAction.COMMAND,
+        entity_type="wp_cli",
+        entity_id=str(payload.project_server_id),
+        details=json.dumps(audit_details),
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent")
+    ))
+    await db.commit()
+
+    try:
+        from ....tasks.wp_tasks import run_wp_cli_command as run_wp_cli_command_task
+        run_wp_cli_command_task.delay(
+            payload.project_server_id,
+            payload.command,
+            payload.args,
+            task_id,
+            current_user.id
+        )
+        return RunCommandResponse(
+            task_id=task_id,
+            status="queued",
+            message="Command queued"
+        )
+    except Exception as e:
+        update_task_status(task_id, "failed", str(e)[:200])
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to queue command"
+        )
 
 
 @router.post("/updates/bulk", response_model=BulkUpdateResponse)

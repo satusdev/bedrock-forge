@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     
     # Redis (for rate limiting and caching)
     REDIS_URL: str = "redis://localhost:6379/0"
+
+    # Environment defaults
+    NOTIFICATION_SUPPRESS_ENVIRONMENTS: List[str] = ["development", "staging"]
     
     # First user (optional - for initial setup)
     FIRST_SUPERUSER_EMAIL: str = ""

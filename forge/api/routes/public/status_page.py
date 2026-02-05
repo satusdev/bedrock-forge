@@ -6,7 +6,7 @@ Provides unauthenticated endpoints for viewing project/monitor status.
 from datetime import datetime, timedelta
 from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
@@ -50,6 +50,7 @@ class StatusPageResponse(BaseModel):
     overall_status: str  # operational, degraded, major_outage
     monitors: List[MonitorStatusResponse]
     recent_incidents: List[IncidentSummary]
+    incident_pagination: dict
     last_updated: datetime
 
 
@@ -119,13 +120,25 @@ def determine_overall_status(monitors: list) -> str:
 # ============================================================================
 
 @router.get("/{project_id}", response_model=StatusPageResponse)
-async def get_status_page(project_id: int):
+async def get_status_page(
+    project_id: int,
+    response: Response,
+    page: int = 1,
+    page_size: int = 10,
+):
     """
     Get public status page for a project.
     
     No authentication required.
     Returns current status of all monitors and recent incidents.
     """
+    if page < 1:
+        page = 1
+    if page_size < 1:
+        page_size = 10
+    if page_size > 50:
+        page_size = 50
+
     async with AsyncSessionLocal() as db:
         # Get project
         result = await db.execute(
@@ -167,13 +180,22 @@ async def get_status_page(project_id: int):
         monitor_ids = [m.id for m in monitors]
         
         recent_incidents = []
+        total_incidents = 0
         if monitor_ids:
+            total_result = await db.execute(
+                select(func.count(Incident.id))
+                .where(Incident.monitor_id.in_(monitor_ids))
+                .where(Incident.started_at >= cutoff)
+            )
+            total_incidents = total_result.scalar() or 0
+
             result = await db.execute(
                 select(Incident)
                 .where(Incident.monitor_id.in_(monitor_ids))
                 .where(Incident.started_at >= cutoff)
                 .order_by(Incident.started_at.desc())
-                .limit(10)
+                .offset((page - 1) * page_size)
+                .limit(page_size)
             )
             incidents = result.scalars().all()
             
@@ -188,17 +210,28 @@ async def get_status_page(project_id: int):
                 for inc in incidents
             ]
         
+        response.headers["Cache-Control"] = "public, max-age=60"
+
         return StatusPageResponse(
             project_name=project.name,
             overall_status=determine_overall_status(monitors),
             monitors=monitor_statuses,
             recent_incidents=recent_incidents,
+            incident_pagination={
+                "page": page,
+                "page_size": page_size,
+                "total": total_incidents,
+            },
             last_updated=datetime.utcnow()
         )
 
 
 @router.get("/{project_id}/history", response_model=StatusHistoryResponse)
-async def get_status_history(project_id: int, days: int = 30):
+async def get_status_history(
+    project_id: int,
+    response: Response,
+    days: int = 30
+):
     """
     Get uptime history for a project.
     
@@ -272,6 +305,8 @@ async def get_status_history(project_id: int, days: int = 30):
             ))
             total_uptime += uptime
         
+        response.headers["Cache-Control"] = "public, max-age=300"
+
         return StatusHistoryResponse(
             project_name=project.name,
             period_days=days,

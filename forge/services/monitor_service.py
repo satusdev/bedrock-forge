@@ -202,8 +202,21 @@ class MonitorService:
         """Helper to send notifications."""
         from ..services.notification_service import notification_service
         from ..db.models.notification_channel import NotificationChannel
+        from ..db.models.project_server import ProjectServer
+        from ..core.config import settings
         
         try:
+            if monitor.project_server_id:
+                result = await self.session.execute(
+                    select(ProjectServer).where(ProjectServer.id == monitor.project_server_id)
+                )
+                project_server = result.scalar_one_or_none()
+                if project_server and project_server.environment.value in settings.NOTIFICATION_SUPPRESS_ENVIRONMENTS:
+                    logger.info(
+                        f"Notification suppressed for monitor {monitor.id} in {project_server.environment.value}"
+                    )
+                    return
+
             channel_ids = json.loads(monitor.notification_channels)
             if not channel_ids: return
             

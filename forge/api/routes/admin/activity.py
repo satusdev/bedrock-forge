@@ -53,6 +53,7 @@ async def get_activity_feed(
     offset: int = 0,
     action: Optional[str] = None,
     entity_type: Optional[str] = None,
+    entity_id: Optional[str] = None,
     hours: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -77,6 +78,9 @@ async def get_activity_feed(
     
     if entity_type:
         query = query.where(AuditLog.entity_type == entity_type)
+
+    if entity_id:
+        query = query.where(AuditLog.entity_id == entity_id)
     
     if hours:
         cutoff = datetime.utcnow() - timedelta(hours=hours)
@@ -91,6 +95,8 @@ async def get_activity_feed(
             pass
     if entity_type:
         count_query = count_query.where(AuditLog.entity_type == entity_type)
+    if entity_id:
+        count_query = count_query.where(AuditLog.entity_id == entity_id)
     if hours:
         count_query = count_query.where(AuditLog.created_at >= cutoff)
     
