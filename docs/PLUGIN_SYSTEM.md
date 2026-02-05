@@ -1,6 +1,8 @@
 # Plugin System Guide
 
-Complete guide to the Bedrock Forge plugin system, including presets, categories, management commands, and best practices for optimal WordPress site setup.
+Complete guide to the Bedrock Forge plugin system, including presets,
+categories, management commands, and best practices for optimal WordPress site
+setup.
 
 ## 📋 Table of Contents
 
@@ -16,7 +18,8 @@ Complete guide to the Bedrock Forge plugin system, including presets, categories
 
 ## 🎯 Overview
 
-The Bedrock Forge plugin system provides intelligent plugin management for WordPress sites with:
+The Bedrock Forge plugin system provides intelligent plugin management for
+WordPress sites with:
 
 - **Smart Presets**: Pre-configured plugin collections for different site types
 - **Dependency Resolution**: Automatic handling of plugin dependencies
@@ -27,14 +30,18 @@ The Bedrock Forge plugin system provides intelligent plugin management for WordP
 
 ## 🎨 Plugin Presets
 
-Plugin presets are curated collections of plugins optimized for specific website types. Each preset includes essential plugins for that category, configured with sensible defaults.
+Plugin presets are curated collections of plugins optimized for specific website
+types. Each preset includes essential plugins for that category, configured with
+sensible defaults.
 
 ### Available Presets
 
 #### **Blog/Content Site** (`blog`)
-*Essential plugins for blogging and content-focused websites*
+
+_Essential plugins for blogging and content-focused websites_
 
 **Includes:**
+
 - Jetpack (site management and stats)
 - WordPress SEO (search optimization)
 - W3 Total Cache (performance)
@@ -46,10 +53,12 @@ Plugin presets are curated collections of plugins optimized for specific website
 
 **Use Case:** Personal blogs, news sites, content-heavy websites
 
-#### **Business Website** (`business`) ⭐ *Default*
-*Complete plugin set for professional business websites*
+#### **Business Website** (`business`) ⭐ _Default_
+
+_Complete plugin set for professional business websites_
 
 **Includes:**
+
 - WordPress SEO (search optimization)
 - W3 Total Cache (performance)
 - Wordfence (security)
@@ -63,9 +72,11 @@ Plugin presets are curated collections of plugins optimized for specific website
 **Use Case:** Corporate websites, small business sites, professional portfolios
 
 #### **E-commerce Store** (`ecommerce`)
-*Plugins optimized for online stores and e-commerce*
+
+_Plugins optimized for online stores and e-commerce_
 
 **Includes:**
+
 - WooCommerce (e-commerce platform)
 - WordPress SEO (search optimization)
 - W3 Total Cache (performance)
@@ -80,9 +91,11 @@ Plugin presets are curated collections of plugins optimized for specific website
 **Use Case:** Online stores, product catalogs, digital downloads
 
 #### **Portfolio/Creative** (`portfolio`)
-*Plugins for portfolio, photography, and creative websites*
+
+_Plugins for portfolio, photography, and creative websites_
 
 **Includes:**
+
 - WordPress SEO (search optimization)
 - W3 Total Cache (performance)
 - Wordfence (security)
@@ -95,9 +108,11 @@ Plugin presets are curated collections of plugins optimized for specific website
 **Use Case:** Photographer portfolios, artist galleries, creative agency sites
 
 #### **Minimal Setup** (`minimal`)
-*Basic essential plugins only*
+
+_Basic essential plugins only_
 
 **Includes:**
+
 - Akismet (spam protection)
 - Wordfence (security)
 - Really Simple SSL (security)
@@ -105,9 +120,11 @@ Plugin presets are curated collections of plugins optimized for specific website
 **Use Case:** Development sites, minimal requirements, custom builds
 
 #### **Performance Optimized** (`performance`)
-*Maximum performance and speed optimization*
+
+_Maximum performance and speed optimization_
 
 **Includes:**
+
 - W3 Total Cache (advanced caching)
 - Smush (image optimization)
 - Autoptimize (CSS/JS optimization)
@@ -122,12 +139,14 @@ Plugin presets are curated collections of plugins optimized for specific website
 ## 📂 Plugin Categories
 
 ### Essential Plugins
+
 Core plugins required for most WordPress installations.
 
 - **Akismet Anti-Spam**: Protects from spam comments
 - **Jetpack**: Comprehensive site management toolkit
 
 ### SEO & Marketing
+
 Search engine optimization and marketing tools.
 
 - **WordPress SEO (Yoast)**: Complete SEO solution with content analysis
@@ -136,6 +155,7 @@ Search engine optimization and marketing tools.
 - **Redirection**: Manage 301 redirects and 404 errors
 
 ### Performance & Caching
+
 Speed optimization and caching solutions.
 
 - **W3 Total Cache**: Comprehensive caching and optimization
@@ -145,6 +165,7 @@ Speed optimization and caching solutions.
 - **Query Monitor**: Database queries and debugging tool
 
 ### Security
+
 Security and protection plugins.
 
 - **Wordfence Security**: Security suite with firewall
@@ -153,6 +174,7 @@ Security and protection plugins.
 - **UpdraftPlus**: Backup and restoration
 
 ### Forms & Contact
+
 Contact forms and user interaction tools.
 
 - **Contact Form 7**: Simple and flexible forms
@@ -162,6 +184,7 @@ Contact forms and user interaction tools.
 - **WP Mail SMTP**: Email deliverability improvement
 
 ### E-commerce
+
 Online store and e-commerce functionality.
 
 - **WooCommerce**: Complete e-commerce platform
@@ -169,12 +192,14 @@ Online store and e-commerce functionality.
 - **PDF Invoices & Packing Slips**: Order management
 
 ### Media & Gallery
+
 Image galleries and media management.
 
 - **Envira Gallery**: Responsive image galleries
 - **Modula**: Creative image and video galleries
 
 ### Optimization
+
 Additional optimization tools.
 
 - **Lazy Load by WP Anatomy**: Lazy load images
@@ -194,6 +219,7 @@ python3 -m forge plugins presets --verbose
 ```
 
 **Example Output:**
+
 ```
 === Available Plugin Presets ===
 
@@ -255,6 +281,7 @@ python3 -m forge plugins status --project mysite --category=seo --verbose
 ```
 
 **Example Output:**
+
 ```
 === Plugin Status for 'mysite' ===
 
@@ -294,6 +321,15 @@ python3 -m forge plugins update --project mysite --dry-run
 
 ### Uninstall Plugins
 
+## ✅ Plugin Policy & Drift Detection
+
+Plugin policy adds allowlists, required plugins, blocked plugins, and pinned
+versions. Use per‑project overrides to deviate from the global default.
+
+Vendor bundles can apply curated plugin sets with version pins.
+
+See [docs/PLUGIN_POLICY.md](PLUGIN_POLICY.md) for details.
+
 ```bash
 # Uninstall specific plugins
 python3 -m forge plugins uninstall "wordpress-seo,wordfence" --project mysite
@@ -306,14 +342,14 @@ python3 -m forge plugins uninstall "akismet" --project mysite --dry-run
 
 ### Choose the Right Preset
 
-| Site Type | Recommended Preset | Why |
-|-----------|-------------------|-----|
-| **Personal Blog** | `blog` | Optimized for content creation and SEO |
-| **Business Website** | `business` | Complete business toolkit with forms and SEO |
-| **Online Store** | `ecommerce` | Full e-commerce stack with payment processing |
-| **Portfolio** | `portfolio` | Image optimization and gallery support |
-| **Development Site** | `minimal` | Essential plugins only for testing |
-| **High-Traffic Site** | `performance` | Maximum speed optimization |
+| Site Type             | Recommended Preset | Why                                           |
+| --------------------- | ------------------ | --------------------------------------------- |
+| **Personal Blog**     | `blog`             | Optimized for content creation and SEO        |
+| **Business Website**  | `business`         | Complete business toolkit with forms and SEO  |
+| **Online Store**      | `ecommerce`        | Full e-commerce stack with payment processing |
+| **Portfolio**         | `portfolio`        | Image optimization and gallery support        |
+| **Development Site**  | `minimal`          | Essential plugins only for testing            |
+| **High-Traffic Site** | `performance`      | Maximum speed optimization                    |
 
 ### Custom Plugin Selection
 
@@ -403,6 +439,7 @@ python3 -m forge sync restore mysite backup_20231201 --include-plugins
 ### Common Plugin Issues
 
 #### Installation Failed
+
 ```bash
 # Check plugin status
 python3 -m forge plugins status --project mysite --verbose
@@ -413,6 +450,7 @@ python3 -m forge plugins install-category performance --project=test
 ```
 
 #### Plugin Conflicts
+
 ```bash
 # Check for conflicts before installation
 python3 -m forge plugins install-preset custom --project mysite --dry-run
@@ -422,6 +460,7 @@ python3 -m forge plugins uninstall "competing-plugin" --project mysite
 ```
 
 #### Performance Issues
+
 ```bash
 # Check active plugins
 python3 -m forge plugins status --project mysite
@@ -433,16 +472,19 @@ python3 -m forge plugins uninstall "heavy-plugin" --project mysite
 ### Error Messages
 
 **"Plugin conflicts detected"**
+
 - Review the conflict warnings
 - Choose alternative plugins from different categories
 - Use `--dry-run` to preview before installation
 
 **"Installation failed for plugin X"**
+
 - Check plugin compatibility with WordPress version
 - Verify plugin is available in WordPress repository
 - Try installing plugin individually
 
 **"Site slow after plugin installation"**
+
 - Use Query Monitor to identify slow plugins
 - Consider alternatives for heavy plugins
 - Optimize plugin settings
@@ -455,21 +497,21 @@ Create custom plugin configurations in your project:
 
 ```json
 {
-  "project_plugins": {
-    "preset": "business",
-    "additional_plugins": ["custom-plugin"],
-    "exclude_plugins": ["jetpack"],
-    "plugin_settings": {
-      "wordpress-seo": {
-        "site_type": "company",
-        "company_or_person": "company"
-      },
-      "w3-total-cache": {
-        "pgcache_enabled": true,
-        "minify_enabled": true
-      }
-    }
-  }
+	"project_plugins": {
+		"preset": "business",
+		"additional_plugins": ["custom-plugin"],
+		"exclude_plugins": ["jetpack"],
+		"plugin_settings": {
+			"wordpress-seo": {
+				"site_type": "company",
+				"company_or_person": "company"
+			},
+			"w3-total-cache": {
+				"pgcache_enabled": true,
+				"minify_enabled": true
+			}
+		}
+	}
 }
 ```
 
@@ -527,4 +569,5 @@ done
 4. **Monitor**: Check performance and functionality
 5. **Optimize**: Refine plugin selection over time
 
-The plugin system is designed to get you started quickly while providing the flexibility to customize your WordPress site exactly as needed.
+The plugin system is designed to get you started quickly while providing the
+flexibility to customize your WordPress site exactly as needed.

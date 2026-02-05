@@ -1,6 +1,7 @@
 # Docker Quick Start Guide
 
-Get Bedrock Forge running with Docker in minutes. This guide covers both development and production setups.
+Get Bedrock Forge running with Docker in minutes. This guide covers both
+development and production setups.
 
 ## Prerequisites
 
@@ -34,13 +35,13 @@ docker compose -f docker-compose.dev.yml logs -f
 
 ### 3. Access the Application
 
-| Service | URL | Description |
-|---------|-----|-------------|
-| Dashboard | http://localhost:3000 | React frontend |
-| API | http://localhost:8000 | FastAPI backend |
-| API Docs | http://localhost:8000/docs | Swagger UI |
-| PostgreSQL | localhost:5432 | Database (user: forge, pass: forge) |
-| Redis | localhost:6379 | Cache/broker |
+| Service    | URL                        | Description                         |
+| ---------- | -------------------------- | ----------------------------------- |
+| Dashboard  | http://localhost:3000      | React frontend                      |
+| API        | http://localhost:8000      | FastAPI backend                     |
+| API Docs   | http://localhost:8000/docs | Swagger UI                          |
+| PostgreSQL | localhost:5432             | Database (user: forge, pass: forge) |
+| Redis      | localhost:6379             | Cache/broker                        |
 
 ### 4. Verify Setup
 
@@ -87,7 +88,18 @@ docker compose up -d
 ### 4. Initialize Database
 
 ```bash
-docker compose exec api python -c "from forge.db import init_db; import asyncio; asyncio.run(init_db())"
+# Migrations run automatically on API startup, but you can run manually
+docker compose exec api alembic -c forge/db/alembic.ini upgrade head
+```
+
+### 5. Seed Database (Optional)
+
+```bash
+# Demo data (default)
+docker compose exec api python -m forge.commands.seed --demo
+
+# Production-style seed (requires SEED_DEMO_MODE=false and SEED_ADMIN_* env vars)
+docker compose exec api python -m forge.commands.seed
 ```
 
 ## 📋 Service Architecture
@@ -137,9 +149,41 @@ docker compose exec postgres pg_dump -U forge forge > backup.sql
 docker compose up -d --scale celery-worker=3
 ```
 
+## ♻️ Reset Database
+
+### Development (data loss OK)
+
+```bash
+# Stop and remove all containers and volumes
+docker compose -f docker-compose.dev.yml down -v
+
+# Rebuild from scratch
+docker compose -f docker-compose.dev.yml build --no-cache
+docker compose -f docker-compose.dev.yml up -d
+
+# Optional: re-seed
+docker compose -f docker-compose.dev.yml exec api python -m forge.commands.seed --demo
+```
+
+### Production (backup required)
+
+```bash
+# 1) Backup first (stores backup.sql locally)
+docker compose exec -T postgres pg_dump -U ${POSTGRES_USER:-forge} ${POSTGRES_DB:-forge} > backup.sql
+
+# 2) Reset database
+docker compose exec postgres psql -U ${POSTGRES_USER:-forge} -d postgres -c "DROP DATABASE ${POSTGRES_DB:-forge};"
+docker compose exec postgres psql -U ${POSTGRES_USER:-forge} -d postgres -c "CREATE DATABASE ${POSTGRES_DB:-forge};"
+
+# 3) Migrate and re-seed
+docker compose exec api alembic -c forge/db/alembic.ini upgrade head
+docker compose exec api python -m forge.commands.seed
+```
+
 ## 🔐 SSL Setup (Production)
 
 1. Place certificates in `deploy/ssl/`:
+
    - `cert.pem` - Certificate
    - `key.pem` - Private key
 
@@ -152,24 +196,13 @@ docker compose up -d --scale celery-worker=3
 
 ## 🐛 Troubleshooting
 
-| Issue | Solution |
-|-------|----------|
-| Services won't start | Check `docker compose logs` for errors |
-| Database connection failed | Ensure postgres is healthy: `docker compose ps` |
-| API not responding | Check API logs: `docker compose logs api` |
-| Port already in use | Stop conflicting services or change ports in `.env` |
-| Permission denied | Ensure Docker socket permissions are correct |
-
-### Reset Everything
-
-```bash
-# Stop and remove all containers, volumes
-docker compose -f docker-compose.dev.yml down -v
-
-# Rebuild from scratch
-docker compose -f docker-compose.dev.yml build --no-cache
-docker compose -f docker-compose.dev.yml up -d
-```
+| Issue                      | Solution                                            |
+| -------------------------- | --------------------------------------------------- |
+| Services won't start       | Check `docker compose logs` for errors              |
+| Database connection failed | Ensure postgres is healthy: `docker compose ps`     |
+| API not responding         | Check API logs: `docker compose logs api`           |
+| Port already in use        | Stop conflicting services or change ports in `.env` |
+| Permission denied          | Ensure Docker socket permissions are correct        |
 
 ## 📚 Next Steps
 

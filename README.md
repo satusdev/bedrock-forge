@@ -29,23 +29,48 @@
 
 ## ✅ Current Status
 
-**Core Implementation: 95% Complete**
+**Core Implementation: Active Development**
 
-> 🚀 **Production Ready**: All core workflows are fully implemented and tested
+> 🚧 **In Progress**: Core workflows are implemented, with ongoing polish and
+> documentation alignment
 
-| Feature | Status | Description |
-|---------|--------|-------------|
-| 🏠 **Local Development** | ✅ Complete | DDEV project creation and management |
-| 🖥️ **Server Provisioning** | ✅ Complete | Hetzner, CyberPanel, LibyanSpider integration |
-| 📦 **Deployment** | ✅ Complete | Atomic deployments with rollback capabilities |
-| 💾 **Backup & Sync** | ✅ Complete | Automated backups to Google Drive, rclone integration |
-| 🔄 **CI/CD Integration** | ✅ Complete | Jenkins, GitHub Actions support |
-| 📊 **Monitoring** | 🔄 In Progress | Uptime monitoring and log management (80% complete) |
-| 🧪 **Testing Suite** | ✅ Complete | Comprehensive unit and integration tests |
-| 👥 **Client Management** | ✅ Complete | Clients, invoices, billing, subscriptions |
-| 🌐 **Domain Tracking** | ✅ Complete | Registrar, expiry dates, renewal alerts |
-| 🔒 **SSL Management** | ✅ Complete | Certificate monitoring and expiry alerts |
-| 🖥️ **CyberPanel** | ✅ Complete | Website, database, and SSL management |
+| Feature                    | Status      | Description                                           |
+| -------------------------- | ----------- | ----------------------------------------------------- |
+| 🏠 **Local Development**   | ✅ Complete | DDEV project creation and management                  |
+| 🖥️ **Server Provisioning** | ✅ Complete | Hetzner, CyberPanel, LibyanSpider integration         |
+| 📦 **Deployment**          | ✅ Complete | Atomic deployments with rollback capabilities         |
+| 💾 **Backup & Sync**       | ✅ Complete | Automated backups to Google Drive, rclone integration |
+| 🔄 **CI/CD Integration**   | ✅ Complete | Jenkins, GitHub Actions support                       |
+| 📊 **Monitoring**          | ✅ Complete | Uptime monitoring, incidents, and alerting            |
+| 🧪 **Testing Suite**       | ✅ Complete | Comprehensive unit and integration tests              |
+| 👥 **Client Management**   | ✅ Complete | Clients, invoices, billing, subscriptions             |
+| 🧭 **Client Portal**       | ✅ Complete | Portal auth, tickets, subscriptions, invoice views    |
+| 📣 **Public Status Page**  | ✅ Complete | Public `/status` page with incidents                  |
+| 🌐 **Domain Tracking**     | ✅ Complete | Registrar, expiry dates, renewal alerts               |
+| 🔒 **SSL Management**      | ✅ Complete | Certificate monitoring and expiry alerts              |
+| 🖥️ **CyberPanel**          | ✅ Complete | Website, database, and SSL management                 |
+
+---
+
+## 🧰 Tech Stack
+
+**Backend**
+
+- FastAPI + Uvicorn
+- SQLAlchemy (async) + Alembic
+- PostgreSQL
+- Redis + Celery
+
+**Dashboard**
+
+- React + TypeScript
+- Vite
+- Tailwind CSS
+
+**Infrastructure**
+
+- Docker + Docker Compose
+- Nginx (optional reverse proxy)
 
 ---
 
@@ -66,11 +91,13 @@ forge --help
 #### 📦 Alternative Installation Methods
 
 **Method 1: Direct pip install from GitHub**
+
 ```bash
 pip install git+https://github.com/bedrock-forge/bedrock-forge.git
 ```
 
 **Method 2: Clone and install manually**
+
 ```bash
 # Clone the repository
 git clone https://github.com/bedrock-forge/bedrock-forge.git
@@ -88,7 +115,8 @@ ln -sf $(pwd)/.venv/bin/forge ~/.local/bin/forge
 forge --help
 ```
 
-> 💡 **Tip**: After installation, you can use either `forge` or `python -m forge` to run commands.
+> 💡 **Tip**: After installation, you can use either `forge` or
+> `python -m forge` to run commands.
 
 ### 🔧 Installation Management
 
@@ -133,6 +161,7 @@ forge sync backup myproject production
 ```
 
 **Plugin Presets Available:**
+
 - **blog** - Blog/content sites with SEO and engagement plugins
 - **business** - Professional business websites with forms and marketing
 - **ecommerce** - Complete e-commerce stores with WooCommerce and payments
@@ -144,7 +173,8 @@ forge sync backup myproject production
 
 ## 🐳 Docker Quick Start
 
-Run the full stack (API, Dashboard, Database, Redis, Celery) with Docker in under 5 minutes.
+Run the full stack (API, Dashboard, Database, Redis, Celery) with Docker in
+under 5 minutes.
 
 ### Development Setup
 
@@ -153,6 +183,11 @@ Run the full stack (API, Dashboard, Database, Redis, Celery) with Docker in unde
 git clone https://github.com/bedrock-forge/bedrock-forge.git
 cd bedrock-forge/deploy
 docker compose -f docker-compose.dev.yml up -d
+
+# Migrations run automatically on API startup
+
+# Optional: seed demo data
+docker compose -f docker-compose.dev.yml exec api python -m forge.commands.seed --demo
 
 # Access the application
 # Dashboard: http://localhost:3000
@@ -167,21 +202,34 @@ cd deploy
 cp .env.production .env
 # Edit .env with your secrets (POSTGRES_PASSWORD, SECRET_KEY)
 docker compose build && docker compose up -d
+
+# Migrations run automatically on API startup
+
+# Optional: seed initial data
+# SEED_DEMO_MODE=false and SEED_ADMIN_EMAIL/SEED_ADMIN_PASSWORD recommended for prod
+docker compose exec api python -m forge.commands.seed
 ```
 
-> 📖 **Full Docker documentation**: [Docker Quick Start Guide](docs/DOCKER_QUICKSTART.md)
+```bash
+docker compose down --rmi all --remove-orphans && docker volume rm deploy_postgres_data deploy_redis_data && docker compose up -d --build && docker compose exec api python -m forge.commands.seed
+```
+
+> 📖 **Full Docker documentation**:
+> [Docker Quick Start Guide](docs/DOCKER_QUICKSTART.md)
 
 ---
 
 ## 🎯 Key Features
 
 ### 🏠 **Local Development**
+
 - Create and manage Bedrock projects with DDEV
 - Automatic WordPress and Bedrock setup
 - Integrated development environment
 - Project switching and management
 
 ### 🖥️ **Server Provisioning**
+
 - **Hetzner Cloud**: Automated server creation and setup
 - **CyberPanel**: One-click WordPress hosting setup
 - **LibyanSpider**: cPanel-based hosting automation
@@ -189,6 +237,7 @@ docker compose build && docker compose up -d
 - **DNS Management**: Cloudflare integration
 
 ### 📦 **Deployment**
+
 - **Atomic Deployments**: Zero-downtime deployments
 - **Version Management**: Track and rollback deployments
 - **Multiple Methods**: SSH, SFTP, FTP, rsync support
@@ -196,6 +245,7 @@ docker compose build && docker compose up -d
 - **Rollback Safety**: Automatic rollback on failure
 
 ### 💾 **Backup & Sync**
+
 - **Google Drive Integration**: Automated cloud backups
 - **Scheduled Backups**: Celery-based task scheduling
 - **Database Sync**: Pull/push database changes
@@ -203,18 +253,21 @@ docker compose build && docker compose up -d
 - **Point-in-Time Recovery**: Restore any backup version
 
 ### 🔄 **CI/CD Integration**
+
 - **Jenkins**: Pipeline automation
 - **GitHub Actions**: Workflow integration
 - **Webhook Support**: Automated deployments
 - **Build Monitoring**: Track deployment status
 
 ### 📊 **Monitoring**
+
 - **Uptime Monitoring**: Site health checks
 - **Log Management**: Centralized logging
 - **Performance Metrics**: Track site performance
 - **Alert System**: Get notified on issues
 
 ### 👥 **Client & Billing**
+
 - **Client Management**: Full CRM with contact and billing info
 - **Invoice System**: Create, send, and track invoices
 - **Subscriptions**: Recurring billing (monthly to triennial)
@@ -223,18 +276,19 @@ docker compose build && docker compose up -d
 - **Hosting Packages**: Tiered pricing with resource limits
 
 ### 🖥️ **CyberPanel Management**
+
 - **Website CRUD**: Create, configure, and delete websites
 - **PHP Management**: Change PHP versions per site
 - **SSL Issuance**: One-click Let's Encrypt certificates
 - **Database Operations**: Create and manage MySQL databases
 - **Server Stats**: CPU, RAM, disk usage monitoring
 
-
 ---
 
 ## 🛠️ Command Examples
 
 ### Local Development
+
 ```bash
 # Create new project
 forge local create-project mysite
@@ -247,6 +301,7 @@ forge local switch mysite
 ```
 
 ### Server Provisioning
+
 ```bash
 # Create Hetzner server
 forge provision hetzner-create myserver
@@ -259,6 +314,7 @@ forge provision ssl-cert myserver example.com
 ```
 
 ### Deployment
+
 ```bash
 # Deploy to production
 forge deploy mysite production
@@ -271,6 +327,7 @@ forge deploy status mysite
 ```
 
 ### Backup & Sync
+
 ```bash
 # Backup project
 forge sync backup mysite production
@@ -283,6 +340,7 @@ forge sync db mysite production --pull
 ```
 
 ### Monitoring
+
 ```bash
 # List monitored sites
 forge monitor list-monitors
@@ -299,15 +357,20 @@ forge monitor health mysite
 ## 📚 Documentation
 
 ### User Guides
-- **[Installation Guide](docs/INSTALLATION.md)** - Detailed installation instructions
+
+- **[Installation Guide](docs/INSTALLATION.md)** - Detailed installation
+  instructions
 - **[Quick Start Guide](docs/QUICK_START.md)** - Get started in 5 minutes
 - **[Configuration Guide](docs/CONFIGURATION.md)** - Setup and configuration
 - **[Command Reference](docs/COMMANDS.md)** - Complete command documentation
 - **[Troubleshooting](docs/TROUBLESHOOTING.md)** - Common issues and solutions
 
 ### Technical Documentation
-- **[Implementation Status](docs/IMPLEMENTATION_STATUS.md)** - Detailed technical documentation
-- **[Architecture Guide](docs/ARCHITECTURE.md)** - System architecture and design
+
+- **[Implementation Status](docs/IMPLEMENTATION_STATUS.md)** - Detailed
+  technical documentation
+- **[Architecture Guide](docs/ARCHITECTURE.md)** - System architecture and
+  design
 - **[Testing Suite](docs/TESTING.md)** - Running and writing tests
 - **[Development Guide](docs/DEVELOPMENT.md)** - Contributing guidelines
 
@@ -337,12 +400,14 @@ bedrock-forge/
 ## 🚀 What's Next
 
 ### Currently in Development 🔄
+
 - [ ] Enhanced monitoring dashboard
 - [ ] GUI interface for backup/restore
 - [ ] Additional hosting providers (DigitalOcean, Vultr)
 - [ ] Advanced deployment strategies (blue-green, canary)
 
 ### Planned Features 📋
+
 - [ ] Multi-site management
 - [ ] Performance optimization tools
 - [ ] Security scanning integration
@@ -350,6 +415,7 @@ bedrock-forge/
 - [ ] WordPress plugin manager
 
 ### Long-term Vision 🔮
+
 - [ ] Visual workflow builder
 - [ ] Team collaboration features
 - [ ] Enterprise SSO integration
@@ -359,7 +425,8 @@ bedrock-forge/
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Development Guide](docs/DEVELOPMENT.md) for details.
+We welcome contributions! Please see our
+[Development Guide](docs/DEVELOPMENT.md) for details.
 
 ### Quick Contribution Steps
 
@@ -382,11 +449,13 @@ We welcome contributions! Please see our [Development Guide](docs/DEVELOPMENT.md
 ## 📋 Requirements
 
 ### System Requirements
+
 - **Python 3.9+** - Modern Python with type hints
 - **Git** - For version control
 - **SSH Client** - For server operations
 
 ### Optional Dependencies
+
 - **DDEV** - For local WordPress development
 - **Docker** - For containerized environments
 - **Node.js** - For frontend build tools
@@ -397,26 +466,36 @@ We welcome contributions! Please see our [Development Guide](docs/DEVELOPMENT.md
 ## 🆘 Getting Help
 
 ### Documentation
+
 - **[Quick Start](docs/QUICK_START.md)** - New to Bedrock Forge?
 - **[Command Reference](docs/COMMANDS.md)** - Need command help?
 - **[Configuration](docs/CONFIGURATION.md)** - Setup questions?
 - **[Troubleshooting](docs/TROUBLESHOOTING.md)** - Having issues?
 
 ### Community
-- **[GitHub Issues](https://github.com/your-org/bedrock-forge/issues)** - Bug reports and feature requests
-- **[GitHub Discussions](https://github.com/your-org/bedrock-forge/discussions)** - General questions and discussions
-- **[Discord Community](https://discord.gg/bedrock-forge)** - Real-time chat (coming soon)
+
+- **[GitHub Issues](https://github.com/your-org/bedrock-forge/issues)** - Bug
+  reports and feature requests
+- **[GitHub Discussions](https://github.com/your-org/bedrock-forge/discussions)** -
+  General questions and discussions
+- **[Discord Community](https://discord.gg/bedrock-forge)** - Real-time chat
+  (coming soon)
 
 ### Professional Support
-- **[Enterprise Support](https://bedrock-forge.com/enterprise)** - 24/7 support for teams
-- **[Consulting](https://bedrock-forge.com/consulting)** - Expert WordPress deployment help
-- **[Training](https://bedrock-forge.com/training)** - Team training and workshops
+
+- **[Enterprise Support](https://bedrock-forge.com/enterprise)** - 24/7 support
+  for teams
+- **[Consulting](https://bedrock-forge.com/consulting)** - Expert WordPress
+  deployment help
+- **[Training](https://bedrock-forge.com/training)** - Team training and
+  workshops
 
 ---
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
+for details.
 
 ---
 
@@ -424,5 +503,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
   <p><strong>Ready to streamline your WordPress workflow?</strong></p>
   <p><a href="#-quick-start">🚀 Get started now!</a> | <a href="docs/QUICK_START.md">📖 Read the docs</a> | <a href="https://github.com/your-org/bedrock-forge/issues">🐛 Report an issue</a></p>
   <br>
-  <p>Build with ❤️ by the WordPress community</p>
 </div>
