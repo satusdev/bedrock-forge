@@ -38,7 +38,36 @@ sleep 5
 # Run migrations
 echo ""
 echo "📊 Running database migrations..."
-docker compose -f deploy/docker-compose.dev.yml exec -T api alembic upgrade head || true
+needs_stamp=$(docker compose -f deploy/docker-compose.dev.yml exec -T api bash -lc "python - <<'PY'
+import asyncio
+import os
+import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import create_async_engine
+
+async def main() -> None:
+    url = os.getenv('DATABASE_URL')
+    if not url:
+        print('0')
+        return
+    engine = create_async_engine(url)
+    async with engine.connect() as conn:
+        def check(sync_conn):
+            inspector = sa.inspect(sync_conn)
+            tables = set(inspector.get_table_names())
+            return ('alembic_version' in tables, 'users' in tables)
+        has_alembic, has_users = await conn.run_sync(check)
+    await engine.dispose()
+    print('1' if (not has_alembic and has_users) else '0')
+
+asyncio.run(main())
+PY")
+
+if [[ "$needs_stamp" == "1" ]]; then
+  echo "Detected existing schema without alembic_version; stamping head..."
+  docker compose -f deploy/docker-compose.dev.yml exec -T api alembic -c forge/db/alembic.ini stamp head
+fi
+
+docker compose -f deploy/docker-compose.dev.yml exec -T api alembic -c forge/db/alembic.ini upgrade head
 
 # Create test user (if not exists)
 echo ""
