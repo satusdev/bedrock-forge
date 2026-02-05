@@ -257,6 +257,15 @@ export default function Invoices() {
 								<FileText className='w-4 h-4 mr-2' />
 								Download PDF
 							</Button>
+							{selectedInvoice.status === 'paid' && (
+								<Button
+									variant='secondary'
+									onClick={() => downloadInvoice(selectedInvoice.id)}
+								>
+									<Download className='w-4 h-4 mr-2' />
+									Receipt
+								</Button>
+							)}
 							{selectedInvoice.status === 'draft' && (
 								<Button
 									variant='secondary'

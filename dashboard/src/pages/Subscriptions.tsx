@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useMutation } from '@tanstack/react-query';
 import {
 	billingService,
 	Subscription,
@@ -9,7 +10,14 @@ import Card from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
-import { RefreshCw, Plus, FileText, XCircle, CheckCircle } from 'lucide-react';
+import {
+	RefreshCw,
+	Plus,
+	FileText,
+	XCircle,
+	CheckCircle,
+	Download,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const Subscriptions: React.FC = () => {
@@ -21,6 +29,7 @@ const Subscriptions: React.FC = () => {
 	const [clients, setClients] = useState<any[]>([]);
 	const [projects, setProjects] = useState<any[]>([]);
 	const [creating, setCreating] = useState(false);
+	const [selectedInvoice, setSelectedInvoice] = useState<any | null>(null);
 	const [createForm, setCreateForm] = useState({
 		client_id: '',
 		project_id: '',
@@ -106,6 +115,50 @@ const Subscriptions: React.FC = () => {
 				return <Badge className='bg-gray-100 text-gray-800'>{status}</Badge>;
 		}
 	};
+
+	const fetchInvoiceDetail = async (invoiceId: number) => {
+		try {
+			const response = await dashboardApi.getInvoice(invoiceId);
+			setSelectedInvoice(response.data);
+		} catch {
+			toast.error('Failed to load invoice');
+		}
+	};
+
+	const downloadInvoice = async (invoiceId: number) => {
+		try {
+			const response = await dashboardApi.downloadInvoicePdf(invoiceId);
+			const blob = new Blob([response.data], { type: 'application/pdf' });
+			const url = window.URL.createObjectURL(blob);
+			const link = document.createElement('a');
+			link.href = url;
+			link.download = `invoice-${invoiceId}.pdf`;
+			link.click();
+			window.URL.revokeObjectURL(url);
+		} catch {
+			toast.error('Failed to download PDF');
+		}
+	};
+
+	const formatCurrency = (amount?: number, currency: string = 'USD') => {
+		if (amount === undefined || amount === null) return '—';
+		return new Intl.NumberFormat('en-US', {
+			style: 'currency',
+			currency,
+		}).format(amount);
+	};
+
+	const generateInvoiceMutation = useMutation({
+		mutationFn: (subscriptionId: number) =>
+			billingService.generateInvoice(subscriptionId),
+		onSuccess: response => {
+			toast.success('Invoice generated');
+			if (response?.invoice_id) {
+				fetchInvoiceDetail(response.invoice_id);
+			}
+		},
+		onError: () => toast.error('Failed to generate invoice'),
+	});
 
 	if (loading) {
 		return (
@@ -207,6 +260,7 @@ const Subscriptions: React.FC = () => {
 												<button
 													className='text-gray-400 hover:text-blue-600'
 													title='Generate Invoice'
+													onClick={() => generateInvoiceMutation.mutate(sub.id)}
 												>
 													<FileText className='w-5 h-5' />
 												</button>
@@ -375,6 +429,86 @@ const Subscriptions: React.FC = () => {
 							>
 								{creating ? 'Creating…' : 'Create Subscriptions'}
 							</Button>
+						</div>
+					</div>
+				</div>
+			)}
+
+			{selectedInvoice && (
+				<div className='fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4'>
+					<div className='bg-white rounded-2xl shadow-xl max-w-2xl w-full'>
+						<div className='p-6 border-b border-gray-100 flex items-center justify-between'>
+							<div>
+								<h2 className='text-xl font-bold text-gray-900'>
+									Invoice {selectedInvoice.invoice_number}
+								</h2>
+								<p className='text-sm text-gray-500'>
+									Status: {selectedInvoice.status}
+								</p>
+							</div>
+							<Button variant='ghost' onClick={() => setSelectedInvoice(null)}>
+								Close
+							</Button>
+						</div>
+
+						<div className='p-6 space-y-4'>
+							<div className='grid grid-cols-2 gap-4'>
+								<Card>
+									<p className='text-xs text-gray-500'>Total</p>
+									<p className='text-lg font-semibold'>
+										{formatCurrency(
+											selectedInvoice.total,
+											selectedInvoice.currency
+										)}
+									</p>
+								</Card>
+								<Card>
+									<p className='text-xs text-gray-500'>Balance Due</p>
+									<p className='text-lg font-semibold'>
+										{formatCurrency(
+											selectedInvoice.balance_due,
+											selectedInvoice.currency
+										)}
+									</p>
+								</Card>
+							</div>
+
+							<div>
+								<h3 className='text-sm font-semibold text-gray-700'>
+									Line Items
+								</h3>
+								<div className='mt-2 space-y-2'>
+									{selectedInvoice.items?.map((item: any) => (
+										<div
+											key={item.id}
+											className='flex items-center justify-between text-sm text-gray-600'
+										>
+											<div>{item.description}</div>
+											<div>
+												{formatCurrency(item.total, selectedInvoice.currency)}
+											</div>
+										</div>
+									))}
+								</div>
+							</div>
+
+							<div className='flex items-center justify-end gap-2'>
+								<Button
+									variant='outline'
+									onClick={() => downloadInvoice(selectedInvoice.id)}
+								>
+									<Download className='w-4 h-4 mr-1' />
+									PDF
+								</Button>
+								{selectedInvoice.status === 'paid' && (
+									<Button
+										variant='secondary'
+										onClick={() => downloadInvoice(selectedInvoice.id)}
+									>
+										Receipt
+									</Button>
+								)}
+							</div>
 						</div>
 					</div>
 				</div>

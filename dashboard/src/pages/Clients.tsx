@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import {
 	Users,
 	Plus,
@@ -25,46 +25,39 @@ import {
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
-import { dashboardApi } from '@/services/api';
+import LabeledInput from '@/components/ui/LabeledInput';
+import LabeledSelect from '@/components/ui/LabeledSelect';
+import LabeledTextarea from '@/components/ui/LabeledTextarea';
+import SummaryCard from '@/components/ui/SummaryCard';
 import { useRealTimeUpdates } from '@/hooks/useRealTimeUpdates';
+import {
+	useClient,
+	useClientTags,
+	useClientsList,
+	useCreateClient,
+	useDeleteClient,
+	useSetClientTags,
+	useTags,
+	useUpdateClient,
+} from '@/hooks/useClients';
+import type { TagOption } from '@/hooks/useClients';
+import type {
+	ClientBillingStatus,
+	ClientCreateInput,
+	ClientDetail,
+	ClientListItem,
+	ClientUpdateInput,
+} from '@/types';
 import toast from 'react-hot-toast';
 
-export interface Client {
-	id: string;
-	name: string;
-	email: string;
-	phone: string;
-	company: string;
-	website: string;
-    currency: string;
-    monthly_retainer: number;
-    // Helper property for frontend compatibility or flatten usage
-	billing_info?: {
-		rate: number;
-		billing_cycle: string;
-		currency: string;
-		payment_method: string;
-		invoice_email: string;
-	};
-	projects: Array<{ project_name: string }>;
-	project_count: number;
-	created_at: string;
-	updated_at: string;
-	active: boolean;
-	notes: string;
-}
-
-interface TagOption {
-	id: number;
-	name: string;
-	color: string;
-}
+type ClientFormPayload = ClientCreateInput &
+	ClientUpdateInput & { tag_ids?: number[] };
 
 const Clients: React.FC = () => {
 	const [searchQuery, setSearchQuery] = useState('');
 	const [showCreateModal, setShowCreateModal] = useState(false);
 	const [showEditModal, setShowEditModal] = useState(false);
-	const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+	const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
 	const [sortBy, setSortBy] = useState<'name' | 'created' | 'projects'>(
 		'created'
 	);
@@ -82,112 +75,24 @@ const Clients: React.FC = () => {
 	});
 
 	// Fetch clients
-	const {
-		data: clientsData,
-		isLoading,
-		refetch,
-	} = useQuery({
-		queryKey: ['clients'],
-		queryFn: dashboardApi.getClients,
-	});
+	const { data: clients = [], isLoading, refetch } = useClientsList();
 
-	const clients = clientsData?.data?.clients || [];
+	const { data: tagOptions = [] } = useTags();
 
-	const { data: tagsData } = useQuery({
-		queryKey: ['tags'],
-		queryFn: () => dashboardApi.getTags(),
-	});
-
-	const tagOptions: TagOption[] = tagsData?.data || [];
-
-	const { data: clientTagsData } = useQuery({
-		queryKey: ['client-tags', selectedClient?.id],
-		queryFn: () => dashboardApi.getClientTags(Number(selectedClient?.id)),
-		enabled: !!selectedClient,
-	});
-
-	const selectedClientTagIds = (clientTagsData?.data || []).map(
-		(tag: TagOption) => tag.id
+	const { data: selectedClientTags = [] } = useClientTags(
+		selectedClientId,
+		!!selectedClientId
 	);
 
-	// Fetch projects for assignments
-	const { data: projectsData } = useQuery({
-		queryKey: ['comprehensive-projects'],
-		queryFn: dashboardApi.getComprehensiveProjects,
-	});
+	const { data: selectedClientDetails, isLoading: isSelectedClientLoading } =
+		useClient(selectedClientId, showEditModal);
 
-	const projects = projectsData?.data || [];
+	const selectedClientTagIds = selectedClientTags.map(tag => tag.id);
 
-	// Create client mutation
-	const createClientMutation = useMutation({
-		mutationFn: ({ clientData }: { clientData: any; tagIds: number[] }) =>
-			dashboardApi.createClient(clientData),
-		onSuccess: async (response, variables) => {
-			const clientId = response?.data?.client_id;
-			if (clientId && variables.tagIds?.length) {
-				await dashboardApi.setClientTags(clientId, variables.tagIds);
-			}
-			toast.success('Client created successfully!');
-			setShowCreateModal(false);
-			refetch();
-		},
-		onError: (error: any) => {
-			toast.error(
-				`Failed to create client: ${
-					error.response?.data?.detail || error.message
-				}`
-			);
-		},
-	});
-
-	// Update client mutation
-	const updateClientMutation = useMutation({
-		mutationFn: ({
-			clientId,
-			clientData,
-			tagIds,
-		}: {
-			clientId: string;
-			clientData: any;
-			tagIds: number[];
-		}) => dashboardApi.updateClient(clientId, clientData),
-		onSuccess: async (_, variables) => {
-			if (variables.tagIds?.length) {
-				await dashboardApi.setClientTags(
-					Number(variables.clientId),
-					variables.tagIds
-				);
-			}
-			toast.success('Client updated successfully!');
-			setShowEditModal(false);
-			setSelectedClient(null);
-			refetch();
-		},
-		onError: (error: any) => {
-			toast.error(
-				`Failed to update client: ${
-					error.response?.data?.detail || error.message
-				}`
-			);
-		},
-	});
-
-	// Delete client mutation
-	const deleteClientMutation = useMutation({
-		mutationFn: dashboardApi.deleteClient,
-		onSuccess: () => {
-			toast.success('Client deleted successfully!');
-			setSelectedClient(null);
-			refetch();
-		},
-		onError: (error: any) => {
-			toast.error(
-				`Failed to delete client: ${
-					error.response?.data?.detail || error.message
-				}`
-			);
-		},
-	});
+	const createClientMutation = useCreateClient();
+	const updateClientMutation = useUpdateClient();
+	const deleteClientMutation = useDeleteClient();
+	const setClientTagsMutation = useSetClientTags();
 
 	// Filter and sort clients
 	const filteredClients = clients
@@ -197,7 +102,7 @@ const Clients: React.FC = () => {
 			return (
 				client.name.toLowerCase().includes(searchLower) ||
 				client.email.toLowerCase().includes(searchLower) ||
-				client.company.toLowerCase().includes(searchLower)
+				client.company?.toLowerCase().includes(searchLower)
 			);
 		})
 		.sort((a, b) => {
@@ -206,7 +111,8 @@ const Clients: React.FC = () => {
 					return a.name.localeCompare(b.name);
 				case 'created':
 					return (
-						new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+						new Date(b.created_at || 0).getTime() -
+						new Date(a.created_at || 0).getTime()
 					);
 				case 'projects':
 					return b.project_count - a.project_count;
@@ -215,32 +121,78 @@ const Clients: React.FC = () => {
 			}
 		});
 
-	const handleCreateClient = (clientData: any) => {
+	const handleCreateClient = async (clientData: ClientFormPayload) => {
 		const { tag_ids = [], ...payload } = clientData;
-		createClientMutation.mutate({ clientData: payload, tagIds: tag_ids });
+		try {
+			const response = await createClientMutation.mutateAsync(payload);
+			const clientId = response?.data?.client_id;
+			if (clientId && tag_ids?.length) {
+				await setClientTagsMutation.mutateAsync({
+					clientId,
+					tagIds: tag_ids,
+				});
+			}
+			toast.success('Client created successfully!');
+			setShowCreateModal(false);
+			refetch();
+		} catch (error: any) {
+			toast.error(
+				`Failed to create client: ${
+					error.response?.data?.detail || error.message
+				}`
+			);
+		}
 	};
 
-	const handleUpdateClient = (clientData: any) => {
-		if (!selectedClient) return;
+	const handleUpdateClient = async (clientData: ClientFormPayload) => {
+		if (!selectedClientId) return;
 		const { tag_ids = [], ...payload } = clientData;
-		updateClientMutation.mutate({
-			clientId: selectedClient.id,
-			clientData: payload,
-			tagIds: tag_ids,
-		});
+		try {
+			await updateClientMutation.mutateAsync({
+				clientId: selectedClientId,
+				clientData: payload,
+			});
+			if (tag_ids?.length) {
+				await setClientTagsMutation.mutateAsync({
+					clientId: selectedClientId,
+					tagIds: tag_ids,
+				});
+			}
+			toast.success('Client updated successfully!');
+			setShowEditModal(false);
+			setSelectedClientId(null);
+			refetch();
+		} catch (error: any) {
+			toast.error(
+				`Failed to update client: ${
+					error.response?.data?.detail || error.message
+				}`
+			);
+		}
 	};
 
-	const handleDeleteClient = (client: Client) => {
+	const handleDeleteClient = async (client: ClientListItem) => {
 		if (
 			window.confirm(
 				`Are you sure you want to delete client "${client.name}"? This action cannot be undone.`
 			)
 		) {
-			deleteClientMutation.mutate(client.id);
+			try {
+				await deleteClientMutation.mutateAsync(client.id);
+				toast.success('Client deleted successfully!');
+				refetch();
+			} catch (error: any) {
+				toast.error(
+					`Failed to delete client: ${
+						error.response?.data?.detail || error.message
+					}`
+				);
+			}
 		}
 	};
 
-	const formatDate = (dateString: string) => {
+	const formatDate = (dateString?: string | null) => {
+		if (!dateString) return '-';
 		return new Date(dateString).toLocaleDateString();
 	};
 
@@ -252,10 +204,21 @@ const Clients: React.FC = () => {
 		}).format(amount);
 	};
 
-	const getStatusBadge = (active: boolean) => {
-		return active
-			? { variant: 'success' as const, text: 'Active' }
-			: { variant: 'default' as const, text: 'Inactive' };
+	const getStatusBadge = (status?: ClientBillingStatus | null) => {
+		switch (status) {
+			case 'active':
+				return { variant: 'success' as const, text: 'Active' };
+			case 'trial':
+				return { variant: 'warning' as const, text: 'Trial' };
+			case 'overdue':
+				return { variant: 'danger' as const, text: 'Overdue' };
+			case 'cancelled':
+				return { variant: 'default' as const, text: 'Cancelled' };
+			case 'inactive':
+				return { variant: 'default' as const, text: 'Inactive' };
+			default:
+				return { variant: 'default' as const, text: 'Unknown' };
+		}
 	};
 
 	const getBillingCycleText = (cycle: string) => {
@@ -302,78 +265,47 @@ const Clients: React.FC = () => {
 
 			{/* Stats Cards */}
 			<div className='grid grid-cols-1 md:grid-cols-4 gap-6'>
-				<Card>
-					<div className='flex items-center'>
-						<div className='p-3 rounded-lg bg-blue-100'>
-							<Users className='w-6 h-6 text-blue-600' />
-						</div>
-						<div className='ml-4'>
-							<p className='text-sm font-medium text-gray-500'>Total Clients</p>
-							<p className='text-2xl font-bold text-gray-900'>
-								{clients.length}
-							</p>
-						</div>
-					</div>
-				</Card>
-
-				<Card>
-					<div className='flex items-center'>
-						<div className='p-3 rounded-lg bg-green-100'>
-							<CheckCircle className='w-6 h-6 text-green-600' />
-						</div>
-						<div className='ml-4'>
-							<p className='text-sm font-medium text-gray-500'>
-								Active Clients
-							</p>
-							<p className='text-2xl font-bold text-gray-900'>
-								{clients.filter(c => c.active).length}
-							</p>
-						</div>
-					</div>
-				</Card>
-
-				<Card>
-					<div className='flex items-center'>
-						<div className='p-3 rounded-lg bg-purple-100'>
-							<FolderKanban className='w-6 h-6 text-purple-600' />
-						</div>
-						<div className='ml-4'>
-							<p className='text-sm font-medium text-gray-500'>
-								Total Projects
-							</p>
-							<p className='text-2xl font-bold text-gray-900'>
-								{clients.reduce(
-									(total, client) => total + client.project_count,
-									0
-								)}
-							</p>
-						</div>
-					</div>
-				</Card>
-
-				<Card>
-					<div className='flex items-center'>
-						<div className='p-3 rounded-lg bg-yellow-100'>
-							<DollarSign className='w-6 h-6 text-yellow-600' />
-						</div>
-						<div className='ml-4'>
-							<p className='text-sm font-medium text-gray-500'>
-								Avg. Monthly Rate
-							</p>
-							<p className='text-2xl font-bold text-gray-900'>
-								{clients.length > 0
-									? formatCurrency(
-											clients.reduce(
-												(total, client) => total + (client.monthly_retainer || 0),
-												0
-											) / clients.length,
-											clients[0].currency || 'USD'
-									  )
-									: '$0'}
-							</p>
-						</div>
-					</div>
-				</Card>
+				<SummaryCard
+					title='Total Clients'
+					value={clients.length}
+					icon={Users}
+					iconClassName='w-6 h-6 text-blue-600'
+					iconContainerClassName='p-3 rounded-lg bg-blue-100'
+				/>
+				<SummaryCard
+					title='Active Clients'
+					value={clients.filter(c => c.billing_status === 'active').length}
+					icon={CheckCircle}
+					iconClassName='w-6 h-6 text-green-600'
+					iconContainerClassName='p-3 rounded-lg bg-green-100'
+				/>
+				<SummaryCard
+					title='Total Projects'
+					value={clients.reduce(
+						(total, client) => total + client.project_count,
+						0
+					)}
+					icon={FolderKanban}
+					iconClassName='w-6 h-6 text-purple-600'
+					iconContainerClassName='p-3 rounded-lg bg-purple-100'
+				/>
+				<SummaryCard
+					title='Avg. Monthly Rate'
+					value={
+						clients.length > 0
+							? formatCurrency(
+									clients.reduce(
+										(total, client) => total + (client.monthly_retainer || 0),
+										0
+									) / clients.length,
+									clients[0].currency || 'USD'
+							  )
+							: '$0'
+					}
+					icon={DollarSign}
+					iconClassName='w-6 h-6 text-yellow-600'
+					iconContainerClassName='p-3 rounded-lg bg-yellow-100'
+				/>
 			</div>
 
 			{/* Search and Filter */}
@@ -439,7 +371,7 @@ const Clients: React.FC = () => {
 				) : (
 					<div className='space-y-4'>
 						{filteredClients.map(client => {
-							const statusBadge = getStatusBadge(client.active);
+							const statusBadge = getStatusBadge(client.billing_status);
 							return (
 								<div
 									key={client.id}
@@ -495,12 +427,11 @@ const Clients: React.FC = () => {
 													</span>
 													<span className='flex items-center'>
 														<DollarSign className='w-4 h-4 mr-1' />
-													{formatCurrency(
-														client.monthly_retainer || 0,
-														client.currency || 'USD'
-													)}
-													/
-													{getBillingCycleText('monthly')}
+														{formatCurrency(
+															client.monthly_retainer || 0,
+															client.currency || 'USD'
+														)}
+														/{getBillingCycleText('monthly')}
 													</span>
 												</div>
 
@@ -530,7 +461,7 @@ const Clients: React.FC = () => {
 												variant='secondary'
 												size='sm'
 												onClick={() => {
-													setSelectedClient(client);
+													setSelectedClientId(client.id);
 													setShowEditModal(true);
 												}}
 											>
@@ -582,7 +513,7 @@ const Clients: React.FC = () => {
 			)}
 
 			{/* Edit Client Modal */}
-			{showEditModal && selectedClient && (
+			{showEditModal && selectedClientId && (
 				<div className='fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50'>
 					<div className='bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto'>
 						<div className='flex items-center justify-between mb-4'>
@@ -590,20 +521,32 @@ const Clients: React.FC = () => {
 							<Button
 								variant='ghost'
 								size='sm'
-								onClick={() => setShowEditModal(false)}
+								onClick={() => {
+									setShowEditModal(false);
+									setSelectedClientId(null);
+								}}
 							>
 								<X className='w-4 h-4' />
 							</Button>
 						</div>
 
-						<ClientForm
-							initialData={selectedClient}
-							initialTagIds={selectedClientTagIds}
-							onSubmit={handleUpdateClient}
-							onCancel={() => setShowEditModal(false)}
-							isLoading={updateClientMutation.isLoading}
-							tagOptions={tagOptions}
-						/>
+						{isSelectedClientLoading && !selectedClientDetails ? (
+							<div className='py-8 text-center text-gray-500'>
+								Loading client details...
+							</div>
+						) : (
+							<ClientForm
+								initialData={selectedClientDetails}
+								initialTagIds={selectedClientTagIds}
+								onSubmit={handleUpdateClient}
+								onCancel={() => {
+									setShowEditModal(false);
+									setSelectedClientId(null);
+								}}
+								isLoading={updateClientMutation.isLoading}
+								tagOptions={tagOptions}
+							/>
+						)}
 					</div>
 				</div>
 			)}
@@ -613,12 +556,27 @@ const Clients: React.FC = () => {
 
 // Client Form Component
 interface ClientFormProps {
-	initialData?: Client;
+	initialData?: ClientDetail;
 	initialTagIds?: number[];
-	onSubmit: (data: any) => void;
+	onSubmit: (data: ClientFormPayload) => void;
 	onCancel: () => void;
 	isLoading?: boolean;
 	tagOptions: TagOption[];
+}
+
+interface ClientFormState {
+	name: string;
+	email: string;
+	phone: string;
+	company: string;
+	website: string;
+	billing_email: string;
+	address: string;
+	payment_terms: number;
+	currency: string;
+	tax_rate: number;
+	monthly_rate: number;
+	notes: string;
 }
 
 const ClientForm: React.FC<ClientFormProps> = ({
@@ -629,21 +587,19 @@ const ClientForm: React.FC<ClientFormProps> = ({
 	isLoading = false,
 	tagOptions,
 }) => {
-	const [formData, setFormData] = useState({
+	const [formData, setFormData] = useState<ClientFormState>({
 		name: initialData?.name || '',
 		email: initialData?.email || '',
 		phone: initialData?.phone || '',
 		company: initialData?.company || '',
 		website: initialData?.website || '',
-		billing_info: {
-			rate: initialData?.billing_info?.rate || 0,
-			billing_cycle: initialData?.billing_info?.billing_cycle || 'monthly',
-			currency: initialData?.billing_info?.currency || 'USD',
-			payment_method: initialData?.billing_info?.payment_method || '',
-			invoice_email: initialData?.billing_info?.invoice_email || '',
-		},
+		billing_email: initialData?.billing_email || '',
+		address: initialData?.address || '',
+		payment_terms: Number(initialData?.payment_terms || 30),
+		currency: initialData?.currency || 'USD',
+		tax_rate: Number(initialData?.tax_rate || 0),
+		monthly_rate: Number(initialData?.monthly_retainer || 0),
 		notes: initialData?.notes || '',
-		...initialData,
 	});
 	const [tagIds, setTagIds] = useState<number[]>(initialTagIds);
 
@@ -651,9 +607,33 @@ const ClientForm: React.FC<ClientFormProps> = ({
 		setTagIds(initialTagIds);
 	}, [initialTagIds]);
 
+	useEffect(() => {
+		if (!initialData) return;
+		setFormData({
+			name: initialData.name || '',
+			email: initialData.email || '',
+			phone: initialData.phone || '',
+			company: initialData.company || '',
+			website: initialData.website || '',
+			billing_email: initialData.billing_email || '',
+			address: initialData.address || '',
+			payment_terms: Number(initialData.payment_terms || 30),
+			currency: initialData.currency || 'USD',
+			tax_rate: Number(initialData.tax_rate || 0),
+			monthly_rate: Number(initialData.monthly_retainer || 0),
+			notes: initialData.notes || '',
+		});
+	}, [initialData]);
+
 	const handleSubmit = (e: React.FormEvent) => {
 		e.preventDefault();
-		onSubmit({ ...formData, tag_ids: tagIds });
+		onSubmit({
+			...formData,
+			payment_terms: Number(formData.payment_terms) || 0,
+			tax_rate: Number(formData.tax_rate) || 0,
+			monthly_rate: Number(formData.monthly_rate) || 0,
+			tag_ids: tagIds,
+		});
 	};
 
 	const handleChange = (
@@ -662,22 +642,12 @@ const ClientForm: React.FC<ClientFormProps> = ({
 		>
 	) => {
 		const { name, value } = e.target;
+		const numberFields = new Set(['payment_terms', 'tax_rate', 'monthly_rate']);
 
-		if (name.startsWith('billing_info.')) {
-			const billingField = name.replace('billing_info.', '');
-			setFormData(prev => ({
-				...prev,
-				billing_info: {
-					...prev.billing_info,
-					[billingField]: value,
-				},
-			}));
-		} else {
-			setFormData(prev => ({
-				...prev,
-				[name]: value,
-			}));
-		}
+		setFormData(prev => ({
+			...prev,
+			[name]: numberFields.has(name) ? Number(value) : value,
+		}));
 	};
 
 	const toggleTag = (tagId: number) => {
@@ -689,86 +659,51 @@ const ClientForm: React.FC<ClientFormProps> = ({
 	return (
 		<form onSubmit={handleSubmit} className='space-y-4'>
 			<div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
-				<div>
-					<label className='block text-sm font-medium text-gray-700 mb-1'>
-						Name *
-					</label>
-					<input
-						type='text'
-						name='name'
-						value={formData.name}
-						onChange={handleChange}
-						required
-						className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent'
-					/>
-				</div>
-
-				<div>
-					<label className='block text-sm font-medium text-gray-700 mb-1'>
-						Email *
-					</label>
-					<input
-						type='email'
-						name='email'
-						value={formData.email}
-						onChange={handleChange}
-						required
-						className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent'
-					/>
-				</div>
-
-				<div>
-					<label className='block text-sm font-medium text-gray-700 mb-1'>
-						Phone
-					</label>
-					<input
-						type='tel'
-						name='phone'
-						value={formData.phone}
-						onChange={handleChange}
-						className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent'
-					/>
-				</div>
-
-				<div>
-					<label className='block text-sm font-medium text-gray-700 mb-1'>
-						Company
-					</label>
-					<input
-						type='text'
-						name='company'
-						value={formData.company}
-						onChange={handleChange}
-						className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent'
-					/>
-				</div>
-
-				<div>
-					<label className='block text-sm font-medium text-gray-700 mb-1'>
-						Website
-					</label>
-					<input
-						type='url'
-						name='website'
-						value={formData.website}
-						onChange={handleChange}
-						placeholder='https://'
-						className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent'
-					/>
-				</div>
-
-				<div>
-					<label className='block text-sm font-medium text-gray-700 mb-1'>
-						Notes
-					</label>
-					<textarea
-						name='notes'
-						value={formData.notes}
-						onChange={handleChange}
-						rows={3}
-						className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent'
-					/>
-				</div>
+				<LabeledInput
+					label='Name'
+					name='name'
+					type='text'
+					value={formData.name}
+					onChange={handleChange}
+					required
+				/>
+				<LabeledInput
+					label='Email'
+					name='email'
+					type='email'
+					value={formData.email}
+					onChange={handleChange}
+					required
+				/>
+				<LabeledInput
+					label='Phone'
+					name='phone'
+					type='tel'
+					value={formData.phone}
+					onChange={handleChange}
+				/>
+				<LabeledInput
+					label='Company'
+					name='company'
+					type='text'
+					value={formData.company}
+					onChange={handleChange}
+				/>
+				<LabeledInput
+					label='Website'
+					name='website'
+					type='url'
+					value={formData.website}
+					onChange={handleChange}
+					placeholder='https://'
+				/>
+				<LabeledTextarea
+					label='Notes'
+					name='notes'
+					value={formData.notes}
+					onChange={handleChange}
+					rows={3}
+				/>
 			</div>
 
 			<div className='border-t border-gray-200 pt-4'>
@@ -776,78 +711,56 @@ const ClientForm: React.FC<ClientFormProps> = ({
 					Billing Information
 				</h4>
 				<div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
-					<div>
-						<label className='block text-sm font-medium text-gray-700 mb-1'>
-							Rate
-						</label>
-						<input
-							type='number'
-							name='billing_info.rate'
-							value={formData.billing_info.rate}
-							onChange={handleChange}
-							min='0'
-							step='0.01'
-							className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent'
-						/>
-					</div>
-
-					<div>
-						<label className='block text-sm font-medium text-gray-700 mb-1'>
-							Billing Cycle
-						</label>
-						<select
-							name='billing_info.billing_cycle'
-							value={formData.billing_info.billing_cycle}
-							onChange={handleChange}
-							className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent'
-						>
-							<option value='monthly'>Monthly</option>
-							<option value='quarterly'>Quarterly</option>
-							<option value='yearly'>Yearly</option>
-						</select>
-					</div>
-
-					<div>
-						<label className='block text-sm font-medium text-gray-700 mb-1'>
-							Currency
-						</label>
-						<select
-							name='billing_info.currency'
-							value={formData.billing_info.currency}
-							onChange={handleChange}
-							className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent'
-						>
-							<option value='USD'>USD</option>
-							<option value='EUR'>EUR</option>
-							<option value='GBP'>GBP</option>
-						</select>
-					</div>
-
-					<div>
-						<label className='block text-sm font-medium text-gray-700 mb-1'>
-							Payment Method
-						</label>
-						<input
-							type='text'
-							name='billing_info.payment_method'
-							value={formData.billing_info.payment_method}
-							onChange={handleChange}
-							className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent'
-						/>
-					</div>
-
-					<div>
-						<label className='block text-sm font-medium text-gray-700 mb-1'>
-							Invoice Email
-						</label>
-						<input
-							type='email'
-							name='billing_info.invoice_email'
-							value={formData.billing_info.invoice_email}
-							onChange={handleChange}
-							className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent'
-						/>
-					</div>
+					<LabeledInput
+						label='Monthly Rate'
+						name='monthly_rate'
+						type='number'
+						value={formData.monthly_rate}
+						onChange={handleChange}
+						min='0'
+						step='0.01'
+					/>
+					<LabeledInput
+						label='Payment Terms (days)'
+						name='payment_terms'
+						type='number'
+						value={formData.payment_terms}
+						onChange={handleChange}
+						min='0'
+					/>
+					<LabeledSelect
+						label='Currency'
+						name='currency'
+						value={formData.currency}
+						onChange={handleChange}
+					>
+						<option value='USD'>USD</option>
+						<option value='EUR'>EUR</option>
+						<option value='GBP'>GBP</option>
+					</LabeledSelect>
+					<LabeledInput
+						label='Tax Rate (%)'
+						name='tax_rate'
+						type='number'
+						value={formData.tax_rate}
+						onChange={handleChange}
+						min='0'
+						step='0.01'
+					/>
+					<LabeledInput
+						label='Billing Email'
+						name='billing_email'
+						type='email'
+						value={formData.billing_email}
+						onChange={handleChange}
+					/>
+					<LabeledInput
+						label='Billing Address'
+						name='address'
+						type='text'
+						value={formData.address}
+						onChange={handleChange}
+					/>
 				</div>
 			</div>
 
