@@ -1,6 +1,7 @@
 # Billing & Asset Management
 
-Complete billing system for managing client subscriptions, domains, SSL certificates, and hosting packages.
+Complete billing system for managing client subscriptions, domains, SSL
+certificates, and hosting packages.
 
 ## 📋 Table of Contents
 
@@ -15,18 +16,20 @@ Complete billing system for managing client subscriptions, domains, SSL certific
 
 ## 🎯 Overview
 
-The billing system provides comprehensive asset and subscription management for WordPress hosting services. Track renewals, generate invoices, and receive expiry alerts.
+The billing system provides comprehensive asset and subscription management for
+WordPress hosting services. Track renewals, generate invoices, and receive
+expiry alerts.
 
 ### Key Features
 
-| Feature | Description |
-|---------|-------------|
-| **Subscriptions** | Recurring services with flexible billing cycles |
-| **Domains** | Domain registration and expiry tracking |
-| **SSL Certificates** | Certificate monitoring and renewal alerts |
-| **Hosting Packages** | Package definitions with tiered pricing |
-| **Invoice Generation** | Automatic invoice creation from subscriptions |
-| **Expiry Alerts** | Configurable reminders before renewals |
+| Feature                | Description                                     |
+| ---------------------- | ----------------------------------------------- |
+| **Subscriptions**      | Recurring services with flexible billing cycles |
+| **Domains**            | Domain registration and expiry tracking         |
+| **SSL Certificates**   | Certificate monitoring and renewal alerts       |
+| **Hosting Packages**   | Package definitions with tiered pricing         |
+| **Invoice Generation** | Automatic invoice creation from subscriptions   |
+| **Expiry Alerts**      | Configurable reminders before renewals          |
 
 ---
 
@@ -36,27 +39,27 @@ Manage recurring services with flexible billing cycles.
 
 ### Subscription Types
 
-| Type | Description |
-|------|-------------|
-| `hosting` | Web hosting services |
-| `domain` | Domain registration |
-| `ssl` | SSL certificates |
-| `maintenance` | Website maintenance |
-| `support` | Technical support |
-| `backup` | Backup services |
-| `cdn` | CDN services |
-| `email` | Email hosting |
+| Type          | Description          |
+| ------------- | -------------------- |
+| `hosting`     | Web hosting services |
+| `domain`      | Domain registration  |
+| `ssl`         | SSL certificates     |
+| `maintenance` | Website maintenance  |
+| `support`     | Technical support    |
+| `backup`      | Backup services      |
+| `cdn`         | CDN services         |
+| `email`       | Email hosting        |
 
 ### Billing Cycles
 
-| Cycle | Duration | Use Case |
-|-------|----------|----------|
-| `monthly` | 1 month | Short-term clients |
-| `quarterly` | 3 months | Small businesses |
-| `biannual` | 6 months | Medium-term contracts |
-| `yearly` | 12 months | **Recommended for hosting** |
-| `biennial` | 24 months | Long-term discounts |
-| `triennial` | 36 months | Maximum savings |
+| Cycle       | Duration  | Use Case                    |
+| ----------- | --------- | --------------------------- |
+| `monthly`   | 1 month   | Short-term clients          |
+| `quarterly` | 3 months  | Small businesses            |
+| `biannual`  | 6 months  | Medium-term contracts       |
+| `yearly`    | 12 months | **Recommended for hosting** |
+| `biennial`  | 24 months | Long-term discounts         |
+| `triennial` | 36 months | Maximum savings             |
 
 ### API Endpoints
 
@@ -90,13 +93,13 @@ Track domain registrations with expiry alerts.
 
 ### Domain Features
 
-| Feature | Default |
-|---------|---------|
+| Feature             | Default    |
+| ------------------- | ---------- |
 | Auto-renew tracking | ✅ Enabled |
-| Privacy protection | ✅ Enabled |
-| Transfer lock | ✅ Enabled |
-| Reminder days | 60 days |
-| WHOIS caching | ✅ Enabled |
+| Privacy protection  | ✅ Enabled |
+| Transfer lock       | ✅ Enabled |
+| Reminder days       | 60 days    |
+| WHOIS caching       | ✅ Enabled |
 
 ### API Endpoints
 
@@ -119,14 +122,14 @@ Monitor SSL certificates and receive expiry alerts.
 
 ### Supported Providers
 
-| Provider | Free | Auto-Renew |
-|----------|------|------------|
-| Let's Encrypt | ✅ | ✅ |
-| Cloudflare | ✅ | ✅ |
-| CyberPanel | ✅ | ✅ |
-| Comodo | ❌ | ❌ |
-| DigiCert | ❌ | ❌ |
-| Sectigo | ❌ | ❌ |
+| Provider      | Free | Auto-Renew |
+| ------------- | ---- | ---------- |
+| Let's Encrypt | ✅   | ✅         |
+| Cloudflare    | ✅   | ✅         |
+| CyberPanel    | ✅   | ✅         |
+| Comodo        | ❌   | ❌         |
+| DigiCert      | ❌   | ❌         |
+| Sectigo       | ❌   | ❌         |
 
 ### Certificate Types
 
@@ -155,18 +158,24 @@ GET    /api/v1/ssl/stats/summary # Statistics
 
 Define hosting packages with resource limits and pricing.
 
+### Manual Purchase Flow
+
+Manual purchases create hosting/support subscriptions from a package without
+payment integration. Use the Packages page to select a package, client, and
+optional project, then create the subscription records.
+
 ### Resource Limits
 
-| Resource | Description |
-|----------|-------------|
-| `disk_space_gb` | Disk space in GB |
-| `bandwidth_gb` | Monthly bandwidth |
-| `domains_limit` | Number of domains |
-| `databases_limit` | MySQL databases |
-| `email_accounts_limit` | Email accounts |
-| `php_workers` | PHP worker processes |
-| `ram_mb` | RAM allocation |
-| `cpu_cores` | CPU core allocation |
+| Resource               | Description          |
+| ---------------------- | -------------------- |
+| `disk_space_gb`        | Disk space in GB     |
+| `bandwidth_gb`         | Monthly bandwidth    |
+| `domains_limit`        | Number of domains    |
+| `databases_limit`      | MySQL databases      |
+| `email_accounts_limit` | Email accounts       |
+| `php_workers`          | PHP worker processes |
+| `ram_mb`               | RAM allocation       |
+| `cpu_cores`            | CPU core allocation  |
 
 ### Tiered Pricing
 
@@ -174,15 +183,15 @@ Packages support multiple billing cycles with automatic savings calculation:
 
 ```json
 {
-  "monthly_price": 19.99,
-  "quarterly_price": 54.99,
-  "yearly_price": 179.99,
-  "biennial_price": 299.99,
-  "savings_percentage": {
-    "quarterly": 8.3,
-    "yearly": 25.0,
-    "biennial": 37.5
-  }
+	"monthly_price": 19.99,
+	"quarterly_price": 54.99,
+	"yearly_price": 179.99,
+	"biennial_price": 299.99,
+	"savings_percentage": {
+		"quarterly": 8.3,
+		"yearly": 25.0,
+		"biennial": 37.5
+	}
 }
 ```
 
@@ -209,9 +218,9 @@ billing:
   payment_terms: NET30
 
 reminders:
-  subscription: 30  # days
-  domain: 60        # days
-  ssl: 14           # days
+  subscription: 30 # days
+  domain: 60 # days
+  ssl: 14 # days
 
 auto_invoice:
   enabled: true

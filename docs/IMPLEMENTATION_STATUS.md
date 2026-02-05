@@ -174,6 +174,15 @@ forge workflow run <workflow> <project>
 - Advanced SEO reporting (real GSC data, SERP crawling, backlink verification)
   remains planned and requires external integrations.
 
+**Checklist:**
+
+- [x] CLI SEO analysis (`forge seo analyze`)
+- [x] Keyword tracking (`forge seo keywords`, `forge seo track`)
+- [x] Competitor/backlink summaries (`forge seo competitors`,
+      `forge seo backlinks`)
+- [x] Technical SEO snapshot storage via `SEOAnalyzer`
+- [ ] Search Console integration (optional)
+
 ### ✅ Phase 7: Billing and Client Management (100% Complete)
 
 **Status**: Full billing system with CRM capabilities
