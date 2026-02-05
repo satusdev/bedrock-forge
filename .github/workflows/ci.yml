@@ -34,6 +34,21 @@ jobs:
       - name: Run tests
         run: pytest forge/tests
 
+  migration-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Alembic migration smoke test
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///./ci.db
+        run: alembic -c forge/db/alembic.ini upgrade head
+
   release:
     if: github.ref == 'refs/heads/main'
     needs: [lint, test]
