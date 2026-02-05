@@ -55,6 +55,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade schema."""
-    op.drop_index("ix_analytics_reports_report_type", table_name="analytics_reports")
-    op.drop_index("ix_analytics_reports_project_id", table_name="analytics_reports")
+    op.drop_index("ix_analytics_reports_report_type", table_name="analytics_reports", if_exists=True)
+    op.drop_index("ix_analytics_reports_project_id", table_name="analytics_reports", if_exists=True)
     op.drop_table("analytics_reports")

@@ -33,6 +33,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index('ix_client_tags_tag_id', 'client_tags')
-    op.drop_index('ix_client_tags_client_id', 'client_tags')
+    op.drop_index('ix_client_tags_tag_id', 'client_tags', if_exists=True)
+    op.drop_index('ix_client_tags_client_id', 'client_tags', if_exists=True)
     op.drop_table('client_tags')

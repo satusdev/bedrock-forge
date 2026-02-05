@@ -76,11 +76,11 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Remove monitoring enhancement tables."""
-    op.drop_index('ix_incidents_monitor_id', 'incidents')
+    op.drop_index('ix_incidents_monitor_id', 'incidents', if_exists=True)
     op.drop_table('incidents')
     op.drop_table('notification_channels')
-    op.drop_index('ix_heartbeats_checked_at', 'heartbeats')
-    op.drop_index('ix_heartbeats_monitor_id', 'heartbeats')
+    op.drop_index('ix_heartbeats_checked_at', 'heartbeats', if_exists=True)
+    op.drop_index('ix_heartbeats_monitor_id', 'heartbeats', if_exists=True)
     op.drop_table('heartbeats')
     
     # Drop enums

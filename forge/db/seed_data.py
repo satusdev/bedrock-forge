@@ -131,7 +131,7 @@ DEMO_SERVERS = [
     {
         "name": "Lamah Production",
         "hostname": "cp.lamah.ly",
-        "ip_address": "128.140.1.61",
+        "ip_address": "46.224.201.233",
         "provider": "hetzner",
         "ssh_user": "root",
         "ssh_port": 22,
@@ -143,7 +143,7 @@ DEMO_SERVERS = [
     {
         "name": "Staging Server",
         "hostname": "cp.staging.ly",
-        "ip_address": "78.47.141.179",
+        "ip_address": "138.199.151.80",
         "provider": "hetzner",
         "ssh_user": "root",
         "ssh_port": 22,
@@ -307,9 +307,7 @@ def get_user_role_assignments() -> List[Dict[str, str]]:
     """Get user-role assignments for demo mode"""
     if is_demo_mode():
         return [
-            {"email": "admin@example.com", "role": "admin"},
-            {"email": "developer@example.com", "role": "developer"},
-            {"email": "viewer@example.com", "role": "viewer"},
+            {"email": "wd@lamah.com", "role": "admin"},
         ]
     return []
 

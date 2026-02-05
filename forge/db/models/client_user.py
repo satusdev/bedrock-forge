@@ -4,7 +4,8 @@ ClientUser model for client portal authentication.
 Separate from admin Users - clients can only view their own data.
 """
 from datetime import datetime
-from sqlalchemy import String, Boolean, ForeignKey, DateTime
+from enum import Enum as PyEnum
+from sqlalchemy import String, Boolean, ForeignKey, DateTime, Enum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import TYPE_CHECKING
 
@@ -37,6 +38,16 @@ class ClientUser(Base, TimestampMixin):
     
     # Profile
     full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Role
+    class ClientRole(str, PyEnum):
+        ADMIN = "admin"
+        MEMBER = "member"
+        VIEWER = "viewer"
+
+    role: Mapped[ClientRole] = mapped_column(
+        Enum(ClientRole), default=ClientRole.MEMBER, nullable=False
+    )
     
     # Status
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import (
     AsyncEngine
 )
 from .base import Base
+from ..utils.logging import logger
 
 
 def get_database_url() -> str:
@@ -69,6 +70,13 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def init_db() -> None:
     """Initialize database tables from models."""
+    database_url = get_database_url()
+    allow_create_all = os.getenv("FORGE_CREATE_ALL", "").lower() in {"1", "true", "yes"}
+
+    if not allow_create_all and not database_url.startswith("sqlite"):
+        logger.info("Skipping create_all; relying on Alembic migrations for non-SQLite DBs.")
+        return
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

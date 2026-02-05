@@ -12,6 +12,7 @@ from ..base import Base, TimestampMixin
 if TYPE_CHECKING:
     from .user import User
     from .project import Project
+    from .project_server import ProjectServer
     from .heartbeat import Heartbeat
     from .incident import Incident
 
@@ -108,6 +109,9 @@ class Monitor(Base, TimestampMixin):
     project_id: Mapped[int | None] = mapped_column(
         ForeignKey("projects.id"), nullable=True
     )
+    project_server_id: Mapped[int | None] = mapped_column(
+        ForeignKey("project_servers.id", ondelete="SET NULL"), nullable=True
+    )
     created_by_id: Mapped[int] = mapped_column(
         ForeignKey("users.id"), nullable=False
     )
@@ -115,6 +119,9 @@ class Monitor(Base, TimestampMixin):
     # Relationships
     project: Mapped["Project | None"] = relationship(
         "Project", back_populates="monitors"
+    )
+    project_server: Mapped["ProjectServer | None"] = relationship(
+        "ProjectServer", back_populates="monitors"
     )
     created_by: Mapped["User"] = relationship("User", back_populates="monitors")
     heartbeats: Mapped[list["Heartbeat"]] = relationship(

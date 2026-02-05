@@ -76,12 +76,12 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Remove client portal tables."""
-    op.drop_index('ix_ticket_messages_ticket_id', 'ticket_messages')
+    op.drop_index('ix_ticket_messages_ticket_id', 'ticket_messages', if_exists=True)
     op.drop_table('ticket_messages')
-    op.drop_index('ix_tickets_status', 'tickets')
-    op.drop_index('ix_tickets_client_id', 'tickets')
+    op.drop_index('ix_tickets_status', 'tickets', if_exists=True)
+    op.drop_index('ix_tickets_client_id', 'tickets', if_exists=True)
     op.drop_table('tickets')
-    op.drop_index('ix_client_users_email', 'client_users')
+    op.drop_index('ix_client_users_email', 'client_users', if_exists=True)
     op.drop_table('client_users')
     
     # Drop enums

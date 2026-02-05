@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = 'i9j0k1l2m3n4'
-down_revision = 'h8i9j0k1l2m3'
+down_revision = 'j0k1l2m3n4o7'
 branch_labels = None
 depends_on = None
 
@@ -89,9 +89,9 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Remove backup_schedules table."""
-    op.drop_index('ix_backup_schedules_next_run_at', table_name='backup_schedules')
-    op.drop_index('ix_backup_schedules_status', table_name='backup_schedules')
-    op.drop_index('ix_backup_schedules_project_id', table_name='backup_schedules')
+    op.drop_index('ix_backup_schedules_next_run_at', table_name='backup_schedules', if_exists=True)
+    op.drop_index('ix_backup_schedules_status', table_name='backup_schedules', if_exists=True)
+    op.drop_index('ix_backup_schedules_project_id', table_name='backup_schedules', if_exists=True)
     op.drop_table('backup_schedules')
     
     # Drop custom enums

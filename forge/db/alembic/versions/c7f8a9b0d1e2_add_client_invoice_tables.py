@@ -134,7 +134,7 @@ def downgrade() -> None:
     
     # Drop tables in reverse order
     op.drop_table('invoice_items')
-    op.drop_index(op.f('ix_invoices_invoice_number'), table_name='invoices')
+    op.drop_index(op.f('ix_invoices_invoice_number'), table_name='invoices', if_exists=True)
     op.drop_table('invoices')
-    op.drop_index(op.f('ix_clients_email'), table_name='clients')
+    op.drop_index(op.f('ix_clients_email'), table_name='clients', if_exists=True)
     op.drop_table('clients')
