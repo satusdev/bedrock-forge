@@ -1,6 +1,7 @@
 # Testing Guide
 
-Comprehensive testing guide for the Bedrock Forge project, including running tests, writing tests, and understanding the test architecture.
+Comprehensive testing guide for the Bedrock Forge project, including running
+tests, writing tests, and understanding the test architecture.
 
 ## 📋 Table of Contents
 
@@ -163,12 +164,14 @@ python forge/tests/run_tests.py setup
 Test individual functions and classes in isolation.
 
 **Characteristics:**
+
 - Fast execution (milliseconds)
 - No external dependencies
 - Mock external services
 - Test specific functionality
 
 **Example:**
+
 ```python
 # tests/unit/test_provision_core.py
 import pytest
@@ -208,12 +211,14 @@ class TestServerConfig:
 Test interactions between multiple components.
 
 **Characteristics:**
+
 - Slower execution (seconds)
 - Test component interactions
 - May use external services (mocked)
 - Test complete workflows
 
 **Example:**
+
 ```python
 # tests/integration/test_deployment_workflow.py
 import pytest
@@ -253,12 +258,14 @@ class TestDeploymentWorkflow:
 Test complete user scenarios.
 
 **Characteristics:**
+
 - Slowest execution (minutes)
 - Test real user workflows
 - Use real services when possible
 - Test complete application behavior
 
 **Example:**
+
 ```python
 # tests/e2e/test_complete_user_journey.py
 import pytest
@@ -623,6 +630,11 @@ pytest tests/ --cov=forge.utils --cov-report=term-missing
 
 ## 🔄 Continuous Integration
 
+- Canonical Python CI workflow:
+  [.github/workflows/test.yml](../.github/workflows/test.yml)
+- Legacy manual workflow (no push/PR trigger):
+  [.github/workflows/ci.yml](../.github/workflows/ci.yml)
+
 ### GitHub Actions Workflow
 
 ```yaml
@@ -631,16 +643,16 @@ name: Tests
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: [3.9, "3.10", 3.11]
+        python-version: [3.9, '3.10', 3.11]
 
     services:
       mysql:
@@ -649,49 +661,47 @@ jobs:
           MYSQL_ROOT_PASSWORD: root
           MYSQL_DATABASE: test_forge
         options: >-
-          --health-cmd="mysqladmin ping"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=3
+          --health-cmd="mysqladmin ping" --health-interval=10s
+          --health-timeout=5s --health-retries=3
 
     steps:
-    - uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v3
-      with:
-        python-version: ${{ matrix.python-version }}
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v3
+        with:
+          python-version: ${{ matrix.python-version }}
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r forge/requirements.txt
-        pip install -r forge/requirements-test.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r forge/requirements.txt
+          pip install -r forge/requirements-test.txt
 
-    - name: Run linting
-      run: |
-        python forge/tests/run_tests.py lint
+      - name: Run linting
+        run: |
+          python forge/tests/run_tests.py lint
 
-    - name: Run security tests
-      run: |
-        python forge/tests/run_tests.py security
+      - name: Run security tests
+        run: |
+          python forge/tests/run_tests.py security
 
-    - name: Run tests
-      env:
-        FORGE_ENV: test
-        FORGE_DB_HOST: localhost
-        FORGE_DB_NAME: test_forge
-        FORGE_DB_USER: root
-        FORGE_DB_PASSWORD: root
-      run: |
-        python forge/tests/run_tests.py all --coverage
+      - name: Run tests
+        env:
+          FORGE_ENV: test
+          FORGE_DB_HOST: localhost
+          FORGE_DB_NAME: test_forge
+          FORGE_DB_USER: root
+          FORGE_DB_PASSWORD: root
+        run: |
+          python forge/tests/run_tests.py all --coverage
 
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
-      with:
-        file: ./coverage.xml
-        flags: unittests
-        name: codecov-umbrella
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
 ```
 
 ### Local CI Testing
@@ -701,6 +711,14 @@ jobs:
 python forge/tests/run_tests.py lint
 python forge/tests/run_tests.py security
 python forge/tests/run_tests.py all --verbose
+
+# Enum persistence guardrails
+pytest -q \
+    forge/tests/unit/test_backup_enum_persistence.py \
+    forge/tests/unit/test_enum_value_persistence_guardrail.py
+
+# Migration smoke (multi-head safe)
+alembic -c forge/db/alembic.ini upgrade heads
 
 # Run with specific Python versions
 python3.9 -m pytest tests/
@@ -896,15 +914,15 @@ def test_with_debugging(self):
 
 ### Common Test Issues and Solutions
 
-| Issue | Cause | Solution |
-|-------|-------|----------|
-| `ImportError` | Python path issues | Run from project root or set PYTHONPATH |
-| `ModuleNotFoundError` | Missing dependencies | `pip install -r forge/requirements-test.txt` |
-| `AssertionError` | Incorrect expectations | Review test logic and actual behavior |
-| `TimeoutError` | Test takes too long | Increase timeout or optimize test |
-| `ConnectionError` | Network dependency | Mock network calls or skip in CI |
-| `PermissionError` | File permission issues | Run with appropriate permissions |
-| `DatabaseError` | Database not available | Use test database or mock |
+| Issue                 | Cause                  | Solution                                     |
+| --------------------- | ---------------------- | -------------------------------------------- |
+| `ImportError`         | Python path issues     | Run from project root or set PYTHONPATH      |
+| `ModuleNotFoundError` | Missing dependencies   | `pip install -r forge/requirements-test.txt` |
+| `AssertionError`      | Incorrect expectations | Review test logic and actual behavior        |
+| `TimeoutError`        | Test takes too long    | Increase timeout or optimize test            |
+| `ConnectionError`     | Network dependency     | Mock network calls or skip in CI             |
+| `PermissionError`     | File permission issues | Run with appropriate permissions             |
+| `DatabaseError`       | Database not available | Use test database or mock                    |
 
 ---
 
@@ -970,6 +988,7 @@ async def test_concurrent_deployments():
 ```
 
 For more information about testing tools and techniques, see:
+
 - [Development Guide](DEVELOPMENT.md)
 - [API Documentation](API.md)
 - [Troubleshooting Guide](TROUBLESHOOTING.md)
