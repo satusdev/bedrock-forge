@@ -7,6 +7,14 @@ echo "========================================"
 echo "Bedrock Forge API Entrypoint"
 echo "========================================"
 
+# If a non-API command was provided (e.g., celery), run it directly
+# and skip migrations to avoid concurrent migration races.
+if [[ $# -gt 0 ]]; then
+    if [[ "$1" == "celery" || "$1" == "bash" || "$1" == "sh" ]]; then
+        exec "$@"
+    fi
+fi
+
 # Run database migrations
 BASELINE_REV="dbe90fcb9778"
 echo "Running database migrations..."
@@ -43,19 +51,12 @@ if [[ "$needs_stamp" == "1" ]]; then
     alembic -c forge/db/alembic.ini stamp "${BASELINE_REV}"
 fi
 
-alembic -c forge/db/alembic.ini upgrade head
+alembic -c forge/db/alembic.ini upgrade heads
 echo "✓ Database migrations completed successfully"
 
 echo "----------------------------------------"
 echo "Starting API server..."
 echo "========================================"
 
-# If a specific command was provided (e.g., celery), run it directly.
-if [[ $# -gt 0 ]]; then
-    if [[ "$1" == "celery" || "$1" == "bash" || "$1" == "sh" ]]; then
-        exec "$@"
-    fi
-fi
-
 # Execute the main command (uvicorn)
-exec uvicorn forge.api.app:app --host 0.0.0.0 --port 8000 "$@"
+exec uvicorn forge.api.app:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*' "$@"
