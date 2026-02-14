@@ -1,14 +1,14 @@
 import axios from 'axios';
+import { API_BASE_URL, getApiBaseUrl } from '@/config/env';
 
-export const API_BASE_URL =
-	import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1';
+export { API_BASE_URL };
 
 export const createApiClient = (options?: {
 	tokenStorageKey?: string;
 	timeout?: number;
 }) => {
 	const instance = axios.create({
-		baseURL: API_BASE_URL,
+		baseURL: getApiBaseUrl(),
 		timeout: options?.timeout ?? 60000,
 		headers: {
 			'Content-Type': 'application/json',
@@ -26,7 +26,7 @@ export const createApiClient = (options?: {
 			}
 			return config;
 		},
-		error => Promise.reject(error)
+		error => Promise.reject(error),
 	);
 
 	return instance;

@@ -1,194 +1,200 @@
 /**
  * WebSocket service for real-time dashboard updates.
  */
+import { getWebSocketUrl } from '@/config/env';
 
 type WebSocketMessage = {
-  type: string
-  project_name?: string
-  data?: any
-  timestamp?: string
-  status?: string
-  message?: string
-}
+	type: string;
+	project_name?: string;
+	data?: any;
+	timestamp?: string;
+	status?: string;
+	message?: string;
+};
 
-type WebSocketEventHandler = (data: any) => void
+type WebSocketEventHandler = (data: any) => void;
 
 class WebSocketService {
-  private ws: WebSocket | null = null
-  private clientId: string
-  private url: string
-  private reconnectAttempts = 0
-  private maxReconnectAttempts = 5
-  private reconnectDelay = 1000
-  private isConnecting = false
-  private eventHandlers: Map<string, WebSocketEventHandler[]> = new Map()
+	private ws: WebSocket | null = null;
+	private clientId: string;
+	private url: string;
+	private reconnectAttempts = 0;
+	private maxReconnectAttempts = 5;
+	private reconnectDelay = 1000;
+	private isConnecting = false;
+	private eventHandlers: Map<string, WebSocketEventHandler[]> = new Map();
 
-  constructor() {
-    this.clientId = this.generateClientId()
-    this.url = this.getWebSocketUrl()
-  }
+	constructor() {
+		this.clientId = this.generateClientId();
+		this.url = this.getWebSocketUrl();
+	}
 
-  private generateClientId(): string {
-    return `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-  }
+	private generateClientId(): string {
+		return `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+	}
 
-  private getWebSocketUrl(): string {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const host = window.location.hostname
-    const port = '8000'  // Backend port
-    return `${protocol}//${host}:${port}/api/v1/ws/${this.clientId}`
-  }
+	private getWebSocketUrl(): string {
+		return getWebSocketUrl(this.clientId);
+	}
 
-  private connectionPromise: Promise<void> | null = null
+	private connectionPromise: Promise<void> | null = null;
 
-  connect(): Promise<void> {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      return Promise.resolve()
-    }
+	connect(): Promise<void> {
+		if (this.ws?.readyState === WebSocket.OPEN) {
+			return Promise.resolve();
+		}
 
-    if (this.connectionPromise) {
-      return this.connectionPromise
-    }
+		if (this.connectionPromise) {
+			return this.connectionPromise;
+		}
 
-    this.isConnecting = true
-    this.connectionPromise = new Promise((resolve, reject) => {
-      try {
-        this.ws = new WebSocket(this.url)
+		this.isConnecting = true;
+		this.connectionPromise = new Promise((resolve, reject) => {
+			try {
+				this.ws = new WebSocket(this.url);
 
-        this.ws.onopen = () => {
-          console.log('WebSocket connected')
-          this.isConnecting = false
-          this.reconnectAttempts = 0
-          this.connectionPromise = null
-          resolve()
-        }
+				this.ws.onopen = () => {
+					console.log('WebSocket connected');
+					this.isConnecting = false;
+					this.reconnectAttempts = 0;
+					this.connectionPromise = null;
+					resolve();
+				};
 
-        this.ws.onmessage = (event) => {
-          try {
-            const message: WebSocketMessage = JSON.parse(event.data)
-            this.handleMessage(message)
-          } catch (error) {
-            console.error('Error parsing WebSocket message:', error)
-          }
-        }
+				this.ws.onmessage = event => {
+					try {
+						const message: WebSocketMessage = JSON.parse(event.data);
+						this.handleMessage(message);
+					} catch (error) {
+						console.error('Error parsing WebSocket message:', error);
+					}
+				};
 
-        this.ws.onclose = (event) => {
-          console.log('WebSocket disconnected:', event.code, event.reason)
-          this.isConnecting = false
-          this.ws = null
-          this.connectionPromise = null
+				this.ws.onclose = event => {
+					console.log('WebSocket disconnected:', event.code, event.reason);
+					this.isConnecting = false;
+					this.ws = null;
+					this.connectionPromise = null;
 
-          // Attempt to reconnect if not explicitly closed
-          if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
-            setTimeout(() => {
-              this.reconnectAttempts++
-              console.log(`Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})`)
-              this.connect().catch(console.error)
-            }, this.reconnectDelay * this.reconnectAttempts)
-          }
-        }
+					// Attempt to reconnect if not explicitly closed
+					if (
+						event.code !== 1000 &&
+						this.reconnectAttempts < this.maxReconnectAttempts
+					) {
+						setTimeout(() => {
+							this.reconnectAttempts++;
+							console.log(
+								`Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})`
+							);
+							this.connect().catch(console.error);
+						}, this.reconnectDelay * this.reconnectAttempts);
+					}
+				};
 
-        this.ws.onerror = (error) => {
-          console.error('WebSocket error:', error)
-          this.isConnecting = false
-          this.connectionPromise = null
-          reject(error)
-        }
-      } catch (error) {
-        this.isConnecting = false
-        this.connectionPromise = null
-        reject(error)
-      }
-    })
+				this.ws.onerror = error => {
+					console.error('WebSocket error:', error);
+					this.isConnecting = false;
+					this.connectionPromise = null;
+					reject(error);
+				};
+			} catch (error) {
+				this.isConnecting = false;
+				this.connectionPromise = null;
+				reject(error);
+			}
+		});
 
-    return this.connectionPromise
-  }
+		return this.connectionPromise;
+	}
 
-  disconnect() {
-    if (this.ws) {
-      this.ws.close(1000, 'Client disconnect')
-      this.ws = null
-    }
-  }
+	disconnect() {
+		if (this.ws) {
+			this.ws.close(1000, 'Client disconnect');
+			this.ws = null;
+		}
+	}
 
-  private handleMessage(message: WebSocketMessage) {
-    console.log('WebSocket message received:', message)
+	private handleMessage(message: WebSocketMessage) {
+		console.log('WebSocket message received:', message);
 
-    // Call specific event handlers
-    const handlers = this.eventHandlers.get(message.type) || []
-    handlers.forEach(handler => {
-      try {
-        handler(message)
-      } catch (error) {
-        console.error(`Error in WebSocket handler for type ${message.type}:`, error)
-      }
-    })
+		// Call specific event handlers
+		const handlers = this.eventHandlers.get(message.type) || [];
+		handlers.forEach(handler => {
+			try {
+				handler(message);
+			} catch (error) {
+				console.error(
+					`Error in WebSocket handler for type ${message.type}:`,
+					error
+				);
+			}
+		});
 
-    // Call general message handlers
-    const generalHandlers = this.eventHandlers.get('message') || []
-    generalHandlers.forEach(handler => {
-      try {
-        handler(message)
-      } catch (error) {
-        console.error('Error in general WebSocket handler:', error)
-      }
-    })
-  }
+		// Call general message handlers
+		const generalHandlers = this.eventHandlers.get('message') || [];
+		generalHandlers.forEach(handler => {
+			try {
+				handler(message);
+			} catch (error) {
+				console.error('Error in general WebSocket handler:', error);
+			}
+		});
+	}
 
-  on(eventType: string, handler: WebSocketEventHandler) {
-    if (!this.eventHandlers.has(eventType)) {
-      this.eventHandlers.set(eventType, [])
-    }
-    this.eventHandlers.get(eventType)!.push(handler)
-  }
+	on(eventType: string, handler: WebSocketEventHandler) {
+		if (!this.eventHandlers.has(eventType)) {
+			this.eventHandlers.set(eventType, []);
+		}
+		this.eventHandlers.get(eventType)!.push(handler);
+	}
 
-  off(eventType: string, handler: WebSocketEventHandler) {
-    const handlers = this.eventHandlers.get(eventType)
-    if (handlers) {
-      const index = handlers.indexOf(handler)
-      if (index > -1) {
-        handlers.splice(index, 1)
-      }
-    }
-  }
+	off(eventType: string, handler: WebSocketEventHandler) {
+		const handlers = this.eventHandlers.get(eventType);
+		if (handlers) {
+			const index = handlers.indexOf(handler);
+			if (index > -1) {
+				handlers.splice(index, 1);
+			}
+		}
+	}
 
-  send(message: WebSocketMessage) {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(message))
-    } else {
-      console.warn('WebSocket not connected, cannot send message:', message)
-    }
-  }
+	send(message: WebSocketMessage) {
+		if (this.ws?.readyState === WebSocket.OPEN) {
+			this.ws.send(JSON.stringify(message));
+		} else {
+			console.warn('WebSocket not connected, cannot send message:', message);
+		}
+	}
 
-  subscribeToProject(projectName: string) {
-    this.send({
-      type: 'subscribe_project',
-      project_name: projectName
-    })
-  }
+	subscribeToProject(projectName: string) {
+		this.send({
+			type: 'subscribe_project',
+			project_name: projectName,
+		});
+	}
 
-  unsubscribeFromProject(projectName: string) {
-    this.send({
-      type: 'unsubscribe_project',
-      project_name: projectName
-    })
-  }
+	unsubscribeFromProject(projectName: string) {
+		this.send({
+			type: 'unsubscribe_project',
+			project_name: projectName,
+		});
+	}
 
-  ping() {
-    this.send({ type: 'ping' })
-  }
+	ping() {
+		this.send({ type: 'ping' });
+	}
 
-  isConnected(): boolean {
-    return this.ws?.readyState === WebSocket.OPEN
-  }
+	isConnected(): boolean {
+		return this.ws?.readyState === WebSocket.OPEN;
+	}
 
-  getClientId(): string {
-    return this.clientId
-  }
+	getClientId(): string {
+		return this.clientId;
+	}
 }
 
 // Create singleton instance
-const websocketService = new WebSocketService()
+const websocketService = new WebSocketService();
 
-export default websocketService
-export type { WebSocketMessage, WebSocketEventHandler }
+export default websocketService;
+export type { WebSocketMessage, WebSocketEventHandler };

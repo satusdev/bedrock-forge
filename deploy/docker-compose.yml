@@ -99,6 +99,9 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile.dashboard
       target: preview
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+        VITE_WS_URL: ${VITE_WS_URL:-}
     container_name: forge-dashboard
     ports:
       - '3000:3000'

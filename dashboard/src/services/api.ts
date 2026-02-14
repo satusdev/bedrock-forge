@@ -7,7 +7,8 @@ import type {
 	ClientUpdateInput,
 	ClientsListResponse,
 } from '@/types';
-import { API_BASE_URL, createApiClient } from './apiClient';
+import { createApiClient } from './apiClient';
+import { HEALTH_URL } from '@/config/env';
 
 // Create axios instance
 const api = createApiClient({ tokenStorageKey: 'auth_token', timeout: 60000 });
@@ -42,7 +43,7 @@ const getSafeErrorMessage = (
 const checkBackendAvailability = async () => {
 	try {
 		// Use absolute URL to bypass baseURL since health check is at root /health
-		await axios.get('http://127.0.0.1:8000/health');
+		await axios.get(HEALTH_URL);
 		useMockApi = false;
 	} catch (error) {
 		console.error(
