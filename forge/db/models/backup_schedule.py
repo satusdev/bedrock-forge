@@ -11,8 +11,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import TYPE_CHECKING, Any
 
 from ..base import Base, TimestampMixin
-from .backup import BackupStorageType
-from forge.core.backup_types import BackupType
+from .backup import BackupStorageType, BackupType
 
 if TYPE_CHECKING:
     from .user import User
@@ -37,6 +36,10 @@ class ScheduleStatus(str, PyEnum):
     DISABLED = "disabled"
 
 
+def _enum_values(enum_cls: type[PyEnum]) -> list[str]:
+    return [member.value for member in enum_cls]
+
+
 class BackupSchedule(Base, TimestampMixin):
     """
     Backup schedule configuration model.
@@ -53,7 +56,12 @@ class BackupSchedule(Base, TimestampMixin):
     
     # Schedule configuration
     frequency: Mapped[ScheduleFrequency] = mapped_column(
-        Enum(ScheduleFrequency), default=ScheduleFrequency.DAILY
+        Enum(
+            ScheduleFrequency,
+            values_callable=_enum_values,
+            name="schedulefrequency",
+        ),
+        default=ScheduleFrequency.DAILY,
     )
     cron_expression: Mapped[str | None] = mapped_column(
         String(100), nullable=True
@@ -72,10 +80,20 @@ class BackupSchedule(Base, TimestampMixin):
     
     # Backup configuration
     backup_type: Mapped[BackupType] = mapped_column(
-        Enum(BackupType), default=BackupType.FULL
+        Enum(
+            BackupType,
+            values_callable=_enum_values,
+            name="backuptype",
+        ),
+        default=BackupType.FULL,
     )
     storage_type: Mapped[BackupStorageType] = mapped_column(
-        Enum(BackupStorageType), default=BackupStorageType.GOOGLE_DRIVE
+        Enum(
+            BackupStorageType,
+            values_callable=_enum_values,
+            name="backupstoragetype",
+        ),
+        default=BackupStorageType.GOOGLE_DRIVE,
     )
     
     # Retention policy
@@ -88,7 +106,12 @@ class BackupSchedule(Base, TimestampMixin):
     
     # Status and tracking
     status: Mapped[ScheduleStatus] = mapped_column(
-        Enum(ScheduleStatus), default=ScheduleStatus.ACTIVE
+        Enum(
+            ScheduleStatus,
+            values_callable=_enum_values,
+            name="schedulestatus",
+        ),
+        default=ScheduleStatus.ACTIVE,
     )
     last_run_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

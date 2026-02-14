@@ -25,6 +25,10 @@ class ServerEnvironment(str, PyEnum):
     development = "development"
 
 
+def _enum_values(enum_cls: type[PyEnum]) -> list[str]:
+    return [member.value for member in enum_cls]
+
+
 class ProjectServer(Base, TimestampMixin):
     """
     Junction table linking projects to servers with environment context.
@@ -52,7 +56,12 @@ class ProjectServer(Base, TimestampMixin):
     
     # Environment context
     environment: Mapped[ServerEnvironment] = mapped_column(
-        Enum(ServerEnvironment), default=ServerEnvironment.staging
+        Enum(
+            ServerEnvironment,
+            values_callable=_enum_values,
+            name="serverenvironment",
+        ),
+        default=ServerEnvironment.staging,
     )
     
     # WordPress paths on this server

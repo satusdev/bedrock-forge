@@ -18,6 +18,10 @@ class AnalyticsReportType(str, PyEnum):
     LIGHTHOUSE = "lighthouse"
 
 
+def _enum_values(enum_cls: type[PyEnum]) -> list[str]:
+    return [member.value for member in enum_cls]
+
+
 class AnalyticsReport(Base, TimestampMixin):
     """Analytics report record for GA4 and Lighthouse runs."""
 
@@ -33,7 +37,13 @@ class AnalyticsReport(Base, TimestampMixin):
     )
 
     report_type: Mapped[AnalyticsReportType] = mapped_column(
-        Enum(AnalyticsReportType), index=True, nullable=False
+        Enum(
+            AnalyticsReportType,
+            values_callable=_enum_values,
+            name="analyticsreporttype",
+        ),
+        index=True,
+        nullable=False,
     )
 
     url: Mapped[str | None] = mapped_column(String(500), nullable=True)
