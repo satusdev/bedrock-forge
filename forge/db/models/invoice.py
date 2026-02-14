@@ -25,6 +25,10 @@ class InvoiceStatus(str, PyEnum):
     REFUNDED = "refunded"
 
 
+def _enum_values(enum_cls: type[PyEnum]) -> list[str]:
+    return [member.value for member in enum_cls]
+
+
 class Invoice(Base, TimestampMixin):
     """Invoice model for client billing."""
     
@@ -37,7 +41,12 @@ class Invoice(Base, TimestampMixin):
     
     # Status
     status: Mapped[InvoiceStatus] = mapped_column(
-        Enum(InvoiceStatus), default=InvoiceStatus.DRAFT
+        Enum(
+            InvoiceStatus,
+            values_callable=_enum_values,
+            name="invoicestatus",
+        ),
+        default=InvoiceStatus.DRAFT,
     )
     
     # Dates

@@ -41,6 +41,10 @@ class Registrar(str, PyEnum):
     OTHER = "other"
 
 
+def _enum_values(enum_cls: type[PyEnum]) -> list[str]:
+    return [member.value for member in enum_cls]
+
+
 class Domain(Base, TimestampMixin):
     """Domain registration tracking model."""
     
@@ -54,7 +58,12 @@ class Domain(Base, TimestampMixin):
     
     # Registrar information
     registrar: Mapped[Registrar] = mapped_column(
-        Enum(Registrar), default=Registrar.OTHER
+        Enum(
+            Registrar,
+            values_callable=_enum_values,
+            name="registrar",
+        ),
+        default=Registrar.OTHER,
     )
     registrar_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     registrar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -71,7 +80,12 @@ class Domain(Base, TimestampMixin):
     
     # Status and settings
     status: Mapped[DomainStatus] = mapped_column(
-        Enum(DomainStatus), default=DomainStatus.ACTIVE
+        Enum(
+            DomainStatus,
+            values_callable=_enum_values,
+            name="domainstatus",
+        ),
+        default=DomainStatus.ACTIVE,
     )
     auto_renew: Mapped[bool] = mapped_column(Boolean, default=True)
     privacy_protection: Mapped[bool] = mapped_column(Boolean, default=True)

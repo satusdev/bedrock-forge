@@ -31,6 +31,10 @@ class BillingStatus(str, PyEnum):
     CANCELLED = "cancelled"
 
 
+def _enum_values(enum_cls: type[PyEnum]) -> list[str]:
+    return [member.value for member in enum_cls]
+
+
 class Client(Base, TimestampMixin):
     """Client/customer model for project billing and management."""
     
@@ -58,7 +62,12 @@ class Client(Base, TimestampMixin):
     
     # Billing configuration
     billing_status: Mapped[BillingStatus] = mapped_column(
-        Enum(BillingStatus), default=BillingStatus.ACTIVE
+        Enum(
+            BillingStatus,
+            values_callable=_enum_values,
+            name="billingstatus",
+        ),
+        default=BillingStatus.ACTIVE,
     )
     payment_terms: Mapped[str] = mapped_column(String(50), default="NET30")
     currency: Mapped[str] = mapped_column(String(3), default="USD")

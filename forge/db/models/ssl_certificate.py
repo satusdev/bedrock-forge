@@ -40,6 +40,10 @@ class CertificateType(str, PyEnum):
     MULTI_DOMAIN = "multi_domain"  # SAN certificate
 
 
+def _enum_values(enum_cls: type[PyEnum]) -> list[str]:
+    return [member.value for member in enum_cls]
+
+
 class SSLCertificate(Base, TimestampMixin):
     """SSL certificate tracking model."""
     
@@ -53,10 +57,20 @@ class SSLCertificate(Base, TimestampMixin):
     
     # Provider info
     provider: Mapped[SSLProvider] = mapped_column(
-        Enum(SSLProvider), default=SSLProvider.LETS_ENCRYPT
+        Enum(
+            SSLProvider,
+            values_callable=_enum_values,
+            name="sslprovider",
+        ),
+        default=SSLProvider.LETS_ENCRYPT,
     )
     certificate_type: Mapped[CertificateType] = mapped_column(
-        Enum(CertificateType), default=CertificateType.DV
+        Enum(
+            CertificateType,
+            values_callable=_enum_values,
+            name="certificatetype",
+        ),
+        default=CertificateType.DV,
     )
     
     # Dates

@@ -38,6 +38,10 @@ class SenderType(str, PyEnum):
     ADMIN = "admin"
 
 
+def _enum_values(enum_cls: type[PyEnum]) -> list[str]:
+    return [member.value for member in enum_cls]
+
+
 class Ticket(Base, TimestampMixin):
     """Support ticket from a client."""
     
@@ -60,10 +64,20 @@ class Ticket(Base, TimestampMixin):
     
     # Status
     status: Mapped[TicketStatus] = mapped_column(
-        Enum(TicketStatus), default=TicketStatus.OPEN
+        Enum(
+            TicketStatus,
+            values_callable=_enum_values,
+            name="ticketstatus",
+        ),
+        default=TicketStatus.OPEN,
     )
     priority: Mapped[TicketPriority] = mapped_column(
-        Enum(TicketPriority), default=TicketPriority.MEDIUM
+        Enum(
+            TicketPriority,
+            values_callable=_enum_values,
+            name="ticketpriority",
+        ),
+        default=TicketPriority.MEDIUM,
     )
     
     # Tracking
@@ -99,7 +113,12 @@ class TicketMessage(Base, TimestampMixin):
     
     # Sender
     sender_type: Mapped[SenderType] = mapped_column(
-        Enum(SenderType), nullable=False
+        Enum(
+            SenderType,
+            values_callable=_enum_values,
+            name="sendertype",
+        ),
+        nullable=False,
     )
     sender_id: Mapped[int | None] = mapped_column(nullable=True)  # ClientUser or User ID
     sender_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
