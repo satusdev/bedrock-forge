@@ -42,6 +42,10 @@ class MonitorStatus(str, PyEnum):
     MAINTENANCE = "maintenance"
 
 
+def _enum_values(enum_cls: type[PyEnum]) -> list[str]:
+    return [member.value for member in enum_cls]
+
+
 class Monitor(Base, TimestampMixin):
     """Uptime/health monitor model (Uptime Kuma style)."""
     
@@ -51,7 +55,12 @@ class Monitor(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     
     monitor_type: Mapped[MonitorType] = mapped_column(
-        Enum(MonitorType), default=MonitorType.UPTIME
+        Enum(
+            MonitorType,
+            values_callable=_enum_values,
+            name="monitortype",
+        ),
+        default=MonitorType.UPTIME,
     )
     url: Mapped[str] = mapped_column(String(500), nullable=False)
     
@@ -80,7 +89,12 @@ class Monitor(Base, TimestampMixin):
         DateTime(timezone=True), nullable=True
     )
     last_status: Mapped[MonitorStatus | None] = mapped_column(
-        Enum(MonitorStatus), nullable=True
+        Enum(
+            MonitorStatus,
+            values_callable=_enum_values,
+            name="monitorstatus",
+        ),
+        nullable=True,
     )
     last_response_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     uptime_percentage: Mapped[float | None] = mapped_column(Float, nullable=True)

@@ -37,6 +37,10 @@ class EnvironmentType(str, PyEnum):
     PRODUCTION = "production"
 
 
+def _enum_values(enum_cls: type[PyEnum]) -> list[str]:
+    return [member.value for member in enum_cls]
+
+
 class Project(Base, TimestampMixin):
     """WordPress project model."""
     
@@ -49,10 +53,20 @@ class Project(Base, TimestampMixin):
     path: Mapped[str] = mapped_column(String(500), nullable=False)
     
     status: Mapped[ProjectStatus] = mapped_column(
-        Enum(ProjectStatus), default=ProjectStatus.ACTIVE
+        Enum(
+            ProjectStatus,
+            values_callable=_enum_values,
+            name="projectstatus",
+        ),
+        default=ProjectStatus.ACTIVE,
     )
     environment: Mapped[EnvironmentType] = mapped_column(
-        Enum(EnvironmentType), default=EnvironmentType.DEVELOPMENT
+        Enum(
+            EnvironmentType,
+            values_callable=_enum_values,
+            name="environmenttype",
+        ),
+        default=EnvironmentType.DEVELOPMENT,
     )
     
     # WordPress info

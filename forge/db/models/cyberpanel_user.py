@@ -36,6 +36,10 @@ class CyberPanelUserType(str, PyEnum):
     USER = "user"  # Standard user, can manage own websites
 
 
+def _enum_values(enum_cls: type[PyEnum]) -> list[str]:
+    return [member.value for member in enum_cls]
+
+
 class CyberPanelUser(Base, TimestampMixin):
     """
     CyberPanel user credentials cache.
@@ -85,8 +89,12 @@ class CyberPanelUser(Base, TimestampMixin):
     last_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     
     user_type: Mapped[CyberPanelUserType] = mapped_column(
-        Enum(CyberPanelUserType), 
-        default=CyberPanelUserType.USER
+        Enum(
+            CyberPanelUserType,
+            values_callable=_enum_values,
+            name="cyberpanelusertype",
+        ),
+        default=CyberPanelUserType.USER,
     )
     
     # ACL name in CyberPanel (e.g., "user", "reseller", "admin")
@@ -108,8 +116,12 @@ class CyberPanelUser(Base, TimestampMixin):
     
     # ===== Status and Sync Tracking =====
     status: Mapped[CyberPanelUserStatus] = mapped_column(
-        Enum(CyberPanelUserStatus), 
-        default=CyberPanelUserStatus.ACTIVE
+        Enum(
+            CyberPanelUserStatus,
+            values_callable=_enum_values,
+            name="cyberpaneluserstatus",
+        ),
+        default=CyberPanelUserStatus.ACTIVE,
     )
     
     # Sync metadata

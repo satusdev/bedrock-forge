@@ -15,6 +15,10 @@ if TYPE_CHECKING:
     from .client import Client
 
 
+def _enum_values(enum_cls: type[PyEnum]) -> list[str]:
+    return [member.value for member in enum_cls]
+
+
 class ClientUser(Base, TimestampMixin):
     """
     Client portal user account.
@@ -46,7 +50,13 @@ class ClientUser(Base, TimestampMixin):
         VIEWER = "viewer"
 
     role: Mapped[ClientRole] = mapped_column(
-        Enum(ClientRole), default=ClientRole.MEMBER, nullable=False
+        Enum(
+            ClientRole,
+            values_callable=_enum_values,
+            name="clientrole",
+        ),
+        default=ClientRole.MEMBER,
+        nullable=False,
     )
     
     # Status

@@ -56,10 +56,12 @@ class Server(Base, TimestampMixin):
     hostname: Mapped[str] = mapped_column(String(255), nullable=False)
     
     provider: Mapped[ServerProvider] = mapped_column(
-        Enum(ServerProvider), default=ServerProvider.CUSTOM
+        Enum(ServerProvider, values_callable=lambda obj: [e.value for e in obj]),
+        default=ServerProvider.CUSTOM,
     )
     status: Mapped[ServerStatus] = mapped_column(
-        Enum(ServerStatus), default=ServerStatus.OFFLINE
+        Enum(ServerStatus, values_callable=lambda obj: [e.value for e in obj]),
+        default=ServerStatus.OFFLINE,
     )
     
     # SSH connection
@@ -71,7 +73,8 @@ class Server(Base, TimestampMixin):
     
     # Control panel (Legacy / Informational)
     panel_type: Mapped[PanelType] = mapped_column(
-        Enum(PanelType), default=PanelType.NONE
+        Enum(PanelType, values_callable=lambda obj: [e.value for e in obj]),
+        default=PanelType.NONE,
     )
     panel_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     panel_port: Mapped[int] = mapped_column(Integer, default=8090)

@@ -48,6 +48,10 @@ class SubscriptionStatus(str, PyEnum):
     SUSPENDED = "suspended"
 
 
+def _enum_values(enum_cls: type[PyEnum]) -> list[str]:
+    return [member.value for member in enum_cls]
+
+
 class Subscription(Base, TimestampMixin):
     """Recurring subscription model for any billable service."""
     
@@ -57,7 +61,12 @@ class Subscription(Base, TimestampMixin):
     
     # Type and identification
     subscription_type: Mapped[SubscriptionType] = mapped_column(
-        Enum(SubscriptionType), nullable=False
+        Enum(
+            SubscriptionType,
+            values_callable=_enum_values,
+            name="subscriptiontype",
+        ),
+        nullable=False,
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -68,7 +77,12 @@ class Subscription(Base, TimestampMixin):
     
     # Billing configuration
     billing_cycle: Mapped[BillingCycle] = mapped_column(
-        Enum(BillingCycle), default=BillingCycle.YEARLY
+        Enum(
+            BillingCycle,
+            values_callable=_enum_values,
+            name="billingcycle",
+        ),
+        default=BillingCycle.YEARLY,
     )
     amount: Mapped[float] = mapped_column(Float, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="USD")
@@ -81,7 +95,12 @@ class Subscription(Base, TimestampMixin):
     
     # Status and renewal
     status: Mapped[SubscriptionStatus] = mapped_column(
-        Enum(SubscriptionStatus), default=SubscriptionStatus.ACTIVE
+        Enum(
+            SubscriptionStatus,
+            values_callable=_enum_values,
+            name="subscriptionstatus",
+        ),
+        default=SubscriptionStatus.ACTIVE,
     )
     auto_renew: Mapped[bool] = mapped_column(Boolean, default=True)
     

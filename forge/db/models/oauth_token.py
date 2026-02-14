@@ -18,6 +18,10 @@ class OAuthProvider(str, PyEnum):
     GITHUB = "github"
 
 
+def _enum_values(enum_cls: type[PyEnum]) -> list[str]:
+    return [member.value for member in enum_cls]
+
+
 class OAuthToken(Base, TimestampMixin):
     """OAuth token storage for external integrations."""
     
@@ -30,7 +34,12 @@ class OAuthToken(Base, TimestampMixin):
     
     # Provider information
     provider: Mapped[OAuthProvider] = mapped_column(
-        Enum(OAuthProvider), nullable=False
+        Enum(
+            OAuthProvider,
+            values_callable=_enum_values,
+            name="oauthprovider",
+        ),
+        nullable=False,
     )
     
     # Token data (encrypted in production)

@@ -32,8 +32,13 @@ class BackupStatus(str, PyEnum):
     """Backup operation status."""
     PENDING = "pending"
     RUNNING = "running"
+    IN_PROGRESS = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+def _enum_values(enum_cls: type[PyEnum]) -> list[str]:
+    return [member.value for member in enum_cls]
 
 
 class Backup(Base, TimestampMixin):
@@ -45,17 +50,32 @@ class Backup(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     
     backup_type: Mapped[BackupType] = mapped_column(
-        Enum(BackupType), default=BackupType.FULL
+        Enum(
+            BackupType,
+            values_callable=_enum_values,
+            name="backuptype",
+        ),
+        default=BackupType.FULL,
     )
     storage_type: Mapped[BackupStorageType] = mapped_column(
-        Enum(BackupStorageType), default=BackupStorageType.LOCAL
+        Enum(
+            BackupStorageType,
+            values_callable=_enum_values,
+            name="backupstoragetype",
+        ),
+        default=BackupStorageType.LOCAL,
     )
     storage_path: Mapped[str] = mapped_column(String(500), nullable=False)
     
     size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     
     status: Mapped[BackupStatus] = mapped_column(
-        Enum(BackupStatus), default=BackupStatus.PENDING
+        Enum(
+            BackupStatus,
+            values_callable=_enum_values,
+            name="backupstatus",
+        ),
+        default=BackupStatus.PENDING,
     )
     
     started_at: Mapped[datetime] = mapped_column(

@@ -18,13 +18,24 @@ class AuditAction(str, enum.Enum):
     COMMAND = "command"
     OTHER = "other"
 
+
+def _enum_values(enum_cls: type[enum.Enum]) -> list[str]:
+    return [member.value for member in enum_cls]
+
 class AuditLog(Base):
     """Audit log model for tracking user actions and system events."""
     __tablename__ = "audit_logs"
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    action = Column(Enum(AuditAction), nullable=False)
+    action = Column(
+        Enum(
+            AuditAction,
+            values_callable=_enum_values,
+            name="auditaction",
+        ),
+        nullable=False,
+    )
     entity_type = Column(String(50), nullable=True)  # e.g., "project", "server", "user"
     entity_id = Column(String(50), nullable=True)    # ID of the affected entity
     details = Column(Text, nullable=True)            # JSON string or text description

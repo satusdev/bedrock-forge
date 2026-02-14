@@ -32,6 +32,10 @@ class UpdateStatus(str, PyEnum):
     SKIPPED = "skipped"
 
 
+def _enum_values(enum_cls: type[PyEnum]) -> list[str]:
+    return [member.value for member in enum_cls]
+
+
 class WPSiteState(Base, TimestampMixin):
     """
     Cached WordPress site state per project-server.
@@ -106,7 +110,12 @@ class WPUpdate(Base, TimestampMixin):
     
     # Update details
     update_type: Mapped[UpdateType] = mapped_column(
-        Enum(UpdateType), nullable=False
+        Enum(
+            UpdateType,
+            values_callable=_enum_values,
+            name="updatetype",
+        ),
+        nullable=False,
     )
     package_name: Mapped[str] = mapped_column(String(255), nullable=False)
     from_version: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -114,7 +123,12 @@ class WPUpdate(Base, TimestampMixin):
     
     # Status
     status: Mapped[UpdateStatus] = mapped_column(
-        Enum(UpdateStatus), default=UpdateStatus.PENDING
+        Enum(
+            UpdateStatus,
+            values_callable=_enum_values,
+            name="updatestatus",
+        ),
+        default=UpdateStatus.PENDING,
     )
     
     # Backup for rollback
