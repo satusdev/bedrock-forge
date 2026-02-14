@@ -432,10 +432,19 @@ async def test_server_connection(
         )
 
     except Exception as e:
-        server.status = ServerStatus.OFFLINE
-        if server.panel_type == PanelType.CYBERPANEL:
-            server.panel_verified = False
-        await db.flush()
+        await db.rollback()
+        result = await db.execute(
+            select(Server).where(Server.id == server_id)
+        )
+        server = result.scalar_one_or_none()
+        if server:
+            server.status = ServerStatus.OFFLINE
+            if server.panel_type == PanelType.CYBERPANEL:
+                server.panel_verified = False
+            try:
+                await db.flush()
+            except Exception:
+                await db.rollback()
         return ServerTestResult(
             success=False,
             message=str(e),

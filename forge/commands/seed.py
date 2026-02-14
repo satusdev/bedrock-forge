@@ -176,6 +176,25 @@ async def run_seeding(reset: bool, users_only: bool, servers_only: bool):
         EnvironmentType,
     )
     from forge.db.models.role import DEFAULT_PERMISSIONS, role_permissions, user_roles
+
+    def parse_enum(enum_cls, raw_value, default):
+        if raw_value is None:
+            return default
+        if isinstance(raw_value, enum_cls):
+            return raw_value
+        if isinstance(raw_value, str):
+            value = raw_value.strip()
+            if not value:
+                return default
+            normalized = value.lower()
+            try:
+                return enum_cls(normalized)
+            except ValueError:
+                try:
+                    return enum_cls(value)
+                except ValueError:
+                    return default
+        return default
     
     console.print("\n[bold blue]Starting database seeding...[/bold blue]")
     
@@ -336,12 +355,24 @@ async def run_seeding(reset: bool, users_only: bool, servers_only: bool):
                         server = Server(
                             name=server_data["name"],
                             hostname=server_data["hostname"],
-                            provider=ServerProvider(server_data.get("provider", "custom")),
-                            status=ServerStatus(server_data.get("status", "offline")),
+                            provider=parse_enum(
+                                ServerProvider,
+                                server_data.get("provider"),
+                                ServerProvider.CUSTOM,
+                            ),
+                            status=parse_enum(
+                                ServerStatus,
+                                server_data.get("status"),
+                                ServerStatus.OFFLINE,
+                            ),
                             ssh_user=server_data.get("ssh_user", "root"),
                             ssh_port=server_data.get("ssh_port", 22),
                             ssh_key_path=server_data.get("ssh_key_path"),
-                            panel_type=PanelType(server_data.get("panel_type", "none")),
+                            panel_type=parse_enum(
+                                PanelType,
+                                server_data.get("panel_type"),
+                                PanelType.NONE,
+                            ),
                             panel_url=server_data.get("panel_url"),
                             owner_id=owner.id if owner else None,
                         )
