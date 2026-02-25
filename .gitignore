@@ -47,6 +47,7 @@ forge/logs/
 *.egg-info/
 dist/
 build/
+*.tsbuildinfo
 *.egg
 *.whl
 *.tar.gz
