@@ -3,19 +3,13 @@ Monitor tasks for Celery.
 
 Background tasks for uptime monitoring and stats calculation.
 """
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 import asyncio
 import aiohttp
+import os
 
 from celery import shared_task
-from sqlalchemy import select, update, func
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from ..db import AsyncSessionLocal, Monitor
-from ..db.models.monitor import MonitorStatus
-from ..db.models.heartbeat import Heartbeat, HeartbeatStatus
-from ..db.models.incident import Incident, IncidentStatus
 from ..utils.logging import logger
 from ..utils.asyncio_utils import run_async
 
@@ -40,24 +34,112 @@ async def check_url(url: str, timeout: int = 30) -> tuple[bool, int, str]:
 
 
 
-from ..services.monitor_service import MonitorService
 from ..api.deps import update_task_status
 
+
+def _nest_api_url(path: str) -> str | None:
+    base_url = os.getenv("NEST_API_URL", "").strip()
+    if not base_url:
+        return None
+
+    api_prefix = os.getenv("NEST_API_PREFIX", "/api/v1").strip() or "/api/v1"
+    if not api_prefix.startswith("/"):
+        api_prefix = f"/{api_prefix}"
+    api_prefix = api_prefix.rstrip("/")
+
+    if not path.startswith("/"):
+        path = f"/{path}"
+
+    return f"{base_url.rstrip('/')}{api_prefix}{path}"
+
+
+def _worker_headers() -> dict[str, str]:
+    token = os.getenv("NEST_WORKER_TOKEN", "").strip()
+    if not token:
+        return {}
+    return {"x-worker-token": token}
+
+
+async def _nest_request(
+    method: str,
+    path: str,
+    params: Optional[dict] = None,
+    payload: Optional[dict] = None,
+) -> Optional[dict]:
+    url = _nest_api_url(path)
+    if not url:
+        return None
+
+    timeout = aiohttp.ClientTimeout(total=8)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.request(
+                method,
+                url,
+                params=params,
+                json=payload,
+                headers=_worker_headers(),
+            ) as response:
+                if response.status >= 400:
+                    body = await response.text()
+                    logger.warning(
+                        f"Nest API {method} {path} failed: {response.status} {body[:200]}"
+                    )
+                    return None
+                return await response.json()
+    except Exception as e:
+        logger.warning(f"Nest API {method} {path} error: {e}")
+        return None
+
+
+async def _fetch_monitors(active_only: bool = False, https_only: bool = False) -> list[dict]:
+    monitors: list[dict] = []
+    skip = 0
+    limit = 100
+
+    while True:
+        payload = await _nest_request(
+            "GET",
+            "/monitors",
+            params={"skip": skip, "limit": limit},
+        )
+        page = payload.get("items", []) if isinstance(payload, dict) else []
+        if not page:
+            break
+
+        for monitor in page:
+            if active_only and not monitor.get("is_active", False):
+                continue
+            if https_only and not str(monitor.get("url", "")).startswith("https://"):
+                continue
+            monitors.append(monitor)
+
+        if len(page) < limit:
+            break
+        skip += len(page)
+
+    return monitors
+
 async def _check_monitor(monitor_id: int, task_id: Optional[str] = None) -> dict:
-    """Check a single monitor using MonitorService."""
+    """Check a single monitor through Nest monitor endpoints."""
     if task_id:
         update_task_status(task_id, "running", f"Checking monitor {monitor_id}...")
-        
-    async with AsyncSessionLocal() as db:
-        service = MonitorService(db)
-        result = await service.check_monitor(monitor_id)
-        
-        if task_id:
-            status = "completed" if result.get("success") else "failed"
-            msg = f"Check finished: {result.get('status')}"
-            update_task_status(task_id, status, msg)
-            
-        return result
+
+    trigger = await _nest_request("POST", f"/monitors/{monitor_id}/check")
+    accepted = isinstance(trigger, dict) and trigger.get("status") == "accepted"
+    result = {
+        "success": accepted,
+        "monitor_id": monitor_id,
+        "status": "queued" if accepted else "failed",
+        "task_id": trigger.get("task_id") if isinstance(trigger, dict) else None,
+        "message": trigger.get("message") if isinstance(trigger, dict) else "Check request failed",
+    }
+
+    if task_id:
+        status = "completed" if accepted else "failed"
+        update_task_status(task_id, status, f"Check finished: {result['status']}")
+
+    return result
 
 
 
@@ -69,26 +151,25 @@ def check_monitor(monitor_id: int) -> dict:
 
 async def _run_all_monitors() -> dict:
     """Check all active monitors."""
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(Monitor).where(Monitor.is_active == True)
-        )
-        monitors = result.scalars().all()
-        
-        results = []
-        for monitor in monitors:
-            check_result = await _check_monitor(monitor.id)
-            results.append(check_result)
-        
-        up_count = sum(1 for r in results if r.get("success"))
-        down_count = sum(1 for r in results if not r.get("success") and not r.get("skipped"))
-        
-        return {
-            "total": len(results),
-            "up": up_count,
-            "down": down_count,
-            "results": results
-        }
+    monitors = await _fetch_monitors(active_only=True)
+
+    results = []
+    for monitor in monitors:
+        monitor_id = monitor.get("id")
+        if monitor_id is None:
+            continue
+        check_result = await _check_monitor(int(monitor_id))
+        results.append(check_result)
+
+    up_count = sum(1 for r in results if r.get("success"))
+    down_count = sum(1 for r in results if not r.get("success") and not r.get("skipped"))
+
+    return {
+        "total": len(results),
+        "up": up_count,
+        "down": down_count,
+        "results": results
+    }
 
 
 @shared_task(name="forge.tasks.monitor_tasks.run_all_monitors")
@@ -99,45 +180,17 @@ def run_all_monitors() -> dict:
 
 
 async def _calculate_uptime_stats() -> dict:
-    """Calculate uptime percentages for all monitors based on heartbeat history."""
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(select(Monitor))
-        monitors = result.scalars().all()
-        
-        # Calculate uptime based on last 30 days of heartbeats
-        cutoff = datetime.utcnow() - timedelta(days=30)
-        
-        updated = 0
-        for monitor in monitors:
-            # Get heartbeat stats for this monitor
-            total_result = await db.execute(
-                select(func.count(Heartbeat.id))
-                .where(Heartbeat.monitor_id == monitor.id)
-                .where(Heartbeat.checked_at >= cutoff)
-            )
-            total_heartbeats = total_result.scalar() or 0
-            
-            if total_heartbeats == 0:
-                # No data, use 100% as default
-                uptime = 100.0
-            else:
-                # Count successful heartbeats (UP status)
-                up_result = await db.execute(
-                    select(func.count(Heartbeat.id))
-                    .where(Heartbeat.monitor_id == monitor.id)
-                    .where(Heartbeat.checked_at >= cutoff)
-                    .where(Heartbeat.status == HeartbeatStatus.UP)
-                )
-                up_heartbeats = up_result.scalar() or 0
-                
-                uptime = round((up_heartbeats / total_heartbeats) * 100, 2)
-            
-            monitor.uptime_percentage = uptime
-            updated += 1
-        
-        await db.commit()
-        
-        return {"updated": updated}
+    """Fetch monitor uptime overview from Nest API."""
+    overview = await _nest_request("GET", "/monitors/stats/overview")
+    monitors = await _fetch_monitors(active_only=False)
+    average_uptime = None
+    if isinstance(overview, dict):
+        average_uptime = overview.get("average_uptime")
+
+    return {
+        "updated": len(monitors),
+        "average_uptime": average_uptime,
+    }
 
 
 @shared_task(name="forge.tasks.monitor_tasks.calculate_uptime_stats")
@@ -171,46 +224,45 @@ def check_ssl_certificates() -> dict:
 
 async def _check_ssl_certificates() -> dict:
     """Check SSL certificates and identify expiring ones."""
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(Monitor)
-            .where(Monitor.is_active == True)
-            .where(Monitor.url.like("https://%"))
-        )
-        monitors = result.scalars().all()
-        
-        results = []
-        expiring_soon = []
-        
-        for monitor in monitors:
-            ssl_result = _sync_ssl_check(monitor.url)
-            results.append({
-                "monitor_id": monitor.id,
-                "name": monitor.name,
-                "valid": ssl_result.get("valid", False),
-                "days_until_expiry": ssl_result.get("days_until_expiry"),
-                "error": ssl_result.get("error")
+    monitors = await _fetch_monitors(active_only=True, https_only=True)
+
+    results = []
+    expiring_soon = []
+
+    for monitor in monitors:
+        monitor_id = monitor.get("id")
+        monitor_url = str(monitor.get("url", ""))
+        monitor_name = str(monitor.get("name", "Monitor"))
+        if monitor_id is None or not monitor_url:
+            continue
+
+        ssl_result = _sync_ssl_check(monitor_url)
+        results.append({
+            "monitor_id": monitor_id,
+            "name": monitor_name,
+            "valid": ssl_result.get("valid", False),
+            "days_until_expiry": ssl_result.get("days_until_expiry"),
+            "error": ssl_result.get("error")
+        })
+
+        days = ssl_result.get("days_until_expiry")
+        if days is not None and days < 30:
+            expiring_soon.append({
+                "monitor_id": monitor_id,
+                "name": monitor_name,
+                "days_until_expiry": days
             })
-            
-            # Flag certificates expiring within 30 days
-            days = ssl_result.get("days_until_expiry")
-            if days is not None and days < 30:
-                expiring_soon.append({
-                    "monitor_id": monitor.id,
-                    "name": monitor.name,
-                    "days_until_expiry": days
-                })
-        
-        if expiring_soon:
-            logger.warning(
-                f"SSL certificates expiring soon: {len(expiring_soon)} monitors"
-            )
-        
-        return {
-            "checked": len(results),
-            "expiring_soon": expiring_soon,
-            "results": results
-        }
+
+    if expiring_soon:
+        logger.warning(
+            f"SSL certificates expiring soon: {len(expiring_soon)} monitors"
+        )
+
+    return {
+        "checked": len(results),
+        "expiring_soon": expiring_soon,
+        "results": results
+    }
 
 
 def _sync_ssl_check(url: str) -> dict:
@@ -313,19 +365,13 @@ def cleanup_old_heartbeats(days: int = 30) -> dict:
 
 
 async def _cleanup_old_heartbeats(days: int) -> dict:
-    """Delete old heartbeat records to manage database size."""
-    from sqlalchemy import delete
-    from ..db.models.heartbeat import Heartbeat
-    
-    cutoff = datetime.utcnow() - timedelta(days=days)
-    
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            delete(Heartbeat).where(Heartbeat.checked_at < cutoff)
-        )
-        await db.commit()
-        
-        deleted = result.rowcount
-        logger.info(f"Deleted {deleted} old heartbeats")
-        
-        return {"deleted": deleted, "cutoff_days": days}
+    """No-op cleanup: heartbeat retention is managed by Nest-owned data layer."""
+    logger.info(
+        "Skipping heartbeat cleanup in Python worker; monitor data retention is Nest-managed"
+    )
+    return {
+        "deleted": 0,
+        "cutoff_days": days,
+        "status": "skipped",
+        "message": "Retention managed by Nest API/database layer",
+    }
