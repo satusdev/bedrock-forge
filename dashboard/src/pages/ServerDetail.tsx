@@ -1,5 +1,6 @@
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate } from '@/router/compat';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { type ColumnDef } from '@tanstack/react-table';
 import {
 	Server as ServerIcon,
 	CheckCircle,
@@ -28,6 +29,7 @@ import {
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
+import DataTable from '../components/ui/DataTable';
 import api, { dashboardApi } from '../services/api';
 import toast from 'react-hot-toast';
 import React, { useState } from 'react';
@@ -210,6 +212,20 @@ interface CyberPanelUser {
 	created_at: string | null;
 }
 
+interface WebsiteItem {
+	domain: string;
+	adminEmail?: string;
+	phpSelection?: string;
+	state?: string;
+}
+
+interface DatabaseItem {
+	dbName: string;
+	dbUser?: string;
+	website?: string;
+	size_bytes?: number;
+}
+
 // Create User Modal
 function CreateUserModal({
 	serverId,
@@ -247,7 +263,7 @@ function CreateUserModal({
 
 			const response = await api.post(
 				`/cyberpanel/servers/${serverId}/users`,
-				payload
+				payload,
 			);
 
 			if (response.data?.status === 'success') {
@@ -724,7 +740,7 @@ export default function ServerDetail() {
 		password: string;
 	} | null>(null);
 	const [revealingPassword, setRevealingPassword] = useState<string | null>(
-		null
+		null,
 	);
 	const [revealedPasswords, setRevealedPasswords] = useState<
 		Record<string, string>
@@ -787,9 +803,9 @@ export default function ServerDetail() {
 	});
 
 	const server = serverData?.data;
-	const websites = websitesData?.data?.websites || [];
+	const websites: WebsiteItem[] = websitesData?.data?.websites || [];
 	const users: CyberPanelUser[] = usersData?.data?.users || [];
-	const databases = databasesData?.data?.databases || [];
+	const databases: DatabaseItem[] = databasesData?.data?.databases || [];
 
 	// Sync users from CyberPanel
 	const syncUsers = async () => {
@@ -806,7 +822,7 @@ export default function ServerDetail() {
 	const deleteUser = async (username: string) => {
 		if (
 			!confirm(
-				`Are you sure you want to delete user "${username}"? This action cannot be undone.`
+				`Are you sure you want to delete user "${username}"? This action cannot be undone.`,
 			)
 		) {
 			return;
@@ -833,7 +849,7 @@ export default function ServerDetail() {
 
 		if (
 			!confirm(
-				'Are you sure you want to reveal this password? Make sure no one is looking at your screen.'
+				'Are you sure you want to reveal this password? Make sure no one is looking at your screen.',
 			)
 		) {
 			return;
@@ -842,7 +858,7 @@ export default function ServerDetail() {
 		setRevealingPassword(username);
 		try {
 			const response = await api.post(
-				`/cyberpanel/servers/${serverId}/users/${username}/reveal-password`
+				`/cyberpanel/servers/${serverId}/users/${username}/reveal-password`,
 			);
 			setRevealedPasswords({
 				...revealedPasswords,
@@ -864,7 +880,7 @@ export default function ServerDetail() {
 		try {
 			const response = await api.post(
 				`/cyberpanel/servers/${serverId}/users/${username}/password`,
-				{}
+				{},
 			);
 			setNewUserPassword({ username, password: response.data.password });
 			// Clear revealed password if it was showing
@@ -882,7 +898,7 @@ export default function ServerDetail() {
 
 		try {
 			await api.post(
-				`/cyberpanel/servers/${serverId}/users/${username}/${action}`
+				`/cyberpanel/servers/${serverId}/users/${username}/${action}`,
 			);
 			refetchUsers();
 			toast.success(`User ${username} ${action}ed`);
@@ -905,7 +921,7 @@ export default function ServerDetail() {
 			setShowPanelLoginModal(true);
 		} catch (error: any) {
 			toast.error(
-				error.response?.data?.detail || 'Failed to get panel credentials'
+				error.response?.data?.detail || 'Failed to get panel credentials',
 			);
 		} finally {
 			setLoadingPanelLogin(false);
@@ -934,7 +950,7 @@ export default function ServerDetail() {
 	const deleteDatabase = async (dbName: string) => {
 		if (
 			!confirm(
-				`Are you sure you want to delete database "${dbName}"? This action cannot be undone.`
+				`Are you sure you want to delete database "${dbName}"? This action cannot be undone.`,
 			)
 		) {
 			return;
@@ -969,6 +985,275 @@ export default function ServerDetail() {
 	}
 
 	const isCyberPanel = server.panel_type === 'cyberpanel';
+
+	const websiteColumns: ColumnDef<WebsiteItem>[] = [
+		{
+			accessorKey: 'domain',
+			header: 'Domain',
+			cell: ({ row }) => (
+				<div className='flex items-center'>
+					<Globe className='w-4 h-4 text-gray-400 mr-2' />
+					<span className='text-sm font-medium text-gray-900'>
+						{row.original.domain}
+					</span>
+				</div>
+			),
+		},
+		{
+			accessorKey: 'adminEmail',
+			header: 'User',
+			cell: ({ row }) => (
+				<span className='text-sm text-gray-500'>
+					{row.original.adminEmail || '-'}
+				</span>
+			),
+		},
+		{
+			accessorKey: 'phpSelection',
+			header: 'PHP',
+			cell: ({ row }) => (
+				<span className='text-sm text-gray-500'>
+					{row.original.phpSelection || '-'}
+				</span>
+			),
+		},
+		{
+			accessorKey: 'state',
+			header: 'Status',
+			cell: ({ row }) => (
+				<Badge
+					variant={row.original.state === 'Active' ? 'success' : 'warning'}
+				>
+					{row.original.state || 'Unknown'}
+				</Badge>
+			),
+		},
+		{
+			id: 'actions',
+			header: 'Actions',
+			cell: ({ row }) => (
+				<div className='flex justify-end'>
+					<Button
+						size='sm'
+						variant='secondary'
+						onClick={() => handleImport(row.original)}
+					>
+						<Download className='w-4 h-4 mr-1' />
+						Import
+					</Button>
+				</div>
+			),
+		},
+	];
+
+	const databaseColumns: ColumnDef<DatabaseItem>[] = [
+		{
+			accessorKey: 'dbName',
+			header: 'Database Name',
+			cell: ({ row }) => (
+				<div className='flex items-center'>
+					<Database className='w-4 h-4 text-purple-500 mr-2' />
+					<span className='text-sm font-medium text-gray-900 font-mono'>
+						{row.original.dbName}
+					</span>
+				</div>
+			),
+		},
+		{
+			accessorKey: 'dbUser',
+			header: 'User',
+			cell: ({ row }) => (
+				<span className='text-sm text-gray-500 font-mono'>
+					{row.original.dbUser || '-'}
+				</span>
+			),
+		},
+		{
+			accessorKey: 'website',
+			header: 'Website',
+			cell: ({ row }) => (
+				<span className='text-sm text-gray-500'>
+					{row.original.website || '-'}
+				</span>
+			),
+		},
+		{
+			accessorKey: 'size_bytes',
+			header: 'Size',
+			cell: ({ row }) => (
+				<span className='text-sm text-gray-500'>
+					{row.original.size_bytes
+						? `${(row.original.size_bytes / 1024 / 1024).toFixed(2)} MB`
+						: '-'}
+				</span>
+			),
+		},
+		{
+			id: 'actions',
+			header: 'Actions',
+			cell: ({ row }) => (
+				<div className='flex justify-end'>
+					<button
+						onClick={() => deleteDatabase(row.original.dbName)}
+						className='p-1 hover:bg-gray-100 rounded text-red-600'
+						title='Delete database'
+					>
+						<Trash2 className='w-4 h-4' />
+					</button>
+				</div>
+			),
+		},
+	];
+
+	const userColumns: ColumnDef<CyberPanelUser>[] = [
+		{
+			accessorKey: 'username',
+			header: 'User',
+			cell: ({ row }) => (
+				<div className='flex items-center'>
+					<div className='w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center mr-3'>
+						<span className='text-sm font-medium text-gray-600'>
+							{row.original.username.charAt(0).toUpperCase()}
+						</span>
+					</div>
+					<div>
+						<p className='text-sm font-medium text-gray-900'>
+							{row.original.username}
+						</p>
+						<p className='text-xs text-gray-500'>{row.original.email}</p>
+					</div>
+				</div>
+			),
+		},
+		{
+			accessorKey: 'user_type',
+			header: 'Type',
+			cell: ({ row }) => (
+				<Badge
+					variant={
+						row.original.user_type === 'admin'
+							? 'error'
+							: row.original.user_type === 'reseller'
+								? 'warning'
+								: 'default'
+					}
+				>
+					{row.original.user_type}
+				</Badge>
+			),
+		},
+		{
+			id: 'websites',
+			header: 'Websites',
+			cell: ({ row }) => (
+				<span className='text-sm text-gray-500'>
+					{row.original.limits.websites.used} /{' '}
+					{row.original.limits.websites.limit || '∞'}
+				</span>
+			),
+		},
+		{
+			accessorKey: 'status',
+			header: 'Status',
+			cell: ({ row }) => (
+				<Badge
+					variant={
+						row.original.status === 'active'
+							? 'success'
+							: row.original.status === 'suspended'
+								? 'error'
+								: 'warning'
+					}
+				>
+					{row.original.status}
+				</Badge>
+			),
+		},
+		{
+			id: 'password',
+			header: 'Password',
+			cell: ({ row }) => (
+				<>
+					{row.original.has_password ? (
+						<div className='flex items-center space-x-2'>
+							{revealedPasswords[row.original.username] ? (
+								<code className='text-xs bg-gray-100 px-2 py-1 rounded'>
+									{revealedPasswords[row.original.username]}
+								</code>
+							) : (
+								<span className='text-xs text-gray-400'>••••••••</span>
+							)}
+							<button
+								onClick={() => revealPassword(row.original.username)}
+								disabled={revealingPassword === row.original.username}
+								className='p-1 hover:bg-gray-100 rounded'
+								title={
+									revealedPasswords[row.original.username]
+										? 'Hide password'
+										: 'Reveal password'
+								}
+							>
+								{revealingPassword === row.original.username ? (
+									<RefreshCw className='w-4 h-4 animate-spin' />
+								) : revealedPasswords[row.original.username] ? (
+									<EyeOff className='w-4 h-4 text-gray-400' />
+								) : (
+									<Eye className='w-4 h-4 text-gray-400' />
+								)}
+							</button>
+						</div>
+					) : (
+						<span className='text-xs text-gray-400 italic'>
+							{row.original.synced_from_panel ? 'Not stored' : 'N/A'}
+						</span>
+					)}
+				</>
+			),
+		},
+		{
+			id: 'actions',
+			header: 'Actions',
+			cell: ({ row }) => (
+				<div className='flex items-center justify-end space-x-2'>
+					<button
+						onClick={() => changePassword(row.original.username)}
+						className='p-1 hover:bg-gray-100 rounded text-blue-600'
+						title='Change password'
+					>
+						<Key className='w-4 h-4' />
+					</button>
+					<button
+						onClick={() =>
+							toggleSuspend(row.original.username, row.original.status)
+						}
+						className={`p-1 hover:bg-gray-100 rounded ${
+							row.original.status === 'suspended'
+								? 'text-green-600'
+								: 'text-yellow-600'
+						}`}
+						title={
+							row.original.status === 'suspended' ? 'Unsuspend' : 'Suspend'
+						}
+					>
+						{row.original.status === 'suspended' ? (
+							<CheckCircle2 className='w-4 h-4' />
+						) : (
+							<Ban className='w-4 h-4' />
+						)}
+					</button>
+					{row.original.username !== 'admin' && (
+						<button
+							onClick={() => deleteUser(row.original.username)}
+							className='p-1 hover:bg-gray-100 rounded text-red-600'
+							title='Delete user'
+						>
+							<Trash2 className='w-4 h-4' />
+						</button>
+					)}
+				</div>
+			),
+		},
+	];
 
 	return (
 		<div className='space-y-6'>
@@ -1142,68 +1427,15 @@ export default function ServerDetail() {
 							No websites found. Try syncing.
 						</div>
 					) : (
-						<div className='overflow-x-auto'>
-							<table className='min-w-full divide-y divide-gray-200'>
-								<thead className='bg-gray-50'>
-									<tr>
-										<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase'>
-											Domain
-										</th>
-										<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase'>
-											User
-										</th>
-										<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase'>
-											PHP
-										</th>
-										<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase'>
-											Status
-										</th>
-										<th className='px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase'>
-											Actions
-										</th>
-									</tr>
-								</thead>
-								<tbody className='bg-white divide-y divide-gray-200'>
-									{websites.map((site: any) => (
-										<tr key={site.domain}>
-											<td className='px-6 py-4 whitespace-nowrap'>
-												<div className='flex items-center'>
-													<Globe className='w-4 h-4 text-gray-400 mr-2' />
-													<span className='text-sm font-medium text-gray-900'>
-														{site.domain}
-													</span>
-												</div>
-											</td>
-											<td className='px-6 py-4 whitespace-nowrap text-sm text-gray-500'>
-												{site.adminEmail}
-											</td>
-											<td className='px-6 py-4 whitespace-nowrap text-sm text-gray-500'>
-												{site.phpSelection}
-											</td>
-											<td className='px-6 py-4 whitespace-nowrap'>
-												<Badge
-													variant={
-														site.state === 'Active' ? 'success' : 'warning'
-													}
-												>
-													{site.state || 'Unknown'}
-												</Badge>
-											</td>
-											<td className='px-6 py-4 whitespace-nowrap text-right text-sm font-medium'>
-												<Button
-													size='sm'
-													variant='secondary'
-													onClick={() => handleImport(site)}
-												>
-													<Download className='w-4 h-4 mr-1' />
-													Import
-												</Button>
-											</td>
-										</tr>
-									))}
-								</tbody>
-							</table>
-						</div>
+						<DataTable
+							columns={websiteColumns}
+							data={websites}
+							showFilter={false}
+							filterValue=''
+							onFilterChange={() => {}}
+							emptyMessage='No websites found. Try syncing.'
+							initialPageSize={10}
+						/>
 					)}
 				</Card>
 			)}
@@ -1244,63 +1476,15 @@ export default function ServerDetail() {
 							No databases found. Create one to get started.
 						</div>
 					) : (
-						<div className='overflow-x-auto'>
-							<table className='min-w-full divide-y divide-gray-200'>
-								<thead className='bg-gray-50'>
-									<tr>
-										<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase'>
-											Database Name
-										</th>
-										<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase'>
-											User
-										</th>
-										<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase'>
-											Website
-										</th>
-										<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase'>
-											Size
-										</th>
-										<th className='px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase'>
-											Actions
-										</th>
-									</tr>
-								</thead>
-								<tbody className='bg-white divide-y divide-gray-200'>
-									{databases.map((db: any) => (
-										<tr key={db.dbName}>
-											<td className='px-6 py-4 whitespace-nowrap'>
-												<div className='flex items-center'>
-													<Database className='w-4 h-4 text-purple-500 mr-2' />
-													<span className='text-sm font-medium text-gray-900 font-mono'>
-														{db.dbName}
-													</span>
-												</div>
-											</td>
-											<td className='px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono'>
-												{db.dbUser || '-'}
-											</td>
-											<td className='px-6 py-4 whitespace-nowrap text-sm text-gray-500'>
-												{db.website || '-'}
-											</td>
-											<td className='px-6 py-4 whitespace-nowrap text-sm text-gray-500'>
-												{db.size_bytes
-													? `${(db.size_bytes / 1024 / 1024).toFixed(2)} MB`
-													: '-'}
-											</td>
-											<td className='px-6 py-4 whitespace-nowrap text-right text-sm font-medium'>
-												<button
-													onClick={() => deleteDatabase(db.dbName)}
-													className='p-1 hover:bg-gray-100 rounded text-red-600'
-													title='Delete database'
-												>
-													<Trash2 className='w-4 h-4' />
-												</button>
-											</td>
-										</tr>
-									))}
-								</tbody>
-							</table>
-						</div>
+						<DataTable
+							columns={databaseColumns}
+							data={databases}
+							showFilter={false}
+							filterValue=''
+							onFilterChange={() => {}}
+							emptyMessage='No databases found. Create one to get started.'
+							initialPageSize={10}
+						/>
 					)}
 				</Card>
 			)}
@@ -1341,168 +1525,15 @@ export default function ServerDetail() {
 							No users found. Sync from CyberPanel or create a new user.
 						</div>
 					) : (
-						<div className='overflow-x-auto'>
-							<table className='min-w-full divide-y divide-gray-200'>
-								<thead className='bg-gray-50'>
-									<tr>
-										<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase'>
-											User
-										</th>
-										<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase'>
-											Type
-										</th>
-										<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase'>
-											Websites
-										</th>
-										<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase'>
-											Status
-										</th>
-										<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase'>
-											Password
-										</th>
-										<th className='px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase'>
-											Actions
-										</th>
-									</tr>
-								</thead>
-								<tbody className='bg-white divide-y divide-gray-200'>
-									{users.map(user => (
-										<tr
-											key={user.id}
-											className={
-												user.status === 'suspended' ? 'bg-gray-50' : ''
-											}
-										>
-											<td className='px-6 py-4 whitespace-nowrap'>
-												<div className='flex items-center'>
-													<div className='w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center mr-3'>
-														<span className='text-sm font-medium text-gray-600'>
-															{user.username.charAt(0).toUpperCase()}
-														</span>
-													</div>
-													<div>
-														<p className='text-sm font-medium text-gray-900'>
-															{user.username}
-														</p>
-														<p className='text-xs text-gray-500'>
-															{user.email}
-														</p>
-													</div>
-												</div>
-											</td>
-											<td className='px-6 py-4 whitespace-nowrap'>
-												<Badge
-													variant={
-														user.user_type === 'admin'
-															? 'error'
-															: user.user_type === 'reseller'
-															? 'warning'
-															: 'default'
-													}
-												>
-													{user.user_type}
-												</Badge>
-											</td>
-											<td className='px-6 py-4 whitespace-nowrap text-sm text-gray-500'>
-												{user.limits.websites.used} /{' '}
-												{user.limits.websites.limit || '∞'}
-											</td>
-											<td className='px-6 py-4 whitespace-nowrap'>
-												<Badge
-													variant={
-														user.status === 'active'
-															? 'success'
-															: user.status === 'suspended'
-															? 'error'
-															: 'warning'
-													}
-												>
-													{user.status}
-												</Badge>
-											</td>
-											<td className='px-6 py-4 whitespace-nowrap'>
-												{user.has_password ? (
-													<div className='flex items-center space-x-2'>
-														{revealedPasswords[user.username] ? (
-															<code className='text-xs bg-gray-100 px-2 py-1 rounded'>
-																{revealedPasswords[user.username]}
-															</code>
-														) : (
-															<span className='text-xs text-gray-400'>
-																••••••••
-															</span>
-														)}
-														<button
-															onClick={() => revealPassword(user.username)}
-															disabled={revealingPassword === user.username}
-															className='p-1 hover:bg-gray-100 rounded'
-															title={
-																revealedPasswords[user.username]
-																	? 'Hide password'
-																	: 'Reveal password'
-															}
-														>
-															{revealingPassword === user.username ? (
-																<RefreshCw className='w-4 h-4 animate-spin' />
-															) : revealedPasswords[user.username] ? (
-																<EyeOff className='w-4 h-4 text-gray-400' />
-															) : (
-																<Eye className='w-4 h-4 text-gray-400' />
-															)}
-														</button>
-													</div>
-												) : (
-													<span className='text-xs text-gray-400 italic'>
-														{user.synced_from_panel ? 'Not stored' : 'N/A'}
-													</span>
-												)}
-											</td>
-											<td className='px-6 py-4 whitespace-nowrap text-right text-sm font-medium'>
-												<div className='flex items-center justify-end space-x-2'>
-													<button
-														onClick={() => changePassword(user.username)}
-														className='p-1 hover:bg-gray-100 rounded text-blue-600'
-														title='Change password'
-													>
-														<Key className='w-4 h-4' />
-													</button>
-													<button
-														onClick={() =>
-															toggleSuspend(user.username, user.status)
-														}
-														className={`p-1 hover:bg-gray-100 rounded ${
-															user.status === 'suspended'
-																? 'text-green-600'
-																: 'text-yellow-600'
-														}`}
-														title={
-															user.status === 'suspended'
-																? 'Unsuspend'
-																: 'Suspend'
-														}
-													>
-														{user.status === 'suspended' ? (
-															<CheckCircle2 className='w-4 h-4' />
-														) : (
-															<Ban className='w-4 h-4' />
-														)}
-													</button>
-													{user.username !== 'admin' && (
-														<button
-															onClick={() => deleteUser(user.username)}
-															className='p-1 hover:bg-gray-100 rounded text-red-600'
-															title='Delete user'
-														>
-															<Trash2 className='w-4 h-4' />
-														</button>
-													)}
-												</div>
-											</td>
-										</tr>
-									))}
-								</tbody>
-							</table>
-						</div>
+						<DataTable
+							columns={userColumns}
+							data={users}
+							showFilter={false}
+							filterValue=''
+							onFilterChange={() => {}}
+							emptyMessage='No users found. Sync from CyberPanel or create a new user.'
+							initialPageSize={10}
+						/>
 					)}
 				</Card>
 			)}

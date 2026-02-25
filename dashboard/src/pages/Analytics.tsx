@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { type ColumnDef } from '@tanstack/react-table';
 import { BarChart3, Gauge, RefreshCw, X } from 'lucide-react';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
+import DataTable from '@/components/ui/DataTable';
 import { dashboardApi } from '@/services/api';
 import toast from 'react-hot-toast';
 
@@ -33,10 +35,15 @@ interface AnalyticsReport {
 	created_at: string;
 }
 
+interface MetricRow {
+	metric: string;
+	value: string | number;
+}
+
 export default function Analytics() {
 	const queryClient = useQueryClient();
 	const [selectedProjectId, setSelectedProjectId] = useState<number | null>(
-		null
+		null,
 	);
 	const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<
 		number | null
@@ -82,7 +89,7 @@ export default function Analytics() {
 	useEffect(() => {
 		if (!selectedEnvironmentId) return;
 		const selectedEnv = environments.find(
-			env => env.id === selectedEnvironmentId
+			env => env.id === selectedEnvironmentId,
 		);
 		if (!selectedEnv?.wp_url) return;
 		if (!lighthouseUrlTouched || lighthouseUrl.trim() === '') {
@@ -215,6 +222,137 @@ export default function Analytics() {
 		return new Date(value).toLocaleString();
 	};
 
+	const metricColumns: ColumnDef<MetricRow>[] = [
+		{
+			accessorKey: 'metric',
+			header: 'Metric',
+		},
+		{
+			accessorKey: 'value',
+			header: 'Value',
+		},
+	];
+
+	const ga4MetricRows = useMemo<MetricRow[]>(
+		() => [
+			{ metric: 'Sessions', value: latestGa4?.summary?.total_sessions ?? '—' },
+			{ metric: 'Users', value: latestGa4?.summary?.total_users ?? '—' },
+			{
+				metric: 'Pageviews',
+				value: latestGa4?.summary?.total_pageviews ?? '—',
+			},
+			{
+				metric: 'Bounce Rate',
+				value: latestGa4?.summary?.avg_bounce_rate ?? '—',
+			},
+			{
+				metric: 'Latest report',
+				value: latestGa4 ? formatDate(latestGa4.created_at) : 'No reports yet',
+			},
+		],
+		[latestGa4],
+	);
+
+	const lighthouseMetricRows = useMemo<MetricRow[]>(
+		() => [
+			{
+				metric: 'SEO Score',
+				value: latestLighthouse?.summary?.seo_score ?? '—',
+			},
+			{
+				metric: 'Performance',
+				value: latestLighthouse?.summary?.performance_score ?? '—',
+			},
+			{
+				metric: 'Accessibility',
+				value: latestLighthouse?.summary?.accessibility_score ?? '—',
+			},
+			{
+				metric: 'Best Practices',
+				value: latestLighthouse?.summary?.best_practices_score ?? '—',
+			},
+			{
+				metric: 'Latest report',
+				value: latestLighthouse
+					? formatDate(latestLighthouse.created_at)
+					: 'No reports yet',
+			},
+		],
+		[latestLighthouse],
+	);
+
+	const ga4HistoryColumns: ColumnDef<AnalyticsReport>[] = [
+		{
+			accessorKey: 'created_at',
+			header: 'Date',
+			cell: ({ row }) => formatDate(row.original.created_at),
+		},
+		{
+			id: 'environment',
+			header: 'Env',
+			cell: ({ row }) => environmentLabelFor(row.original.environment_id),
+		},
+		{
+			id: 'sessions',
+			header: 'Sessions',
+			cell: ({ row }) => row.original.summary?.total_sessions ?? '—',
+		},
+		{
+			id: 'users',
+			header: 'Users',
+			cell: ({ row }) => row.original.summary?.total_users ?? '—',
+		},
+		{
+			id: 'action',
+			header: 'Action',
+			cell: ({ row }) => (
+				<Button
+					size='sm'
+					variant='secondary'
+					onClick={() => setSelectedReportId(row.original.id)}
+				>
+					View
+				</Button>
+			),
+		},
+	];
+
+	const lighthouseHistoryColumns: ColumnDef<AnalyticsReport>[] = [
+		{
+			accessorKey: 'created_at',
+			header: 'Date',
+			cell: ({ row }) => formatDate(row.original.created_at),
+		},
+		{
+			id: 'environment',
+			header: 'Env',
+			cell: ({ row }) => environmentLabelFor(row.original.environment_id),
+		},
+		{
+			accessorKey: 'device',
+			header: 'Device',
+			cell: ({ row }) => row.original.device || 'desktop',
+		},
+		{
+			id: 'seo',
+			header: 'SEO',
+			cell: ({ row }) => row.original.summary?.seo_score ?? '—',
+		},
+		{
+			id: 'action',
+			header: 'Action',
+			cell: ({ row }) => (
+				<Button
+					size='sm'
+					variant='secondary'
+					onClick={() => setSelectedReportId(row.original.id)}
+				>
+					View
+				</Button>
+			),
+		},
+	];
+
 	const { data: reportDetailData } = useQuery({
 		queryKey: ['analytics-report', selectedReportId],
 		queryFn: () => dashboardApi.getAnalyticsReport(selectedReportId as number),
@@ -311,48 +449,15 @@ export default function Analytics() {
 					</div>
 
 					<div className='mt-6 border rounded-lg overflow-hidden'>
-						<table className='w-full text-sm'>
-							<thead className='bg-gray-50 text-gray-600'>
-								<tr>
-									<th className='px-4 py-2 text-left'>Metric</th>
-									<th className='px-4 py-2 text-left'>Value</th>
-								</tr>
-							</thead>
-							<tbody className='divide-y'>
-								<tr>
-									<td className='px-4 py-2'>Sessions</td>
-									<td className='px-4 py-2'>
-										{latestGa4?.summary?.total_sessions ?? '—'}
-									</td>
-								</tr>
-								<tr>
-									<td className='px-4 py-2'>Users</td>
-									<td className='px-4 py-2'>
-										{latestGa4?.summary?.total_users ?? '—'}
-									</td>
-								</tr>
-								<tr>
-									<td className='px-4 py-2'>Pageviews</td>
-									<td className='px-4 py-2'>
-										{latestGa4?.summary?.total_pageviews ?? '—'}
-									</td>
-								</tr>
-								<tr>
-									<td className='px-4 py-2'>Bounce Rate</td>
-									<td className='px-4 py-2'>
-										{latestGa4?.summary?.avg_bounce_rate ?? '—'}
-									</td>
-								</tr>
-								<tr>
-									<td className='px-4 py-2'>Latest report</td>
-									<td className='px-4 py-2'>
-										{latestGa4
-											? formatDate(latestGa4.created_at)
-											: 'No reports yet'}
-									</td>
-								</tr>
-							</tbody>
-						</table>
+						<DataTable
+							columns={metricColumns}
+							data={ga4MetricRows}
+							showFilter={false}
+							filterValue=''
+							onFilterChange={() => {}}
+							emptyMessage='No metrics available.'
+							initialPageSize={10}
+						/>
 					</div>
 				</Card>
 
@@ -413,48 +518,15 @@ export default function Analytics() {
 					</div>
 
 					<div className='mt-6 border rounded-lg overflow-hidden'>
-						<table className='w-full text-sm'>
-							<thead className='bg-gray-50 text-gray-600'>
-								<tr>
-									<th className='px-4 py-2 text-left'>Metric</th>
-									<th className='px-4 py-2 text-left'>Value</th>
-								</tr>
-							</thead>
-							<tbody className='divide-y'>
-								<tr>
-									<td className='px-4 py-2'>SEO Score</td>
-									<td className='px-4 py-2'>
-										{latestLighthouse?.summary?.seo_score ?? '—'}
-									</td>
-								</tr>
-								<tr>
-									<td className='px-4 py-2'>Performance</td>
-									<td className='px-4 py-2'>
-										{latestLighthouse?.summary?.performance_score ?? '—'}
-									</td>
-								</tr>
-								<tr>
-									<td className='px-4 py-2'>Accessibility</td>
-									<td className='px-4 py-2'>
-										{latestLighthouse?.summary?.accessibility_score ?? '—'}
-									</td>
-								</tr>
-								<tr>
-									<td className='px-4 py-2'>Best Practices</td>
-									<td className='px-4 py-2'>
-										{latestLighthouse?.summary?.best_practices_score ?? '—'}
-									</td>
-								</tr>
-								<tr>
-									<td className='px-4 py-2'>Latest report</td>
-									<td className='px-4 py-2'>
-										{latestLighthouse
-											? formatDate(latestLighthouse.created_at)
-											: 'No reports yet'}
-									</td>
-								</tr>
-							</tbody>
-						</table>
+						<DataTable
+							columns={metricColumns}
+							data={lighthouseMetricRows}
+							showFilter={false}
+							filterValue=''
+							onFilterChange={() => {}}
+							emptyMessage='No metrics available.'
+							initialPageSize={10}
+						/>
 					</div>
 				</Card>
 			</div>
@@ -470,46 +542,15 @@ export default function Analytics() {
 						) : ga4Reports.length === 0 ? (
 							<div className='text-sm text-gray-500'>No reports yet.</div>
 						) : (
-							<div className='border rounded-lg overflow-hidden'>
-								<table className='w-full text-sm'>
-									<thead className='bg-gray-50 text-gray-600'>
-										<tr>
-											<th className='px-4 py-2 text-left'>Date</th>
-											<th className='px-4 py-2 text-left'>Env</th>
-											<th className='px-4 py-2 text-left'>Sessions</th>
-											<th className='px-4 py-2 text-left'>Users</th>
-											<th className='px-4 py-2 text-left'>Action</th>
-										</tr>
-									</thead>
-									<tbody className='divide-y'>
-										{ga4Reports.map(report => (
-											<tr key={report.id}>
-												<td className='px-4 py-2'>
-													{formatDate(report.created_at)}
-												</td>
-												<td className='px-4 py-2'>
-													{environmentLabelFor(report.environment_id)}
-												</td>
-												<td className='px-4 py-2'>
-													{report.summary?.total_sessions ?? '—'}
-												</td>
-												<td className='px-4 py-2'>
-													{report.summary?.total_users ?? '—'}
-												</td>
-												<td className='px-4 py-2'>
-													<Button
-														size='sm'
-														variant='secondary'
-														onClick={() => setSelectedReportId(report.id)}
-													>
-														View
-													</Button>
-												</td>
-											</tr>
-										))}
-									</tbody>
-								</table>
-							</div>
+							<DataTable
+								columns={ga4HistoryColumns}
+								data={ga4Reports}
+								showFilter={false}
+								filterValue=''
+								onFilterChange={() => {}}
+								emptyMessage='No reports yet.'
+								initialPageSize={5}
+							/>
 						)}
 					</div>
 				</Card>
@@ -526,46 +567,15 @@ export default function Analytics() {
 						) : lighthouseReports.length === 0 ? (
 							<div className='text-sm text-gray-500'>No reports yet.</div>
 						) : (
-							<div className='border rounded-lg overflow-hidden'>
-								<table className='w-full text-sm'>
-									<thead className='bg-gray-50 text-gray-600'>
-										<tr>
-											<th className='px-4 py-2 text-left'>Date</th>
-											<th className='px-4 py-2 text-left'>Env</th>
-											<th className='px-4 py-2 text-left'>Device</th>
-											<th className='px-4 py-2 text-left'>SEO</th>
-											<th className='px-4 py-2 text-left'>Action</th>
-										</tr>
-									</thead>
-									<tbody className='divide-y'>
-										{lighthouseReports.map(report => (
-											<tr key={report.id}>
-												<td className='px-4 py-2'>
-													{formatDate(report.created_at)}
-												</td>
-												<td className='px-4 py-2'>
-													{environmentLabelFor(report.environment_id)}
-												</td>
-												<td className='px-4 py-2'>
-													{report.device || 'desktop'}
-												</td>
-												<td className='px-4 py-2'>
-													{report.summary?.seo_score ?? '—'}
-												</td>
-												<td className='px-4 py-2'>
-													<Button
-														size='sm'
-														variant='secondary'
-														onClick={() => setSelectedReportId(report.id)}
-													>
-														View
-													</Button>
-												</td>
-											</tr>
-										))}
-									</tbody>
-								</table>
-							</div>
+							<DataTable
+								columns={lighthouseHistoryColumns}
+								data={lighthouseReports}
+								showFilter={false}
+								filterValue=''
+								onFilterChange={() => {}}
+								emptyMessage='No reports yet.'
+								initialPageSize={5}
+							/>
 						)}
 					</div>
 				</Card>

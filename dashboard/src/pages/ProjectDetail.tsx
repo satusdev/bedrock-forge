@@ -3,7 +3,7 @@
  * Full project view with tabs for Overview, Environments, Plugins, Backups, Git.
  */
 import { useEffect, useState, useMemo } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link } from '@/router/compat';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
 	ArrowLeft,
@@ -101,10 +101,10 @@ export default function ProjectDetail() {
 	const [securityEnvId, setSecurityEnvId] = useState<string>('');
 	const [restoreEnvId, setRestoreEnvId] = useState<string>('');
 	const [backupType, setBackupType] = useState<'database' | 'files' | 'full'>(
-		'database'
+		'database',
 	);
 	const [storageType, setStorageType] = useState<'gdrive' | 'local' | 'both'>(
-		'gdrive'
+		'gdrive',
 	);
 
 	// WP-CLI Runner State
@@ -173,7 +173,7 @@ export default function ProjectDetail() {
 	});
 
 	const project = (projectData?.data as any[])?.find(
-		p => p.project_name === projectName || p.slug === projectName
+		p => p.project_name === projectName || p.slug === projectName,
 	);
 	const projectId = project?.id;
 
@@ -437,7 +437,7 @@ export default function ProjectDetail() {
 		},
 		onError: (error: any) => {
 			toast.error(
-				getApiErrorMessage(error, 'Failed to apply bundle to global policy')
+				getApiErrorMessage(error, 'Failed to apply bundle to global policy'),
 			);
 		},
 	});
@@ -456,7 +456,7 @@ export default function ProjectDetail() {
 		},
 		onError: (error: any) => {
 			toast.error(
-				getApiErrorMessage(error, 'Failed to apply bundle to project policy')
+				getApiErrorMessage(error, 'Failed to apply bundle to project policy'),
 			);
 		},
 	});
@@ -466,7 +466,7 @@ export default function ProjectDetail() {
 				projectId!,
 				data.envId,
 				data.type,
-				data.storage
+				data.storage,
 			),
 		onSuccess: () => {
 			toast.success('Backup started');
@@ -523,7 +523,7 @@ export default function ProjectDetail() {
 		},
 		onError: (error: any) => {
 			toast.error(
-				getApiErrorMessage(error, 'Failed to delete selected backups')
+				getApiErrorMessage(error, 'Failed to delete selected backups'),
 			);
 		},
 	});
@@ -583,7 +583,7 @@ export default function ProjectDetail() {
 			// Use dashboardApi which includes the new scanEnvironment method
 			const response = await dashboardApi.scanEnvironment(
 				projectId,
-				Number(securityEnvId)
+				Number(securityEnvId),
 			);
 			setSecurityScanResult(response.data);
 			toast.success('Security scan completed');
@@ -606,7 +606,7 @@ export default function ProjectDetail() {
 				toast.success(
 					`Composer update completed! ${
 						response.data.packages_updated || 0
-					} packages updated.`
+					} packages updated.`,
 				);
 			} else {
 				toast.error(response.data.message || 'Composer update failed');
@@ -648,7 +648,8 @@ export default function ProjectDetail() {
 				// the only risk is if DB data has dupes or if we mutated the cache (which we fixed above).
 				// We can add a simple check to be safe against mixed sources having same backup.
 				const exists = index[envName].some(
-					b => (b.id && b.id === backup.id) || b.timestamp === backup.created_at
+					b =>
+						(b.id && b.id === backup.id) || b.timestamp === backup.created_at,
 				);
 
 				if (!exists) {
@@ -769,13 +770,13 @@ export default function ProjectDetail() {
 						<div className='grid grid-cols-2 gap-4 p-3 bg-gray-50 rounded-lg'>
 							<div className='text-center'>
 								<div className='text-2xl font-bold text-gray-900'>
-									{wpLoading ? '...' : wpState?.data?.plugins_count ?? '--'}
+									{wpLoading ? '...' : (wpState?.data?.plugins_count ?? '--')}
 								</div>
 								<div className='text-xs text-gray-500'>Plugins</div>
 							</div>
 							<div className='text-center'>
 								<div className='text-2xl font-bold text-gray-900'>
-									{wpLoading ? '...' : wpState?.data?.themes_count ?? '--'}
+									{wpLoading ? '...' : (wpState?.data?.themes_count ?? '--')}
 								</div>
 								<div className='text-xs text-gray-500'>Themes</div>
 							</div>
@@ -794,7 +795,7 @@ export default function ProjectDetail() {
 									</span>
 								) : wpState?.data?.last_scanned_at ? (
 									`Scanned: ${new Date(
-										wpState.data.last_scanned_at
+										wpState.data.last_scanned_at,
 									).toLocaleDateString()}`
 								) : (
 									'Click to scan & view details'
@@ -849,7 +850,7 @@ export default function ProjectDetail() {
 		},
 		onError: (error: any) => {
 			toast.error(
-				error.response?.data?.detail || 'Drive clone failed to start'
+				error.response?.data?.detail || 'Drive clone failed to start',
 			);
 		},
 	});
@@ -905,20 +906,20 @@ export default function ProjectDetail() {
 		} catch (error: any) {
 			toast.error(
 				'Download failed: ' + (error.response?.data?.detail || 'Unknown error'),
-				{ id: 'download-toast' }
+				{ id: 'download-toast' },
 			);
 		}
 	};
 
 	// Backup restore handler
 	const [restoringBackupId, setRestoringBackupId] = useState<number | null>(
-		null
+		null,
 	);
 
 	const handleRestoreBackup = async (backupId: number, backupName: string) => {
 		if (
 			!window.confirm(
-				`Are you sure you want to restore from "${backupName}"? This will overwrite your current local data.`
+				`Are you sure you want to restore from "${backupName}"? This will overwrite your current local data.`,
 			)
 		) {
 			return;
@@ -947,7 +948,7 @@ export default function ProjectDetail() {
 	const backupsTotal = backupsData?.data?.total || 0;
 	const backupsTotalPages = Math.max(
 		1,
-		Math.ceil(backupsTotal / backupsPageSize)
+		Math.ceil(backupsTotal / backupsPageSize),
 	);
 	const isAllBackupsSelected =
 		backups.length > 0 && backups.every(b => selectedBackupIds.includes(b.id));
@@ -956,14 +957,14 @@ export default function ProjectDetail() {
 		setSelectedBackupIds(prev =>
 			prev.includes(backupId)
 				? prev.filter(id => id !== backupId)
-				: [...prev, backupId]
+				: [...prev, backupId],
 		);
 	};
 
 	const toggleSelectAllBackups = () => {
 		if (isAllBackupsSelected) {
 			setSelectedBackupIds(prev =>
-				prev.filter(id => !backups.some(b => b.id === id))
+				prev.filter(id => !backups.some(b => b.id === id)),
 			);
 			return;
 		}
@@ -978,7 +979,7 @@ export default function ProjectDetail() {
 	const handleUnlink = (envId: number, envName: string) => {
 		if (
 			window.confirm(
-				`Unlink ${envName} environment? This won't delete the server data.`
+				`Unlink ${envName} environment? This won't delete the server data.`,
 			)
 		) {
 			unlinkMutation.mutate(envId);
@@ -1258,8 +1259,8 @@ export default function ProjectDetail() {
 											{driveSettings?.gdrive_connected
 												? 'Connected'
 												: driveSettings?.gdrive_global_configured
-												? 'Connected (Global)'
-												: 'Not Connected'}
+													? 'Connected (Global)'
+													: 'Not Connected'}
 										</Badge>
 										<button
 											onClick={() => {
@@ -1360,7 +1361,7 @@ export default function ProjectDetail() {
 												📁 Backups:{' '}
 												{driveSettings.gdrive_backups_folder_id.substring(
 													0,
-													20
+													20,
 												)}
 												...
 											</div>
@@ -1496,7 +1497,7 @@ export default function ProjectDetail() {
 													</Button>
 													{env.environment === 'staging' &&
 														environments.some(
-															e => e.environment === 'production'
+															e => e.environment === 'production',
 														) && (
 															<Button
 																variant='secondary'
@@ -1510,7 +1511,7 @@ export default function ProjectDetail() {
 														)}
 													{env.environment === 'production' &&
 														environments.some(
-															e => e.environment === 'staging'
+															e => e.environment === 'staging',
 														) && (
 															<Button
 																variant='secondary'
@@ -1549,7 +1550,7 @@ export default function ProjectDetail() {
 										size='sm'
 										onClick={() => {
 											const staging = environments.find(
-												e => e.environment === 'staging'
+												e => e.environment === 'staging',
 											);
 											if (staging) handleSync(staging, 'push');
 										}}
@@ -1563,7 +1564,7 @@ export default function ProjectDetail() {
 										size='sm'
 										onClick={() => {
 											const production = environments.find(
-												e => e.environment === 'production'
+												e => e.environment === 'production',
 											);
 											if (production) handleSync(production, 'pull');
 										}}
@@ -1749,8 +1750,8 @@ export default function ProjectDetail() {
 																details?.status === 'completed'
 																	? 'success'
 																	: details?.status === 'failed'
-																	? 'danger'
-																	: 'default'
+																		? 'danger'
+																		: 'default'
 															}
 														>
 															{details?.status || 'queued'}
@@ -2053,7 +2054,7 @@ export default function ProjectDetail() {
 											Pinned:{' '}
 											{
 												Object.keys(
-													effectivePolicyData.data.pinned_versions || {}
+													effectivePolicyData.data.pinned_versions || {},
 												).length
 											}
 										</div>
@@ -2090,7 +2091,7 @@ export default function ProjectDetail() {
 											Version mismatches:{' '}
 											{
 												Object.keys(
-													pluginDriftData.data.version_mismatches || {}
+													pluginDriftData.data.version_mismatches || {},
 												).length
 											}
 										</div>
@@ -2125,7 +2126,7 @@ export default function ProjectDetail() {
 																	Install
 																</Button>
 															</div>
-														)
+														),
 													)}
 												</div>
 											</div>
@@ -2161,7 +2162,7 @@ export default function ProjectDetail() {
 																	Deactivate
 																</Button>
 															</div>
-														)
+														),
 													)}
 												</div>
 											</div>
@@ -2197,7 +2198,7 @@ export default function ProjectDetail() {
 																	Deactivate
 																</Button>
 															</div>
-														)
+														),
 													)}
 												</div>
 											</div>
@@ -2211,7 +2212,7 @@ export default function ProjectDetail() {
 												</div>
 												<div className='mt-1 space-y-2'>
 													{Object.entries(
-														pluginDriftData.data.version_mismatches || {}
+														pluginDriftData.data.version_mismatches || {},
 													).map(
 														([plugin, currentVersion]: [string, string]) => {
 															const pinnedVersion =
@@ -2248,7 +2249,7 @@ export default function ProjectDetail() {
 																	</Button>
 																</div>
 															);
-														}
+														},
 													)}
 												</div>
 											</div>
@@ -2347,7 +2348,7 @@ export default function ProjectDetail() {
 													envId: Number(backupEnvId),
 													type: backupType,
 													storage: storageType,
-											  })
+												})
 											: toast.error('Please select an environment')
 									}
 									disabled={
@@ -2392,16 +2393,16 @@ export default function ProjectDetail() {
 									onClick={() => {
 										if (selectedBackupIds.length === 0) return;
 										const selectedBackups = backups.filter((backup: any) =>
-											selectedBackupIds.includes(backup.id)
+											selectedBackupIds.includes(backup.id),
 										);
 										const force = selectedBackups.some(
 											(backup: any) =>
 												['running', 'pending', 'failed'].includes(
-													String(backup.status || '').toLowerCase()
+													String(backup.status || '').toLowerCase(),
 												) ||
 												(backup.storage_type?.toLowerCase() ===
 													'google_drive' &&
-													!backup.drive_folder_id)
+													!backup.drive_folder_id),
 										);
 										bulkDeleteBackupsMutation.mutate({
 											backupIds: selectedBackupIds,
@@ -2431,8 +2432,8 @@ export default function ProjectDetail() {
 														backup.status === 'completed'
 															? 'bg-green-100 text-green-600'
 															: backup.status === 'failed'
-															? 'bg-red-100 text-red-600'
-															: 'bg-gray-100 text-gray-400'
+																? 'bg-red-100 text-red-600'
+																: 'bg-gray-100 text-gray-400'
 													}`}
 												>
 													{backup.status?.toLowerCase() === 'completed' ? (
@@ -2465,7 +2466,7 @@ export default function ProjectDetail() {
 																				backup.size_bytes /
 																				1024 /
 																				1024
-																		  ).toFixed(1)} MB`
+																			).toFixed(1)} MB`
 																		: ''}
 																</p>
 																{backup.status?.toLowerCase() === 'failed' &&
@@ -2538,11 +2539,11 @@ export default function ProjectDetail() {
 																onClick={() => {
 																	if (
 																		confirm(
-																			'Are you sure you want to delete this backup?'
+																			'Are you sure you want to delete this backup?',
 																		)
 																	) {
 																		const status = String(
-																			backup.status || ''
+																			backup.status || '',
 																		).toLowerCase();
 																		const isDrive =
 																			backup.storage_type?.toLowerCase() ===
@@ -2554,7 +2555,7 @@ export default function ProjectDetail() {
 																			Boolean(backup.drive_folder_id);
 																		const force =
 																			['running', 'pending', 'failed'].includes(
-																				status
+																				status,
 																			) ||
 																			(isDrive && !backup.drive_folder_id);
 																		deleteBackupMutation.mutate({
@@ -2594,7 +2595,7 @@ export default function ProjectDetail() {
 											disabled={backupsPage >= backupsTotalPages}
 											onClick={() =>
 												setBackupsPage(prev =>
-													Math.min(backupsTotalPages, prev + 1)
+													Math.min(backupsTotalPages, prev + 1),
 												)
 											}
 										>
@@ -2689,7 +2690,7 @@ export default function ProjectDetail() {
 														setDriveTimestamp('');
 														setSelectedBackup(null);
 														const envMatch = environments.find(
-															e => e.environment === envName
+															e => e.environment === envName,
 														);
 														if (envMatch?.wp_url) {
 															setDriveSourceUrl(envMatch.wp_url);
@@ -2738,7 +2739,7 @@ export default function ProjectDetail() {
 													</Card>
 												</div>
 											);
-										}
+										},
 									)}
 								</div>
 							)}
@@ -2842,7 +2843,7 @@ export default function ProjectDetail() {
 											const envId = Number(e.target.value) || '';
 											setTargetEnvId(envId);
 											const envMatch = environments.find(
-												env => env.id === envId
+												env => env.id === envId,
 											);
 											if (envMatch?.wp_url) {
 												try {
@@ -3056,8 +3057,8 @@ export default function ProjectDetail() {
 												securityScanResult.overall_status === 'pass'
 													? 'bg-green-100 text-green-700'
 													: securityScanResult.overall_status === 'warn'
-													? 'bg-yellow-100 text-yellow-700'
-													: 'bg-red-100 text-red-700'
+														? 'bg-yellow-100 text-yellow-700'
+														: 'bg-red-100 text-red-700'
 											}`}
 										>
 											{securityScanResult.score}
@@ -3069,7 +3070,7 @@ export default function ProjectDetail() {
 											<p className='text-sm text-gray-500'>
 												Scanned at{' '}
 												{new Date(
-													securityScanResult.scanned_at
+													securityScanResult.scanned_at,
 												).toLocaleString()}
 											</p>
 										</div>
@@ -3109,8 +3110,8 @@ export default function ProjectDetail() {
 															check.status === 'pass'
 																? 'bg-green-100 text-green-600'
 																: check.status === 'warn'
-																? 'bg-yellow-100 text-yellow-600'
-																: 'bg-red-100 text-red-600'
+																	? 'bg-yellow-100 text-yellow-600'
+																	: 'bg-red-100 text-red-600'
 														}`}
 													>
 														{check.status === 'pass' ? (
@@ -3139,7 +3140,7 @@ export default function ProjectDetail() {
 																				</span>{' '}
 																				{String(value)}
 																			</div>
-																		)
+																		),
 																	)}
 																</div>
 															)}
@@ -3151,8 +3152,8 @@ export default function ProjectDetail() {
 														check.severity === 'high'
 															? 'danger'
 															: check.severity === 'medium'
-															? 'warning'
-															: 'default'
+																? 'warning'
+																: 'default'
 													}
 												>
 													{check.severity}

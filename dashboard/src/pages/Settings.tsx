@@ -116,7 +116,7 @@ const Settings: React.FC = () => {
 		onSuccess: response => {
 			queryClient.invalidateQueries({ queryKey: ['cloudflare-status'] });
 			toast.success(
-				`Synced ${response.data.domains_synced} domains, ${response.data.ssl_synced} SSL certs`
+				`Synced ${response.data.domains_synced} domains, ${response.data.ssl_synced} SSL certs`,
 			);
 		},
 		onError: () => toast.error('Sync failed'),
@@ -139,7 +139,7 @@ const Settings: React.FC = () => {
 
 	const handleColorChange = (
 		colorType: 'primary' | 'accent',
-		color: string
+		color: string,
 	) => {
 		const updateData =
 			colorType === 'primary'
@@ -159,7 +159,7 @@ const Settings: React.FC = () => {
 	const handleReset = () => {
 		if (
 			confirm(
-				'Are you sure you want to reset all settings to defaults? This cannot be undone.'
+				'Are you sure you want to reset all settings to defaults? This cannot be undone.',
 			)
 		) {
 			resetConfigMutation.mutate();
@@ -995,7 +995,7 @@ const AddNotificationChannelModal: React.FC<
 				toast.success('Test notification sent!');
 			} else {
 				toast.error(
-					response.data.message || 'Test failed - check your configuration'
+					response.data.message || 'Test failed - check your configuration',
 				);
 			}
 			setIsTesting(false);
@@ -1037,12 +1037,12 @@ const AddNotificationChannelModal: React.FC<
 	};
 
 	const validateConfig = () => {
+		const webhookUrl =
+			typeof config.webhook_url === 'string' ? config.webhook_url : '';
+
 		switch (channelType) {
 			case 'slack':
-				if (
-					!config.webhook_url ||
-					!config.webhook_url.startsWith('https://hooks.slack.com/')
-				) {
+				if (!webhookUrl || !webhookUrl.startsWith('https://hooks.slack.com/')) {
 					toast.error('Please enter a valid Slack webhook URL');
 					return false;
 				}
@@ -1061,7 +1061,7 @@ const AddNotificationChannelModal: React.FC<
 				break;
 			case 'webhook':
 			case 'discord':
-				if (!config.webhook_url || !config.webhook_url.startsWith('https://')) {
+				if (!webhookUrl || !webhookUrl.startsWith('https://')) {
 					toast.error('Please enter a valid webhook URL');
 					return false;
 				}
@@ -1471,7 +1471,7 @@ const RcloneSetupModal: React.FC<RcloneSetupModalProps> = ({
 		onSuccess: response => {
 			if (response.data.success) {
 				toast.success(
-					response.data.message || 'Google Drive configured successfully!'
+					response.data.message || 'Google Drive configured successfully!',
 				);
 				onSuccess();
 			} else {
@@ -1743,7 +1743,7 @@ const GitHubIntegrationCard: React.FC = () => {
 				.catch(err => {
 					toast.error(
 						'Failed to connect GitHub: ' +
-							(err.response?.data?.detail || err.message)
+							(err.response?.data?.detail || err.message),
 					);
 				})
 				.finally(() => setIsConnecting(false));
@@ -1754,13 +1754,13 @@ const GitHubIntegrationCard: React.FC = () => {
 		try {
 			setIsConnecting(true);
 			const response = await dashboardApi.getGitHubAuthUrl(
-				window.location.origin + '/settings?oauth=github'
+				window.location.origin + '/settings?oauth=github',
 			);
 			if (response.data?.auth_url) {
 				window.location.href = response.data.auth_url;
 			} else {
 				toast.error(
-					'GitHub OAuth not configured. Use Personal Access Token instead.'
+					'GitHub OAuth not configured. Use Personal Access Token instead.',
 				);
 				setShowTokenInput(true);
 				setIsConnecting(false);
@@ -1774,7 +1774,7 @@ const GitHubIntegrationCard: React.FC = () => {
 				setShowTokenInput(true);
 			} else {
 				toast.error(
-					error.response?.data?.detail || 'Failed to start OAuth flow'
+					error.response?.data?.detail || 'Failed to start OAuth flow',
 				);
 			}
 			setIsConnecting(false);
@@ -1900,7 +1900,7 @@ const GitHubIntegrationCard: React.FC = () => {
 // Storage Browser Card for testing Drive configuration
 const StorageBrowserCard: React.FC = () => {
 	const [folders, setFolders] = useState<{ path: string; source?: string }[]>(
-		[]
+		[],
 	);
 	const [isLoading, setIsLoading] = useState(false);
 	const [hasLoaded, setHasLoaded] = useState(false);

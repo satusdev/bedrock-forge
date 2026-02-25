@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from '@/router/compat';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
 	ArrowLeft,
@@ -117,10 +117,10 @@ export default function CreateProjectWizard() {
 	useEffect(() => {
 		if (formData.server_id) {
 			const selectedServer = servers.find(
-				(s: any) => s.id === formData.server_id
+				(s: any) => s.id === formData.server_id,
 			);
 			setScanBasePath(
-				selectedServer?.panel_type === 'cyberpanel' ? '/home' : '/var/www'
+				selectedServer?.panel_type === 'cyberpanel' ? '/home' : '/var/www',
 			);
 		}
 	}, [formData.server_id, servers]);
@@ -135,8 +135,8 @@ export default function CreateProjectWizard() {
 		}) =>
 			api.post<{ success: boolean; sites: ScannedSite[]; message?: string }>(
 				`/servers/${serverId}/scan-sites?base_path=${encodeURIComponent(
-					basePath
-				)}&max_depth=4`
+					basePath,
+				)}&max_depth=4`,
 			),
 		onSuccess: (response: any) => {
 			setIsScanning(false);
@@ -146,7 +146,7 @@ export default function CreateProjectWizard() {
 					toast.error('No WordPress sites found in the specified path');
 				} else {
 					toast.success(
-						`Found ${response.data.sites.length} WordPress site(s)`
+						`Found ${response.data.sites.length} WordPress site(s)`,
 					);
 				}
 			} else {
@@ -265,7 +265,7 @@ export default function CreateProjectWizard() {
 	const removeTag = (tag: string) => {
 		updateForm(
 			'tags',
-			formData.tags.filter(t => t !== tag)
+			formData.tags.filter(t => t !== tag),
 		);
 	};
 
@@ -981,7 +981,7 @@ export default function CreateProjectWizard() {
 												onChange={e =>
 													updateForm(
 														'server_id',
-														e.target.value ? Number(e.target.value) : null
+														e.target.value ? Number(e.target.value) : null,
 													)
 												}
 												className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800'

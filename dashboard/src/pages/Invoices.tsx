@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { type ColumnDef } from '@tanstack/react-table';
 import { Download, FileText, Loader2 } from 'lucide-react';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
+import DataTable from '@/components/ui/DataTable';
 import { dashboardApi } from '@/services/api';
 import toast from 'react-hot-toast';
 
@@ -44,7 +46,7 @@ interface InvoiceDetail extends InvoiceSummary {
 export default function Invoices() {
 	const queryClient = useQueryClient();
 	const [selectedInvoice, setSelectedInvoice] = useState<InvoiceDetail | null>(
-		null
+		null,
 	);
 
 	const { data, isLoading } = useQuery({
@@ -111,6 +113,69 @@ export default function Invoices() {
 		}).format(amount);
 	};
 
+	const columns = useMemo<ColumnDef<InvoiceSummary>[]>(
+		() => [
+			{
+				accessorKey: 'invoice_number',
+				header: 'Invoice',
+				cell: ({ row }) => (
+					<span className='text-sm text-gray-700'>
+						{row.original.invoice_number}
+					</span>
+				),
+			},
+			{
+				accessorKey: 'status',
+				header: 'Status',
+				cell: ({ row }) => (
+					<Badge variant='secondary'>{row.original.status}</Badge>
+				),
+			},
+			{
+				accessorKey: 'due_date',
+				header: 'Due',
+				cell: ({ row }) => (
+					<span className='text-sm text-gray-600'>
+						{row.original.due_date
+							? new Date(row.original.due_date).toLocaleDateString()
+							: '—'}
+					</span>
+				),
+			},
+			{
+				accessorKey: 'total',
+				header: 'Total',
+				cell: ({ row }) => (
+					<div className='text-right text-sm text-gray-700'>
+						{formatCurrency(row.original.total, row.original.currency)}
+					</div>
+				),
+			},
+			{
+				id: 'actions',
+				header: 'Actions',
+				cell: ({ row }) => (
+					<div className='flex items-center justify-end gap-2'>
+						<Button
+							variant='secondary'
+							onClick={() => fetchInvoiceDetail(row.original.id)}
+						>
+							View
+						</Button>
+						<Button
+							variant='outline'
+							onClick={() => downloadInvoice(row.original.id)}
+						>
+							<Download className='w-4 h-4 mr-1' />
+							PDF
+						</Button>
+					</div>
+				),
+			},
+		],
+		[],
+	);
+
 	if (isLoading) {
 		return (
 			<div className='flex items-center justify-center h-64'>
@@ -131,66 +196,16 @@ export default function Invoices() {
 			</div>
 
 			<Card>
-				<div className='overflow-x-auto'>
-					<table className='min-w-full divide-y divide-gray-200'>
-						<thead className='bg-gray-50'>
-							<tr>
-								<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase'>
-									Invoice
-								</th>
-								<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase'>
-									Status
-								</th>
-								<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase'>
-									Due
-								</th>
-								<th className='px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase'>
-									Total
-								</th>
-								<th className='px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase'>
-									Actions
-								</th>
-							</tr>
-						</thead>
-						<tbody className='divide-y divide-gray-200 bg-white'>
-							{invoices.map(invoice => (
-								<tr key={invoice.id}>
-									<td className='px-6 py-4 text-sm text-gray-700'>
-										{invoice.invoice_number}
-									</td>
-									<td className='px-6 py-4'>
-										<Badge variant='secondary'>{invoice.status}</Badge>
-									</td>
-									<td className='px-6 py-4 text-sm text-gray-600'>
-										{invoice.due_date
-											? new Date(invoice.due_date).toLocaleDateString()
-											: '—'}
-									</td>
-									<td className='px-6 py-4 text-right text-sm text-gray-700'>
-										{formatCurrency(invoice.total, invoice.currency)}
-									</td>
-									<td className='px-6 py-4 text-right'>
-										<div className='flex items-center justify-end gap-2'>
-											<Button
-												variant='secondary'
-												onClick={() => fetchInvoiceDetail(invoice.id)}
-											>
-												View
-											</Button>
-											<Button
-												variant='outline'
-												onClick={() => downloadInvoice(invoice.id)}
-											>
-												<Download className='w-4 h-4 mr-1' />
-												PDF
-											</Button>
-										</div>
-									</td>
-								</tr>
-							))}
-						</tbody>
-					</table>
-				</div>
+				<DataTable
+					columns={columns}
+					data={invoices}
+					showFilter={false}
+					filterValue=''
+					onFilterChange={() => {}}
+					filterPlaceholder=''
+					emptyMessage='No invoices found.'
+					initialPageSize={10}
+				/>
 			</Card>
 
 			{selectedInvoice && (
@@ -217,7 +232,7 @@ export default function Invoices() {
 									<p className='text-lg font-semibold'>
 										{formatCurrency(
 											selectedInvoice.total,
-											selectedInvoice.currency
+											selectedInvoice.currency,
 										)}
 									</p>
 								</Card>
@@ -226,7 +241,7 @@ export default function Invoices() {
 									<p className='text-lg font-semibold'>
 										{formatCurrency(
 											selectedInvoice.balance_due,
-											selectedInvoice.currency
+											selectedInvoice.currency,
 										)}
 									</p>
 								</Card>
