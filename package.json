@@ -1,0 +1,16 @@
+{
+	"name": "bedrock-forge-ops",
+	"private": true,
+	"version": "0.1.0",
+	"description": "Shortcut commands for local Docker lifecycle",
+	"scripts": {
+		"up": "docker compose --env-file .env up -d --build --wait",
+		"down": "docker compose --env-file .env down --remove-orphans",
+		"reset": "./reset-seed.sh",
+		"reset:noseed": "RUN_SEED=false ./reset-seed.sh",
+		"migrate": "MIGRATION_STRATEGY=auto RUN_SEED=false ./reset-seed.sh",
+		"seed": "docker compose --env-file .env --profile seed run --rm --no-deps --build nest-api sh -c \"npm run prisma:seed\"",
+		"seed:demo": "docker compose --env-file .env --profile seed run --rm --no-deps --build -e SEED_DEMO_MODE=true nest-api sh -c \"npm run prisma:seed\"",
+		"smoke": "SEED_STRATEGY=prisma ./scripts/local-docker-smoke.sh"
+	}
+}
