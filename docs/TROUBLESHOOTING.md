@@ -22,6 +22,7 @@ Solutions to common issues and problems when using Bedrock Forge.
 **Problem**: `python3 -m forge --help` fails with syntax errors
 
 **Solution**:
+
 ```bash
 # Check Python version
 python3 --version
@@ -38,7 +39,7 @@ brew install python@3.9
 # Create virtual environment
 python3.9 -m venv forge-env
 source forge-env/bin/activate
-pip install -r forge/requirements.txt
+pip install -r requirements.txt
 ```
 
 ### Module Import Errors
@@ -50,7 +51,7 @@ pip install -r forge/requirements.txt
 ```bash
 # 1. Install dependencies properly
 cd /path/to/bedrock-forge
-pip install -r forge/requirements.txt
+pip install -r requirements.txt
 
 # 2. Add to PYTHONPATH
 export PYTHONPATH="${PYTHONPATH}:/path/to/bedrock-forge"
@@ -69,6 +70,7 @@ pip install -e .
 **Problem**: Permission errors when running commands
 
 **Solution**:
+
 ```bash
 # Check file permissions
 ls -la forge/
@@ -79,7 +81,7 @@ chmod -R 755 forge/
 
 # Don't use sudo with pip unless necessary
 # If you must, use user install:
-pip install --user -r forge/requirements.txt
+pip install --user -r requirements.txt
 ```
 
 ## 🏠 Local Development Issues
@@ -754,26 +756,29 @@ python3 -m forge debug create-bundle
 
 ### Common Error Messages
 
-| Error | Cause | Solution |
-|-------|-------|----------|
-| `ModuleNotFoundError` | Missing dependencies | `pip install -r forge/requirements.txt` |
-| `Permission denied` | File permissions | `chmod 755 forge/` |
-| `Connection refused` | Service not running | `ddev start` or `sudo systemctl start nginx` |
-| `Authentication failed` | Invalid credentials | Check API tokens and SSH keys |
-| `JSON decode error` | Invalid configuration | `python3 -m forge config validate` |
-| `Database connection failed` | Wrong DB credentials | Verify database configuration |
-| `SSL handshake failed` | Certificate issues | Check SSL setup and domain |
+| Error                        | Cause                 | Solution                                     |
+| ---------------------------- | --------------------- | -------------------------------------------- |
+| `ModuleNotFoundError`        | Missing dependencies  | `pip install -r requirements.txt`            |
+| `Permission denied`          | File permissions      | `chmod 755 forge/`                           |
+| `Connection refused`         | Service not running   | `ddev start` or `sudo systemctl start nginx` |
+| `Authentication failed`      | Invalid credentials   | Check API tokens and SSH keys                |
+| `JSON decode error`          | Invalid configuration | `python3 -m forge config validate`           |
+| `Database connection failed` | Wrong DB credentials  | Verify database configuration                |
+| `SSL handshake failed`       | Certificate issues    | Check SSL setup and domain                   |
 
 ### Community Support
 
-- **GitHub Issues**: [Report bugs](https://github.com/your-org/bedrock-forge/issues)
-- **GitHub Discussions**: [Ask questions](https://github.com/your-org/bedrock-forge/discussions)
+- **GitHub Issues**:
+  [Report bugs](https://github.com/your-org/bedrock-forge/issues)
+- **GitHub Discussions**:
+  [Ask questions](https://github.com/your-org/bedrock-forge/discussions)
 - **Documentation**: [Complete docs](IMPLEMENTATION_STATUS.md)
 - **Discord**: [Live chat support](https://discord.gg/bedrock-forge)
 
 ### Professional Support
 
 For enterprise support:
+
 - **Email**: support@bedrock-forge.com
 - **Documentation**: [Enterprise Support](https://bedrock-forge.com/enterprise)
 - **Consulting**: [Expert help](https://bedrock-forge.com/consulting)
@@ -811,4 +816,5 @@ python3 -m forge network check-all
 python3 -m forge debug support-bundle
 ```
 
-These commands will help diagnose most common issues and provide specific recommendations for fixes.
+These commands will help diagnose most common issues and provide specific
+recommendations for fixes.

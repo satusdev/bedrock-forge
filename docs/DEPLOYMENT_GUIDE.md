@@ -28,9 +28,8 @@ workflows.
 ## 🧭 aaPanel Single-Domain Reverse Proxy (Dashboard + API)
 
 Use this when you only need the Forge dashboard and API on the same domain (e.g.
-`forge.staging.ly`). This mirrors the routing used in
-[deploy/nginx.conf](../deploy/nginx.conf) and SPA behavior in
-[deploy/nginx-dashboard.conf](../deploy/nginx-dashboard.conf).
+`forge.staging.ly`). This mirrors the Docker routing model where dashboard and
+API are exposed on separate internal upstreams.
 
 ### ✅ Target routing (single domain)
 
@@ -83,9 +82,8 @@ location / {
 
 ### ✅ Ports to use
 
-Use the ports defined in
-[deploy/docker-compose.yml](../deploy/docker-compose.yml). If you deployed
-without Docker, use your system service ports.
+Use the ports defined in [docker-compose.yml](../docker-compose.yml). If you
+deployed without Docker, use your system service ports.
 
 ### Key Features
 

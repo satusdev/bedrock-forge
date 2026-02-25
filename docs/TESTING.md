@@ -148,7 +148,7 @@ export FORGE_ENV=test
 export FORGE_LOG_LEVEL=DEBUG
 
 # Install test dependencies
-pip install -r forge/requirements-test.txt
+pip install -e ".[dev]"
 
 # Set up test database (if needed)
 mysql -u root -e "CREATE DATABASE test_forge;"
@@ -675,8 +675,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r forge/requirements.txt
-          pip install -r forge/requirements-test.txt
+                    pip install -r requirements.txt
+                    pip install -e ".[dev]"
 
       - name: Run linting
         run: |
@@ -717,8 +717,8 @@ pytest -q \
     forge/tests/unit/test_backup_enum_persistence.py \
     forge/tests/unit/test_enum_value_persistence_guardrail.py
 
-# Migration smoke (multi-head safe)
-alembic -c forge/db/alembic.ini upgrade heads
+# Prisma schema smoke
+docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:push"
 
 # Run with specific Python versions
 python3.9 -m pytest tests/
@@ -914,15 +914,15 @@ def test_with_debugging(self):
 
 ### Common Test Issues and Solutions
 
-| Issue                 | Cause                  | Solution                                     |
-| --------------------- | ---------------------- | -------------------------------------------- |
-| `ImportError`         | Python path issues     | Run from project root or set PYTHONPATH      |
-| `ModuleNotFoundError` | Missing dependencies   | `pip install -r forge/requirements-test.txt` |
-| `AssertionError`      | Incorrect expectations | Review test logic and actual behavior        |
-| `TimeoutError`        | Test takes too long    | Increase timeout or optimize test            |
-| `ConnectionError`     | Network dependency     | Mock network calls or skip in CI             |
-| `PermissionError`     | File permission issues | Run with appropriate permissions             |
-| `DatabaseError`       | Database not available | Use test database or mock                    |
+| Issue                 | Cause                  | Solution                                |
+| --------------------- | ---------------------- | --------------------------------------- |
+| `ImportError`         | Python path issues     | Run from project root or set PYTHONPATH |
+| `ModuleNotFoundError` | Missing dependencies   | `pip install -e ".[dev]"`               |
+| `AssertionError`      | Incorrect expectations | Review test logic and actual behavior   |
+| `TimeoutError`        | Test takes too long    | Increase timeout or optimize test       |
+| `ConnectionError`     | Network dependency     | Mock network calls or skip in CI        |
+| `PermissionError`     | File permission issues | Run with appropriate permissions        |
+| `DatabaseError`       | Database not available | Use test database or mock               |
 
 ---
 

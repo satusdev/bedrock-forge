@@ -26,6 +26,11 @@ and this project adheres to
 ### Documentation
 
 - update README feature status for portal and status page
+- move deploy command docs to root entrypoints (`./forge-deploy`,
+  `./server-deploy`, `./reset-seed.sh`)
+- make Docker deploy canonical at repo root (`docker-compose.yml`,
+  `Dockerfile.dashboard`, `Dockerfile.nest`)
+- remove archived/stub planning docs and archived internal utility scripts
 
 ## 0.1.0 (2025-10-15)
 

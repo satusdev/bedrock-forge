@@ -10,21 +10,23 @@ This document defines high-level service boundaries for the backend.
 ## Service Layer
 
 - Each domain owns a service module:
-  - Backups → forge/services/backup
-  - Monitoring → forge/services/monitor_service.py
-  - Notifications → forge/services/notification_service.py
-  - WordPress operations → forge/tasks/wp_tasks.py and services/wordpress.py
-  - Billing → forge/api/routes/admin/subscriptions.py and packages.py
+  - Backups → `nest-api/src/schedules` + `nest-api/src/sync`
+  - Monitoring/Status → `nest-api/src/status`
+  - Notifications/WebSocket → `nest-api/src/websocket`
+  - WordPress operations → `nest-api/src/wp`
+  - Billing/Subscriptions → `nest-api/src/subscriptions` + `nest-api/src/ssl`
+  - Identity/RBAC → `nest-api/src/users` + `nest-api/src/rbac`
 
 ## Data Access
 
-- Use SQLAlchemy models for persistence.
+- Use Prisma + PostgreSQL for persistence.
 - Avoid raw SQL except for migrations or performance-critical queries.
 
 ## Tasks
 
-- Long-running operations should be Celery tasks in forge/tasks.
-- Task status should be tracked via Redis.
+- Long-running operations should use API-managed task status via
+  `nest-api/src/task-status`.
+- Task state may be cached/transient, with Redis used where appropriate.
 
 ## Logging
 
