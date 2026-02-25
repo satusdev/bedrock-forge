@@ -56,10 +56,10 @@
 
 **Backend**
 
-- FastAPI + Uvicorn
-- SQLAlchemy (async) + Alembic
+- NestJS
+- Prisma
 - PostgreSQL
-- Redis + Celery
+- Redis
 
 **Dashboard**
 
@@ -70,7 +70,6 @@
 **Infrastructure**
 
 - Docker + Docker Compose
-- Nginx (optional reverse proxy)
 
 ---
 
@@ -173,45 +172,67 @@ forge sync backup myproject production
 
 ## 🐳 Docker Quick Start
 
-Run the full stack (API, Dashboard, Database, Redis, Celery) with Docker in
-under 5 minutes.
+Run the full stack (API, Dashboard, Database, Redis) with Docker in under 5
+minutes.
 
 ### Development Setup
 
 ```bash
 # Clone and start
 git clone https://github.com/bedrock-forge/bedrock-forge.git
-cd bedrock-forge/deploy
-docker compose -f docker-compose.dev.yml up -d
+cd bedrock-forge
+cp .env.local.example .env
+docker compose up -d
 
-# Migrations run automatically on API startup
-
-# Optional: seed demo data
-docker compose -f docker-compose.dev.yml exec api python -m forge.commands.seed --demo
+# Run Prisma schema sync + seed
+docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:push"
+docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:seed"
 
 # Access the application
 # Dashboard: http://localhost:3000
 # API: http://localhost:8000
-# API Docs: http://localhost:8000/docs
+# Health: http://localhost:8000/api/v1/health
 ```
 
 ### Production Setup
 
 ```bash
-cd deploy
-cp .env.production .env
-# Edit .env with your secrets (POSTGRES_PASSWORD, SECRET_KEY)
+cp .env.production.example .env
+# Edit .env with your real values before launch
 docker compose build && docker compose up -d
 
-# Migrations run automatically on API startup
-
-# Optional: seed initial data
-# SEED_DEMO_MODE=false and SEED_ADMIN_EMAIL/SEED_ADMIN_PASSWORD recommended for prod
-docker compose exec api python -m forge.commands.seed
+# Run Prisma schema sync + seed
+docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:push"
+docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:seed"
 ```
 
 ```bash
-docker compose down --rmi all --remove-orphans && docker volume rm deploy_postgres_data deploy_redis_data && docker compose up -d --build && docker compose exec api python -m forge.commands.seed
+./reset-seed.sh
+```
+
+```bash
+# Local smoke test for deploy + seed + health
+./scripts/local-docker-smoke.sh
+```
+
+```bash
+# Server tarball update (preserves DB/Redis volumes)
+./server-deploy --mode update
+
+# Optional seed during update
+./server-deploy --mode update --seed
+
+# Full reset (wipes volumes, migrates, and re-seeds)
+./server-deploy --mode reset
+
+# End-to-end wrapper: creates local tar archive, uploads via SSH, runs remote deploy,
+# streams output locally, and writes local logs under logs/deploy/
+./forge-deploy update
+./forge-deploy update --seed
+./forge-deploy reset
+
+# Optional SSH overrides
+./forge-deploy reset --host 49.13.65.81 --user root --port 22
 ```
 
 > 📖 **Full Docker documentation**:
@@ -358,19 +379,19 @@ forge monitor health mysite
 
 ### User Guides
 
-- **[Installation Guide](docs/INSTALLATION.md)** - Detailed installation
-  instructions
 - **[Quick Start Guide](docs/QUICK_START.md)** - Get started in 5 minutes
+- **[Docker Quick Start](docs/DOCKER_QUICKSTART.md)** - Local and production
+  Docker setup
 - **[Configuration Guide](docs/CONFIGURATION.md)** - Setup and configuration
 - **[Command Reference](docs/COMMANDS.md)** - Complete command documentation
 - **[Troubleshooting](docs/TROUBLESHOOTING.md)** - Common issues and solutions
 
 ### Technical Documentation
 
-- **[Implementation Status](docs/IMPLEMENTATION_STATUS.md)** - Detailed
-  technical documentation
 - **[Architecture Guide](docs/ARCHITECTURE.md)** - System architecture and
   design
+- **[Service Boundaries](docs/SERVICE_BOUNDARIES.md)** - API/runtime boundaries
+  and migration context
 - **[Testing Suite](docs/TESTING.md)** - Running and writing tests
 - **[Development Guide](docs/DEVELOPMENT.md)** - Contributing guidelines
 
@@ -389,9 +410,10 @@ bedrock-forge/
 │   └── workflows/           # Workflow definitions
 ├── docs/                    # Documentation
 │   ├── QUICK_START.md       # Quick start guide
+│   ├── DOCKER_QUICKSTART.md # Docker setup guide
 │   ├── COMMANDS.md          # Command reference
 │   ├── CONFIGURATION.md     # Configuration guide
-│   └── IMPLEMENTATION_STATUS.md  # Technical docs
+│   └── ARCHITECTURE.md      # Technical docs
 └── README.md               # This file
 ```
 
