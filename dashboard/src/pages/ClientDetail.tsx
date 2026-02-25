@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { useParams, useNavigate } from '@/router/compat';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { type ColumnDef } from '@tanstack/react-table';
 import { billingService } from '../services/billing';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
+import DataTable from '../components/ui/DataTable';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import { useClient } from '@/hooks/useClients';
 import {
@@ -43,6 +45,16 @@ interface Invoice {
 	currency: string;
 }
 
+interface ClientService {
+	id: number;
+	client_id: number;
+	name: string;
+	type: string;
+	currency: string;
+	amount: number;
+	status: string;
+}
+
 const ClientDetail: React.FC = () => {
 	const { clientId } = useParams<{ clientId: string }>();
 	const navigate = useNavigate();
@@ -57,11 +69,11 @@ const ClientDetail: React.FC = () => {
 
 	const { data: client, isLoading } = useClient(
 		parsedClientId,
-		!!parsedClientId
+		!!parsedClientId,
 	);
 
 	// Mock services/invoices data since backend endpoints might not fully support filtering by client yet
-	const [services, setServices] = useState<any[]>([]);
+	const [services, setServices] = useState<ClientService[]>([]);
 
 	// Fetch invoices for this client
 	const { data: invoicesData, isLoading: invoicesLoading } = useQuery({
@@ -78,7 +90,7 @@ const ClientDetail: React.FC = () => {
 			try {
 				const allSubs = await billingService.getSubscriptions();
 				setServices(
-					allSubs.filter(s => s.client_id === Number(parsedClientId))
+					allSubs.filter(s => s.client_id === Number(parsedClientId)),
 				);
 			} catch (e) {
 				console.error(e);
@@ -134,7 +146,7 @@ const ClientDetail: React.FC = () => {
 
 	const handleCreateInvoice = async (
 		items: InvoiceItem[],
-		options: { tax_rate?: number; discount_amount?: number; notes?: string }
+		options: { tax_rate?: number; discount_amount?: number; notes?: string },
 	) => {
 		try {
 			await billingService.createInvoice({
@@ -159,7 +171,7 @@ const ClientDetail: React.FC = () => {
 		invoiceId: number,
 		amount: number,
 		method: string,
-		reference?: string
+		reference?: string,
 	) => {
 		try {
 			await billingService.recordPayment(invoiceId, {
@@ -187,6 +199,163 @@ const ClientDetail: React.FC = () => {
 	if (!client) {
 		return <div className='p-8 text-center'>Client not found</div>;
 	}
+
+	const serviceColumns: ColumnDef<ClientService>[] = [
+		{
+			accessorKey: 'name',
+			header: 'Service',
+			cell: ({ row }) => (
+				<span className='font-medium text-gray-900'>{row.original.name}</span>
+			),
+		},
+		{
+			accessorKey: 'type',
+			header: 'Type',
+			cell: ({ row }) => (
+				<span className='text-gray-500 capitalize'>{row.original.type}</span>
+			),
+		},
+		{
+			accessorKey: 'amount',
+			header: 'Price',
+			cell: ({ row }) => (
+				<span className='text-gray-900'>
+					{row.original.currency} {row.original.amount}
+				</span>
+			),
+		},
+		{
+			accessorKey: 'status',
+			header: 'Status',
+			cell: ({ row }) => (
+				<Badge
+					className={
+						row.original.status === 'active'
+							? 'bg-green-100 text-green-800'
+							: 'bg-gray-100'
+					}
+				>
+					{row.original.status}
+				</Badge>
+			),
+		},
+	];
+
+	const invoiceColumns: ColumnDef<Invoice>[] = [
+		{
+			accessorKey: 'invoice_number',
+			header: 'Invoice #',
+			cell: ({ row }) => (
+				<span className='font-medium text-gray-900'>
+					{row.original.invoice_number}
+				</span>
+			),
+		},
+		{
+			accessorKey: 'issue_date',
+			header: 'Issue Date',
+			cell: ({ row }) => (
+				<span className='text-gray-500'>
+					{row.original.issue_date
+						? new Date(row.original.issue_date).toLocaleDateString()
+						: '-'}
+				</span>
+			),
+		},
+		{
+			accessorKey: 'due_date',
+			header: 'Due Date',
+			cell: ({ row }) => (
+				<span className='text-gray-500'>
+					{row.original.due_date
+						? new Date(row.original.due_date).toLocaleDateString()
+						: '-'}
+				</span>
+			),
+		},
+		{
+			accessorKey: 'total',
+			header: 'Total',
+			cell: ({ row }) => (
+				<span className='text-gray-900'>
+					{row.original.currency} {row.original.total.toFixed(2)}
+				</span>
+			),
+		},
+		{
+			accessorKey: 'balance_due',
+			header: 'Balance',
+			cell: ({ row }) => (
+				<span className='text-gray-900'>
+					{row.original.currency} {row.original.balance_due.toFixed(2)}
+				</span>
+			),
+		},
+		{
+			accessorKey: 'status',
+			header: 'Status',
+			cell: ({ row }) => (
+				<Badge
+					variant={
+						row.original.status === 'paid'
+							? 'success'
+							: row.original.status === 'pending'
+								? 'warning'
+								: row.original.status === 'overdue' ||
+									  row.original.status === 'cancelled'
+									? 'error'
+									: 'default'
+					}
+				>
+					{row.original.status}
+				</Badge>
+			),
+		},
+		{
+			id: 'actions',
+			header: 'Actions',
+			cell: ({ row }) => (
+				<div className='flex items-center space-x-2'>
+					<button
+						onClick={() => handleDownloadPdf(row.original.id)}
+						className='text-blue-600 hover:text-blue-800'
+						title='Download PDF'
+					>
+						<Download className='w-4 h-4' />
+					</button>
+					{row.original.status === 'draft' && (
+						<button
+							onClick={() => handleSendInvoice(row.original.id)}
+							className='text-green-600 hover:text-green-800'
+							title='Send Invoice'
+						>
+							<Send className='w-4 h-4' />
+						</button>
+					)}
+					{(row.original.status === 'pending' ||
+						row.original.status === 'draft') &&
+						row.original.balance_due > 0 && (
+							<button
+								onClick={() => setShowPaymentModal(row.original.id)}
+								className='text-purple-600 hover:text-purple-800'
+								title='Record Payment'
+							>
+								<DollarSign className='w-4 h-4' />
+							</button>
+						)}
+					{row.original.status === 'draft' && (
+						<button
+							onClick={() => handleDeleteInvoice(row.original.id)}
+							className='text-red-600 hover:text-red-800'
+							title='Delete Invoice'
+						>
+							<Trash2 className='w-4 h-4' />
+						</button>
+					)}
+				</div>
+			),
+		},
+	];
 
 	return (
 		<div className='space-y-6'>
@@ -313,52 +482,15 @@ const ClientDetail: React.FC = () => {
 									No active services found for this client.
 								</p>
 							) : (
-								<div className='overflow-x-auto'>
-									<table className='min-w-full divide-y divide-gray-200'>
-										<thead>
-											<tr>
-												<th className='px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase'>
-													Service
-												</th>
-												<th className='px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase'>
-													Type
-												</th>
-												<th className='px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase'>
-													Price
-												</th>
-												<th className='px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase'>
-													Status
-												</th>
-											</tr>
-										</thead>
-										<tbody className='divide-y divide-gray-200'>
-											{services.map((svc: any) => (
-												<tr key={svc.id}>
-													<td className='px-4 py-3 font-medium text-gray-900'>
-														{svc.name}
-													</td>
-													<td className='px-4 py-3 text-gray-500 capitalize'>
-														{svc.type}
-													</td>
-													<td className='px-4 py-3 text-gray-900'>
-														{svc.currency} {svc.amount}
-													</td>
-													<td className='px-4 py-3'>
-														<Badge
-															className={
-																svc.status === 'active'
-																	? 'bg-green-100 text-green-800'
-																	: 'bg-gray-100'
-															}
-														>
-															{svc.status}
-														</Badge>
-													</td>
-												</tr>
-											))}
-										</tbody>
-									</table>
-								</div>
+								<DataTable
+									columns={serviceColumns}
+									data={services}
+									showFilter={false}
+									filterValue=''
+									onFilterChange={() => {}}
+									emptyMessage='No active services found for this client.'
+									initialPageSize={10}
+								/>
 							)}
 							<div className='mt-4 pt-4 border-t border-gray-100'>
 								<Button>
@@ -390,123 +522,15 @@ const ClientDetail: React.FC = () => {
 									<p>No invoices found for this client.</p>
 								</div>
 							) : (
-								<div className='overflow-x-auto'>
-									<table className='min-w-full divide-y divide-gray-200'>
-										<thead>
-											<tr>
-												<th className='px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase'>
-													Invoice #
-												</th>
-												<th className='px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase'>
-													Issue Date
-												</th>
-												<th className='px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase'>
-													Due Date
-												</th>
-												<th className='px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase'>
-													Total
-												</th>
-												<th className='px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase'>
-													Balance
-												</th>
-												<th className='px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase'>
-													Status
-												</th>
-												<th className='px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase'>
-													Actions
-												</th>
-											</tr>
-										</thead>
-										<tbody className='divide-y divide-gray-200'>
-											{invoicesData.invoices.map((invoice: Invoice) => (
-												<tr key={invoice.id}>
-													<td className='px-4 py-3 font-medium text-gray-900'>
-														{invoice.invoice_number}
-													</td>
-													<td className='px-4 py-3 text-gray-500'>
-														{invoice.issue_date
-															? new Date(
-																	invoice.issue_date
-															  ).toLocaleDateString()
-															: '-'}
-													</td>
-													<td className='px-4 py-3 text-gray-500'>
-														{invoice.due_date
-															? new Date(invoice.due_date).toLocaleDateString()
-															: '-'}
-													</td>
-													<td className='px-4 py-3 text-gray-900'>
-														{invoice.currency} {invoice.total.toFixed(2)}
-													</td>
-													<td className='px-4 py-3 text-gray-900'>
-														{invoice.currency} {invoice.balance_due.toFixed(2)}
-													</td>
-													<td className='px-4 py-3'>
-														<Badge
-															variant={
-																invoice.status === 'paid'
-																	? 'success'
-																	: invoice.status === 'pending'
-																	? 'warning'
-																	: invoice.status === 'overdue'
-																	? 'error'
-																	: invoice.status === 'cancelled'
-																	? 'error'
-																	: 'default'
-															}
-														>
-															{invoice.status}
-														</Badge>
-													</td>
-													<td className='px-4 py-3'>
-														<div className='flex items-center space-x-2'>
-															<button
-																onClick={() => handleDownloadPdf(invoice.id)}
-																className='text-blue-600 hover:text-blue-800'
-																title='Download PDF'
-															>
-																<Download className='w-4 h-4' />
-															</button>
-															{invoice.status === 'draft' && (
-																<button
-																	onClick={() => handleSendInvoice(invoice.id)}
-																	className='text-green-600 hover:text-green-800'
-																	title='Send Invoice'
-																>
-																	<Send className='w-4 h-4' />
-																</button>
-															)}
-															{(invoice.status === 'pending' ||
-																invoice.status === 'draft') &&
-																invoice.balance_due > 0 && (
-																	<button
-																		onClick={() =>
-																			setShowPaymentModal(invoice.id)
-																		}
-																		className='text-purple-600 hover:text-purple-800'
-																		title='Record Payment'
-																	>
-																		<DollarSign className='w-4 h-4' />
-																	</button>
-																)}
-															{invoice.status === 'draft' && (
-																<button
-																	onClick={() =>
-																		handleDeleteInvoice(invoice.id)
-																	}
-																	className='text-red-600 hover:text-red-800'
-																	title='Delete Invoice'
-																>
-																	<Trash2 className='w-4 h-4' />
-																</button>
-															)}
-														</div>
-													</td>
-												</tr>
-											))}
-										</tbody>
-									</table>
-								</div>
+								<DataTable
+									columns={invoiceColumns}
+									data={invoicesData.invoices}
+									showFilter={false}
+									filterValue=''
+									onFilterChange={() => {}}
+									emptyMessage='No invoices found for this client.'
+									initialPageSize={10}
+								/>
 							)}
 						</div>
 					</Card>
@@ -546,7 +570,7 @@ interface CreateInvoiceModalProps {
 	onClose: () => void;
 	onSubmit: (
 		items: InvoiceItem[],
-		options: { tax_rate?: number; discount_amount?: number; notes?: string }
+		options: { tax_rate?: number; discount_amount?: number; notes?: string },
 	) => Promise<void>;
 }
 
@@ -590,7 +614,7 @@ const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
 	const updateItem = (
 		index: number,
 		field: keyof InvoiceItem,
-		value: string | number
+		value: string | number,
 	) => {
 		const updated = [...items];
 		updated[index] = { ...updated[index], [field]: value };
@@ -599,7 +623,7 @@ const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
 
 	const subtotal = items.reduce(
 		(sum, item) => sum + item.quantity * item.unit_price,
-		0
+		0,
 	);
 	const taxAmount = subtotal * (taxRate / 100);
 	const total = subtotal + taxAmount - discountAmount;
@@ -695,7 +719,7 @@ const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
 											updateItem(
 												index,
 												'quantity',
-												parseFloat(e.target.value) || 0
+												parseFloat(e.target.value) || 0,
 											)
 										}
 										className='w-20 px-2 py-1 border rounded text-sm'
@@ -710,7 +734,7 @@ const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
 											updateItem(
 												index,
 												'unit_price',
-												parseFloat(e.target.value) || 0
+												parseFloat(e.target.value) || 0,
 											)
 										}
 										className='w-24 px-2 py-1 border rounded text-sm'
@@ -843,7 +867,7 @@ interface RecordPaymentModalProps {
 	onSubmit: (
 		amount: number,
 		method: string,
-		reference?: string
+		reference?: string,
 	) => Promise<void>;
 }
 

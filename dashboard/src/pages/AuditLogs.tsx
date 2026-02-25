@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { type ColumnDef } from '@tanstack/react-table';
 import Card from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
+import DataTable from '../components/ui/DataTable';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import {
 	Shield,
@@ -108,6 +110,80 @@ const AuditLogs: React.FC = () => {
 			log.entity_type.toLowerCase().includes(searchLower)
 		);
 	});
+
+	const columns: ColumnDef<AuditLogEntry>[] = [
+		{
+			id: 'timestamp',
+			header: 'Timestamp',
+			cell: ({ row }) => (
+				<span className='text-sm text-gray-500 whitespace-nowrap'>
+					{new Date(row.original.created_at).toLocaleString()}
+				</span>
+			),
+		},
+		{
+			id: 'user',
+			header: 'User',
+			cell: ({ row }) => (
+				<div className='flex items-center'>
+					<div className='h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 mr-3'>
+						{(row.original.user_name || 'S').charAt(0)}
+					</div>
+					<div className='text-sm font-medium text-gray-900'>
+						{row.original.user_name || 'System'}
+					</div>
+				</div>
+			),
+		},
+		{
+			id: 'action',
+			header: 'Action',
+			cell: ({ row }) => (
+				<Badge
+					className={`flex items-center w-fit space-x-1 ${getActionColor(
+						row.original.action,
+					)}`}
+				>
+					{getActionIcon(row.original.action)}
+					<span className='capitalize ml-1'>{row.original.action}</span>
+				</Badge>
+			),
+		},
+		{
+			id: 'entity',
+			header: 'Entity',
+			cell: ({ row }) => (
+				<div className='text-sm text-gray-600'>
+					<span className='capitalize font-medium'>
+						{row.original.entity_type}
+					</span>
+					<span className='text-gray-400 mx-1'>:</span>
+					<span className='font-mono text-xs'>{row.original.entity_id}</span>
+				</div>
+			),
+		},
+		{
+			id: 'details',
+			header: 'Details',
+			cell: ({ row }) => (
+				<div
+					className='text-sm text-gray-600 max-w-xs truncate'
+					title={row.original.details || ''}
+				>
+					{row.original.details || '-'}
+				</div>
+			),
+		},
+		{
+			id: 'ip',
+			header: 'IP Address',
+			cell: ({ row }) => (
+				<span className='text-sm text-gray-500 font-mono'>
+					{row.original.ip_address || '-'}
+				</span>
+			),
+		},
+	];
 
 	const exportCSV = () => {
 		if (filteredLogs.length === 0) {
@@ -235,7 +311,7 @@ const AuditLogs: React.FC = () => {
 					value={hoursFilter || ''}
 					onChange={e => {
 						setHoursFilter(
-							e.target.value ? parseInt(e.target.value) : undefined
+							e.target.value ? parseInt(e.target.value) : undefined,
 						);
 						setPage(0);
 					}}
@@ -250,92 +326,16 @@ const AuditLogs: React.FC = () => {
 			</div>
 
 			<Card>
-				<div className='overflow-x-auto'>
-					<table className='min-w-full divide-y divide-gray-200'>
-						<thead className='bg-gray-50'>
-							<tr>
-								<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider'>
-									Timestamp
-								</th>
-								<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider'>
-									User
-								</th>
-								<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider'>
-									Action
-								</th>
-								<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider'>
-									Entity
-								</th>
-								<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider'>
-									Details
-								</th>
-								<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider'>
-									IP Address
-								</th>
-							</tr>
-						</thead>
-						<tbody className='bg-white divide-y divide-gray-200'>
-							{filteredLogs.length === 0 ? (
-								<tr>
-									<td
-										colSpan={6}
-										className='px-6 py-16 text-center text-gray-400'
-									>
-										<Shield className='w-12 h-12 mx-auto mb-3 text-gray-300' />
-										<p className='text-sm font-medium'>No audit logs found</p>
-										<p className='text-xs mt-1'>
-											Activity will be recorded here
-										</p>
-									</td>
-								</tr>
-							) : (
-								filteredLogs.map(log => (
-									<tr key={log.id} className='hover:bg-gray-50'>
-										<td className='px-6 py-4 text-sm text-gray-500 whitespace-nowrap'>
-											{new Date(log.created_at).toLocaleString()}
-										</td>
-										<td className='px-6 py-4'>
-											<div className='flex items-center'>
-												<div className='h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 mr-3'>
-													{(log.user_name || 'S').charAt(0)}
-												</div>
-												<div className='text-sm font-medium text-gray-900'>
-													{log.user_name || 'System'}
-												</div>
-											</div>
-										</td>
-										<td className='px-6 py-4'>
-											<Badge
-												className={`flex items-center w-fit space-x-1 ${getActionColor(
-													log.action
-												)}`}
-											>
-												{getActionIcon(log.action)}
-												<span className='capitalize ml-1'>{log.action}</span>
-											</Badge>
-										</td>
-										<td className='px-6 py-4 text-sm text-gray-600'>
-											<span className='capitalize font-medium'>
-												{log.entity_type}
-											</span>
-											<span className='text-gray-400 mx-1'>:</span>
-											<span className='font-mono text-xs'>{log.entity_id}</span>
-										</td>
-										<td
-											className='px-6 py-4 text-sm text-gray-600 max-w-xs truncate'
-											title={log.details || ''}
-										>
-											{log.details || '-'}
-										</td>
-										<td className='px-6 py-4 text-sm text-gray-500 font-mono'>
-											{log.ip_address || '-'}
-										</td>
-									</tr>
-								))
-							)}
-						</tbody>
-					</table>
-				</div>
+				<DataTable
+					columns={columns}
+					data={filteredLogs}
+					showFilter={false}
+					filterValue=''
+					onFilterChange={() => {}}
+					filterPlaceholder=''
+					emptyMessage='No audit logs found.'
+					initialPageSize={50}
+				/>
 
 				{/* Pagination */}
 				{total > limit && (

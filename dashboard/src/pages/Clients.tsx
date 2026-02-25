@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from '@/router/compat';
 import { useQueryClient } from '@tanstack/react-query';
 import {
 	Users,
@@ -59,7 +59,7 @@ const Clients: React.FC = () => {
 	const [showEditModal, setShowEditModal] = useState(false);
 	const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
 	const [sortBy, setSortBy] = useState<'name' | 'created' | 'projects'>(
-		'created'
+		'created',
 	);
 
 	const queryClient = useQueryClient();
@@ -81,7 +81,7 @@ const Clients: React.FC = () => {
 
 	const { data: selectedClientTags = [] } = useClientTags(
 		selectedClientId,
-		!!selectedClientId
+		!!selectedClientId,
 	);
 
 	const { data: selectedClientDetails, isLoading: isSelectedClientLoading } =
@@ -139,7 +139,7 @@ const Clients: React.FC = () => {
 			toast.error(
 				`Failed to create client: ${
 					error.response?.data?.detail || error.message
-				}`
+				}`,
 			);
 		}
 	};
@@ -166,7 +166,7 @@ const Clients: React.FC = () => {
 			toast.error(
 				`Failed to update client: ${
 					error.response?.data?.detail || error.message
-				}`
+				}`,
 			);
 		}
 	};
@@ -174,7 +174,7 @@ const Clients: React.FC = () => {
 	const handleDeleteClient = async (client: ClientListItem) => {
 		if (
 			window.confirm(
-				`Are you sure you want to delete client "${client.name}"? This action cannot be undone.`
+				`Are you sure you want to delete client "${client.name}"? This action cannot be undone.`,
 			)
 		) {
 			try {
@@ -185,7 +185,7 @@ const Clients: React.FC = () => {
 				toast.error(
 					`Failed to delete client: ${
 						error.response?.data?.detail || error.message
-					}`
+					}`,
 				);
 			}
 		}
@@ -283,7 +283,7 @@ const Clients: React.FC = () => {
 					title='Total Projects'
 					value={clients.reduce(
 						(total, client) => total + client.project_count,
-						0
+						0,
 					)}
 					icon={FolderKanban}
 					iconClassName='w-6 h-6 text-purple-600'
@@ -296,10 +296,10 @@ const Clients: React.FC = () => {
 							? formatCurrency(
 									clients.reduce(
 										(total, client) => total + (client.monthly_retainer || 0),
-										0
+										0,
 									) / clients.length,
-									clients[0].currency || 'USD'
-							  )
+									clients[0].currency || 'USD',
+								)
 							: '$0'
 					}
 					icon={DollarSign}
@@ -429,7 +429,7 @@ const Clients: React.FC = () => {
 														<DollarSign className='w-4 h-4 mr-1' />
 														{formatCurrency(
 															client.monthly_retainer || 0,
-															client.currency || 'USD'
+															client.currency || 'USD',
 														)}
 														/{getBillingCycleText('monthly')}
 													</span>
@@ -639,7 +639,7 @@ const ClientForm: React.FC<ClientFormProps> = ({
 	const handleChange = (
 		e: React.ChangeEvent<
 			HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
-		>
+		>,
 	) => {
 		const { name, value } = e.target;
 		const numberFields = new Set(['payment_terms', 'tax_rate', 'monthly_rate']);
@@ -652,7 +652,7 @@ const ClientForm: React.FC<ClientFormProps> = ({
 
 	const toggleTag = (tagId: number) => {
 		setTagIds(prev =>
-			prev.includes(tagId) ? prev.filter(id => id !== tagId) : [...prev, tagId]
+			prev.includes(tagId) ? prev.filter(id => id !== tagId) : [...prev, tagId],
 		);
 	};
 
@@ -800,8 +800,8 @@ const ClientForm: React.FC<ClientFormProps> = ({
 					{isLoading
 						? 'Saving...'
 						: initialData
-						? 'Update Client'
-						: 'Create Client'}
+							? 'Update Client'
+							: 'Create Client'}
 				</Button>
 			</div>
 		</form>

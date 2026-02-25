@@ -1,28 +1,21 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams } from '@/router/compat';
 import {
 	Database,
 	Cloud,
 	HardDrive,
-	Download,
-	RotateCcw,
 	Plus,
-	Trash2,
-	FolderOpen,
 	RefreshCw,
 	Loader2,
-	CheckCircle,
-	XCircle,
-	Clock,
 	Filter,
-	Terminal,
-	ExternalLink,
 } from 'lucide-react';
 import { dashboardApi, getApiErrorMessage } from '../services/api';
 import { Backup, BackupType, BackupStorageType, BackupStatus } from '../types';
 import toast from 'react-hot-toast';
 import TaskLogModal from '../components/TaskLogModal';
+import DataTable from '@/components/ui/DataTable';
 import Badge from '../components/ui/Badge';
+import { createBackupsColumns } from '@/pages/backups/columns';
 import { useTaskStatusPolling } from '../hooks/useTaskStatusPolling';
 
 interface Project {
@@ -91,6 +84,7 @@ const Backups: React.FC = () => {
 		googleDriveCount: 0,
 		localCount: 0,
 	});
+	const [tableFilter, setTableFilter] = useState('');
 
 	const selectedProject = useMemo(() => {
 		if (!filterProjectId) return null;
@@ -110,7 +104,7 @@ const Backups: React.FC = () => {
 				setRestoreMessage(status.message || '');
 				setRestoreProgress(status.progress || 0);
 			},
-		}
+		},
 	);
 
 	useEffect(() => {
@@ -146,13 +140,13 @@ const Backups: React.FC = () => {
 			// Calculate stats
 			const totalSize = backupList.reduce(
 				(acc: number, b: Backup) => acc + (b.size_bytes || 0),
-				0
+				0,
 			);
 			const googleDriveCount = backupList.filter(
-				(b: Backup) => b.storage_type === 'google_drive'
+				(b: Backup) => b.storage_type === 'google_drive',
 			).length;
 			const localCount = backupList.filter(
-				(b: Backup) => b.storage_type === 'local'
+				(b: Backup) => b.storage_type === 'local',
 			).length;
 
 			setStats({
@@ -309,6 +303,24 @@ const Backups: React.FC = () => {
 		}
 	};
 
+	const columns = useMemo(
+		() =>
+			createBackupsColumns({
+				actionLoading,
+				onOpenLogs: backup =>
+					setLogModal({
+						isOpen: true,
+						backupId: backup.id,
+						backupName: backup.name,
+						isRunning:
+							backup.status === 'running' || backup.status === 'in_progress',
+					}),
+				onOpenRestore: openRestoreModal,
+				onDelete: handleDeleteBackup,
+			}),
+		[actionLoading, openRestoreModal, handleDeleteBackup],
+	);
+
 	const formatSize = (bytes: number | undefined) => {
 		if (!bytes) return '0 B';
 		const units = ['B', 'KB', 'MB', 'GB'];
@@ -319,55 +331,6 @@ const Backups: React.FC = () => {
 			unitIndex++;
 		}
 		return `${size.toFixed(1)} ${units[unitIndex]}`;
-	};
-
-	const formatDate = (dateStr: string) => {
-		const date = new Date(dateStr);
-		return date.toLocaleString();
-	};
-
-	const getStatusIcon = (status: BackupStatus | string) => {
-		switch (status) {
-			case 'completed':
-				return <CheckCircle className='h-4 w-4 text-green-500' />;
-			case 'failed':
-				return <XCircle className='h-4 w-4 text-red-500' />;
-			case 'running':
-				return <Loader2 className='h-4 w-4 text-blue-500 animate-spin' />;
-			default:
-				return <Clock className='h-4 w-4 text-gray-400' />;
-		}
-	};
-
-	const getBackupTypeLabel = (type: BackupType | string) => {
-		const labels: Record<BackupType, string> = {
-			full: 'Full',
-			database: 'DB',
-			files: 'Files',
-		};
-		return labels[type as BackupType] || type;
-	};
-
-	const getBackupTypeColor = (type: BackupType | string) => {
-		const colors: Record<BackupType, string> = {
-			full: 'bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300',
-			database:
-				'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
-			files:
-				'bg-orange-50 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
-		};
-		return colors[type as BackupType] || 'bg-gray-50 text-gray-700';
-	};
-
-	const getStorageIcon = (type: BackupStorageType | string) => {
-		switch (type) {
-			case 'google_drive':
-				return <Cloud className='h-4 w-4' />;
-			case 'local':
-				return <HardDrive className='h-4 w-4' />;
-			default:
-				return <Database className='h-4 w-4' />;
-		}
 	};
 
 	return (
@@ -521,166 +484,16 @@ const Backups: React.FC = () => {
 					<div className='flex items-center justify-center py-16'>
 						<Loader2 className='h-8 w-8 animate-spin text-indigo-600' />
 					</div>
-				) : backups.length > 0 ? (
-					<div className='overflow-x-auto'>
-						<table className='w-full text-left'>
-							<thead className='bg-gray-50 dark:bg-gray-900/50'>
-								<tr>
-									<th className='px-6 py-4 text-xs font-semibold text-gray-500 uppercase'>
-										Status
-									</th>
-									<th className='px-6 py-4 text-xs font-semibold text-gray-500 uppercase'>
-										Name
-									</th>
-									<th className='px-6 py-4 text-xs font-semibold text-gray-500 uppercase'>
-										Project
-									</th>
-									<th className='px-6 py-4 text-xs font-semibold text-gray-500 uppercase'>
-										Type
-									</th>
-									<th className='px-6 py-4 text-xs font-semibold text-gray-500 uppercase'>
-										Size
-									</th>
-									<th className='px-6 py-4 text-xs font-semibold text-gray-500 uppercase'>
-										Storage
-									</th>
-									<th className='px-6 py-4 text-xs font-semibold text-gray-500 uppercase'>
-										Date
-									</th>
-									<th className='px-6 py-4 text-xs font-semibold text-gray-500 uppercase text-right'>
-										Actions
-									</th>
-								</tr>
-							</thead>
-							<tbody className='divide-y divide-gray-100 dark:divide-gray-700'>
-								{backups.map(backup => (
-									<tr
-										key={backup.id}
-										className='hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors'
-									>
-										<td className='px-6 py-4'>
-											<div className='flex items-center gap-2'>
-												{getStatusIcon(backup.status)}
-												<span className='text-xs capitalize text-gray-500'>
-													{backup.status}
-												</span>
-											</div>
-										</td>
-										<td className='px-6 py-4'>
-											<span className='font-medium text-gray-900 dark:text-gray-200 truncate max-w-xs block'>
-												{backup.name}
-											</span>
-											{backup.error_message && (
-												<span className='text-xs text-red-500 truncate block max-w-xs'>
-													{backup.error_message}
-												</span>
-											)}
-										</td>
-										<td className='px-6 py-4 text-sm text-gray-600 dark:text-gray-300'>
-											{backup.project_name || `#${backup.project_id}`}
-										</td>
-										<td className='px-6 py-4'>
-											<span
-												className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getBackupTypeColor(
-													backup.backup_type
-												)}`}
-											>
-												{getBackupTypeLabel(backup.backup_type)}
-											</span>
-										</td>
-										<td className='px-6 py-4 text-sm text-gray-600 dark:text-gray-300'>
-											{formatSize(backup.size_bytes)}
-										</td>
-										<td className='px-6 py-4'>
-											<div className='flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-300'>
-												{getStorageIcon(backup.storage_type)}
-												<span className='capitalize'>
-													{backup.storage_type.replace('_', ' ')}
-												</span>
-											</div>
-										</td>
-										<td className='px-6 py-4 text-sm text-gray-600 dark:text-gray-300'>
-											{formatDate(backup.created_at)}
-										</td>
-										<td className='px-6 py-4 text-right'>
-											<div className='flex justify-end gap-1'>
-												<button
-													className='p-1.5 text-gray-400 hover:text-indigo-600 transition-colors rounded hover:bg-gray-100 dark:hover:bg-gray-700'
-													title='View Logs'
-													onClick={() =>
-														setLogModal({
-															isOpen: true,
-															backupId: backup.id,
-															backupName: backup.name,
-															isRunning:
-																backup.status === 'running' ||
-																backup.status === 'in_progress',
-														})
-													}
-												>
-													<Terminal className='h-4 w-4' />
-												</button>
-												{backup.status === 'completed' && (
-													<>
-														{/* Open/Download Button */}
-														{backup.storage_type === 'google_drive' &&
-															(backup.gdrive_link ||
-																backup.drive_folder_id ||
-																backup.storage_file_id) && (
-																<a
-																	href={
-																		backup.gdrive_link ||
-																		`https://drive.google.com/drive/folders/${
-																			backup.drive_folder_id ||
-																			backup.storage_file_id
-																		}`
-																	}
-																	target='_blank'
-																	rel='noopener noreferrer'
-																	className='p-1.5 text-gray-400 hover:text-indigo-600 transition-colors rounded hover:bg-gray-100 dark:hover:bg-gray-700 block'
-																	title='Open in Google Drive'
-																	onClick={e => e.stopPropagation()}
-																>
-																	<ExternalLink className='h-4 w-4' />
-																</a>
-															)}
-														<button
-															onClick={() => openRestoreModal(backup)}
-															disabled={actionLoading === backup.id}
-															className='p-1.5 text-gray-400 hover:text-green-600 transition-colors rounded hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50'
-															title='Restore'
-														>
-															{actionLoading === backup.id ? (
-																<Loader2 className='h-4 w-4 animate-spin' />
-															) : (
-																<RotateCcw className='h-4 w-4' />
-															)}
-														</button>
-													</>
-												)}
-												<button
-													onClick={() => handleDeleteBackup(backup)}
-													disabled={actionLoading === backup.id}
-													className='p-1.5 text-gray-400 hover:text-red-500 transition-colors rounded hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50'
-													title='Delete'
-												>
-													<Trash2 className='h-4 w-4' />
-												</button>
-											</div>
-										</td>
-									</tr>
-								))}
-							</tbody>
-						</table>
-					</div>
 				) : (
-					<div className='flex flex-col items-center justify-center py-16 text-gray-400'>
-						<FolderOpen className='w-12 h-12 mb-3 text-gray-300' />
-						<p className='text-sm font-medium'>No backups yet</p>
-						<p className='text-xs mt-1'>
-							Create your first backup using the button above
-						</p>
-					</div>
+					<DataTable
+						columns={columns}
+						data={backups}
+						filterValue={tableFilter}
+						onFilterChange={setTableFilter}
+						filterPlaceholder='Filter backups by name, project, status, or storage...'
+						emptyMessage='No backups yet.'
+						initialPageSize={10}
+					/>
 				)}
 			</div>
 

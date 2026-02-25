@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { type ColumnDef } from '@tanstack/react-table';
+import { useParams, useSearchParams } from '@/router/compat';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
+import DataTable from '@/components/ui/DataTable';
 import { dashboardApi } from '@/services/api';
 
 interface MonitorStatusResponse {
@@ -127,7 +129,7 @@ export default function StatusPage() {
 		queryFn: async () => {
 			const response = await dashboardApi.getPublicStatusHistory(
 				numericProjectId,
-				days
+				days,
 			);
 			return response.data as StatusHistoryResponse;
 		},
@@ -141,9 +143,29 @@ export default function StatusPage() {
 	const incidentTotalPages = incidentPagination
 		? Math.max(
 				1,
-				Math.ceil(incidentPagination.total / incidentPagination.page_size)
-		  )
+				Math.ceil(incidentPagination.total / incidentPagination.page_size),
+			)
 		: 1;
+
+	const historyColumns: ColumnDef<StatusHistoryPoint>[] = [
+		{
+			accessorKey: 'date',
+			header: 'Date',
+		},
+		{
+			accessorKey: 'uptime_percentage',
+			header: 'Uptime %',
+			cell: ({ row }) => `${row.original.uptime_percentage.toFixed(2)}%`,
+		},
+		{
+			accessorKey: 'checks_total',
+			header: 'Checks',
+		},
+		{
+			accessorKey: 'checks_up',
+			header: 'Up',
+		},
+	];
 
 	useEffect(() => {
 		const projectName = statusData?.project_name || 'Status Page';
@@ -348,7 +370,7 @@ export default function StatusPage() {
 																className='px-2 py-1 border border-gray-200 rounded'
 																onClick={() =>
 																	setIncidentPage(p =>
-																		Math.min(incidentTotalPages, p + 1)
+																		Math.min(incidentTotalPages, p + 1),
 																	)
 																}
 																disabled={incidentPage >= incidentTotalPages}
@@ -377,30 +399,15 @@ export default function StatusPage() {
 								{historyQuery.isLoading ? (
 									<p className='text-sm text-gray-500'>Loading history...</p>
 								) : historyData?.history?.length ? (
-									<div className='overflow-x-auto'>
-										<table className='min-w-full text-sm text-left'>
-											<thead className='bg-gray-50 text-gray-600'>
-												<tr>
-													<th className='px-4 py-2'>Date</th>
-													<th className='px-4 py-2'>Uptime %</th>
-													<th className='px-4 py-2'>Checks</th>
-													<th className='px-4 py-2'>Up</th>
-												</tr>
-											</thead>
-											<tbody className='divide-y divide-gray-200'>
-												{historyData.history.map(point => (
-													<tr key={point.date}>
-														<td className='px-4 py-2'>{point.date}</td>
-														<td className='px-4 py-2'>
-															{point.uptime_percentage.toFixed(2)}%
-														</td>
-														<td className='px-4 py-2'>{point.checks_total}</td>
-														<td className='px-4 py-2'>{point.checks_up}</td>
-													</tr>
-												))}
-											</tbody>
-										</table>
-									</div>
+									<DataTable
+										columns={historyColumns}
+										data={historyData.history}
+										showFilter={false}
+										filterValue=''
+										onFilterChange={() => {}}
+										emptyMessage='No uptime history available.'
+										initialPageSize={10}
+									/>
 								) : (
 									<p className='text-sm text-gray-500'>
 										No uptime history available.
