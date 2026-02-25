@@ -18,7 +18,7 @@ let useMockApi = false;
 
 const getSafeErrorMessage = (
 	error: any,
-	fallback: string = 'An error occurred'
+	fallback: string = 'An error occurred',
 ): string => {
 	const detail =
 		error?.response?.data?.detail ??
@@ -42,12 +42,12 @@ const getSafeErrorMessage = (
 // Check if backend is available
 const checkBackendAvailability = async () => {
 	try {
-		// Use absolute URL to bypass baseURL since health check is at root /health
+		// Use absolute URL from env config to support prefixed API health endpoints
 		await axios.get(HEALTH_URL);
 		useMockApi = false;
 	} catch (error) {
 		console.error(
-			'Backend not available. Please ensure the API server is running.'
+			'Backend not available. Please ensure the API server is running.',
 		);
 		// Do not fallback to mock API automatically to ensure we debug real connections
 		useMockApi = false;
@@ -156,7 +156,7 @@ api.interceptors.response.use(
 		}
 
 		return Promise.reject(error);
-	}
+	},
 );
 
 export const getApiErrorMessage = getSafeErrorMessage;
@@ -174,7 +174,7 @@ export const dashboardApi = {
 	// Public status page
 	getPublicStatus: async (
 		projectId: number,
-		params?: { page?: number; page_size?: number }
+		params?: { page?: number; page_size?: number },
 	) => {
 		await checkBackendAvailability();
 		return api.get(`/status/${projectId}`, { params });
@@ -241,7 +241,7 @@ export const dashboardApi = {
 			user_email: string;
 			role?: string;
 			send_email?: boolean;
-		}
+		},
 	) => {
 		await checkBackendAvailability();
 		return api.post(`/projects/${projectId}/environments/${envId}/users`, data);
@@ -249,7 +249,7 @@ export const dashboardApi = {
 	magicLogin: async (projectId: number, envId: number, userId: string) => {
 		await checkBackendAvailability();
 		return api.post(
-			`/projects/${projectId}/environments/${envId}/users/${userId}/login`
+			`/projects/${projectId}/environments/${envId}/users/${userId}/login`,
 		);
 	},
 	unlinkEnvironment: async (projectId: number, envId: number) => {
@@ -262,7 +262,7 @@ export const dashboardApi = {
 		projectId: number,
 		envId: number,
 		backupType: string = 'database',
-		storageType: string = 'gdrive'
+		storageType: string = 'gdrive',
 	) => {
 		await checkBackendAvailability();
 		return api.post(
@@ -273,7 +273,7 @@ export const dashboardApi = {
 					backup_type: backupType,
 					storage_type: storageType,
 				},
-			}
+			},
 		);
 	},
 
@@ -304,7 +304,7 @@ export const dashboardApi = {
 	executeProjectAction: async (
 		projectName: string,
 		action: string,
-		data?: any
+		data?: any,
 	) => {
 		await checkBackendAvailability();
 		return useMockApi
@@ -365,7 +365,7 @@ export const dashboardApi = {
 		repoUrl: string,
 		ref: string,
 		environment: string,
-		description?: string
+		description?: string,
 	) =>
 		api.post('/github/deployment/create', {
 			repository_url: repoUrl,
@@ -445,14 +445,14 @@ export const dashboardApi = {
 	updatePlugin: (
 		projectName: string,
 		pluginName: string,
-		environment?: string
+		environment?: string,
 	) =>
 		api.post(
 			`/projects/${projectName}/plugins/${pluginName}/update`,
 			undefined,
 			{
 				params: environment ? { environment } : undefined,
-			}
+			},
 		),
 	updateAllPlugins: (projectName: string, environment?: string) =>
 		api.post(`/projects/${projectName}/plugins/update-all`, undefined, {
@@ -463,7 +463,7 @@ export const dashboardApi = {
 	updateProjectTheme: (
 		projectName: string,
 		themeName: string,
-		environment?: string
+		environment?: string,
 	) =>
 		api.post(`/projects/${projectName}/themes/${themeName}/update`, undefined, {
 			params: environment ? { environment } : undefined,
@@ -548,7 +548,7 @@ export const dashboardApi = {
 			blocked_plugins: string[];
 			pinned_versions: Record<string, string>;
 			notes?: string;
-		}
+		},
 	) => api.put(`/plugin-policies/projects/${projectId}`, payload),
 	getEffectivePluginPolicy: (projectId: number) =>
 		api.get(`/plugin-policies/projects/${projectId}/effective`),
@@ -590,7 +590,11 @@ export const dashboardApi = {
 		api.put(`/invoices/${invoiceId}`, data),
 	recordInvoicePayment: (
 		invoiceId: number,
-		data: { amount: number; payment_method: string; payment_reference?: string }
+		data: {
+			amount: number;
+			payment_method: string;
+			payment_reference?: string;
+		},
 	) => api.post(`/invoices/${invoiceId}/payment`, data),
 	downloadInvoicePdf: (invoiceId: number) =>
 		api.get(`/invoices/${invoiceId}/pdf`, { responseType: 'blob' }),
@@ -650,14 +654,14 @@ export const dashboardApi = {
 			target_server_id: number;
 			target_domain: string;
 			target_environment: string;
-		}
+		},
 	) => api.post(`/projects/${projectId}/clone`, data),
 
 	// Project Backups
 	getProjectBackups: (
 		projectId: number,
 		page: number = 1,
-		pageSize: number = 10
+		pageSize: number = 10,
 	) =>
 		api.get(`/projects/${projectId}/backups`, {
 			params: { page, page_size: pageSize },
@@ -665,7 +669,7 @@ export const dashboardApi = {
 	downloadProjectBackup: (
 		projectId: number,
 		path: string,
-		storage: string = 'local'
+		storage: string = 'local',
 	) =>
 		api.get(`/projects/${projectId}/backups/download`, {
 			params: { path, storage },
@@ -682,7 +686,7 @@ export const dashboardApi = {
 			project_name?: string;
 			environment?: string;
 			create_monitor?: boolean;
-		}
+		},
 	) => api.post(`/servers/${serverId}/import`, data),
 	importAllServerWebsites: (
 		serverId: number,
@@ -690,7 +694,7 @@ export const dashboardApi = {
 			environment?: string;
 			create_monitors?: boolean;
 			wordpress_only?: boolean;
-		}
+		},
 	) => api.post(`/servers/${serverId}/import-all`, null, { params: options }),
 
 	// Server Sync
@@ -750,7 +754,7 @@ export const dashboardApi = {
 			retention_days?: number;
 			status?: string;
 			description?: string;
-		}
+		},
 	) => api.patch(`/schedules/${scheduleId}`, data),
 	deleteSchedule: (scheduleId: number) =>
 		api.delete(`/schedules/${scheduleId}`),
@@ -779,13 +783,13 @@ export const dashboardApi = {
 	}) => api.post('/backups', data),
 	deleteBackup: (
 		backupId: number,
-		params?: { delete_file?: boolean; force?: boolean }
+		params?: { delete_file?: boolean; force?: boolean },
 	) => api.delete(`/backups/${backupId}`, { params }),
 	downloadBackup: (backupId: number) =>
 		api.get(`/backups/${backupId}/download`, { responseType: 'blob' }),
 	restoreBackupFile: (
 		backupId: number,
-		options?: { database?: boolean; files?: boolean }
+		options?: { database?: boolean; files?: boolean },
 	) => api.post(`/backups/${backupId}/restore`, options),
 
 	// Tasks
@@ -851,8 +855,8 @@ export const dashboardApi = {
 			? mockDashboardApi.updateTheme(
 					data.theme,
 					data.primary_color,
-					data.accent_color
-			  )
+					data.accent_color,
+				)
 			: api.put('/dashboard/config/theme', data);
 	},
 	updateLayoutPreferences: async (preferences: any) => {
@@ -886,7 +890,7 @@ export const dashboardApi = {
 			? mockDashboardApi.exportConfiguration(exportPath)
 			: api.post('/dashboard/config/export', null, {
 					params: { export_path: exportPath },
-			  });
+				});
 	},
 	importConfiguration: (importPath: string) =>
 		api.post('/dashboard/config/import', null, {
@@ -946,7 +950,7 @@ export const dashboardApi = {
 			name?: string;
 			config?: Record<string, any>;
 			is_active?: boolean;
-		}
+		},
 	) => api.put(`/notifications/${id}`, data),
 	deleteNotificationChannel: (id: number) => api.delete(`/notifications/${id}`),
 	testNotificationChannel: (data: {
