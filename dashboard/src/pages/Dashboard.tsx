@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from '@/router/compat';
 import { useQuery } from '@tanstack/react-query';
 import {
 	FolderKanban,
@@ -100,13 +100,13 @@ const Dashboard: React.FC = () => {
 	const recentProjects = projectsData
 		.sort(
 			(a: any, b: any) =>
-				new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+				new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
 		)
 		.slice(0, 5);
 
 	// Get projects with issues
 	const projectsWithIssues = projectsData.filter(
-		(project: any) => project.health_score < 80 || project.status === 'error'
+		(project: any) => project.health_score < 80 || project.status === 'error',
 	);
 
 	const statCards = [
@@ -127,7 +127,7 @@ const Dashboard: React.FC = () => {
 		{
 			title: 'Total Clients',
 			value: new Set(
-				projectsData.map((p: any) => p.client?.name).filter(Boolean)
+				projectsData.map((p: any) => p.client?.name).filter(Boolean),
 			).size,
 			icon: Users,
 			color: 'text-purple-600',

@@ -1,5 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { billingService } from '../services/billing';
+import {
+	billingService,
+	type CreateHostingPackagePayload,
+	type HostingPackage,
+	type UpdateHostingPackagePayload,
+} from '../services/billing';
 import { dashboardApi } from '../services/api';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -17,26 +22,25 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-interface Package {
-	id: number;
-	name: string;
-	description?: string;
-	disk_quota_mb: number;
-	bandwidth_mb: number;
-	db_limit: number;
-	site_limit: number;
-	price_monthly: number;
-	price_yearly: number;
-	is_active: boolean;
-}
+type PackageEditorPayload =
+	| (CreateHostingPackagePayload & { id?: number })
+	| (UpdateHostingPackagePayload & { id?: number });
+
+const toSlug = (name: string) =>
+	name
+		.toLowerCase()
+		.trim()
+		.replace(/[^a-z0-9]+/g, '-')
+		.replace(/^-+|-+$/g, '')
+		.slice(0, 100);
 
 const Packages: React.FC = () => {
-	const [packages, setPackages] = useState<Package[]>([]);
+	const [packages, setPackages] = useState<HostingPackage[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [isEditorOpen, setIsEditorOpen] = useState(false);
-	const [editingPackage, setEditingPackage] = useState<Package | undefined>(
-		undefined
-	);
+	const [editingPackage, setEditingPackage] = useState<
+		HostingPackage | undefined
+	>(undefined);
 	const [clients, setClients] = useState<any[]>([]);
 	const [projects, setProjects] = useState<any[]>([]);
 	const [purchaseForm, setPurchaseForm] = useState({
@@ -78,7 +82,7 @@ const Packages: React.FC = () => {
 		fetchClientsAndProjects();
 	}, []);
 
-	const handleEdit = (pkg: Package) => {
+	const handleEdit = (pkg: HostingPackage) => {
 		setEditingPackage(pkg);
 		setIsEditorOpen(true);
 	};
@@ -88,12 +92,49 @@ const Packages: React.FC = () => {
 		setIsEditorOpen(true);
 	};
 
-	const handleSave = async (data: any) => {
-		// In a real app, call API to save/create
-		console.log('Saving package:', data);
-		toast.success('Package saved (mock)');
-		setIsEditorOpen(false);
-		fetchPackages(); // Refresh list
+	const handleSave = async (data: PackageEditorPayload) => {
+		try {
+			if (typeof data.id === 'number') {
+				const { id, ...updatePayload } = data;
+				await billingService.updatePackage(id, updatePayload);
+				toast.success('Package updated');
+			} else {
+				const name = typeof data.name === 'string' ? data.name.trim() : '';
+				const slug = toSlug(name);
+				if (!slug) {
+					toast.error('Package name must contain letters or numbers');
+					return;
+				}
+				const createPayload: CreateHostingPackagePayload = {
+					name,
+					slug,
+					description: data.description,
+					disk_space_gb: data.disk_space_gb,
+					bandwidth_gb: data.bandwidth_gb,
+					domains_limit: data.domains_limit,
+					databases_limit: data.databases_limit,
+					email_accounts_limit: data.email_accounts_limit,
+					monthly_price: data.monthly_price,
+					quarterly_price: data.quarterly_price,
+					yearly_price: data.yearly_price,
+					biennial_price: data.biennial_price,
+					setup_fee: data.setup_fee,
+					currency: data.currency,
+					hosting_yearly_price: data.hosting_yearly_price,
+					support_monthly_price: data.support_monthly_price,
+					features: data.features,
+					is_featured: data.is_featured,
+				};
+				await billingService.createPackage({
+					...createPayload,
+				});
+				toast.success('Package created');
+			}
+			setIsEditorOpen(false);
+			fetchPackages();
+		} catch {
+			toast.error('Failed to save package');
+		}
 	};
 
 	const handleManualPurchase = async () => {
@@ -288,31 +329,33 @@ const Packages: React.FC = () => {
 								<div className='mb-6'>
 									<div className='flex items-baseline'>
 										<span className='text-3xl font-extrabold text-gray-900'>
-											${pkg.price_monthly}
+											${pkg.monthly_price}
 										</span>
 										<span className='text-gray-500 ml-1'>/mo</span>
 									</div>
 									<div className='text-sm text-gray-500 mt-1'>
-										or ${pkg.price_yearly}/yr
+										or ${pkg.yearly_price}/yr
 									</div>
 								</div>
 
 								<div className='space-y-3 mb-6'>
 									<div className='flex items-center text-sm text-gray-600'>
 										<HardDrive className='w-4 h-4 mr-3 text-gray-400' />
-										{pkg.disk_quota_mb / 1024} GB Disk Space
+										{pkg.disk_space_gb} GB Disk Space
 									</div>
 									<div className='flex items-center text-sm text-gray-600'>
 										<Globe className='w-4 h-4 mr-3 text-gray-400' />
-										{pkg.site_limit} Website{pkg.site_limit > 1 ? 's' : ''}
+										{pkg.domains_limit} Domain
+										{pkg.domains_limit !== 1 ? 's' : ''}
 									</div>
 									<div className='flex items-center text-sm text-gray-600'>
 										<Database className='w-4 h-4 mr-3 text-gray-400' />
-										{pkg.db_limit} Database{pkg.db_limit > 1 ? 's' : ''}
+										{pkg.databases_limit} Database
+										{pkg.databases_limit !== 1 ? 's' : ''}
 									</div>
 									<div className='flex items-center text-sm text-gray-600'>
 										<Server className='w-4 h-4 mr-3 text-gray-400' />
-										{pkg.bandwidth_mb / 1024} GB Bandwidth
+										{pkg.bandwidth_gb} GB Bandwidth
 									</div>
 								</div>
 

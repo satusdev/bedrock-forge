@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams } from '@/router/compat';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import Card from '@/components/ui/Card';
@@ -294,8 +294,8 @@ const Migrations: React.FC = () => {
 												taskStatus?.status === 'completed'
 													? 'text-green-600'
 													: taskStatus?.status === 'failed'
-													? 'text-red-600'
-													: 'text-blue-600'
+														? 'text-red-600'
+														: 'text-blue-600'
 											}`}
 										>
 											{taskStatus?.status || 'pending'}

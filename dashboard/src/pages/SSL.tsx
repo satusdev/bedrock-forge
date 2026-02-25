@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { type ColumnDef } from '@tanstack/react-table';
 import { billingService } from '../services/billing';
 import Card from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
+import DataTable from '../components/ui/DataTable';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import SummaryCard from '../components/ui/SummaryCard';
 import {
@@ -87,13 +89,13 @@ const SSL: React.FC = () => {
 
 	// Stats
 	const validCount = certificates.filter(
-		(c: SSLCertificate) => c.days_until_expiry > 14
+		(c: SSLCertificate) => c.days_until_expiry > 14,
 	).length;
 	const expiringCount = certificates.filter(
-		(c: SSLCertificate) => c.days_until_expiry > 0 && c.days_until_expiry <= 14
+		(c: SSLCertificate) => c.days_until_expiry > 0 && c.days_until_expiry <= 14,
 	).length;
 	const expiredCount = certificates.filter(
-		(c: SSLCertificate) => c.days_until_expiry <= 0
+		(c: SSLCertificate) => c.days_until_expiry <= 0,
 	).length;
 
 	const getStatusBadge = (cert: SSLCertificate) => {
@@ -105,6 +107,89 @@ const SSL: React.FC = () => {
 		}
 		return <Badge variant='success'>Valid</Badge>;
 	};
+
+	const columns = useMemo<ColumnDef<SSLCertificate>[]>(
+		() => [
+			{
+				id: 'domain',
+				header: 'Domain',
+				cell: ({ row }) => (
+					<div className='text-sm font-medium text-gray-900 dark:text-white'>
+						{row.original.common_name}
+					</div>
+				),
+			},
+			{
+				id: 'status',
+				header: 'Status',
+				cell: ({ row }) => getStatusBadge(row.original),
+			},
+			{
+				id: 'provider',
+				header: 'Provider',
+				cell: ({ row }) => (
+					<span className='text-sm text-gray-600 dark:text-gray-300 capitalize'>
+						{row.original.provider?.replace('_', ' ') || 'Unknown'}
+					</span>
+				),
+			},
+			{
+				id: 'expires',
+				header: 'Expires',
+				cell: ({ row }) => (
+					<div>
+						<div
+							className={`text-sm ${
+								row.original.days_until_expiry <= 14
+									? 'text-red-600 font-medium'
+									: 'text-gray-900 dark:text-white'
+							}`}
+						>
+							{row.original.expiry_date}
+						</div>
+						<div className='text-xs text-gray-500 dark:text-gray-400'>
+							{row.original.days_until_expiry > 0
+								? `${row.original.days_until_expiry} days left`
+								: `${Math.abs(row.original.days_until_expiry)} days ago`}
+						</div>
+					</div>
+				),
+			},
+			{
+				id: 'auto-renew',
+				header: 'Auto-Renew',
+				cell: ({ row }) => (
+					<Badge variant={row.original.auto_renew ? 'success' : 'default'}>
+						{row.original.auto_renew ? 'Yes' : 'No'}
+					</Badge>
+				),
+			},
+			{
+				id: 'actions',
+				header: 'Actions',
+				cell: ({ row }) => (
+					<div className='flex justify-end space-x-2'>
+						<Button
+							size='sm'
+							variant='secondary'
+							onClick={() => setEditingCert(row.original)}
+						>
+							<Edit2 className='w-4 h-4' />
+						</Button>
+						<Button
+							size='sm'
+							variant='secondary'
+							className='text-red-600 hover:text-red-700'
+							onClick={() => handleDelete(row.original)}
+						>
+							<Trash2 className='w-4 h-4' />
+						</Button>
+					</div>
+				),
+			},
+		],
+		[],
+	);
 
 	if (isLoading) {
 		return (
@@ -187,107 +272,16 @@ const SSL: React.FC = () => {
 
 			{/* Certificates Table */}
 			<Card>
-				<div className='overflow-x-auto'>
-					<table className='min-w-full divide-y divide-gray-200 dark:divide-gray-700'>
-						<thead className='bg-gray-50 dark:bg-gray-800'>
-							<tr>
-								<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
-									Domain
-								</th>
-								<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
-									Status
-								</th>
-								<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
-									Provider
-								</th>
-								<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
-									Expires
-								</th>
-								<th className='px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
-									Auto-Renew
-								</th>
-								<th className='px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
-									Actions
-								</th>
-							</tr>
-						</thead>
-						<tbody className='bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700'>
-							{certificates.length === 0 ? (
-								<tr>
-									<td
-										colSpan={6}
-										className='px-6 py-16 text-center text-gray-400'
-									>
-										<Shield className='w-12 h-12 mx-auto mb-3 text-gray-300 dark:text-gray-600' />
-										<p className='text-sm font-medium'>
-											No SSL certificates tracked
-										</p>
-										<p className='text-xs mt-1'>
-											Add your first certificate using the button above
-										</p>
-									</td>
-								</tr>
-							) : (
-								certificates.map((cert: SSLCertificate) => (
-									<tr
-										key={cert.id}
-										className='hover:bg-gray-50 dark:hover:bg-gray-800'
-									>
-										<td className='px-6 py-4'>
-											<div className='text-sm font-medium text-gray-900 dark:text-white'>
-												{cert.common_name}
-											</div>
-										</td>
-										<td className='px-6 py-4'>{getStatusBadge(cert)}</td>
-										<td className='px-6 py-4 text-sm text-gray-600 dark:text-gray-300 capitalize'>
-											{cert.provider?.replace('_', ' ') || 'Unknown'}
-										</td>
-										<td className='px-6 py-4'>
-											<div
-												className={`text-sm ${
-													cert.days_until_expiry <= 14
-														? 'text-red-600 font-medium'
-														: 'text-gray-900 dark:text-white'
-												}`}
-											>
-												{cert.expiry_date}
-											</div>
-											<div className='text-xs text-gray-500 dark:text-gray-400'>
-												{cert.days_until_expiry > 0
-													? `${cert.days_until_expiry} days left`
-													: `${Math.abs(cert.days_until_expiry)} days ago`}
-											</div>
-										</td>
-										<td className='px-6 py-4'>
-											<Badge variant={cert.auto_renew ? 'success' : 'default'}>
-												{cert.auto_renew ? 'Yes' : 'No'}
-											</Badge>
-										</td>
-										<td className='px-6 py-4 text-right'>
-											<div className='flex justify-end space-x-2'>
-												<Button
-													size='sm'
-													variant='secondary'
-													onClick={() => setEditingCert(cert)}
-												>
-													<Edit2 className='w-4 h-4' />
-												</Button>
-												<Button
-													size='sm'
-													variant='secondary'
-													className='text-red-600 hover:text-red-700'
-													onClick={() => handleDelete(cert)}
-												>
-													<Trash2 className='w-4 h-4' />
-												</Button>
-											</div>
-										</td>
-									</tr>
-								))
-							)}
-						</tbody>
-					</table>
-				</div>
+				<DataTable
+					columns={columns}
+					data={certificates}
+					showFilter={false}
+					filterValue=''
+					onFilterChange={() => {}}
+					filterPlaceholder=''
+					emptyMessage='No SSL certificates tracked.'
+					initialPageSize={10}
+				/>
 			</Card>
 
 			{/* Add/Edit Modal */}
