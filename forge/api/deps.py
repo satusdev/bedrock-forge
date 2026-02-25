@@ -5,11 +5,13 @@ This module contains shared state, utilities, and dependency injection
 functions used across multiple route modules.
 """
 from typing import Dict, Any, Annotated
+import os
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+import requests
 
 from ..db import get_db, User
 from ..core.config import settings
@@ -32,6 +34,10 @@ oauth2_scheme = OAuth2PasswordBearer(
 
 def get_task_status(task_id: str) -> Dict[str, Any]:
     """Get the status of a background task from Redis."""
+    nest_payload = _get_task_status_from_nest(task_id)
+    if nest_payload:
+        return nest_payload
+
     try:
         redis = get_redis_client()
         data = redis.get(f"task:{task_id}")
@@ -50,18 +56,74 @@ def get_task_status(task_id: str) -> Dict[str, Any]:
 def update_task_status(task_id: str, status: str, message: str = "", 
                        progress: int = 0, result: Any = None) -> None:
     """Update the status of a background task in Redis."""
+    data = {
+        "status": status,
+        "message": message,
+        "progress": progress,
+        "result": result
+    }
+
+    if _update_task_status_in_nest(task_id, data):
+        return
+
     try:
         redis = get_redis_client()
-        data = {
-            "status": status,
-            "message": message,
-            "progress": progress,
-            "result": result
-        }
         # Store with 24h expiry
         redis.setex(f"task:{task_id}", 86400, json.dumps(data))
     except Exception as e:
         print(f"Error updating task status in Redis: {e}")
+
+
+def _get_nest_task_status_url(task_id: str) -> str | None:
+    base_url = os.getenv("NEST_API_URL")
+    if not base_url:
+        return None
+
+    api_prefix = os.getenv("NEST_API_PREFIX", "/api/v1").strip()
+    if not api_prefix.startswith("/"):
+        api_prefix = f"/{api_prefix}"
+    api_prefix = api_prefix.rstrip("/")
+
+    return f"{base_url.rstrip('/')}{api_prefix}/internal/tasks/{task_id}"
+
+
+def _task_status_headers() -> Dict[str, str]:
+    token = os.getenv("NEST_WORKER_TOKEN", "").strip()
+    if not token:
+        return {}
+    return {"x-worker-token": token}
+
+
+def _get_task_status_from_nest(task_id: str) -> Dict[str, Any] | None:
+    url = _get_nest_task_status_url(task_id)
+    if not url:
+        return None
+
+    try:
+        response = requests.get(url, headers=_task_status_headers(), timeout=2.5)
+        if response.ok:
+            return response.json()
+    except Exception:
+        return None
+
+    return None
+
+
+def _update_task_status_in_nest(task_id: str, payload: Dict[str, Any]) -> bool:
+    url = _get_nest_task_status_url(task_id)
+    if not url:
+        return False
+
+    try:
+        response = requests.put(
+            url,
+            headers=_task_status_headers(),
+            json=payload,
+            timeout=2.5,
+        )
+        return response.ok
+    except Exception:
+        return False
 
 
 async def get_current_user(

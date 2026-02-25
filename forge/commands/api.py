@@ -24,28 +24,21 @@ def serve(
     from ..utils.logging import logger
 
     try:
+        typer.echo("ℹ️ API runtime is NestJS; use Docker Compose services.")
         if daemon:
             # Run as daemon (background process)
             cmd = [
-                sys.executable, str(Path(__file__).parent.parent / "api_server.py"),
-                "--host", host,
-                "--port", str(port),
-                "--log-level", log_level
+                "docker", "compose", "up", "-d", "api"
             ]
             process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            logger.info(f"API server started in background (PID: {process.pid})")
+            logger.info(f"API service start command launched (PID: {process.pid})")
             typer.echo(f"✅ API server running on http://{host}:{port}")
-            typer.echo(f"📚 API docs: http://{host}:{port}/docs")
+            typer.echo(f"📚 API docs: http://{host}:{port}/api/v1/docs")
         else:
-            # Run in foreground
-            typer.echo(f"🚀 Starting API server on http://{host}:{port}")
-            typer.echo(f"📚 API documentation: http://{host}:{port}/docs")
-            typer.echo("Press Ctrl+C to stop the server")
-
-            # Import and run the server
-            from ..api.app import app
-            import uvicorn
-            uvicorn.run(app, host=host, port=port, reload=reload, log_level=log_level)
+            typer.echo("🚀 Starting Nest API service with Docker Compose")
+            typer.echo("Press Ctrl+C to stop attached logs")
+            subprocess.run(["docker", "compose", "up", "-d", "api"], check=True)
+            subprocess.run(["docker", "compose", "logs", "-f", "api"], check=True)
 
     except KeyboardInterrupt:
         typer.echo("\n👋 API server stopped")
@@ -60,7 +53,7 @@ def status():
     import requests
 
     try:
-        response = requests.get("http://127.0.0.1:8000/health", timeout=5)
+        response = requests.get("http://127.0.0.1:8000/api/v1/health", timeout=5)
         if response.status_code == 200:
             data = response.json()
             typer.echo(f"✅ API server is healthy")
@@ -79,11 +72,11 @@ def docs():
     import webbrowser
 
     try:
-        webbrowser.open("http://127.0.0.1:8000/docs")
+        webbrowser.open("http://127.0.0.1:8000/api/v1/docs")
         typer.echo("📖 Opening API documentation in browser...")
     except Exception as e:
         typer.echo(f"❌ Failed to open browser: {e}")
-        typer.echo("📖 API docs are available at: http://127.0.0.1:8000/docs")
+        typer.echo("📖 API docs are available at: http://127.0.0.1:8000/api/v1/docs")
 
 if __name__ == "__main__":
     app()

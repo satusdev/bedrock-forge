@@ -33,11 +33,7 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("Database initialized")
     
-    # Log Celery Beat info
-    logger.info(
-        "Backup schedules are processed by scheduled_backup_tasks.process_due_schedules. "
-        "Start Celery Beat with: celery -A forge.api.celery_worker beat --loglevel=info"
-    )
+    logger.info("Legacy FastAPI runtime initialized")
     
     yield
     # Shutdown
