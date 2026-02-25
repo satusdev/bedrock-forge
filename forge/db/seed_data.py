@@ -71,7 +71,7 @@ def is_demo_mode() -> bool:
 DEMO_USERS = [
     {
         "email": "wd@lamah.com",
-        "password": "demo123456",
+        "password": "5qktKR3J3P9zbQ",
         "full_name": "WD Administrator",
         "is_superuser": True,
         "is_active": True,
@@ -118,109 +118,75 @@ DEMO_ROLES = [
 DEMO_SERVERS = [
     {
         "name": "LamaHost Production",
-        "hostname": "cp.lamahost.ly",
+        "hostname": "78.46.41.81y",
         "ip_address": "78.46.41.81",
         "provider": "hetzner",
         "ssh_user": "root",
         "ssh_port": 22,
         "ssh_key_path": "~/.ssh/id_rsa",
         "panel_type": "cyberpanel",
-        "panel_url": "https://cp.lamahost.ly:8090",
+        "panel_url": "https://cp.lamahost.ly",
         "status": "online",
     },
     {
         "name": "Lamah Production",
-        "hostname": "cp.lamah.ly",
+        "hostname": "46.224.201.233",
         "ip_address": "46.224.201.233",
         "provider": "hetzner",
         "ssh_user": "root",
         "ssh_port": 22,
         "ssh_key_path": "~/.ssh/id_rsa",
         "panel_type": "cyberpanel",
-        "panel_url": "https://cp.lamah.ly:8090",
+        "panel_url": "https://cp.lamah.ly",
         "status": "online",
     },
     {
         "name": "Staging Server",
-        "hostname": "cp.staging.ly",
+        "hostname": "138.199.151.80",
         "ip_address": "138.199.151.80",
         "provider": "hetzner",
         "ssh_user": "root",
         "ssh_port": 22,
         "ssh_key_path": "~/.ssh/id_rsa",
         "panel_type": "cyberpanel",
-        "panel_url": "https://cp.staging.ly:8090",
+        "panel_url": "https://cp.staging.ly",
         "status": "online",
     },
 ]
 
 DEMO_PROJECTS = [
-    # {
-    #     "name": "Demo Blog",
-    #     "slug": "demo-blog",
-    #     "description": "A demo WordPress blog project",
-    #     "project_type": "wordpress",
-    #     "status": "active",
-    #     "directory": "/var/www/demo-blog",
-    #     "environments": {
-    #         "local": {
-    #             "url": "http://demo-blog.ddev.site",
-    #             "type": "local",
-    #         },
-    #         "staging": {
-    #             "url": "https://staging.demo-blog.example.com",
-    #             "type": "staging",
-    #         },
-    #         "production": {
-    #             "url": "https://demo-blog.example.com",
-    #             "type": "production",
-    #         }
-    #     }
-    # },
+
 ]
 
 DEMO_MONITORS = [
     {
         "name": "LamaHost Panel",
-        "url": "https://cp.lamahost.ly:8090",
+        "url": "https://cp.lamahost.ly",
         "monitor_type": "uptime",
         "interval_seconds": 300,
         "timeout_seconds": 30,
     },
     {
         "name": "Lamah Production Panel",
-        "url": "https://cp.lamah.ly:8090",
+        "url": "https://cp.lamah.ly",
         "monitor_type": "uptime",
         "interval_seconds": 300,
         "timeout_seconds": 30,
     },
     {
         "name": "Staging Panel",
-        "url": "https://cp.staging.ly:8090",
+        "url": "https://cp.staging.ly",
         "monitor_type": "uptime",
         "interval_seconds": 300,
         "timeout_seconds": 30,
-    },
-    {
-        "name": "Staging Panel",
-        "url": "https://cp.staging.ly:8090",
-        "monitor_type": "uptime",
-        "interval_seconds": 300,
-        "timeout_seconds": 30,
-    },
+    }
 ]
 
 DEMO_CLIENTS = [
     {
-        "name": "Lamah Internal",
-        "email": "internal@lamah.com",
+        "name": "Lamah",
+        "email": "wd@lamah.com",
         "notes": "Internal deployments and self-owned projects.",
-        "status": "active",
-    },
-    {
-        "name": "Acme Corp",
-        "email": "contact@acme.com", 
-        "notes": "Demo client.",
         "status": "active",
     }
 ]
@@ -300,6 +266,15 @@ def get_seed_monitors() -> List[Dict[str, Any]]:
         return DEMO_MONITORS
     
     # In real mode, don't seed any monitors
+    return []
+
+
+def get_seed_clients() -> List[Dict[str, Any]]:
+    """Get clients for seeding based on demo mode"""
+    if is_demo_mode():
+        return DEMO_CLIENTS
+
+    # In real mode, don't seed any clients
     return []
 
 
