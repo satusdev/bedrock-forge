@@ -1,6 +1,7 @@
 # Quick Start Guide
 
-Get started with Bedrock Forge in 5 minutes. This guide will walk you through installation, setup, and your first Bedrock WordPress project.
+Get started with Bedrock Forge in 5 minutes. This guide will walk you through
+installation, setup, and your first Bedrock WordPress project.
 
 ## 📋 Table of Contents
 
@@ -14,12 +15,14 @@ Get started with Bedrock Forge in 5 minutes. This guide will walk you through in
 
 ## 🐳 Docker Quick Start (Alternative)
 
-**Prefer containers?** Skip the manual installation and run everything with Docker:
+**Prefer containers?** Skip the manual installation and run everything with
+Docker:
 
 ```bash
 git clone https://github.com/bedrock-forge/bedrock-forge.git
-cd bedrock-forge/deploy
-docker compose -f docker-compose.dev.yml up -d
+cd bedrock-forge
+cp .env.local.example .env
+docker compose up -d
 ```
 
 Access the Dashboard at http://localhost:3000 and API at http://localhost:8000.
@@ -33,18 +36,21 @@ Access the Dashboard at http://localhost:3000 and API at http://localhost:8000.
 ### Required Software
 
 1. **Python 3.9+**
+
    ```bash
    # Check your Python version
    python3 --version
    ```
 
 2. **Git**
+
    ```bash
    # Check if Git is installed
    git --version
    ```
 
 3. **DDEV** (for local development)
+
    ```bash
    # Install DDEV (macOS/Linux)
    curl -L https://ddev.com/install.sh | bash
@@ -72,7 +78,7 @@ cd bedrock-forge
 
 ```bash
 # Install Python dependencies
-pip install -r forge/requirements.txt
+pip install -r requirements.txt
 
 # Verify installation
 python3 -m forge --help
@@ -159,7 +165,8 @@ open https://my-awesome-site.ddev.site
 
 **Plugin Preset Examples:**
 
-If you created a project with a plugin preset, your site will come with pre-configured plugins:
+If you created a project with a plugin preset, your site will come with
+pre-configured plugins:
 
 ```bash
 # Blog project example
@@ -177,6 +184,7 @@ Installing blog plugin preset...
 ```
 
 **Available Plugin Presets:**
+
 - **blog** - Content sites with SEO and engagement plugins
 - **business** - Professional sites with forms and marketing
 - **ecommerce** - Online stores with WooCommerce and payments
@@ -352,13 +360,18 @@ python3 -m forge local create-project speed-demo --plugin-preset=performance
 
 ### Complete Site Tutorials
 
-Ready to build specific types of websites? Check out our comprehensive tutorials:
+Ready to build specific types of websites? Check out our comprehensive
+tutorials:
 
-- **[Blog Site Tutorial](workflows/BLOG_SITE_TUTORIAL.md)** - Create a professional blog
-- **[E-commerce Site Tutorial](workflows/ECOMMERCE_SITE_TUTORIAL.md)** - Build an online store
-- **[Business Site Tutorial](workflows/BUSINESS_SITE_TUTORIAL.md)** - Launch a business website
+- **[Blog Site Tutorial](workflows/BLOG_SITE_TUTORIAL.md)** - Create a
+  professional blog
+- **[E-commerce Site Tutorial](workflows/ECOMMERCE_SITE_TUTORIAL.md)** - Build
+  an online store
+- **[Business Site Tutorial](workflows/BUSINESS_SITE_TUTORIAL.md)** - Launch a
+  business website
 
 Each tutorial includes:
+
 - Step-by-step instructions
 - Real command examples with expected outputs
 - Best practices and optimization tips
@@ -367,32 +380,37 @@ Each tutorial includes:
 ### Join the Community
 
 - 📖 **Documentation**: [Complete docs](IMPLEMENTATION_STATUS.md)
-- 🐛 **Issues**: [GitHub Issues](https://github.com/your-org/bedrock-forge/issues)
-- 💬 **Discussions**: [GitHub Discussions](https://github.com/your-org/bedrock-forge/discussions)
+- 🐛 **Issues**:
+  [GitHub Issues](https://github.com/your-org/bedrock-forge/issues)
+- 💬 **Discussions**:
+  [GitHub Discussions](https://github.com/your-org/bedrock-forge/discussions)
 - 🎮 **Discord**: [Join our Discord](https://discord.gg/bedrock-forge)
 
 ## ❓ Need Help?
 
 ### Quick Troubleshooting
 
-| Issue | Solution |
-|-------|----------|
-| `ddev start` fails | Check Docker is running: `docker --version` |
-| Composer timeouts | Increase timeout: `export COMPOSER_PROCESS_TIMEOUT=600` |
-| Permission denied | Check file permissions: `chmod +x forge/scripts/*` |
-| Module not found | Reinstall dependencies: `pip install -r forge/requirements.txt` |
+| Issue              | Solution                                                  |
+| ------------------ | --------------------------------------------------------- |
+| `ddev start` fails | Check Docker is running: `docker --version`               |
+| Composer timeouts  | Increase timeout: `export COMPOSER_PROCESS_TIMEOUT=600`   |
+| Permission denied  | Check file permissions: `chmod +x forge/scripts/*`        |
+| Module not found   | Reinstall dependencies: `pip install -r requirements.txt` |
 
 ### Get Support
 
-- 📚 **[Troubleshooting Guide](TROUBLESHOOTING.md)** - Common issues and solutions
+- 📚 **[Troubleshooting Guide](TROUBLESHOOTING.md)** - Common issues and
+  solutions
 - 💬 **Community Support** - Ask in GitHub Discussions
-- 🎯 **Professional Support** - [Enterprise Support](https://bedrock-forge.com/enterprise)
+- 🎯 **Professional Support** -
+  [Enterprise Support](https://bedrock-forge.com/enterprise)
 
 ---
 
 ## 🎉 Congratulations!
 
 You've successfully:
+
 - ✅ Installed Bedrock Forge
 - ✅ Created your first Bedrock project
 - ✅ Set up local development with DDEV
@@ -401,4 +419,5 @@ You've successfully:
 
 **You're ready to streamline your WordPress workflow!** 🚀
 
-For more advanced topics, check out our [complete documentation](IMPLEMENTATION_STATUS.md).
+For more advanced topics, check out our
+[complete documentation](IMPLEMENTATION_STATUS.md).

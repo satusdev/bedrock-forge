@@ -1,6 +1,7 @@
 # Development Guide
 
-Complete guide for contributing to Bedrock Forge, including development setup, coding standards, and contribution workflow.
+Complete guide for contributing to Bedrock Forge, including development setup,
+coding standards, and contribution workflow.
 
 ## 📋 Table of Contents
 
@@ -18,11 +19,15 @@ Complete guide for contributing to Bedrock Forge, including development setup, c
 
 ## 🎯 Overview
 
-Bedrock Forge is an open-source project that welcomes contributions from the community. This guide covers everything you need to know to start contributing effectively.
+Bedrock Forge is an open-source project that welcomes contributions from the
+community. This guide covers everything you need to know to start contributing
+effectively.
 
 ### Our Mission
 
-Create a unified, reliable, and user-friendly CLI tool for WordPress development workflows that simplifies the complexity of modern WordPress development and deployment.
+Create a unified, reliable, and user-friendly CLI tool for WordPress development
+workflows that simplifies the complexity of modern WordPress development and
+deployment.
 
 ### Core Values
 
@@ -60,8 +65,8 @@ python3 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # 5. Install dependencies
-pip install -r forge/requirements.txt
-pip install -r forge/requirements-dev.txt
+pip install -r requirements.txt
+pip install -e ".[dev]"
 
 # 6. Install in development mode
 pip install -e .
@@ -97,16 +102,16 @@ Install recommended extensions:
 ```json
 // .vscode/extensions.json
 {
-  "recommendations": [
-    "ms-python.python",
-    "ms-python.flake8",
-    "ms-python.black-formatter",
-    "ms-python.isort",
-    "ms-python.mypy-type-checker",
-    "bradlc.vscode-tailwindcss",
-    "ms-vscode.vscode-json",
-    "redhat.vscode-yaml"
-  ]
+	"recommendations": [
+		"ms-python.python",
+		"ms-python.flake8",
+		"ms-python.black-formatter",
+		"ms-python.isort",
+		"ms-python.mypy-type-checker",
+		"bradlc.vscode-tailwindcss",
+		"ms-vscode.vscode-json",
+		"redhat.vscode-yaml"
+	]
 }
 ```
 
@@ -115,16 +120,16 @@ Configure VS Code settings:
 ```json
 // .vscode/settings.json
 {
-  "python.defaultInterpreterPath": "./venv/bin/python",
-  "python.formatting.provider": "black",
-  "python.linting.enabled": true,
-  "python.linting.flake8Enabled": true,
-  "python.linting.mypyEnabled": true,
-  "python.sortImports.args": ["--profile", "black"],
-  "editor.formatOnSave": true,
-  "editor.codeActionsOnSave": {
-    "source.organizeImports": true
-  }
+	"python.defaultInterpreterPath": "./venv/bin/python",
+	"python.formatting.provider": "black",
+	"python.linting.enabled": true,
+	"python.linting.flake8Enabled": true,
+	"python.linting.mypyEnabled": true,
+	"python.sortImports.args": ["--profile", "black"],
+	"editor.formatOnSave": true,
+	"editor.codeActionsOnSave": {
+		"source.organizeImports": true
+	}
 }
 ```
 
@@ -614,7 +619,8 @@ git push origin feature/your-feature-name
 
 ### Commit Message Convention
 
-We follow [Conventional Commits](https://www.conventionalcommits.org/) specification:
+We follow [Conventional Commits](https://www.conventionalcommits.org/)
+specification:
 
 ```
 <type>[optional scope]: <description>
@@ -625,6 +631,7 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/) specifica
 ```
 
 **Types:**
+
 - `feat`: New feature
 - `fix`: Bug fix
 - `docs`: Documentation changes
@@ -634,6 +641,7 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/) specifica
 - `chore`: Maintenance tasks
 
 **Examples:**
+
 ```
 feat(deployment): add blue-green deployment strategy
 
@@ -837,23 +845,23 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-    - name: Set up Python
-      uses: actions/setup-python@v3
-      with:
-        python-version: '3.10'
+      - name: Set up Python
+        uses: actions/setup-python@v3
+        with:
+          python-version: '3.10'
 
-    - name: Build package
-      run: |
-        python -m pip install --upgrade pip
-        pip install build
-        python -m build
+      - name: Build package
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+          python -m build
 
-    - name: Publish to PyPI
-      uses: pypa/gh-action-pypi-publish@release/v1
-      with:
-        password: ${{ secrets.PYPI_API_TOKEN }}
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
 ```
 
 ## 🐛 Debugging
@@ -1073,6 +1081,7 @@ pytest forge/tests/ -m security
 ### Recognition
 
 Contributors are recognized in:
+
 - README.md contributors section
 - Release notes
 - Annual contributor highlights
@@ -1080,6 +1089,7 @@ Contributors are recognized in:
 Thank you for contributing to Bedrock Forge! 🚀
 
 For more information:
+
 - [Testing Guide](TESTING.md)
 - [API Documentation](API.md)
 - [Architecture Guide](ARCHITECTURE.md)
