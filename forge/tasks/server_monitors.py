@@ -8,13 +8,60 @@ from typing import Optional
 import asyncio
 import subprocess
 import socket
+import os
+import requests
 
 from celery import shared_task
 
-from ..db import AsyncSessionLocal, Server
-from ..db.models.server import ServerStatus
 from ..utils.logging import logger
 from ..utils.asyncio_utils import run_async
+
+
+def _nest_api_base() -> str:
+    base_url = (os.getenv("NEST_API_URL") or "http://localhost:8100").rstrip("/")
+    api_prefix = (os.getenv("NEST_API_PREFIX") or "/api/v1").strip()
+    if not api_prefix.startswith("/"):
+        api_prefix = f"/{api_prefix}"
+    api_prefix = api_prefix.rstrip("/")
+    return f"{base_url}{api_prefix}"
+
+
+def _get_server(server_id: int) -> Optional[dict]:
+    response = requests.get(f"{_nest_api_base()}/servers/{server_id}", timeout=5)
+    if response.status_code == 404:
+        return None
+    response.raise_for_status()
+    return response.json()
+
+
+def _list_servers(limit: int = 100) -> list[dict]:
+    rows: list[dict] = []
+    skip = 0
+
+    while True:
+        response = requests.get(
+            f"{_nest_api_base()}/servers",
+            params={"skip": skip, "limit": limit},
+            timeout=5,
+        )
+        response.raise_for_status()
+        batch = response.json() or []
+        rows.extend(batch)
+        if len(batch) < limit:
+            break
+        skip += limit
+
+    return rows
+
+
+def _trigger_server_health(server_id: int) -> None:
+    try:
+        requests.post(
+            f"{_nest_api_base()}/servers/{server_id}/health/trigger",
+            timeout=5,
+        ).raise_for_status()
+    except Exception as e:
+        logger.warning(f"Health trigger failed for server {server_id}: {e}")
 
 
 def ping_host(hostname: str, count: int = 3, timeout: int = 5) -> dict:
@@ -103,52 +150,40 @@ def check_ssh_port(hostname: str, port: int = 22, timeout: int = 10) -> dict:
 
 async def _check_server_health(server_id: int) -> dict:
     """Check server via ping and SSH port connectivity."""
-    async with AsyncSessionLocal() as db:
-        from sqlalchemy import select
-        
-        result = await db.execute(select(Server).where(Server.id == server_id))
-        server = result.scalar_one_or_none()
-        
-        if not server:
-            return {"success": False, "error": "Server not found"}
-        
-        hostname = server.hostname
-        ssh_port = server.ssh_port
-        
-        # Run ping check
-        ping_result = ping_host(hostname)
-        
-        # Run SSH port check
-        ssh_result = check_ssh_port(hostname, ssh_port)
-        
-        # Determine overall status
-        if ping_result["success"] and ssh_result["success"]:
-            new_status = ServerStatus.ONLINE
-        elif ping_result["success"]:
-            new_status = ServerStatus.MAINTENANCE  # Server responds to ping but SSH is down
-        else:
-            new_status = ServerStatus.OFFLINE
-        
-        # Update server record
-        server.status = new_status
-        server.last_health_check = datetime.utcnow()
-        
-        await db.commit()
-        
-        logger.info(
-            f"Server {server.name} health check: ping={ping_result['success']}, "
-            f"ssh={ssh_result['success']}, status={new_status.value}"
-        )
-        
-        return {
-            "server_id": server_id,
-            "server_name": server.name,
-            "hostname": hostname,
-            "ping": ping_result,
-            "ssh": ssh_result,
-            "status": new_status.value,
-            "checked_at": datetime.utcnow().isoformat()
-        }
+    server = _get_server(server_id)
+    if not server:
+        return {"success": False, "error": "Server not found"}
+
+    hostname = server.get("hostname")
+    ssh_port = int(server.get("ssh_port") or 22)
+    server_name = server.get("name") or f"server-{server_id}"
+
+    ping_result = ping_host(hostname)
+    ssh_result = check_ssh_port(hostname, ssh_port)
+
+    if ping_result["success"] and ssh_result["success"]:
+        status = "online"
+    elif ping_result["success"]:
+        status = "maintenance"
+    else:
+        status = "offline"
+
+    _trigger_server_health(server_id)
+
+    logger.info(
+        f"Server {server_name} health check: ping={ping_result['success']}, "
+        f"ssh={ssh_result['success']}, status={status}"
+    )
+
+    return {
+        "server_id": server_id,
+        "server_name": server_name,
+        "hostname": hostname,
+        "ping": ping_result,
+        "ssh": ssh_result,
+        "status": status,
+        "checked_at": datetime.utcnow().isoformat()
+    }
 
 
 @shared_task
@@ -159,27 +194,25 @@ def check_server_health(server_id: int):
 
 async def _run_all_server_health_checks():
     """Check all servers' health."""
-    async with AsyncSessionLocal() as db:
-        from sqlalchemy import select
-        
-        result = await db.execute(select(Server))
-        servers = result.scalars().all()
-        
-        results = []
-        for server in servers:
-            try:
-                check_result = await _check_server_health(server.id)
-                results.append(check_result)
-            except Exception as e:
-                logger.error(f"Health check failed for server {server.id}: {e}")
-                results.append({
-                    "server_id": server.id,
-                    "server_name": server.name,
-                    "success": False,
-                    "error": str(e)
-                })
-        
-        return results
+    servers = _list_servers(limit=100)
+
+    results = []
+    for server in servers:
+        server_id = int(server.get("id"))
+        server_name = server.get("name") or f"server-{server_id}"
+        try:
+            check_result = await _check_server_health(server_id)
+            results.append(check_result)
+        except Exception as e:
+            logger.error(f"Health check failed for server {server_id}: {e}")
+            results.append({
+                "server_id": server_id,
+                "server_name": server_name,
+                "success": False,
+                "error": str(e)
+            })
+
+    return results
 
 
 @shared_task
@@ -261,31 +294,23 @@ def check_panel_url(url: str, timeout: int = 10) -> dict:
 
 async def _check_panel_health(server_id: int) -> dict:
     """Check if the server's control panel is accessible."""
-    async with AsyncSessionLocal() as db:
-        from sqlalchemy import select
-        
-        result = await db.execute(select(Server).where(Server.id == server_id))
-        server = result.scalar_one_or_none()
-        
-        if not server:
-            return {"success": False, "error": "Server not found"}
-        
-        if not server.panel_url:
-            return {"success": False, "error": "No panel URL configured"}
-        
-        panel_result = check_panel_url(server.panel_url)
-        
-        # Update panel verification status
-        server.panel_verified = panel_result["success"]
-        await db.commit()
-        
-        return {
-            "server_id": server_id,
-            "server_name": server.name,
-            "panel_url": server.panel_url,
-            "panel_type": server.panel_type.value if server.panel_type else None,
-            **panel_result
-        }
+    server = _get_server(server_id)
+    if not server:
+        return {"success": False, "error": "Server not found"}
+
+    panel_url = server.get("panel_url")
+    if not panel_url:
+        return {"success": False, "error": "No panel URL configured"}
+
+    panel_result = check_panel_url(panel_url)
+
+    return {
+        "server_id": server_id,
+        "server_name": server.get("name") or f"server-{server_id}",
+        "panel_url": panel_url,
+        "panel_type": server.get("panel_type"),
+        **panel_result
+    }
 
 
 @shared_task

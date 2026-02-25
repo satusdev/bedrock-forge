@@ -492,18 +492,14 @@ def get_deployment_status(task_id: str) -> Dict[str, Any]:
     Get the status of a deployment task.
     
     Args:
-        task_id: Celery task ID
+        task_id: Task ID
         
     Returns:
         Dict with task status and result
     """
-    from forge.tasks.celery_tasks import celery_app
-    
-    result = celery_app.AsyncResult(task_id)
-    
     return {
         "task_id": task_id,
-        "status": result.status,
-        "result": result.result if result.ready() else None,
-        "info": result.info if result.status == "PROGRESS" else None
+        "status": "unsupported",
+        "result": None,
+        "info": "Legacy Celery runtime removed; use Nest task-status endpoints"
     }

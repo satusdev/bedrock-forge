@@ -47,6 +47,8 @@ def seed(demo: bool, reset: bool, dry_run: bool, users_only: bool, servers_only:
         get_seed_roles,
         get_seed_servers,
         get_seed_projects,
+        get_seed_monitors,
+        get_seed_clients,
         get_user_role_assignments,
         is_demo_mode,
     )
@@ -104,6 +106,8 @@ def seed(demo: bool, reset: bool, dry_run: bool, users_only: bool, servers_only:
     if not users_only:
         servers = get_seed_servers()
         projects = get_seed_projects()
+        monitors = get_seed_monitors()
+        clients = get_seed_clients()
         
         console.print("\n[bold]Servers to seed:[/bold]")
         if servers:
@@ -136,6 +140,38 @@ def seed(demo: bool, reset: bool, dry_run: bool, users_only: bool, servers_only:
             console.print(project_table)
         else:
             console.print("[dim]No projects to seed[/dim]")
+
+        console.print("\n[bold]Monitors to seed:[/bold]")
+        if monitors:
+            monitor_table = Table(show_header=True)
+            monitor_table.add_column("Name")
+            monitor_table.add_column("URL")
+            monitor_table.add_column("Type")
+            for monitor in monitors:
+                monitor_table.add_row(
+                    monitor["name"],
+                    monitor["url"],
+                    monitor.get("monitor_type", "uptime")
+                )
+            console.print(monitor_table)
+        else:
+            console.print("[dim]No monitors to seed[/dim]")
+
+        console.print("\n[bold]Clients to seed:[/bold]")
+        if clients:
+            client_table = Table(show_header=True)
+            client_table.add_column("Name")
+            client_table.add_column("Email")
+            client_table.add_column("Status")
+            for client in clients:
+                client_table.add_row(
+                    client["name"],
+                    client["email"],
+                    client.get("status", "active")
+                )
+            console.print(client_table)
+        else:
+            console.print("[dim]No clients to seed[/dim]")
     
     if dry_run:
         console.print("\n[dim]Dry run complete. Use without --dry-run to apply changes.[/dim]")
@@ -153,13 +189,15 @@ def seed(demo: bool, reset: bool, dry_run: bool, users_only: bool, servers_only:
 
 async def run_seeding(reset: bool, users_only: bool, servers_only: bool):
     """Execute the actual seeding process"""
-    from sqlalchemy import select
+    from sqlalchemy import inspect, select
     from forge.db.session import AsyncSessionLocal
     from forge.db.seed_data import (
         get_seed_users,
         get_seed_roles,
         get_seed_servers,
         get_seed_projects,
+        get_seed_monitors,
+        get_seed_clients,
         get_user_role_assignments,
     )
     from forge.api.security import hash_password
@@ -174,6 +212,10 @@ async def run_seeding(reset: bool, users_only: bool, servers_only: bool):
         Project,
         ProjectStatus,
         EnvironmentType,
+        Monitor,
+        MonitorType,
+        Client,
+        BillingStatus,
     )
     from forge.db.models.role import DEFAULT_PERMISSIONS, role_permissions, user_roles
 
@@ -200,6 +242,30 @@ async def run_seeding(reset: bool, users_only: bool, servers_only: bool):
     
     async with AsyncSessionLocal() as session:
         try:
+            required_tables = {"users"}
+            if not servers_only:
+                required_tables.update({"roles", "permissions", "role_permissions", "user_roles"})
+            if not users_only:
+                required_tables.update({"servers", "projects", "monitors", "clients"})
+
+            connection = await session.connection()
+
+            def get_table_names(sync_connection):
+                inspector = inspect(sync_connection)
+                return set(inspector.get_table_names())
+
+            existing_tables = await connection.run_sync(get_table_names)
+            missing_tables = sorted(required_tables - existing_tables)
+            if missing_tables:
+                missing_list = ", ".join(missing_tables)
+                raise click.ClickException(
+                    "Database schema is not ready for seeding. "
+                    f"Missing tables: {missing_list}.\n"
+                    "Run migrations first, then retry seeding:\n"
+                    "  docker compose --profile seed --env-file .env -f docker-compose.yml "
+                    "run --rm --no-deps nest-api sh -c \"npm run prisma:push\""
+                )
+
             if reset:
                 console.print("[yellow]Clearing existing data...[/yellow]")
                 # Add reset logic here if needed
@@ -400,10 +466,77 @@ async def run_seeding(reset: bool, users_only: bool, servers_only: bool):
                         )
                         session.add(project)
                 console.print(f"  [green]✓[/green] {len(projects)} projects")
+
+                # Seed monitors
+                console.print("Seeding monitors...")
+                monitors = get_seed_monitors()
+                for monitor_data in monitors:
+                    result = await session.execute(
+                        select(Monitor).where(Monitor.url == monitor_data["url"])
+                    )
+                    monitor = result.scalar_one_or_none()
+                    if monitor is None:
+                        monitor = Monitor(
+                            name=monitor_data["name"],
+                            url=monitor_data["url"],
+                            monitor_type=parse_enum(
+                                MonitorType,
+                                monitor_data.get("monitor_type"),
+                                MonitorType.UPTIME,
+                            ),
+                            interval_seconds=monitor_data.get("interval_seconds", 300),
+                            timeout_seconds=monitor_data.get("timeout_seconds", 30),
+                            created_by_id=owner.id if owner else 1,
+                        )
+                        session.add(monitor)
+                    else:
+                        monitor.name = monitor_data["name"]
+                        monitor.monitor_type = parse_enum(
+                            MonitorType,
+                            monitor_data.get("monitor_type"),
+                            monitor.monitor_type,
+                        )
+                        monitor.interval_seconds = monitor_data.get("interval_seconds", monitor.interval_seconds)
+                        monitor.timeout_seconds = monitor_data.get("timeout_seconds", monitor.timeout_seconds)
+                console.print(f"  [green]✓[/green] {len(monitors)} monitors")
+
+                # Seed clients
+                console.print("Seeding clients...")
+                clients = get_seed_clients()
+                for client_data in clients:
+                    result = await session.execute(
+                        select(Client).where(Client.email == client_data["email"])
+                    )
+                    client = result.scalar_one_or_none()
+                    if client is None:
+                        client = Client(
+                            name=client_data["name"],
+                            email=client_data["email"],
+                            notes=client_data.get("notes"),
+                            billing_status=parse_enum(
+                                BillingStatus,
+                                client_data.get("status"),
+                                BillingStatus.ACTIVE,
+                            ),
+                            owner_id=owner.id if owner else 1,
+                        )
+                        session.add(client)
+                    else:
+                        client.name = client_data.get("name", client.name)
+                        client.notes = client_data.get("notes", client.notes)
+                        client.billing_status = parse_enum(
+                            BillingStatus,
+                            client_data.get("status"),
+                            client.billing_status,
+                        )
+                console.print(f"  [green]✓[/green] {len(clients)} clients")
             
             await session.commit()
             console.print("\n[bold green]✓ Seeding complete![/bold green]")
             
+        except click.ClickException:
+            await session.rollback()
+            raise
         except Exception as e:
             await session.rollback()
             console.print(f"\n[bold red]✗ Seeding failed: {e}[/bold red]")

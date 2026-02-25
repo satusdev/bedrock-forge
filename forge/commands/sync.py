@@ -478,66 +478,15 @@ def schedule(
     cron: str = typer.Option("0 0 * * *", "--cron", help=_("Cron expression for scheduling")),
     project_dir: str = typer.Option(".", "--project-dir", help=_("Project directory")),
     gdrive: bool = typer.Option(True, "--gdrive"),
-    use_celery: bool = typer.Option(False, "--celery", help=_("Generate Celery task instead of cron"))
 ):
     """Generate backup scheduling configuration."""
     project_path = Path(project_dir).resolve()
     cmd = f"cd {project_path} && python -m forge sync backup --gdrive={gdrive}"
 
-    if use_celery:
-        # Generate Celery task configuration
-        celery_config = f'''
-# Add to your Celery tasks.py
-from celery import Celery
-from forge.commands.sync import backup
-
-@celery.task(bind=True)
-def scheduled_backup(self, project_dir: str, db: bool = True, uploads: bool = True, gdrive: bool = True):
-    """Scheduled backup task for Celery."""
-    result = backup(
-        project_dir=Path(project_dir),
-        db=db,
-        uploads=uploads,
-        gdrive=gdrive,
-        verbose=True
-    )
-
-    if result.success:
-        self.update_state(
-            state='SUCCESS',
-            meta={{
-                'backup_type': result.backup_type,
-                'size_bytes': result.size_bytes,
-                'duration_seconds': result.duration_seconds,
-                'gdrive_synced': result.gdrive_synced
-            }}
-        )
-        return {{'status': 'success', 'result': result.__dict__}}
-    else:
-        self.update_state(
-            state='FAILURE',
-            meta={{'error': result.error_message}}
-        )
-        return {{'status': 'failed', 'error': result.error_message}}
-
-# Schedule with Celery Beat:
-# CELERYBEAT_SCHEDULE = {{
-#     'daily-backup': {{
-#         'task': 'scheduled_backup',
-#         'schedule': crontab(minute=0, hour=0),  # Daily at midnight
-#         'args': ("{project_path}",)
-#     }},
-# }}
-        '''
-
-        typer.secho(_("🐬 Celery task configuration:"), fg=typer.colors.BLUE)
-        typer.echo(celery_config)
-    else:
-        # Traditional cron scheduling
-        typer.secho(_("⏰ Add to crontab:"), fg=typer.colors.BLUE)
-        typer.echo(f"{cron} {cmd}")
-        typer.echo(_("\nOr use:"))
-        typer.echo(f"(crontab -l 2>/dev/null; echo '{cron} {cmd}') | crontab -")
+    typer.secho(_("⏰ Add to crontab:"), fg=typer.colors.BLUE)
+    typer.echo(f"{cron} {cmd}")
+    typer.echo(_("\nOr use:"))
+    typer.echo(f"(crontab -l 2>/dev/null; echo '{cron} {cmd}') | crontab -")
 
 @app.command()
 def configure(
