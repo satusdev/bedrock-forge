@@ -1,0 +1,1125 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model alembic_version {
+  version_num String @id(map: "alembic_version_pkc") @db.VarChar(32)
+}
+
+model analytics_reports {
+  id              Int                 @id @default(autoincrement())
+  project_id      Int
+  report_type     analyticsreporttype
+  url             String?             @db.VarChar(500)
+  property_id     String?             @db.VarChar(120)
+  device          String?             @db.VarChar(20)
+  start_date      DateTime?           @db.Timestamptz(6)
+  end_date        DateTime?           @db.Timestamptz(6)
+  summary         Json?               @db.Json
+  payload         Json?               @db.Json
+  created_at      DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime            @default(now()) @db.Timestamptz(6)
+  environment_id  Int?
+  projects        projects            @relation(fields: [project_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  project_servers project_servers?    @relation(fields: [environment_id], references: [id], onUpdate: NoAction, map: "fk_analytics_reports_environment_id")
+
+  @@index([environment_id], map: "ix_analytics_reports_environment_id")
+  @@index([project_id], map: "ix_analytics_reports_project_id")
+  @@index([report_type], map: "ix_analytics_reports_report_type")
+}
+
+model app_settings {
+  id              Int      @id @default(autoincrement())
+  key             String   @unique(map: "ix_app_settings_key") @db.VarChar(100)
+  value           String?
+  encrypted_value String?  @db.VarChar
+  description     String?  @db.VarChar(500)
+  is_sensitive    Boolean  @default(false)
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime @default(now()) @db.Timestamptz(6)
+}
+
+model audit_logs {
+  id          Int         @id @default(autoincrement())
+  user_id     Int?
+  action      auditaction
+  entity_type String?     @db.VarChar(50)
+  entity_id   String?     @db.VarChar(50)
+  details     String?
+  ip_address  String?     @db.VarChar(45)
+  user_agent  String?     @db.VarChar(255)
+  created_at  DateTime?   @default(now()) @db.Timestamptz(6)
+  users       users?      @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model backup_schedules {
+  id               Int               @id @default(autoincrement())
+  name             String            @db.VarChar(255)
+  description      String?
+  frequency        schedulefrequency @default(daily)
+  cron_expression  String?           @db.VarChar(100)
+  hour             Int               @default(2)
+  minute           Int               @default(0)
+  day_of_week      Int?
+  day_of_month     Int?
+  timezone         String            @default("UTC") @db.VarChar(50)
+  backup_type      backuptype        @default(full)
+  storage_type     backupstoragetype @default(google_drive)
+  retention_count  Int               @default(7)
+  retention_days   Int?
+  status           schedulestatus    @default(active)
+  last_run_at      DateTime?         @db.Timestamptz(6)
+  next_run_at      DateTime?         @db.Timestamptz(6)
+  last_run_success Boolean?
+  last_run_error   String?
+  run_count        Int               @default(0)
+  failure_count    Int               @default(0)
+  celery_task_id   String?           @unique @db.VarChar(255)
+  config           Json?             @db.Json
+  project_id       Int
+  created_by_id    Int
+  created_at       DateTime          @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime          @default(now()) @db.Timestamptz(6)
+  environment_id   Int?
+  users            users             @relation(fields: [created_by_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  project_servers  project_servers?  @relation(fields: [environment_id], references: [id], onUpdate: NoAction)
+  projects         projects          @relation(fields: [project_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([environment_id], map: "ix_backup_schedules_environment_id")
+  @@index([next_run_at], map: "ix_backup_schedules_next_run_at")
+  @@index([project_id], map: "ix_backup_schedules_project_id")
+  @@index([status], map: "ix_backup_schedules_status")
+}
+
+model backups {
+  id                Int               @id @default(autoincrement())
+  name              String            @db.VarChar(255)
+  backup_type       backuptype
+  storage_type      backupstoragetype
+  storage_path      String            @db.VarChar(500)
+  size_bytes        BigInt?
+  status            backupstatus
+  started_at        DateTime          @db.Timestamptz(6)
+  completed_at      DateTime?         @db.Timestamptz(6)
+  error_message     String?
+  project_id        Int
+  created_by_id     Int
+  created_at        DateTime          @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime          @default(now()) @db.Timestamptz(6)
+  project_server_id Int?
+  notes             String?
+  storage_file_id   String?           @db.VarChar(255)
+  logs              String?
+  drive_folder_id   String?           @db.VarChar(255)
+  users             users             @relation(fields: [created_by_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  projects          projects          @relation(fields: [project_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  project_servers   project_servers?  @relation(fields: [project_server_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_backups_project_server_id_project_servers")
+  wp_updates        wp_updates[]
+}
+
+model client_tags {
+  client_id Int
+  tag_id    Int
+  clients   clients @relation(fields: [client_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tags      tags    @relation(fields: [tag_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([client_id, tag_id])
+  @@index([client_id], map: "ix_client_tags_client_id")
+  @@index([tag_id], map: "ix_client_tags_tag_id")
+}
+
+model client_users {
+  id            Int        @id @default(autoincrement())
+  client_id     Int
+  email         String     @unique(map: "ix_client_users_email") @db.VarChar(255)
+  password_hash String     @db.VarChar(255)
+  full_name     String?    @db.VarChar(255)
+  is_active     Boolean
+  last_login_at DateTime?  @db.Timestamptz(6)
+  created_at    DateTime   @db.Timestamptz(6)
+  updated_at    DateTime   @db.Timestamptz(6)
+  role          clientrole
+  clients       clients    @relation(fields: [client_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model clients {
+  id                  Int             @id @default(autoincrement())
+  name                String          @db.VarChar(255)
+  company             String?         @db.VarChar(255)
+  email               String          @db.VarChar(255)
+  phone               String?         @db.VarChar(50)
+  billing_email       String?         @db.VarChar(255)
+  address             String?
+  notes               String?
+  billing_status      billingstatus
+  payment_terms       String          @db.VarChar(50)
+  currency            String          @db.VarChar(3)
+  tax_rate            Float
+  auto_billing        Boolean
+  contract_start      DateTime?       @db.Date
+  contract_end        DateTime?       @db.Date
+  invoice_prefix      String          @db.VarChar(20)
+  next_invoice_number Int
+  created_at          DateTime        @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime        @db.Timestamptz(6)
+  billing_name        String?         @db.VarChar(255)
+  city                String?         @db.VarChar(100)
+  state               String?         @db.VarChar(100)
+  postal_code         String?         @db.VarChar(20)
+  country             String          @db.VarChar(100)
+  monthly_rate        Float
+  total_revenue       Float
+  outstanding_balance Float
+  last_invoice_date   DateTime?       @db.Date
+  last_payment_date   DateTime?       @db.Date
+  tags                String?
+  owner_id            Int
+  website             String?         @db.VarChar(255)
+  client_tags         client_tags[]
+  client_users        client_users[]
+  users               users           @relation(fields: [owner_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  domains             domains[]
+  invoices            invoices[]
+  projects            projects[]
+  subscriptions       subscriptions[]
+  tickets             tickets[]
+
+  @@index([email], map: "ix_clients_email")
+}
+
+model cyberpanel_users {
+  id                       Int                  @id @default(autoincrement())
+  server_id                Int
+  created_by_id            Int?
+  username                 String               @db.VarChar(100)
+  email                    String               @db.VarChar(255)
+  first_name               String?              @db.VarChar(100)
+  last_name                String?              @db.VarChar(100)
+  user_type                cyberpanelusertype   @default(user)
+  acl_name                 String?              @db.VarChar(100)
+  password_encrypted       String?
+  password_set_at          DateTime?            @db.Timestamptz(6)
+  password_last_changed_at DateTime?            @db.Timestamptz(6)
+  password_out_of_sync     Boolean              @default(false)
+  status                   cyberpaneluserstatus @default(active)
+  last_synced_at           DateTime?            @db.Timestamptz(6)
+  synced_from_panel        Boolean              @default(false)
+  sync_error_message       String?
+  websites_limit           Int                  @default(0)
+  websites_count           Int                  @default(0)
+  disk_limit               Int                  @default(0)
+  disk_used                Int                  @default(0)
+  bandwidth_limit          Int                  @default(0)
+  bandwidth_used           Int                  @default(0)
+  databases_limit          Int                  @default(0)
+  databases_count          Int                  @default(0)
+  email_accounts_limit     Int                  @default(0)
+  email_accounts_count     Int                  @default(0)
+  ftp_accounts_limit       Int                  @default(0)
+  ftp_accounts_count       Int                  @default(0)
+  package_name             String?              @db.VarChar(100)
+  notes                    String?
+  last_login_at            DateTime?            @db.Timestamptz(6)
+  last_login_ip            String?              @db.VarChar(45)
+  created_at               DateTime             @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime             @default(now()) @db.Timestamptz(6)
+  users                    users?               @relation(fields: [created_by_id], references: [id], onUpdate: NoAction)
+  servers                  servers              @relation(fields: [server_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([server_id, username], map: "uq_server_username")
+  @@index([server_id], map: "ix_cyberpanel_users_server_id")
+  @@index([status], map: "ix_cyberpanel_users_status")
+  @@index([username], map: "ix_cyberpanel_users_username")
+}
+
+model domains {
+  id                 Int                @id @default(autoincrement())
+  domain_name        String             @unique(map: "ix_domains_domain_name") @db.VarChar(255)
+  tld                String             @db.VarChar(50)
+  registrar          registrar
+  registrar_name     String?            @db.VarChar(100)
+  registrar_url      String?            @db.VarChar(500)
+  registration_date  DateTime?          @db.Date
+  expiry_date        DateTime           @db.Date
+  last_renewed       DateTime?          @db.Date
+  nameservers        String?
+  dns_provider       String?            @db.VarChar(100)
+  dns_zone_id        String?            @db.VarChar(255)
+  status             domainstatus
+  auto_renew         Boolean
+  privacy_protection Boolean
+  transfer_lock      Boolean
+  annual_cost        Float
+  currency           String             @db.VarChar(3)
+  whois_data         String?
+  last_whois_check   DateTime?          @db.Timestamptz(6)
+  reminder_days      Int
+  last_reminder_sent DateTime?          @db.Timestamptz(6)
+  notes              String?
+  client_id          Int
+  project_id         Int?
+  subscription_id    Int?
+  created_at         DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime           @db.Timestamptz(6)
+  clients            clients            @relation(fields: [client_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  projects           projects?          @relation(fields: [project_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  subscriptions      subscriptions?     @relation(fields: [subscription_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  ssl_certificates   ssl_certificates[]
+}
+
+model heartbeats {
+  id               Int             @id @default(autoincrement())
+  monitor_id       Int
+  status           heartbeatstatus
+  response_time_ms Int?
+  status_code      Int?
+  message          String?
+  checked_at       DateTime        @db.Timestamptz(6)
+  monitors         monitors        @relation(fields: [monitor_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([checked_at], map: "ix_heartbeats_checked_at")
+  @@index([monitor_id], map: "ix_heartbeats_monitor_id")
+}
+
+model hosting_packages {
+  id                    Int      @id @default(autoincrement())
+  name                  String   @unique @db.VarChar(100)
+  slug                  String   @unique(map: "ix_hosting_packages_slug") @db.VarChar(100)
+  description           String?
+  disk_space_gb         Int
+  bandwidth_gb          Int
+  domains_limit         Int
+  subdomains_limit      Int
+  databases_limit       Int
+  email_accounts_limit  Int
+  ftp_accounts_limit    Int
+  php_workers           Int
+  ram_mb                Int
+  cpu_cores             Float
+  monthly_price         Float
+  quarterly_price       Float
+  yearly_price          Float
+  biennial_price        Float
+  setup_fee             Float
+  currency              String   @db.VarChar(3)
+  features              String?
+  is_active             Boolean
+  is_featured           Boolean
+  sort_order            Int
+  created_at            DateTime @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime @db.Timestamptz(6)
+  hosting_yearly_price  Float
+  support_monthly_price Float
+}
+
+model incidents {
+  id                         Int            @id @default(autoincrement())
+  monitor_id                 Int
+  title                      String         @db.VarChar(255)
+  status                     incidentstatus
+  started_at                 DateTime       @db.Timestamptz(6)
+  resolved_at                DateTime?      @db.Timestamptz(6)
+  duration_seconds           Int?
+  root_cause                 String?
+  resolution                 String?
+  notification_sent          Boolean
+  recovery_notification_sent Boolean
+  created_at                 DateTime       @db.Timestamptz(6)
+  updated_at                 DateTime       @db.Timestamptz(6)
+  monitors                   monitors       @relation(fields: [monitor_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([monitor_id], map: "ix_incidents_monitor_id")
+}
+
+model invoice_items {
+  id          Int       @id @default(autoincrement())
+  description String
+  quantity    Float
+  unit_price  Float
+  total       Float
+  item_type   String?   @db.VarChar(50)
+  project_id  Int?
+  invoice_id  Int
+  invoices    invoices  @relation(fields: [invoice_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  projects    projects? @relation(fields: [project_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model invoices {
+  id                Int             @id @default(autoincrement())
+  invoice_number    String          @unique(map: "ix_invoices_invoice_number") @db.VarChar(50)
+  status            invoicestatus
+  issue_date        DateTime        @db.Date
+  due_date          DateTime        @db.Date
+  paid_date         DateTime?       @db.Date
+  subtotal          Float
+  tax_rate          Float
+  tax_amount        Float
+  discount_amount   Float
+  total             Float
+  amount_paid       Float
+  payment_method    String?         @db.VarChar(50)
+  payment_reference String?         @db.VarChar(255)
+  notes             String?
+  terms             String?
+  period_start      DateTime?       @db.Date
+  period_end        DateTime?       @db.Date
+  currency          String          @db.VarChar(3)
+  client_id         Int
+  created_at        DateTime        @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime        @db.Timestamptz(6)
+  invoice_items     invoice_items[]
+  clients           clients         @relation(fields: [client_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  subscriptions     subscriptions[]
+}
+
+model monitors {
+  id                    Int              @id @default(autoincrement())
+  name                  String           @db.VarChar(255)
+  monitor_type          monitortype
+  url                   String           @db.VarChar(500)
+  interval_seconds      Int
+  timeout_seconds       Int
+  is_active             Boolean
+  last_check_at         DateTime?        @db.Timestamptz(6)
+  last_status           monitorstatus?
+  last_response_time_ms Int?
+  uptime_percentage     Float?
+  alert_on_down         Boolean
+  consecutive_failures  Int
+  project_id            Int?
+  created_by_id         Int
+  created_at            DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime         @default(now()) @db.Timestamptz(6)
+  port                  Int?
+  expected_keyword      String?          @db.VarChar(500)
+  dns_record_type       String?          @db.VarChar(10)
+  json_query_path       String?          @db.VarChar(500)
+  json_expected_value   String?          @db.VarChar(500)
+  last_error_message    String?
+  max_retries           Int              @default(3)
+  maintenance_start     DateTime?        @db.Timestamptz(6)
+  maintenance_end       DateTime?        @db.Timestamptz(6)
+  maintenance_reason    String?          @db.VarChar(500)
+  notification_channels String?
+  project_server_id     Int?
+  heartbeats            heartbeats[]
+  incidents             incidents[]
+  project_servers       project_servers? @relation(fields: [project_server_id], references: [id], onUpdate: NoAction, map: "fk_monitors_project_server_id")
+  users                 users            @relation(fields: [created_by_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  projects              projects?        @relation(fields: [project_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([project_server_id], map: "ix_monitors_project_server_id")
+}
+
+model notification_channels {
+  id           Int         @id @default(autoincrement())
+  name         String      @db.VarChar(255)
+  channel_type channeltype
+  config       String?
+  is_active    Boolean
+  last_sent_at DateTime?   @db.Timestamptz(6)
+  last_error   String?
+  owner_id     Int
+  created_at   DateTime    @db.Timestamptz(6)
+  updated_at   DateTime    @db.Timestamptz(6)
+  users        users       @relation(fields: [owner_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model oauth_tokens {
+  id            Int           @id @default(autoincrement())
+  user_id       Int
+  provider      oauthprovider
+  access_token  String
+  refresh_token String?
+  token_type    String        @db.VarChar(50)
+  expires_at    DateTime?     @db.Timestamptz(6)
+  scope         String?
+  account_email String?       @db.VarChar(255)
+  account_name  String?       @db.VarChar(255)
+  account_id    String?       @db.VarChar(255)
+  created_at    DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime      @default(now()) @db.Timestamptz(6)
+  users         users         @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([user_id, provider], map: "ix_oauth_tokens_user_provider")
+}
+
+model permissions {
+  id               Int                @id @default(autoincrement())
+  code             String             @unique(map: "ix_permissions_code") @db.VarChar(100)
+  name             String             @db.VarChar(255)
+  description      String?
+  category         String?            @db.VarChar(100)
+  created_at       DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime           @default(now()) @db.Timestamptz(6)
+  role_permissions role_permissions[]
+}
+
+model plugin_policies {
+  id               Int       @id @default(autoincrement())
+  owner_id         Int
+  name             String    @db.VarChar(255)
+  is_default       Boolean?
+  allowed_plugins  String?
+  required_plugins String?
+  blocked_plugins  String?
+  pinned_versions  String?
+  notes            String?
+  created_at       DateTime? @db.Timestamptz(6)
+  updated_at       DateTime? @db.Timestamptz(6)
+  users            users     @relation(fields: [owner_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([owner_id], map: "ix_plugin_policies_owner_id")
+}
+
+model project_plugin_policies {
+  id               Int       @id @default(autoincrement())
+  project_id       Int       @unique(map: "uq_project_plugin_policy_project")
+  inherit_default  Boolean?
+  allowed_plugins  String?
+  required_plugins String?
+  blocked_plugins  String?
+  pinned_versions  String?
+  notes            String?
+  created_at       DateTime? @db.Timestamptz(6)
+  updated_at       DateTime? @db.Timestamptz(6)
+  projects         projects  @relation(fields: [project_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([project_id], map: "ix_project_plugin_policies_project_id")
+}
+
+model project_servers {
+  id                       Int                 @id @default(autoincrement())
+  project_id               Int
+  server_id                Int
+  environment              serverenvironment
+  wp_path                  String              @db.VarChar(500)
+  wp_url                   String              @db.VarChar(500)
+  notes                    String?             @db.VarChar(1000)
+  is_primary               Boolean             @default(true)
+  created_at               DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime            @default(now()) @db.Timestamptz(6)
+  ssh_user                 String?             @db.VarChar(100)
+  ssh_key_path             String?             @db.VarChar(500)
+  gdrive_backups_folder_id String?             @db.VarChar(255)
+  database_name            String?             @db.VarChar(255)
+  database_user            String?             @db.VarChar(255)
+  database_password        String?             @db.VarChar(255)
+  analytics_reports        analytics_reports[]
+  backup_schedules         backup_schedules[]
+  backups                  backups[]
+  monitors                 monitors[]
+  projects                 projects            @relation(fields: [project_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  servers                  servers             @relation(fields: [server_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  wp_credentials           wp_credentials[]
+  wp_site_states           wp_site_states?
+  wp_updates               wp_updates[]
+
+  @@unique([project_id, server_id, environment], map: "uq_project_server_env")
+}
+
+model project_tags {
+  project_id Int
+  tag_id     Int
+  projects   projects @relation(fields: [project_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tags       tags     @relation(fields: [tag_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([project_id, tag_id])
+  @@index([project_id], map: "ix_project_tags_project_id")
+  @@index([tag_id], map: "ix_project_tags_tag_id")
+}
+
+model projects {
+  id                       Int                      @id @default(autoincrement())
+  name                     String                   @db.VarChar(255)
+  slug                     String                   @unique(map: "ix_projects_slug") @db.VarChar(255)
+  description              String?
+  path                     String                   @db.VarChar(500)
+  status                   projectstatus
+  environment              environmenttype
+  wp_version               String?                  @db.VarChar(20)
+  php_version              String?                  @db.VarChar(20)
+  wp_home                  String?                  @db.VarChar(500)
+  last_deployed_at         DateTime?                @db.Timestamptz(6)
+  github_repo_url          String?                  @db.VarChar(500)
+  github_branch            String?                  @db.VarChar(100)
+  gdrive_folder_id         String?                  @db.VarChar(255)
+  owner_id                 Int
+  server_id                Int?
+  created_at               DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime                 @default(now()) @db.Timestamptz(6)
+  local_path               String?                  @db.VarChar(500)
+  ddev_configured          Boolean                  @default(false)
+  tags                     String?
+  client_id                Int?
+  gdrive_assets_folder_id  String?                  @db.VarChar(255)
+  gdrive_docs_folder_id    String?                  @db.VarChar(255)
+  gdrive_backups_folder_id String?                  @db.VarChar(255)
+  gdrive_connected         Boolean
+  gdrive_last_sync         DateTime?                @db.Timestamptz(6)
+  analytics_reports        analytics_reports[]
+  backup_schedules         backup_schedules[]
+  backups                  backups[]
+  domains                  domains[]
+  invoice_items            invoice_items[]
+  monitors                 monitors[]
+  project_plugin_policies  project_plugin_policies?
+  project_servers          project_servers[]
+  project_tags             project_tags[]
+  clients                  clients?                 @relation(fields: [client_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_projects_client_id")
+  users                    users                    @relation(fields: [owner_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  servers                  servers?                 @relation(fields: [server_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  ssl_certificates         ssl_certificates[]
+  subscriptions            subscriptions[]
+  tickets                  tickets[]
+}
+
+model role_permissions {
+  role_id       Int
+  permission_id Int
+  permissions   permissions @relation(fields: [permission_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  roles         roles       @relation(fields: [role_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([role_id, permission_id])
+}
+
+model roles {
+  id               Int                @id @default(autoincrement())
+  name             String             @unique(map: "ix_roles_name") @db.VarChar(100)
+  display_name     String             @db.VarChar(255)
+  description      String?
+  color            String             @default("#6366f1") @db.VarChar(7)
+  is_system        Boolean            @default(false)
+  created_at       DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime           @default(now()) @db.Timestamptz(6)
+  role_permissions role_permissions[]
+  user_roles       user_roles[]
+}
+
+model server_tags {
+  server_id Int
+  tag_id    Int
+  servers   servers @relation(fields: [server_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tags      tags    @relation(fields: [tag_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([server_id, tag_id])
+  @@index([server_id], map: "ix_server_tags_server_id")
+  @@index([tag_id], map: "ix_server_tags_tag_id")
+}
+
+model servers {
+  id                Int                @id @default(autoincrement())
+  name              String             @db.VarChar(255)
+  hostname          String             @db.VarChar(255)
+  provider          serverprovider
+  status            serverstatus
+  ssh_user          String             @db.VarChar(100)
+  ssh_port          Int
+  ssh_key_path      String?            @db.VarChar(500)
+  panel_type        paneltype
+  panel_url         String?            @db.VarChar(500)
+  last_health_check DateTime?          @db.Timestamptz(6)
+  owner_id          Int
+  created_at        DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime           @default(now()) @db.Timestamptz(6)
+  wp_root_paths     String?
+  uploads_path      String?            @db.VarChar(500)
+  tags              String?
+  panel_port        Int
+  panel_verified    Boolean
+  ssh_password      String?            @db.VarChar
+  ssh_private_key   String?            @db.VarChar
+  panel_username    String?            @db.VarChar
+  panel_password    String?            @db.VarChar
+  cyberpanel_users  cyberpanel_users[]
+  project_servers   project_servers[]
+  projects          projects[]
+  server_tags       server_tags[]
+  users             users              @relation(fields: [owner_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model ssl_certificates {
+  id                    Int             @id @default(autoincrement())
+  common_name           String          @db.VarChar(255)
+  san_domains           String?
+  provider              sslprovider
+  certificate_type      certificatetype
+  issue_date            DateTime        @db.Date
+  expiry_date           DateTime        @db.Date
+  is_active             Boolean
+  auto_renew            Boolean
+  is_wildcard           Boolean
+  serial_number         String?         @db.VarChar(100)
+  issuer                String?         @db.VarChar(255)
+  fingerprint_sha256    String?         @db.VarChar(100)
+  annual_cost           Float
+  currency              String          @db.VarChar(3)
+  last_renewal_attempt  DateTime?       @db.Timestamptz(6)
+  renewal_failure_count Int
+  last_renewal_error    String?
+  reminder_days         Int
+  last_reminder_sent    DateTime?       @db.Timestamptz(6)
+  notes                 String?
+  domain_id             Int?
+  project_id            Int?
+  subscription_id       Int?
+  created_at            DateTime        @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime        @db.Timestamptz(6)
+  domains               domains?        @relation(fields: [domain_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  projects              projects?       @relation(fields: [project_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  subscriptions         subscriptions?  @relation(fields: [subscription_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model subscriptions {
+  id                 Int                @id @default(autoincrement())
+  subscription_type  subscriptiontype
+  name               String             @db.VarChar(255)
+  description        String?
+  external_id        String?            @db.VarChar(255)
+  provider           String?            @db.VarChar(100)
+  billing_cycle      billingcycle
+  amount             Float
+  currency           String             @db.VarChar(3)
+  start_date         DateTime           @db.Date
+  next_billing_date  DateTime           @db.Date
+  end_date           DateTime?          @db.Date
+  cancelled_at       DateTime?          @db.Timestamptz(6)
+  status             subscriptionstatus
+  auto_renew         Boolean
+  reminder_days      Int
+  last_reminder_sent DateTime?          @db.Timestamptz(6)
+  reminder_count     Int
+  last_invoice_id    Int?
+  total_invoiced     Float
+  total_paid         Float
+  notes              String?
+  client_id          Int
+  project_id         Int?
+  created_at         DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime           @db.Timestamptz(6)
+  domains            domains[]
+  ssl_certificates   ssl_certificates[]
+  clients            clients            @relation(fields: [client_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  invoices           invoices?          @relation(fields: [last_invoice_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  projects           projects?          @relation(fields: [project_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model tags {
+  id           Int            @id @default(autoincrement())
+  name         String         @unique(map: "ix_tags_name") @db.VarChar(100)
+  slug         String         @unique(map: "ix_tags_slug") @db.VarChar(100)
+  color        String         @default("#6366f1") @db.VarChar(7)
+  icon         String?        @db.VarChar(50)
+  description  String?        @db.VarChar(500)
+  usage_count  Int            @default(0)
+  created_at   DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime       @default(now()) @db.Timestamptz(6)
+  client_tags  client_tags[]
+  project_tags project_tags[]
+  server_tags  server_tags[]
+}
+
+model ticket_messages {
+  id          Int        @id @default(autoincrement())
+  ticket_id   Int
+  sender_type sendertype
+  sender_id   Int?
+  sender_name String?    @db.VarChar(255)
+  message     String
+  attachments String?
+  created_at  DateTime   @db.Timestamptz(6)
+  updated_at  DateTime   @db.Timestamptz(6)
+  tickets     tickets    @relation(fields: [ticket_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model tickets {
+  id              Int               @id @default(autoincrement())
+  client_id       Int
+  project_id      Int?
+  subject         String            @db.VarChar(255)
+  status          ticketstatus
+  priority        ticketpriority
+  last_reply_at   DateTime?         @db.Timestamptz(6)
+  resolved_at     DateTime?         @db.Timestamptz(6)
+  created_at      DateTime          @db.Timestamptz(6)
+  updated_at      DateTime          @db.Timestamptz(6)
+  ticket_messages ticket_messages[]
+  clients         clients           @relation(fields: [client_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  projects        projects?         @relation(fields: [project_id], references: [id], onUpdate: NoAction)
+}
+
+model user_roles {
+  user_id Int
+  role_id Int
+  roles   roles @relation(fields: [role_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users   users @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([user_id, role_id])
+}
+
+model users {
+  id                    Int                     @id @default(autoincrement())
+  email                 String                  @unique(map: "ix_users_email") @db.VarChar(255)
+  username              String                  @unique(map: "ix_users_username") @db.VarChar(100)
+  hashed_password       String                  @db.VarChar(255)
+  full_name             String?                 @db.VarChar(255)
+  is_active             Boolean
+  is_superuser          Boolean
+  created_at            DateTime                @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime                @default(now()) @db.Timestamptz(6)
+  avatar_url            String?                 @db.VarChar(500)
+  audit_logs            audit_logs[]
+  backup_schedules      backup_schedules[]
+  backups               backups[]
+  clients               clients[]
+  cyberpanel_users      cyberpanel_users[]
+  monitors              monitors[]
+  notification_channels notification_channels[]
+  oauth_tokens          oauth_tokens[]
+  plugin_policies       plugin_policies[]
+  projects              projects[]
+  servers               servers[]
+  user_roles            user_roles[]
+  wp_credentials        wp_credentials[]
+}
+
+model wp_credentials {
+  id                 Int              @id @default(autoincrement())
+  project_server_id  Int
+  user_id            Int
+  label              String           @default("Admin") @db.VarChar(100)
+  is_primary         Boolean          @default(false)
+  notes              String?          @db.VarChar(500)
+  created_at         DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime         @default(now()) @db.Timestamptz(6)
+  username_encrypted String
+  username_salt      String           @db.VarChar(100)
+  password_encrypted String
+  password_salt      String           @db.VarChar(100)
+  status             credentialstatus
+  project_servers    project_servers  @relation(fields: [project_server_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users              users            @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model wp_site_states {
+  id                   Int             @id @default(autoincrement())
+  project_server_id    Int             @unique
+  wp_version           String?         @db.VarChar(20)
+  wp_version_available String?         @db.VarChar(20)
+  php_version          String?         @db.VarChar(20)
+  plugins              String?
+  themes               String?
+  plugins_count        Int
+  plugins_update_count Int
+  themes_count         Int
+  themes_update_count  Int
+  users_count          Int
+  site_health_score    Int?
+  last_scanned_at      DateTime?       @db.Timestamptz(6)
+  scan_error           String?
+  created_at           DateTime        @db.Timestamptz(6)
+  updated_at           DateTime        @db.Timestamptz(6)
+  project_servers      project_servers @relation(fields: [project_server_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model wp_updates {
+  id                Int             @id @default(autoincrement())
+  project_server_id Int
+  update_type       updatetype
+  package_name      String          @db.VarChar(255)
+  from_version      String          @db.VarChar(50)
+  to_version        String          @db.VarChar(50)
+  status            updatestatus
+  backup_id         Int?
+  applied_at        DateTime?       @db.Timestamptz(6)
+  notes             String?
+  error_message     String?
+  created_at        DateTime        @db.Timestamptz(6)
+  updated_at        DateTime        @db.Timestamptz(6)
+  backups           backups?        @relation(fields: [backup_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  project_servers   project_servers @relation(fields: [project_server_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+enum analyticsreporttype {
+  ga4
+  lighthouse
+}
+
+enum auditaction {
+  create
+  update
+  delete
+  login
+  logout
+  deploy
+  backup
+  restore
+  sync
+  provision
+  command
+  other
+}
+
+enum backupstatus {
+  pending
+  running
+  completed
+  failed
+}
+
+enum backupstoragetype {
+  local
+  google_drive
+  s3
+}
+
+enum backuptype {
+  full
+  database
+  files
+}
+
+enum billingcycle {
+  monthly
+  quarterly
+  biannual
+  yearly
+  biennial
+  triennial
+}
+
+enum billingstatus {
+  active
+  inactive
+  trial
+  overdue
+}
+
+enum certificatetype {
+  dv
+  ov
+  ev
+  wildcard
+  multi_domain
+}
+
+enum channeltype {
+  email
+  slack
+  telegram
+  webhook
+  discord
+}
+
+enum clientrole {
+  admin
+  member
+  viewer
+}
+
+enum credentialstatus {
+  ACTIVE
+  INACTIVE
+  EXPIRED
+}
+
+enum cyberpaneluserstatus {
+  active
+  suspended
+  pending_sync
+  sync_error
+  deleted
+}
+
+enum cyberpanelusertype {
+  admin
+  reseller
+  user
+}
+
+enum domainstatus {
+  active
+  expired
+  pending_transfer
+  locked
+  redemption
+  pending_delete
+}
+
+enum environmenttype {
+  development
+  staging
+  production
+}
+
+enum heartbeatstatus {
+  up
+  down
+  degraded
+  pending
+}
+
+enum incidentstatus {
+  ongoing
+  resolved
+  investigating
+}
+
+enum invoicestatus {
+  draft
+  pending
+  paid
+  overdue
+  cancelled
+  refunded
+}
+
+enum monitorstatus {
+  up
+  down
+  degraded
+}
+
+enum monitortype {
+  uptime
+  performance
+  ssl
+  security
+}
+
+enum oauthprovider {
+  google_drive
+  github
+}
+
+enum paneltype {
+  cyberpanel
+  cpanel
+  plesk
+  none
+}
+
+enum projectstatus {
+  active
+  paused
+  archived
+}
+
+enum registrar {
+  namecheap
+  godaddy
+  cloudflare
+  google_domains
+  name_com
+  porkbun
+  hover
+  dynadot
+  other
+}
+
+enum schedulefrequency {
+  hourly
+  daily
+  weekly
+  monthly
+  custom
+}
+
+enum schedulestatus {
+  active
+  paused
+  disabled
+}
+
+enum sendertype {
+  client
+  admin
+}
+
+enum serverenvironment {
+  staging
+  production
+  development
+}
+
+enum serverprovider {
+  hetzner
+  cyberpanel
+  cpanel
+  digitalocean
+  custom
+}
+
+enum serverstatus {
+  online
+  offline
+  provisioning
+  maintenance
+}
+
+enum sslprovider {
+  letsencrypt
+  cloudflare
+  cyberpanel
+  comodo
+  digicert
+  globalsign
+  sectigo
+  godaddy
+  namecheap
+  other
+}
+
+enum subscriptionstatus {
+  active
+  pending
+  cancelled
+  expired
+  suspended
+}
+
+enum subscriptiontype {
+  hosting
+  domain
+  ssl
+  maintenance
+  support
+  backup
+  cdn
+  email
+  other
+}
+
+enum ticketpriority {
+  low
+  medium
+  high
+  urgent
+}
+
+enum ticketstatus {
+  open
+  in_progress
+  waiting_reply
+  resolved
+  closed
+}
+
+enum updatestatus {
+  pending
+  applied
+  failed
+  rolled_back
+  skipped
+}
+
+enum updatetype {
+  core
+  plugin
+  theme
+}
