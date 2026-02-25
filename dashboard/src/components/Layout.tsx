@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation } from '@/router/compat';
 import {
 	LayoutDashboard,
 	FolderKanban,
@@ -64,10 +64,18 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 	];
 
 	const isActive = (href: string) => {
+		const pathname =
+			typeof location.pathname === 'string'
+				? location.pathname
+				: location.pathname == null
+					? ''
+					: String(location.pathname);
+		const normalizedHref = typeof href === 'string' ? href : String(href);
+
 		if (href === '/') {
-			return location.pathname === '/';
+			return pathname === '/';
 		}
-		return location.pathname.startsWith(href);
+		return pathname.startsWith(normalizedHref);
 	};
 
 	return (
