@@ -1,0 +1,240 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MODE="update"
+RUN_SEED="false"
+TAR_PATH="/home/bedrock-forge.tar.xz"
+APP_DIR="/home/bedrock-forge"
+
+print_usage() {
+  cat <<'EOF'
+Usage:
+  ./server-deploy [options]
+
+Options:
+  --mode <update|reset>     Deployment mode (default: update)
+  --seed                    Run seed after migrations (update mode only)
+  --tar <path>              Uploaded tar.xz path (default: /home/bedrock-forge.tar.xz)
+  --app-dir <path>          Extracted app directory (default: /home/bedrock-forge)
+  -h, --help                Show this help
+
+Examples:
+  ./server-deploy --mode update
+  ./server-deploy --mode update --seed
+  ./server-deploy --mode reset
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --mode)
+      MODE="${2:-}"
+      shift 2
+      ;;
+    --seed)
+      RUN_SEED="true"
+      shift
+      ;;
+    --tar)
+      TAR_PATH="${2:-}"
+      shift 2
+      ;;
+    --app-dir)
+      APP_DIR="${2:-}"
+      shift 2
+      ;;
+    -h|--help)
+      print_usage
+      exit 0
+      ;;
+    *)
+      echo "✗ Unknown option: $1" >&2
+      print_usage
+      exit 1
+      ;;
+  esac
+done
+
+if [[ "$MODE" != "update" && "$MODE" != "reset" ]]; then
+  echo "✗ Invalid --mode '${MODE}'. Use update or reset." >&2
+  exit 1
+fi
+
+if [[ ! -f "$TAR_PATH" ]]; then
+  echo "✗ Tar archive not found: ${TAR_PATH}" >&2
+  exit 1
+fi
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "✗ docker is required but not found" >&2
+  exit 1
+fi
+
+PARENT_DIR="$(dirname "$APP_DIR")"
+APP_NAME="$(basename "$APP_DIR")"
+PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$APP_NAME}"
+TMP_ENV=""
+MIGRATION_STRATEGY="${MIGRATION_STRATEGY:-auto}"
+
+cleanup_stale_forge_containers() {
+  local containers=(
+    forge-postgres
+    forge-redis
+    forge-api
+    forge-dashboard
+  )
+
+  for container in "${containers[@]}"; do
+    if docker ps -a --format '{{.Names}}' | grep -Fxq "$container"; then
+      echo "Removing stale container: ${container}"
+      docker rm -f "$container" >/dev/null 2>&1 || true
+    fi
+  done
+}
+
+is_production_deploy() {
+  local env_value="${DEPLOY_ENV:-${APP_ENV:-${NODE_ENV:-}}}"
+  [[ "${env_value,,}" == "production" ]]
+}
+
+can_seed_in_production() {
+  local override_value="${SEED_ALLOW_PRODUCTION:-}"
+  [[ "${override_value,,}" == "true" || "${override_value}" == "1" ]]
+}
+
+run_seed_container_cmd() {
+  local cmd="$1"
+  docker compose -p "$PROJECT_NAME" --profile seed --env-file "$ENV_FILE" -f "$COMPOSE_FILE" run --rm --no-deps --build nest-api sh -c "${cmd}"
+}
+
+has_prisma_migrations() {
+  local migrations_dir="${APP_DIR}/nest-api/prisma/migrations"
+  [[ -d "${migrations_dir}" ]] || return 1
+  find "${migrations_dir}" -mindepth 2 -maxdepth 2 -type f -name 'migration.sql' | grep -q .
+}
+
+run_migrations() {
+  case "${MIGRATION_STRATEGY}" in
+    deploy)
+      echo "Running migrations with strategy=deploy"
+      run_seed_container_cmd "npm run prisma:deploy"
+      ;;
+    push)
+      echo "Running migrations with strategy=push"
+      run_seed_container_cmd "npm run prisma:push"
+      ;;
+    auto)
+      echo "Running migrations with strategy=auto (deploy -> push fallback)"
+      if ! has_prisma_migrations; then
+        echo "No Prisma migration files found, using prisma db push"
+        run_seed_container_cmd "npm run prisma:push"
+      elif ! run_seed_container_cmd "npm run prisma:deploy"; then
+        echo "Deploy migrations failed, falling back to prisma db push"
+        run_seed_container_cmd "npm run prisma:push"
+      fi
+      ;;
+    *)
+      echo "✗ Invalid MIGRATION_STRATEGY='${MIGRATION_STRATEGY}'. Use auto|deploy|push." >&2
+      exit 1
+      ;;
+  esac
+}
+
+echo "Using tar: ${TAR_PATH}"
+echo "Target app dir: ${APP_DIR}"
+echo "Compose project: ${PROJECT_NAME}"
+echo "Mode: ${MODE}"
+echo "Migration strategy: ${MIGRATION_STRATEGY}"
+
+if [[ -f "${APP_DIR}/.env" ]]; then
+  TMP_ENV="/tmp/${APP_NAME}.env.$$"
+  cp "${APP_DIR}/.env" "$TMP_ENV"
+  echo "✓ Backed up existing .env"
+fi
+
+echo "Cleaning previous extracted project"
+rm -rf "$APP_DIR"
+
+echo "Extracting archive"
+mkdir -p "$PARENT_DIR"
+tar -xf "$TAR_PATH" -C "$PARENT_DIR"
+
+if [[ ! -d "$APP_DIR" ]]; then
+  echo "✗ Extracted archive did not create expected app directory: ${APP_DIR}" >&2
+  echo "  Ensure the tar contains a single top-level '${APP_NAME}/' folder." >&2
+  exit 1
+fi
+
+echo "Removing uploaded archive"
+rm -f "$TAR_PATH"
+
+if [[ -n "$TMP_ENV" && -f "$TMP_ENV" ]]; then
+  cp "$TMP_ENV" "${APP_DIR}/.env"
+  rm -f "$TMP_ENV"
+  echo "✓ Restored .env"
+fi
+
+COMPOSE_FILE="${APP_DIR}/docker-compose.yml"
+ENV_FILE="${APP_DIR}/.env"
+
+if [[ ! -f "$COMPOSE_FILE" ]]; then
+  echo "✗ Compose file not found: ${COMPOSE_FILE}" >&2
+  exit 1
+fi
+
+if [[ ! -f "$ENV_FILE" ]]; then
+  echo "✗ Env file not found: ${ENV_FILE}" >&2
+  echo "  Create it on the server, then re-run deploy:" >&2
+  echo "  cp ${APP_DIR}/.env.example ${ENV_FILE}" >&2
+  exit 1
+fi
+
+echo "Using compose file: ${COMPOSE_FILE}"
+echo "Using env file: ${ENV_FILE}"
+
+if [[ "$MODE" == "reset" ]]; then
+  echo "Reset mode: removing containers, images, and named volumes"
+  docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" down -v --rmi all --remove-orphans
+else
+  echo "Update mode: preserving named volumes"
+  docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" down --remove-orphans
+fi
+
+cleanup_stale_forge_containers
+
+echo "Building and starting stack"
+if ! docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --build --wait; then
+  echo "✗ Compose startup failed. Showing service status and recent logs." >&2
+  docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps || true
+  docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" logs --no-color --tail=200 || true
+  exit 1
+fi
+
+echo "Running migrations"
+run_migrations
+
+run_prisma_seed() {
+  echo "Seed source: nest-api/prisma/seed.cjs"
+  run_seed_container_cmd "npm run prisma:seed"
+}
+
+if is_production_deploy && ! can_seed_in_production; then
+  if [[ "$MODE" == "reset" || "$RUN_SEED" == "true" ]]; then
+    echo "✗ Seed blocked in production. Set SEED_ALLOW_PRODUCTION=true to override." >&2
+    exit 1
+  fi
+fi
+
+if [[ "$MODE" == "reset" ]]; then
+  echo "Starting seed phase (reset mode)"
+  run_prisma_seed
+  echo "✓ Seed phase complete (reset mode)"
+elif [[ "$RUN_SEED" == "true" ]]; then
+  echo "Starting seed phase (update mode)"
+  run_prisma_seed
+  echo "✓ Seed phase complete (update mode)"
+else
+  echo "Skipping seed (use --seed to seed on update)"
+fi
+
+echo "✓ Deployment complete"
