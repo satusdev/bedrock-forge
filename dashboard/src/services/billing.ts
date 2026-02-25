@@ -32,9 +32,64 @@ export interface HostingPackage {
 	name: string;
 	slug: string;
 	description?: string | null;
+	disk_space_gb: number;
+	bandwidth_gb: number;
+	domains_limit: number;
+	databases_limit: number;
+	email_accounts_limit: number;
+	monthly_price: number;
+	quarterly_price: number;
+	yearly_price: number;
+	biennial_price: number;
+	setup_fee: number;
+	currency: string;
+	hosting_yearly_price: number;
+	support_monthly_price: number;
+	features: string[];
+	is_active: boolean;
+	is_featured: boolean;
+}
+
+export interface CreateHostingPackagePayload {
+	name: string;
+	slug: string;
+	description?: string;
+	disk_space_gb?: number;
+	bandwidth_gb?: number;
+	domains_limit?: number;
+	databases_limit?: number;
+	email_accounts_limit?: number;
+	monthly_price?: number;
+	quarterly_price?: number;
+	yearly_price?: number;
+	biennial_price?: number;
+	setup_fee?: number;
 	currency?: string;
 	hosting_yearly_price?: number;
 	support_monthly_price?: number;
+	features?: string[];
+	is_featured?: boolean;
+}
+
+export interface UpdateHostingPackagePayload {
+	name?: string;
+	description?: string;
+	disk_space_gb?: number;
+	bandwidth_gb?: number;
+	domains_limit?: number;
+	databases_limit?: number;
+	email_accounts_limit?: number;
+	monthly_price?: number;
+	quarterly_price?: number;
+	yearly_price?: number;
+	biennial_price?: number;
+	setup_fee?: number;
+	currency?: string;
+	hosting_yearly_price?: number;
+	support_monthly_price?: number;
+	features?: string[];
+	is_active?: boolean;
+	is_featured?: boolean;
 }
 
 export const billingService = {
@@ -110,7 +165,7 @@ export const billingService = {
 			notes: string;
 			dns_provider: string;
 			status: string;
-		}>
+		}>,
 	) => {
 		const response = await api.put(`/domains/${id}`, data);
 		return response.data;
@@ -161,7 +216,7 @@ export const billingService = {
 			expiry_date: string;
 			auto_renew: boolean;
 			notes: string;
-		}>
+		}>,
 	) => {
 		const response = await api.put(`/ssl/${id}`, data);
 		return response.data;
@@ -178,7 +233,7 @@ export const billingService = {
 	},
 
 	// Packages
-	getPackages: async () => {
+	getPackages: async (): Promise<HostingPackage[]> => {
 		try {
 			const response = await api.get('/packages/');
 			// Backend returns { packages: [...] }
@@ -188,7 +243,12 @@ export const billingService = {
 		}
 	},
 
-	updatePackage: async (id: number, data: any) => {
+	createPackage: async (data: CreateHostingPackagePayload) => {
+		const response = await api.post('/packages/', data);
+		return response.data;
+	},
+
+	updatePackage: async (id: number, data: UpdateHostingPackagePayload) => {
 		const response = await api.put(`/packages/${id}`, data);
 		return response.data;
 	},
@@ -243,7 +303,7 @@ export const billingService = {
 			discount_amount?: number;
 			notes?: string;
 			terms?: string;
-		}
+		},
 	) => {
 		const response = await api.put(`/invoices/${id}`, data);
 		return response.data;
@@ -261,7 +321,11 @@ export const billingService = {
 
 	recordPayment: async (
 		id: number,
-		data: { amount: number; payment_method: string; payment_reference?: string }
+		data: {
+			amount: number;
+			payment_method: string;
+			payment_reference?: string;
+		},
 	) => {
 		const response = await api.post(`/invoices/${id}/payment`, data);
 		return response.data;
