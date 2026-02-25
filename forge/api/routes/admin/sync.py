@@ -371,47 +371,6 @@ async def get_sync_status(
             result=status_info.get("result")
         )
     
-    # Check Celery for task status
-    try:
-        from ....tasks.celery_tasks import celery_app
-        result = celery_app.AsyncResult(task_id)
-        
-        if result.state == "PENDING":
-            return SyncStatusResponse(
-                task_id=task_id,
-                status="pending",
-                message="Task is waiting to be processed"
-            )
-        elif result.state == "STARTED":
-            return SyncStatusResponse(
-                task_id=task_id,
-                status="running",
-                progress=result.info.get("progress", 0) if result.info else 0,
-                message=result.info.get("message", "Task is running") if result.info else "Task is running"
-            )
-        elif result.state == "SUCCESS":
-            return SyncStatusResponse(
-                task_id=task_id,
-                status="completed",
-                progress=100,
-                message="Task completed successfully",
-                result=result.result
-            )
-        elif result.state == "FAILURE":
-            return SyncStatusResponse(
-                task_id=task_id,
-                status="failed",
-                message=str(result.result) if result.result else "Task failed"
-            )
-        else:
-            return SyncStatusResponse(
-                task_id=task_id,
-                status=result.state.lower(),
-                message=f"Task state: {result.state}"
-            )
-    except ImportError:
-        pass
-    
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
         detail=f"Task {task_id} not found"
