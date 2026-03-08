@@ -80,53 +80,50 @@ export class GithubService {
 		const accountName =
 			source === 'oauth' ? 'GitHub OAuth User' : 'GitHub PAT User';
 
-		await this.prisma.$executeRaw`
-			INSERT INTO oauth_tokens (
-				user_id,
-				provider,
-				access_token,
-				token_type,
-				scope,
-				account_email,
-				account_name,
-				account_id,
-				created_at,
-				updated_at
-			)
-			VALUES (
-				${resolvedOwnerId},
-				CAST(${'github'} AS oauthprovider),
-				${token},
-				${'bearer'},
-				${'repo,workflow'},
-				${'github-user@example.com'},
-				${accountName},
-				${accountId},
-				NOW(),
-				NOW()
-			)
-			ON CONFLICT (user_id, provider)
-			DO UPDATE SET
-				access_token = EXCLUDED.access_token,
-				token_type = EXCLUDED.token_type,
-				scope = EXCLUDED.scope,
-				account_email = EXCLUDED.account_email,
-				account_name = EXCLUDED.account_name,
-				account_id = EXCLUDED.account_id,
-				updated_at = NOW()
-		`;
+		await this.prisma.oauth_tokens.upsert({
+			where: {
+				user_id_provider: {
+					user_id: resolvedOwnerId,
+					provider: 'github',
+				},
+			},
+			create: {
+				user_id: resolvedOwnerId,
+				provider: 'github',
+				access_token: token,
+				token_type: 'bearer',
+				scope: 'repo,workflow',
+				account_email: 'github-user@example.com',
+				account_name: accountName,
+				account_id: accountId,
+				updated_at: new Date(),
+			},
+			update: {
+				access_token: token,
+				token_type: 'bearer',
+				scope: 'repo,workflow',
+				account_email: 'github-user@example.com',
+				account_name: accountName,
+				account_id: accountId,
+				updated_at: new Date(),
+			},
+		});
 	}
 
 	async getAuthStatus(ownerId?: number) {
 		const resolvedOwnerId = this.resolveOwnerId(ownerId);
-		const rows = await this.prisma.$queryRaw<GitHubTokenRow[]>`
-			SELECT access_token, account_id, account_name, account_email
-			FROM oauth_tokens
-			WHERE user_id = ${resolvedOwnerId}
-				AND provider::text = 'github'
-			LIMIT 1
-		`;
-		const token = rows[0];
+		const token = (await this.prisma.oauth_tokens.findFirst({
+			where: {
+				user_id: resolvedOwnerId,
+				provider: 'github',
+			},
+			select: {
+				access_token: true,
+				account_id: true,
+				account_name: true,
+				account_email: true,
+			},
+		})) as GitHubTokenRow | null;
 
 		if (!token) {
 			return {
@@ -196,11 +193,12 @@ export class GithubService {
 
 	async disconnect(ownerId?: number) {
 		const resolvedOwnerId = this.resolveOwnerId(ownerId);
-		await this.prisma.$executeRaw`
-			DELETE FROM oauth_tokens
-			WHERE user_id = ${resolvedOwnerId}
-				AND provider::text = 'github'
-		`;
+		await this.prisma.oauth_tokens.deleteMany({
+			where: {
+				user_id: resolvedOwnerId,
+				provider: 'github',
+			},
+		});
 
 		return { status: 'success', message: 'GitHub disconnected' };
 	}

@@ -9,6 +9,7 @@ describe('DomainsController', () => {
 			| 'listDomains'
 			| 'listExpiringDomains'
 			| 'getDomainStats'
+			| 'getRunnerSnapshot'
 			| 'getDomain'
 			| 'refreshWhois'
 			| 'createDomain'
@@ -23,6 +24,7 @@ describe('DomainsController', () => {
 			listDomains: jest.fn(),
 			listExpiringDomains: jest.fn(),
 			getDomainStats: jest.fn(),
+			getRunnerSnapshot: jest.fn(),
 			getDomain: jest.fn(),
 			refreshWhois: jest.fn(),
 			createDomain: jest.fn(),
@@ -39,10 +41,12 @@ describe('DomainsController', () => {
 			domains: [],
 			total: 0,
 		} as never);
+		service.getRunnerSnapshot.mockReturnValueOnce({ runs_total: 1 } as never);
 		service.getDomain.mockResolvedValueOnce({ id: 1 } as never);
 		service.createDomain.mockResolvedValueOnce({ status: 'success' } as never);
 
 		await controller.listDomains(undefined, undefined, undefined, '10', '0');
+		controller.getMaintenanceStatus();
 		await controller.getDomain(1);
 		await controller.createDomain({
 			client_id: 1,
@@ -57,6 +61,7 @@ describe('DomainsController', () => {
 			limit: 10,
 			offset: 0,
 		});
+		expect(service.getRunnerSnapshot).toHaveBeenCalled();
 		expect(service.getDomain).toHaveBeenCalledWith(1);
 	});
 });

@@ -18,6 +18,12 @@ type ProjectServerRow = {
 	panel_type: string;
 };
 
+type PendingSyncTask = {
+	task_id: string;
+	kind: string;
+	payload: Record<string, unknown>;
+};
+
 @Injectable()
 export class SyncService {
 	constructor(
@@ -26,6 +32,7 @@ export class SyncService {
 	) {}
 
 	private readonly fallbackOwnerId = 1;
+	private readonly taskQueue: PendingSyncTask[] = [];
 
 	private getPanelSyncMethod(panelType: string) {
 		switch (panelType) {
@@ -46,28 +53,84 @@ export class SyncService {
 
 	private async getProjectServer(projectServerId: number, ownerId?: number) {
 		const resolvedOwnerId = ownerId ?? this.fallbackOwnerId;
-		const rows = await this.prisma.$queryRaw<ProjectServerRow[]>`
-			SELECT
-				ps.id,
-				ps.project_id,
-				ps.environment::text AS environment,
-				ps.wp_url,
-				ps.wp_path,
-				ps.server_id,
-				s.name AS server_name,
-				s.panel_type::text AS panel_type
-			FROM project_servers ps
-			JOIN projects p ON p.id = ps.project_id
-			JOIN servers s ON s.id = ps.server_id
-			WHERE ps.id = ${projectServerId}
-				AND p.owner_id = ${resolvedOwnerId}
-			LIMIT 1
-		`;
-		const projectServer = rows[0];
+		const projectServer = await this.prisma.project_servers.findFirst({
+			where: {
+				id: projectServerId,
+				projects: {
+					is: {
+						owner_id: resolvedOwnerId,
+					},
+				},
+			},
+			select: {
+				id: true,
+				project_id: true,
+				environment: true,
+				wp_url: true,
+				wp_path: true,
+				server_id: true,
+				servers: {
+					select: {
+						name: true,
+						panel_type: true,
+					},
+				},
+			},
+		});
 		if (!projectServer) {
 			throw new NotFoundException({ detail: 'Project-server link not found' });
 		}
-		return projectServer;
+		return {
+			id: projectServer.id,
+			project_id: projectServer.project_id,
+			environment: projectServer.environment,
+			wp_url: projectServer.wp_url,
+			wp_path: projectServer.wp_path,
+			server_id: projectServer.server_id,
+			server_name: projectServer.servers.name,
+			panel_type: projectServer.servers.panel_type,
+		} satisfies ProjectServerRow;
+	}
+
+	private enqueueTask(kind: string, payload: Record<string, unknown>) {
+		const taskId = randomUUID();
+		this.taskQueue.push({
+			task_id: taskId,
+			kind,
+			payload,
+		});
+		this.taskStatusService.upsertTaskStatus(taskId, {
+			status: 'pending',
+			message: `${kind} task queued`,
+			progress: 0,
+			result: null,
+		});
+		return taskId;
+	}
+
+	claimPendingTasks(limit = 10) {
+		const safeLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
+		return this.taskQueue.splice(0, safeLimit);
+	}
+
+	processPendingTask(task: PendingSyncTask) {
+		this.taskStatusService.upsertTaskStatus(task.task_id, {
+			status: 'running',
+			message: `${task.kind} task running`,
+			progress: 50,
+		});
+
+		this.taskStatusService.upsertTaskStatus(task.task_id, {
+			status: 'completed',
+			message: `${task.kind} task completed`,
+			progress: 100,
+			result: task.payload,
+		});
+
+		return {
+			task_id: task.task_id,
+			status: 'completed',
+		};
 	}
 
 	pullDatabase(
@@ -82,7 +145,10 @@ export class SyncService {
 			payload.source_project_server_id,
 			ownerId,
 		).then(source => {
-			const taskId = randomUUID();
+			const taskId = this.enqueueTask('sync.pull_database', {
+				source_project_server_id: payload.source_project_server_id,
+				target: payload.target ?? 'local',
+			});
 			return {
 				status: 'accepted',
 				task_id: taskId,
@@ -110,7 +176,10 @@ export class SyncService {
 			payload.target_project_server_id,
 			ownerId,
 		).then(target => {
-			const taskId = randomUUID();
+			const taskId = this.enqueueTask('sync.push_database', {
+				target_project_server_id: payload.target_project_server_id,
+				source: payload.source ?? 'local',
+			});
 			return {
 				status: 'accepted',
 				task_id: taskId,
@@ -138,18 +207,25 @@ export class SyncService {
 		return this.getProjectServer(
 			payload.source_project_server_id,
 			ownerId,
-		).then(source => ({
-			status: 'accepted',
-			task_id: randomUUID(),
-			source: {
-				server: source.server_name,
-				environment: source.environment,
-				wp_path: source.wp_path,
-			},
-			target: payload.target ?? 'local',
-			paths: payload.paths ?? ['uploads'],
-			dry_run: payload.dry_run ?? false,
-		}));
+		).then(source => {
+			const taskId = this.enqueueTask('sync.pull_files', {
+				source_project_server_id: payload.source_project_server_id,
+				target: payload.target ?? 'local',
+				paths: payload.paths ?? ['uploads'],
+			});
+			return {
+				status: 'accepted',
+				task_id: taskId,
+				source: {
+					server: source.server_name,
+					environment: source.environment,
+					wp_path: source.wp_path,
+				},
+				target: payload.target ?? 'local',
+				paths: payload.paths ?? ['uploads'],
+				dry_run: payload.dry_run ?? false,
+			};
+		});
 	}
 
 	pushFiles(
@@ -165,19 +241,26 @@ export class SyncService {
 		return this.getProjectServer(
 			payload.target_project_server_id,
 			ownerId,
-		).then(target => ({
-			status: 'accepted',
-			task_id: randomUUID(),
-			source: payload.source ?? 'local',
-			target: {
-				server: target.server_name,
-				environment: target.environment,
-				wp_path: target.wp_path,
-			},
-			paths: payload.paths ?? ['uploads'],
-			dry_run: payload.dry_run ?? false,
-			delete_extra: payload.delete_extra ?? false,
-		}));
+		).then(target => {
+			const taskId = this.enqueueTask('sync.push_files', {
+				target_project_server_id: payload.target_project_server_id,
+				source: payload.source ?? 'local',
+				paths: payload.paths ?? ['uploads'],
+			});
+			return {
+				status: 'accepted',
+				task_id: taskId,
+				source: payload.source ?? 'local',
+				target: {
+					server: target.server_name,
+					environment: target.environment,
+					wp_path: target.wp_path,
+				},
+				paths: payload.paths ?? ['uploads'],
+				dry_run: payload.dry_run ?? false,
+				delete_extra: payload.delete_extra ?? false,
+			};
+		});
 	}
 
 	getStatus(taskId: string) {
@@ -217,9 +300,14 @@ export class SyncService {
 			targetName = target.server_name;
 		}
 
+		const taskId = this.enqueueTask('sync.full', {
+			source_project_server_id: payload.source_project_server_id,
+			target_project_server_id: payload.target_project_server_id ?? null,
+		});
+
 		return {
 			status: 'accepted',
-			task_id: randomUUID(),
+			task_id: taskId,
 			source: {
 				server: source.server_name,
 				environment: source.environment,
@@ -256,9 +344,14 @@ export class SyncService {
 			payload.project_server_id,
 			ownerId,
 		);
+		const taskId = this.enqueueTask('sync.composer', {
+			project_server_id: payload.project_server_id,
+			command,
+			packages: payload.packages ?? null,
+		});
 		return {
 			status: 'accepted',
-			task_id: randomUUID(),
+			task_id: taskId,
 			server: target.server_name,
 			environment: target.environment,
 			command,

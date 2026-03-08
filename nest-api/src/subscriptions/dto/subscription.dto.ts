@@ -76,6 +76,16 @@ export class CreateSubscriptionDto {
 	package_id?: number;
 
 	@IsOptional()
+	@IsNumber()
+	@Min(1)
+	hosting_package_id?: number;
+
+	@IsOptional()
+	@IsNumber()
+	@Min(1)
+	support_package_id?: number;
+
+	@IsOptional()
 	@IsBoolean()
 	create_hosting?: boolean;
 

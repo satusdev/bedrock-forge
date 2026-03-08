@@ -17,6 +17,28 @@ type MonitorRow = {
 	created_at: Date;
 	project_id: number | null;
 	project_server_id: number | null;
+	created_by_id: number;
+	alert_on_down: boolean;
+	last_error_message: string | null;
+	maintenance_start: Date | null;
+	maintenance_end: Date | null;
+};
+
+type DueMonitorClaim = {
+	id: number;
+	created_by_id: number;
+};
+
+type MonitorRunnerSnapshot = {
+	enabled: boolean;
+	runs_total: number;
+	last_run_at: string | null;
+	last_outcome: {
+		claimed: number;
+		checks_succeeded: number;
+		checks_failed: number;
+		error: string | null;
+	} | null;
 };
 
 @Injectable()
@@ -24,9 +46,39 @@ export class MonitorsService {
 	constructor(private readonly prisma: PrismaService) {}
 
 	private readonly fallbackOwnerId = 1;
+	private runnerSnapshot: MonitorRunnerSnapshot = {
+		enabled:
+			(process.env.MONITOR_RUNNER_ENABLED ?? 'true').toLowerCase() !== 'false',
+		runs_total: 0,
+		last_run_at: null,
+		last_outcome: null,
+	};
 
 	private resolveOwnerId(ownerId?: number) {
 		return ownerId ?? this.fallbackOwnerId;
+	}
+
+	getRunnerSnapshot() {
+		return this.runnerSnapshot;
+	}
+
+	recordRunnerSnapshot(outcome: {
+		claimed: number;
+		checks_succeeded: number;
+		checks_failed: number;
+		error?: string | null;
+	}) {
+		this.runnerSnapshot = {
+			...this.runnerSnapshot,
+			runs_total: this.runnerSnapshot.runs_total + 1,
+			last_run_at: new Date().toISOString(),
+			last_outcome: {
+				claimed: outcome.claimed,
+				checks_succeeded: outcome.checks_succeeded,
+				checks_failed: outcome.checks_failed,
+				error: outcome.error ?? null,
+			},
+		};
 	}
 
 	private normalizeMonitor(row: MonitorRow) {
@@ -45,7 +97,72 @@ export class MonitorsService {
 			created_at: row.created_at,
 			project_id: row.project_id,
 			project_server_id: row.project_server_id,
+			created_by_id: row.created_by_id,
 		};
+	}
+
+	private async getMonitorRecord(monitorId: number) {
+		const rows = await this.prisma.$queryRaw<MonitorRow[]>`
+			SELECT
+				id,
+				name,
+				monitor_type::text AS monitor_type,
+				url,
+				interval_seconds,
+				timeout_seconds,
+				is_active,
+				last_check_at,
+				last_status::text AS last_status,
+				last_response_time_ms,
+				uptime_percentage,
+				created_at,
+				project_id,
+				project_server_id,
+				created_by_id,
+				alert_on_down,
+				last_error_message,
+				maintenance_start,
+				maintenance_end
+			FROM monitors
+			WHERE id = ${monitorId}
+			LIMIT 1
+		`;
+		return rows[0] ?? null;
+	}
+
+	private async performHttpCheck(url: string, timeoutSeconds: number) {
+		const controller = new AbortController();
+		const timeout = setTimeout(
+			() => controller.abort(),
+			Math.max(1, timeoutSeconds) * 1000,
+		);
+		const startedAt = Date.now();
+		try {
+			const response = await fetch(url, {
+				method: 'GET',
+				signal: controller.signal,
+			});
+			const responseTimeMs = Date.now() - startedAt;
+			const status = response.ok ? 'up' : 'down';
+			const message = response.ok ? null : `HTTP ${response.status}`;
+			return {
+				status,
+				responseTimeMs,
+				statusCode: response.status,
+				message,
+			};
+		} catch (error) {
+			const responseTimeMs = Date.now() - startedAt;
+			const detail = error instanceof Error ? error.message : 'Request failed';
+			return {
+				status: 'down',
+				responseTimeMs,
+				statusCode: null,
+				message: detail,
+			};
+		} finally {
+			clearTimeout(timeout);
+		}
 	}
 
 	async listMonitors(skip = 0, limit = 100, ownerId?: number) {
@@ -319,6 +436,146 @@ export class MonitorsService {
 			task_id: randomUUID(),
 			monitor_id: monitorId,
 			message: `Check triggered for ${monitor.name}`,
+		};
+	}
+
+	async claimDueMonitors(limit = 10) {
+		const safeLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
+		const now = new Date();
+		const rows = await this.prisma.monitors.findMany({
+			where: { is_active: true },
+			orderBy: [{ last_check_at: 'asc' }, { id: 'asc' }],
+			select: {
+				id: true,
+				created_by_id: true,
+				maintenance_start: true,
+				maintenance_end: true,
+				last_check_at: true,
+				interval_seconds: true,
+			},
+		});
+
+		const due = rows
+			.filter(row => {
+				if (row.maintenance_start && row.maintenance_end) {
+					const inMaintenance =
+						now >= row.maintenance_start && now <= row.maintenance_end;
+					if (inMaintenance) {
+						return false;
+					}
+				}
+
+				if (!row.last_check_at) {
+					return true;
+				}
+
+				const elapsedSeconds =
+					(now.getTime() - row.last_check_at.getTime()) / 1000;
+				return elapsedSeconds >= row.interval_seconds;
+			})
+			.slice(0, safeLimit)
+			.map(row => ({ id: row.id, created_by_id: row.created_by_id }));
+
+		if (due.length === 0) {
+			return [];
+		}
+
+		await this.prisma.monitors.updateMany({
+			where: { id: { in: due.map(row => row.id) } },
+			data: { last_check_at: now, updated_at: now },
+		});
+
+		return due;
+	}
+
+	async runMonitorCheck(monitorId: number) {
+		const monitor = await this.getMonitorRecord(monitorId);
+		if (!monitor) {
+			throw new NotFoundException({ detail: 'Monitor not found' });
+		}
+
+		const check = await this.performHttpCheck(
+			monitor.url,
+			monitor.timeout_seconds,
+		);
+		const status = check.status === 'up' ? 'up' : 'down';
+		const previousUptime = monitor.uptime_percentage ?? 100;
+		const nextUptime =
+			status === 'up'
+				? Math.min(100, previousUptime * 0.95 + 5)
+				: Math.max(0, previousUptime * 0.95);
+
+		const now = new Date();
+		const responseTime = Math.max(0, Math.trunc(check.responseTimeMs));
+
+		await this.prisma.monitors.update({
+			where: { id: monitor.id },
+			data: {
+				last_status: status,
+				last_response_time_ms: responseTime,
+				uptime_percentage: nextUptime,
+				last_error_message: check.message ?? null,
+				updated_at: now,
+			},
+		});
+
+		await this.prisma.heartbeats.create({
+			data: {
+				monitor_id: monitor.id,
+				status,
+				response_time_ms: responseTime,
+				status_code: check.statusCode ?? null,
+				message: check.message ?? null,
+				checked_at: now,
+			},
+		});
+
+		const openIncident = await this.prisma.incidents.findFirst({
+			where: {
+				monitor_id: monitor.id,
+				status: 'ongoing',
+			},
+			orderBy: { started_at: 'desc' },
+			select: { id: true, started_at: true },
+		});
+
+		if (status === 'down' && monitor.alert_on_down && !openIncident) {
+			await this.prisma.incidents.create({
+				data: {
+					monitor_id: monitor.id,
+					title: `Monitor down: ${monitor.name}`,
+					status: 'ongoing',
+					started_at: now,
+					notification_sent: false,
+					recovery_notification_sent: false,
+					created_at: now,
+					updated_at: now,
+				},
+			});
+		}
+
+		if (status === 'up' && openIncident) {
+			const durationSeconds = Math.max(
+				0,
+				Math.trunc((now.getTime() - openIncident.started_at.getTime()) / 1000),
+			);
+			await this.prisma.incidents.update({
+				where: { id: openIncident.id },
+				data: {
+					status: 'resolved',
+					resolved_at: now,
+					duration_seconds: durationSeconds,
+					recovery_notification_sent: false,
+					updated_at: now,
+				},
+			});
+		}
+
+		return {
+			monitor_id: monitor.id,
+			status,
+			response_time_ms: Math.max(0, Math.trunc(check.responseTimeMs)),
+			error_message: check.message,
 		};
 	}
 

@@ -57,6 +57,14 @@ describe('Schedules HTTP Contract', () => {
 		expect(response.body[0].name).toBe('Daily');
 	});
 
+	it('GET /schedules returns 400 for invalid pagination query', async () => {
+		const response = await request(app.getHttpServer())
+			.get('/schedules?page=abc')
+			.expect(400);
+
+		expect(response.body).toEqual({ detail: 'Invalid page' });
+	});
+
 	it('GET /schedules/:id returns 404 detail when missing', async () => {
 		schedulesService.getSchedule.mockRejectedValueOnce(
 			new NotFoundException({ detail: 'Schedule not found' }),

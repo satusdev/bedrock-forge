@@ -86,6 +86,31 @@ export class TaskStatusService {
 		return record;
 	}
 
+	pruneTerminalStatuses(maxAgeMinutes = 180) {
+		const safeMaxAgeMinutes = Math.max(
+			1,
+			Math.min(7 * 24 * 60, Math.trunc(maxAgeMinutes)),
+		);
+		const threshold = Date.now() - safeMaxAgeMinutes * 60_000;
+		let removed = 0;
+
+		for (const [taskId, record] of this.store.entries()) {
+			if (!['completed', 'failed'].includes(record.status)) {
+				continue;
+			}
+
+			const updatedAt = Date.parse(record.updated_at);
+			if (!Number.isFinite(updatedAt) || updatedAt > threshold) {
+				continue;
+			}
+
+			this.store.delete(taskId);
+			removed += 1;
+		}
+
+		return removed;
+	}
+
 	private normalizeProgress(progress: number) {
 		if (Number.isNaN(progress)) {
 			return 0;

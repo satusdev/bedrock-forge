@@ -46,4 +46,38 @@ describe('TaskStatusService', () => {
 
 		expect(result.progress).toBe(100);
 	});
+
+	it('prunes completed and failed task records older than retention threshold', () => {
+		const oldTimestamp = new Date(Date.now() - 5 * 60_000).toISOString();
+		(service as any).store.set('task-completed', {
+			task_id: 'task-completed',
+			status: 'completed',
+			message: '',
+			progress: 100,
+			result: null,
+			started_at: oldTimestamp,
+			completed_at: oldTimestamp,
+			updated_at: oldTimestamp,
+		});
+		(service as any).store.set('task-failed', {
+			task_id: 'task-failed',
+			status: 'failed',
+			message: '',
+			progress: 100,
+			result: null,
+			started_at: oldTimestamp,
+			completed_at: oldTimestamp,
+			updated_at: oldTimestamp,
+		});
+		service.upsertTaskStatus('task-running', {
+			status: 'running',
+			progress: 50,
+		});
+
+		const removed = service.pruneTerminalStatuses(1);
+
+		expect(removed).toBe(2);
+		expect(service.getTaskStatus('task-running').status).toBe('running');
+		expect(service.getTaskStatus('task-completed').status).toBe('pending');
+	});
 });

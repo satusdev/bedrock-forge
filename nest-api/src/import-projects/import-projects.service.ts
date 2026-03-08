@@ -12,10 +12,12 @@ type ServerRow = {
 
 type ImportedWebsiteRow = {
 	project_id: number;
-	project_name: string;
 	environment: string;
 	wp_url: string;
 	wp_path: string;
+	projects: {
+		name: string;
+	};
 };
 
 @Injectable()
@@ -46,36 +48,52 @@ export class ImportProjectsService {
 
 	private async getOwnedServer(serverId: number, ownerId?: number) {
 		const resolvedOwnerId = this.resolveOwnerId(ownerId);
-		const rows = await this.prisma.$queryRaw<ServerRow[]>`
-			SELECT id, name
-			FROM servers
-			WHERE id = ${serverId} AND owner_id = ${resolvedOwnerId}
-			LIMIT 1
-		`;
-		const server = rows[0];
+		const server = await this.prisma.servers.findFirst({
+			where: {
+				id: serverId,
+				owner_id: resolvedOwnerId,
+			},
+			select: {
+				id: true,
+				name: true,
+			},
+		});
 		if (!server) {
 			throw new NotFoundException({ detail: 'Server not found' });
 		}
-		return server;
+		return server as ServerRow;
 	}
 
 	async listServerWebsites(serverId: number, ownerId?: number) {
 		const resolvedOwnerId = this.resolveOwnerId(ownerId);
 		await this.getOwnedServer(serverId, resolvedOwnerId);
 
-		const rows = await this.prisma.$queryRaw<ImportedWebsiteRow[]>`
-			SELECT
-				ps.project_id,
-				p.name AS project_name,
-				ps.environment::text AS environment,
-				ps.wp_url,
-				ps.wp_path
-			FROM project_servers ps
-			JOIN projects p ON p.id = ps.project_id
-			WHERE ps.server_id = ${serverId}
-				AND p.owner_id = ${resolvedOwnerId}
-			ORDER BY p.name ASC
-		`;
+		const rows = await this.prisma.project_servers.findMany({
+			where: {
+				server_id: serverId,
+				projects: {
+					is: {
+						owner_id: resolvedOwnerId,
+					},
+				},
+			},
+			select: {
+				project_id: true,
+				environment: true,
+				wp_url: true,
+				wp_path: true,
+				projects: {
+					select: {
+						name: true,
+					},
+				},
+			},
+			orderBy: {
+				projects: {
+					name: 'asc',
+				},
+			},
+		});
 
 		return rows.map(row => ({
 			domain: this.normalizeDomain(row.wp_url),
@@ -86,7 +104,7 @@ export class ImportProjectsService {
 			is_wordpress: true,
 			wp_type: row.wp_path.includes('/web') ? 'bedrock' : 'standard',
 			wp_version: null,
-			site_title: row.project_name,
+			site_title: row.projects.name,
 			already_imported: true,
 			project_id: row.project_id,
 		}));
@@ -112,138 +130,102 @@ export class ImportProjectsService {
 		const wpUrl = `https://${domain}`;
 		const docRoot = `/home/${domain}/public_html`;
 
-		const existingRows = await this.prisma.$queryRaw<Array<{ id: number }>>`
-			SELECT ps.id
-			FROM project_servers ps
-			JOIN projects p ON p.id = ps.project_id
-			WHERE ps.server_id = ${serverId}
-				AND p.owner_id = ${resolvedOwnerId}
-				AND (
-					LOWER(REPLACE(REPLACE(ps.wp_url, 'https://', ''), 'http://', '')) = ${domain}
-					OR LOWER(ps.wp_path) = ${docRoot.toLowerCase()}
-				)
-			LIMIT 1
-		`;
-		if (existingRows[0]) {
+		const existing = await this.prisma.project_servers.findFirst({
+			where: {
+				server_id: serverId,
+				projects: {
+					is: {
+						owner_id: resolvedOwnerId,
+					},
+				},
+				OR: [
+					{ wp_url: { equals: `https://${domain}`, mode: 'insensitive' } },
+					{ wp_url: { equals: `http://${domain}`, mode: 'insensitive' } },
+					{ wp_path: { equals: docRoot, mode: 'insensitive' } },
+				],
+			},
+			select: { id: true },
+		});
+		if (existing) {
 			throw new BadRequestException({
 				detail: 'This website is already imported as a project',
 			});
 		}
 
 		let slug = domain.replace(/\./g, '-');
-		const slugRows = await this.prisma.$queryRaw<Array<{ id: number }>>`
-			SELECT id
-			FROM projects
-			WHERE slug = ${slug}
-			LIMIT 1
-		`;
-		if (slugRows[0]) {
+		const duplicateSlug = await this.prisma.projects.findUnique({
+			where: { slug },
+			select: { id: true },
+		});
+		if (duplicateSlug) {
 			slug = `${slug}-${serverId}`;
 		}
 
 		const projectName =
 			payload.project_name?.trim() || this.titleizeFromDomain(domain) || domain;
-		const environment =
-			payload.environment &&
-			['production', 'staging', 'development'].includes(payload.environment)
+		const environment: 'production' | 'staging' | 'development' =
+			payload.environment === 'production' ||
+			payload.environment === 'staging' ||
+			payload.environment === 'development'
 				? payload.environment
 				: 'production';
 
-		const projectRows = await this.prisma.$queryRaw<
-			Array<{ id: number; name: string }>
-		>`
-			INSERT INTO projects (
-				name,
+		const project = await this.prisma.projects.create({
+			data: {
+				name: projectName,
 				slug,
-				description,
-				path,
-				status,
+				description: `Imported from ${server.name}: ${domain}`,
+				path: docRoot,
+				status: 'active',
 				environment,
-				wp_home,
-				owner_id,
-				tags,
-				gdrive_connected,
-				updated_at
-			)
-			VALUES (
-				${projectName},
-				${slug},
-				${`Imported from ${server.name}: ${domain}`},
-				${docRoot},
-				${'active'},
-				${environment},
-				${wpUrl},
-				${resolvedOwnerId},
-				${'[]'},
-				${false},
-				NOW()
-			)
-			RETURNING id, name
-		`;
-		const project = projectRows[0];
+				wp_home: wpUrl,
+				owner_id: resolvedOwnerId,
+				tags: '[]',
+				gdrive_connected: false,
+				updated_at: new Date(),
+			},
+			select: {
+				id: true,
+				name: true,
+			},
+		});
 		if (!project) {
 			throw new NotFoundException({ detail: 'Failed to create project' });
 		}
 
-		await this.prisma.$executeRaw`
-			INSERT INTO project_servers (
-				project_id,
-				server_id,
+		await this.prisma.project_servers.create({
+			data: {
+				project_id: project.id,
+				server_id: serverId,
 				environment,
-				wp_url,
-				wp_path,
-				database_name,
-				database_user,
-				database_password,
-				is_primary,
-				updated_at
-			)
-			VALUES (
-				${project.id},
-				${serverId},
-				${environment},
-				${wpUrl},
-				${docRoot},
-				${`${slug}_db`},
-				${`${slug}_user`},
-				${'imported'},
-				${true},
-				NOW()
-			)
-		`;
+				wp_url: wpUrl,
+				wp_path: docRoot,
+				database_name: `${slug}_db`,
+				database_user: `${slug}_user`,
+				database_password: 'imported',
+				is_primary: true,
+				updated_at: new Date(),
+			},
+		});
 
 		const createMonitor = payload.create_monitor ?? true;
 		if (createMonitor) {
-			await this.prisma.$executeRaw`
-				INSERT INTO monitors (
-					name,
-					monitor_type,
-					url,
-					interval_seconds,
-					timeout_seconds,
-					is_active,
-					alert_on_down,
-					consecutive_failures,
-					project_id,
-					created_by_id,
-					created_at,
-					updated_at
-				)
-				VALUES (
-					${`${projectName} - ${environment}`},
-					${'uptime'}::monitortype,
-					${wpUrl},
-					${300},
-					${30},
-					${true},
-					${true},
-					${3},
-					${project.id},
-					${resolvedOwnerId},
-					NOW(),
-					NOW()
-				)
-			`;
+			await this.prisma.monitors.create({
+				data: {
+					name: `${projectName} - ${environment}`,
+					monitor_type: 'uptime',
+					url: wpUrl,
+					interval_seconds: 300,
+					timeout_seconds: 30,
+					is_active: true,
+					alert_on_down: true,
+					consecutive_failures: 3,
+					project_id: project.id,
+					created_by_id: resolvedOwnerId,
+					created_at: new Date(),
+					updated_at: new Date(),
+				},
+			});
 		}
 
 		return {

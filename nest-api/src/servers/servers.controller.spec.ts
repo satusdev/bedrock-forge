@@ -135,7 +135,12 @@ describe('ServersController', () => {
 			undefined,
 		);
 		expect(service.getServerTags).toHaveBeenCalledWith(2, undefined);
-		expect(service.scanSites).toHaveBeenCalledWith(2, '/home', undefined);
+		expect(service.scanSites).toHaveBeenCalledWith(
+			2,
+			'/home',
+			undefined,
+			undefined,
+		);
 		expect(service.scanDirectories).toHaveBeenCalledWith(
 			2,
 			'/var/www',

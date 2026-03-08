@@ -3,7 +3,7 @@ import {
 	Injectable,
 	NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { billingstatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ClientCreateDto } from './dto/client-create.dto';
 import { ClientUpdateDto } from './dto/client-update.dto';
@@ -82,11 +82,31 @@ type UserPreferences = {
 export class ClientsService {
 	private readonly userPreferences = new Map<string, UserPreferences>();
 	private readonly fallbackOwnerId = 1;
+	private readonly billingStatuses = new Set<billingstatus>([
+		'active',
+		'inactive',
+		'trial',
+		'overdue',
+	]);
 
 	constructor(private readonly prisma: PrismaService) {}
 
 	private resolveOwnerId(ownerId?: number) {
 		return ownerId ?? this.fallbackOwnerId;
+	}
+
+	private normalizeBillingStatus(
+		status: string | undefined,
+		fallback: billingstatus,
+	) {
+		if (!status) {
+			return fallback;
+		}
+		const normalized = status.trim().toLowerCase();
+		if (!this.billingStatuses.has(normalized as billingstatus)) {
+			throw new BadRequestException({ detail: 'Invalid billing_status' });
+		}
+		return normalized as billingstatus;
 	}
 
 	private getDefaultUserPreferences(userId: string): UserPreferences {
@@ -129,85 +149,69 @@ export class ClientsService {
 	async getAllClients(query: GetClientsQueryDto) {
 		const limit = query.limit ?? 50;
 		const offset = query.offset ?? 0;
-		const whereClauses: Prisma.Sql[] = [];
+		const where: Prisma.clientsWhereInput = {
+			...(query.status ? { billing_status: query.status } : {}),
+		};
 
 		if (query.search) {
-			const searchTerm = `%${query.search}%`;
-			whereClauses.push(
-				Prisma.sql`(
-					c.name ILIKE ${searchTerm}
-					OR c.company ILIKE ${searchTerm}
-					OR c.email ILIKE ${searchTerm}
-				)`,
-			);
+			where.OR = [
+				{ name: { contains: query.search, mode: 'insensitive' } },
+				{ company: { contains: query.search, mode: 'insensitive' } },
+				{ email: { contains: query.search, mode: 'insensitive' } },
+			];
 		}
 
-		if (query.status) {
-			whereClauses.push(
-				Prisma.sql`c.billing_status = ${query.status}::billingstatus`,
-			);
-		}
-
-		const whereSql = whereClauses.length
-			? Prisma.sql`WHERE ${Prisma.join(whereClauses, ' AND ')}`
-			: Prisma.empty;
-
-		const totalRows = await this.prisma.$queryRaw<{ total: bigint | number }[]>`
-			SELECT COUNT(*) AS total
-			FROM clients c
-			${whereSql}
-		`;
-		const totalRaw = totalRows[0]?.total ?? 0;
-		const total = Number(totalRaw);
-
-		const clients = await this.prisma.$queryRaw<DbClientListRow[]>`
-			SELECT
-				c.id,
-				c.name,
-				c.company,
-				c.email,
-				c.phone,
-				c.billing_status,
-				c.monthly_rate,
-				c.currency,
-				c.created_at,
-				(SELECT COUNT(*) FROM projects p WHERE p.client_id = c.id) AS project_count,
-				(SELECT COUNT(*) FROM invoices i WHERE i.client_id = c.id) AS invoice_count
-			FROM clients c
-			${whereSql}
-			ORDER BY c.name
-			OFFSET ${offset}
-			LIMIT ${limit}
-		`;
-
-		const items = await Promise.all(
-			clients.map(async client => {
-				const projects = await this.prisma.$queryRaw<DbProjectSummary[]>`
-					SELECT p.id, p.name, p.status, p.environment, p.wp_home
-					FROM projects p
-					WHERE p.client_id = ${client.id}
-					ORDER BY p.name
-				`;
-
-				return {
-					id: client.id,
-					name: client.name,
-					company: client.company,
-					email: client.email,
-					phone: client.phone,
-					billing_status: client.billing_status,
-					project_count: Number(client.project_count),
-					invoice_count: Number(client.invoice_count),
-					monthly_retainer: client.monthly_rate,
-					currency: client.currency,
-					projects: projects.map(project => ({
-						id: project.id,
-						project_name: project.name,
-					})),
-					created_at: client.created_at?.toISOString() ?? null,
-				};
+		const [total, clients] = await Promise.all([
+			this.prisma.clients.count({ where }),
+			this.prisma.clients.findMany({
+				where,
+				orderBy: { name: 'asc' },
+				skip: offset,
+				take: limit,
+				select: {
+					id: true,
+					name: true,
+					company: true,
+					email: true,
+					phone: true,
+					billing_status: true,
+					monthly_rate: true,
+					currency: true,
+					created_at: true,
+					projects: {
+						select: {
+							id: true,
+							name: true,
+						},
+						orderBy: { name: 'asc' },
+					},
+					_count: {
+						select: {
+							projects: true,
+							invoices: true,
+						},
+					},
+				},
 			}),
-		);
+		]);
+
+		const items = clients.map(client => ({
+			id: client.id,
+			name: client.name,
+			company: client.company,
+			email: client.email,
+			phone: client.phone,
+			billing_status: client.billing_status,
+			project_count: client._count.projects,
+			invoice_count: client._count.invoices,
+			monthly_retainer: client.monthly_rate,
+			currency: client.currency,
+			projects: client.projects.map(project => ({
+				id: project.id,
+				project_name: project.name,
+			})),
+			created_at: client.created_at?.toISOString() ?? null,
+		}));
 
 		return {
 			clients: items,
@@ -218,51 +222,57 @@ export class ClientsService {
 	}
 
 	async getClient(clientId: number) {
-		const rows = await this.prisma.$queryRaw<DbClientDetails[]>`
-			SELECT
-				id,
-				name,
-				company,
-				email,
-				phone,
-				billing_email,
-				address,
-				website,
-				notes,
-				billing_status,
-				payment_terms,
-				currency,
-				tax_rate,
-				auto_billing,
-				contract_start,
-				contract_end,
-				invoice_prefix,
-				created_at,
-				updated_at,
-				monthly_rate
-			FROM clients
-			WHERE id = ${clientId}
-			LIMIT 1
-		`;
-		const client = rows[0];
+		const client = await this.prisma.clients.findUnique({
+			where: { id: clientId },
+			select: {
+				id: true,
+				name: true,
+				company: true,
+				email: true,
+				phone: true,
+				billing_email: true,
+				address: true,
+				website: true,
+				notes: true,
+				billing_status: true,
+				payment_terms: true,
+				currency: true,
+				tax_rate: true,
+				auto_billing: true,
+				contract_start: true,
+				contract_end: true,
+				invoice_prefix: true,
+				created_at: true,
+				updated_at: true,
+				monthly_rate: true,
+				projects: {
+					select: {
+						id: true,
+						name: true,
+						status: true,
+						environment: true,
+						wp_home: true,
+					},
+					orderBy: { name: 'asc' },
+				},
+				invoices: {
+					select: {
+						id: true,
+						invoice_number: true,
+						status: true,
+						total: true,
+						amount_paid: true,
+						issue_date: true,
+						due_date: true,
+					},
+					orderBy: { issue_date: 'desc' },
+					take: 5,
+				},
+			},
+		});
 		if (!client) {
 			throw new NotFoundException({ detail: 'Client not found' });
 		}
-
-		const projects = await this.prisma.$queryRaw<DbProjectSummary[]>`
-			SELECT id, name, status, environment, wp_home
-			FROM projects
-			WHERE client_id = ${clientId}
-			ORDER BY name
-		`;
-
-		const recentInvoices = await this.prisma.$queryRaw<DbInvoiceSummary[]>`
-			SELECT id, invoice_number, status, total, amount_paid, issue_date, due_date
-			FROM invoices
-			WHERE client_id = ${clientId}
-			ORDER BY issue_date DESC
-			LIMIT 5
-		`;
 
 		return {
 			id: client.id,
@@ -285,12 +295,12 @@ export class ClientsService {
 			created_at: client.created_at?.toISOString() ?? null,
 			updated_at: client.updated_at?.toISOString() ?? null,
 			monthly_retainer: client.monthly_rate,
-			projects: projects.map(project => ({
+			projects: client.projects.map(project => ({
 				id: project.id,
 				project_name: project.name,
 				status: project.status,
 			})),
-			recent_invoices: recentInvoices.map(invoice => ({
+			recent_invoices: client.invoices.map(invoice => ({
 				id: invoice.id,
 				invoice_number: invoice.invoice_number,
 				status: invoice.status,
@@ -301,128 +311,112 @@ export class ClientsService {
 
 	async createClient(payload: ClientCreateDto, ownerId?: number) {
 		const resolvedOwnerId = this.resolveOwnerId(ownerId);
-		const existing = await this.prisma.$queryRaw<{ id: number }[]>`
-			SELECT id
-			FROM clients
-			WHERE email = ${payload.email}
-			LIMIT 1
-		`;
-		if (existing[0]) {
+		const existing = await this.prisma.clients.findFirst({
+			where: { email: payload.email },
+			select: { id: true },
+		});
+		if (existing) {
 			throw new BadRequestException({
 				detail: 'Client with this email already exists',
 			});
 		}
 
-		const inserted = await this.prisma.$queryRaw<{ id: number }[]>`
-			INSERT INTO clients (
-				name,
-				email,
-				company,
-				phone,
-				billing_email,
-				address,
-				website,
-				notes,
-				billing_status,
-				payment_terms,
-				currency,
-				tax_rate,
-				auto_billing,
-				invoice_prefix,
-				next_invoice_number,
-				updated_at,
-				country,
-				monthly_rate,
-				total_revenue,
-				outstanding_balance,
-				owner_id
-			)
-			VALUES (
-				${payload.name},
-				${payload.email},
-				${payload.company ?? null},
-				${payload.phone ?? null},
-				${payload.billing_email ?? payload.email},
-				${payload.address ?? null},
-				${payload.website ?? null},
-				${payload.notes ?? null},
-				${'active'}::billingstatus,
-				${String(payload.payment_terms ?? 30)},
-				${payload.currency ?? 'USD'},
-				${payload.tax_rate ?? 0},
-				${false},
-				${'INV'},
-				${1},
-				NOW(),
-				${'Unknown'},
-				${0},
-				${0},
-				${0},
-				${resolvedOwnerId}
-			)
-			RETURNING id
-		`;
+		const inserted = await this.prisma.clients.create({
+			data: {
+				name: payload.name,
+				email: payload.email,
+				company: payload.company ?? null,
+				phone: payload.phone ?? null,
+				billing_email: payload.billing_email ?? payload.email,
+				address: payload.address ?? null,
+				website: payload.website ?? null,
+				notes: payload.notes ?? null,
+				billing_status: 'active',
+				payment_terms: String(payload.payment_terms ?? 30),
+				currency: payload.currency ?? 'USD',
+				tax_rate: payload.tax_rate ?? 0,
+				auto_billing: false,
+				invoice_prefix: 'INV',
+				next_invoice_number: 1,
+				updated_at: new Date(),
+				country: 'Unknown',
+				monthly_rate: 0,
+				total_revenue: 0,
+				outstanding_balance: 0,
+				owner_id: resolvedOwnerId,
+			},
+			select: {
+				id: true,
+			},
+		});
 
 		return {
 			status: 'success',
 			message: 'Client created successfully',
-			client_id: inserted[0]?.id ?? null,
+			client_id: inserted.id,
 		};
 	}
 
 	async updateClient(clientId: number, payload: ClientUpdateDto) {
-		const rows = await this.prisma.$queryRaw<DbClientDetails[]>`
-			SELECT
-				id,
-				name,
-				company,
-				email,
-				phone,
-				billing_email,
-				address,
-				website,
-				notes,
-				billing_status,
-				payment_terms,
-				currency,
-				tax_rate,
-				auto_billing,
-				contract_start,
-				contract_end,
-				invoice_prefix,
-				created_at,
-				updated_at,
-				monthly_rate
-			FROM clients
-			WHERE id = ${clientId}
-			LIMIT 1
-		`;
-		const current = rows[0];
+		const current = await this.prisma.clients.findUnique({
+			where: { id: clientId },
+			select: {
+				id: true,
+				name: true,
+				company: true,
+				email: true,
+				phone: true,
+				billing_email: true,
+				address: true,
+				website: true,
+				notes: true,
+				billing_status: true,
+				payment_terms: true,
+				currency: true,
+				tax_rate: true,
+				auto_billing: true,
+				contract_start: true,
+				contract_end: true,
+				invoice_prefix: true,
+				created_at: true,
+				updated_at: true,
+				monthly_rate: true,
+			},
+		});
 		if (!current) {
 			throw new NotFoundException({ detail: 'Client not found' });
 		}
 
-		await this.prisma.$executeRaw`
-			UPDATE clients
-			SET
-				name = ${payload.name ?? current.name},
-				email = ${payload.email ?? current.email},
-				company = ${payload.company ?? current.company},
-				phone = ${payload.phone ?? current.phone},
-				billing_email = ${payload.billing_email ?? current.billing_email},
-				address = ${payload.address ?? current.address},
-				website = ${payload.website ?? current.website},
-				notes = ${payload.notes ?? current.notes},
-				billing_status = ${payload.billing_status ?? current.billing_status}::billingstatus,
-				payment_terms = ${String(payload.payment_terms ?? Number.parseInt(current.payment_terms, 10))},
-				currency = ${payload.currency ?? current.currency},
-				tax_rate = ${payload.tax_rate ?? current.tax_rate},
-				contract_start = ${payload.contract_start ? new Date(payload.contract_start) : current.contract_start},
-				contract_end = ${payload.contract_end ? new Date(payload.contract_end) : current.contract_end},
-				monthly_rate = ${payload.monthly_rate ?? current.monthly_rate},
-				updated_at = NOW()
-			WHERE id = ${clientId}
-		`;
+		await this.prisma.clients.update({
+			where: { id: clientId },
+			data: {
+				name: payload.name ?? current.name,
+				email: payload.email ?? current.email,
+				company: payload.company ?? current.company,
+				phone: payload.phone ?? current.phone,
+				billing_email: payload.billing_email ?? current.billing_email,
+				address: payload.address ?? current.address,
+				website: payload.website ?? current.website,
+				notes: payload.notes ?? current.notes,
+				billing_status: this.normalizeBillingStatus(
+					payload.billing_status,
+					current.billing_status,
+				),
+				payment_terms: String(
+					payload.payment_terms ?? Number.parseInt(current.payment_terms, 10),
+				),
+				currency: payload.currency ?? current.currency,
+				tax_rate: payload.tax_rate ?? current.tax_rate,
+				contract_start: payload.contract_start
+					? new Date(payload.contract_start)
+					: current.contract_start,
+				contract_end: payload.contract_end
+					? new Date(payload.contract_end)
+					: current.contract_end,
+				monthly_rate: payload.monthly_rate ?? current.monthly_rate,
+				updated_at: new Date(),
+			},
+		});
 
 		return {
 			status: 'success',
@@ -431,36 +425,36 @@ export class ClientsService {
 	}
 
 	async deleteClient(clientId: number) {
-		const rows = await this.prisma.$queryRaw<{ id: number; name: string }[]>`
-			SELECT id, name
-			FROM clients
-			WHERE id = ${clientId}
-			LIMIT 1
-		`;
-		const client = rows[0];
+		const client = await this.prisma.clients.findUnique({
+			where: { id: clientId },
+			select: {
+				id: true,
+				name: true,
+				_count: {
+					select: {
+						projects: true,
+					},
+				},
+			},
+		});
 		if (!client) {
 			throw new NotFoundException({ detail: 'Client not found' });
 		}
 
-		const projectCountRows = await this.prisma.$queryRaw<
-			{ total: bigint | number }[]
-		>`
-			SELECT COUNT(*) AS total
-			FROM projects
-			WHERE client_id = ${clientId}
-		`;
-		const projectCount = Number(projectCountRows[0]?.total ?? 0);
+		const projectCount = client._count.projects;
 		if (projectCount > 0) {
 			throw new BadRequestException({
 				detail: 'Cannot delete client with active projects',
 			});
 		}
 
-		await this.prisma.$executeRaw`
-			UPDATE clients
-			SET billing_status = ${'inactive'}::billingstatus, updated_at = NOW()
-			WHERE id = ${clientId}
-		`;
+		await this.prisma.clients.update({
+			where: { id: clientId },
+			data: {
+				billing_status: 'inactive',
+				updated_at: new Date(),
+			},
+		});
 
 		return {
 			status: 'success',
@@ -469,25 +463,26 @@ export class ClientsService {
 	}
 
 	async getClientProjects(clientId: number) {
-		const clientRows = await this.prisma.$queryRaw<
-			{ id: number; name: string }[]
-		>`
-			SELECT id, name
-			FROM clients
-			WHERE id = ${clientId}
-			LIMIT 1
-		`;
-		const client = clientRows[0];
+		const client = await this.prisma.clients.findUnique({
+			where: { id: clientId },
+			select: { id: true, name: true },
+		});
 		if (!client) {
 			throw new NotFoundException({ detail: 'Client not found' });
 		}
 
-		const projects = await this.prisma.$queryRaw<DbProjectSummary[]>`
-			SELECT id, name, slug, status, environment, wp_home
-			FROM projects
-			WHERE client_id = ${clientId}
-			ORDER BY name
-		`;
+		const projects = await this.prisma.projects.findMany({
+			where: { client_id: clientId },
+			orderBy: { name: 'asc' },
+			select: {
+				id: true,
+				name: true,
+				slug: true,
+				status: true,
+				environment: true,
+				wp_home: true,
+			},
+		});
 
 		return {
 			client_id: clientId,
@@ -504,25 +499,27 @@ export class ClientsService {
 	}
 
 	async getClientInvoices(clientId: number) {
-		const clientRows = await this.prisma.$queryRaw<
-			{ id: number; name: string }[]
-		>`
-			SELECT id, name
-			FROM clients
-			WHERE id = ${clientId}
-			LIMIT 1
-		`;
-		const client = clientRows[0];
+		const client = await this.prisma.clients.findUnique({
+			where: { id: clientId },
+			select: { id: true, name: true },
+		});
 		if (!client) {
 			throw new NotFoundException({ detail: 'Client not found' });
 		}
 
-		const invoices = await this.prisma.$queryRaw<DbInvoiceSummary[]>`
-			SELECT id, invoice_number, status, issue_date, due_date, total, amount_paid
-			FROM invoices
-			WHERE client_id = ${clientId}
-			ORDER BY issue_date DESC
-		`;
+		const invoices = await this.prisma.invoices.findMany({
+			where: { client_id: clientId },
+			orderBy: { issue_date: 'desc' },
+			select: {
+				id: true,
+				invoice_number: true,
+				status: true,
+				issue_date: true,
+				due_date: true,
+				total: true,
+				amount_paid: true,
+			},
+		});
 
 		const totalInvoiced = invoices.reduce(
 			(sum, invoice) => sum + Number(invoice.total),
@@ -551,37 +548,29 @@ export class ClientsService {
 	}
 
 	async assignProjectToClient(clientId: number, projectId: number) {
-		const clientRows = await this.prisma.$queryRaw<
-			{ id: number; name: string }[]
-		>`
-			SELECT id, name
-			FROM clients
-			WHERE id = ${clientId}
-			LIMIT 1
-		`;
-		const client = clientRows[0];
+		const client = await this.prisma.clients.findUnique({
+			where: { id: clientId },
+			select: { id: true, name: true },
+		});
 		if (!client) {
 			throw new NotFoundException({ detail: 'Client not found' });
 		}
 
-		const projectRows = await this.prisma.$queryRaw<
-			{ id: number; name: string }[]
-		>`
-			SELECT id, name
-			FROM projects
-			WHERE id = ${projectId}
-			LIMIT 1
-		`;
-		const project = projectRows[0];
+		const project = await this.prisma.projects.findUnique({
+			where: { id: projectId },
+			select: { id: true, name: true },
+		});
 		if (!project) {
 			throw new NotFoundException({ detail: 'Project not found' });
 		}
 
-		await this.prisma.$executeRaw`
-			UPDATE projects
-			SET client_id = ${clientId}, updated_at = NOW()
-			WHERE id = ${projectId}
-		`;
+		await this.prisma.projects.update({
+			where: { id: projectId },
+			data: {
+				client_id: clientId,
+				updated_at: new Date(),
+			},
+		});
 
 		return {
 			status: 'success',
@@ -590,26 +579,29 @@ export class ClientsService {
 	}
 
 	async unassignProjectFromClient(clientId: number, projectId: number) {
-		const projectRows = await this.prisma.$queryRaw<
-			{ id: number; name: string }[]
-		>`
-			SELECT id, name
-			FROM projects
-			WHERE id = ${projectId} AND client_id = ${clientId}
-			LIMIT 1
-		`;
-		const project = projectRows[0];
+		const project = await this.prisma.projects.findFirst({
+			where: {
+				id: projectId,
+				client_id: clientId,
+			},
+			select: {
+				id: true,
+				name: true,
+			},
+		});
 		if (!project) {
 			throw new NotFoundException({
 				detail: 'Project not found for this client',
 			});
 		}
 
-		await this.prisma.$executeRaw`
-			UPDATE projects
-			SET client_id = NULL, updated_at = NOW()
-			WHERE id = ${projectId}
-		`;
+		await this.prisma.projects.update({
+			where: { id: projectId },
+			data: {
+				client_id: null,
+				updated_at: new Date(),
+			},
+		});
 
 		return {
 			status: 'success',

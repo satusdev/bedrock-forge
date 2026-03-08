@@ -56,6 +56,11 @@ export class MonitorsController {
 		return this.monitorsService.getOverview(ownerId);
 	}
 
+	@Get('maintenance/status')
+	getMaintenanceStatus() {
+		return this.monitorsService.getRunnerSnapshot();
+	}
+
 	@Post(['', '/'])
 	async createMonitor(
 		@Body()
