@@ -57,6 +57,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test:
         [
@@ -67,6 +69,24 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+
+  # One-off Prisma schema sync before API startup
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.nest
+      target: development
+    container_name: forge-migrate
+    env_file:
+      - ./.env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-forge}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-forge}
+      NODE_ENV: development
+    command: ['sh', '-c', 'npm run prisma:push']
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
 
   # React Dashboard
   dashboard:
@@ -104,3 +124,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
+
+networks:
+  default:
+    name: forge-network
