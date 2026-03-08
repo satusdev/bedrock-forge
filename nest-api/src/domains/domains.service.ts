@@ -3,9 +3,14 @@ import {
 	Injectable,
 	NotFoundException,
 } from '@nestjs/common';
+import { execFile } from 'child_process';
+import { domains, domainstatus, registrar } from '@prisma/client';
+import { promisify } from 'util';
 import { PrismaService } from '../prisma/prisma.service';
 import { DomainCreateDto } from './dto/domain-create.dto';
 import { DomainUpdateDto } from './dto/domain-update.dto';
+
+const execFileAsync = promisify(execFile);
 
 type DbDomainRow = {
 	id: number;
@@ -33,9 +38,36 @@ type DbDomainRow = {
 	updated_at: Date;
 };
 
+type DueDomainClaim = {
+	id: number;
+	domain_name: string;
+	last_whois_check: Date | null;
+};
+
+type DomainRunnerSnapshot = {
+	enabled: boolean;
+	runs_total: number;
+	last_run_at: string | null;
+	last_outcome: {
+		claimed: number;
+		whois_succeeded: number;
+		whois_failed: number;
+		reminders_processed: number;
+		reminders_sent: number;
+		error: string | null;
+	} | null;
+};
+
 @Injectable()
 export class DomainsService {
 	constructor(private readonly prisma: PrismaService) {}
+	private runnerSnapshot: DomainRunnerSnapshot = {
+		enabled:
+			(process.env.DOMAIN_RUNNER_ENABLED ?? 'true').toLowerCase() !== 'false',
+		runs_total: 0,
+		last_run_at: null,
+		last_outcome: null,
+	};
 
 	private readonly allowedRegistrars = new Set([
 		'namecheap',
@@ -45,8 +77,36 @@ export class DomainsService {
 		'name_com',
 		'porkbun',
 		'hover',
+		'dynadot',
 		'other',
 	]);
+
+	getRunnerSnapshot() {
+		return this.runnerSnapshot;
+	}
+
+	recordRunnerSnapshot(outcome: {
+		claimed: number;
+		whois_succeeded: number;
+		whois_failed: number;
+		reminders_processed: number;
+		reminders_sent: number;
+		error?: string | null;
+	}) {
+		this.runnerSnapshot = {
+			...this.runnerSnapshot,
+			runs_total: this.runnerSnapshot.runs_total + 1,
+			last_run_at: new Date().toISOString(),
+			last_outcome: {
+				claimed: outcome.claimed,
+				whois_succeeded: outcome.whois_succeeded,
+				whois_failed: outcome.whois_failed,
+				reminders_processed: outcome.reminders_processed,
+				reminders_sent: outcome.reminders_sent,
+				error: outcome.error ?? null,
+			},
+		};
+	}
 
 	private readonly allowedStatuses = new Set([
 		'active',
@@ -56,6 +116,25 @@ export class DomainsService {
 		'redemption',
 		'pending_delete',
 	]);
+
+	private toDbDomainRow(domain: domains): DbDomainRow {
+		return {
+			...domain,
+			registrar: domain.registrar,
+			status: domain.status,
+		};
+	}
+
+	private async getDomainRecord(domainId: number) {
+		const domain = await this.prisma.domains.findUnique({
+			where: { id: domainId },
+		});
+		if (!domain) {
+			throw new NotFoundException({ detail: 'Domain not found' });
+		}
+
+		return domain;
+	}
 
 	private extractTld(domainName: string): string {
 		const parts = domainName.toLowerCase().split('.');
@@ -134,15 +213,15 @@ export class DomainsService {
 		};
 	}
 
-	private normalizeRegistrar(value?: string): string {
+	private normalizeRegistrar(value?: string): registrar {
 		const registrar = (value ?? 'other').toLowerCase();
 		if (!this.allowedRegistrars.has(registrar)) {
-			return 'other';
+			return 'other' as registrar;
 		}
-		return registrar;
+		return registrar as registrar;
 	}
 
-	private normalizeStatus(value?: string): string | null {
+	private normalizeStatus(value?: string): domainstatus | null {
 		if (!value) {
 			return null;
 		}
@@ -150,7 +229,172 @@ export class DomainsService {
 		if (!this.allowedStatuses.has(normalized)) {
 			return null;
 		}
-		return normalized;
+		return normalized as domainstatus;
+	}
+
+	private parseWhoisExpiryDate(output: string): Date | null {
+		const patterns = [
+			/Registry Expiry Date\s*:\s*(.+)$/im,
+			/Registrar Registration Expiration Date\s*:\s*(.+)$/im,
+			/Expiration Date\s*:\s*(.+)$/im,
+			/Expiry Date\s*:\s*(.+)$/im,
+			/paid-till\s*:\s*(.+)$/im,
+			/renewal date\s*:\s*(.+)$/im,
+		];
+
+		for (const pattern of patterns) {
+			const match = output.match(pattern);
+			if (!match?.[1]) {
+				continue;
+			}
+
+			const candidate = new Date(match[1].trim());
+			if (!Number.isNaN(candidate.getTime())) {
+				return candidate;
+			}
+		}
+
+		return null;
+	}
+
+	private async fetchWhoisExpiryDate(domainName: string) {
+		try {
+			const { stdout } = await execFileAsync('whois', [domainName], {
+				timeout: 5000,
+				maxBuffer: 1024 * 1024,
+			});
+			return this.parseWhoisExpiryDate(stdout);
+		} catch {
+			return null;
+		}
+	}
+
+	private async resolveExpiryDate(
+		domainName: string,
+		explicitExpiryDate?: string,
+	) {
+		if (explicitExpiryDate) {
+			return new Date(explicitExpiryDate);
+		}
+
+		const whoisExpiryDate = await this.fetchWhoisExpiryDate(domainName);
+		if (whoisExpiryDate) {
+			return whoisExpiryDate;
+		}
+
+		const fallback = new Date();
+		fallback.setUTCDate(fallback.getUTCDate() + 365);
+		fallback.setUTCHours(0, 0, 0, 0);
+		return fallback;
+	}
+
+	async claimWhoisDueDomains(limit = 10) {
+		const safeLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
+		const lookbackHours = Math.max(
+			1,
+			Math.min(
+				168,
+				Number.parseInt(process.env.DOMAIN_WHOIS_LOOKBACK_HOURS ?? '24', 10) ||
+					24,
+			),
+		);
+		const threshold = new Date(Date.now() - lookbackHours * 60 * 60 * 1000);
+		const rows = await this.prisma.domains.findMany({
+			where: {
+				status: 'active',
+				OR: [
+					{ last_whois_check: null },
+					{ last_whois_check: { lte: threshold } },
+				],
+			},
+			orderBy: [{ last_whois_check: 'asc' }, { id: 'asc' }],
+			take: safeLimit,
+			select: {
+				id: true,
+				domain_name: true,
+				last_whois_check: true,
+			},
+		});
+
+		const now = new Date();
+		for (const row of rows) {
+			await this.prisma.domains.update({
+				where: { id: row.id },
+				data: {
+					last_whois_check: now,
+					updated_at: now,
+				},
+			});
+		}
+
+		return rows as DueDomainClaim[];
+	}
+
+	async runWhoisRefresh(domainId: number) {
+		const domain = await this.getDomainRecord(domainId);
+		const whoisExpiryDate = await this.fetchWhoisExpiryDate(domain.domain_name);
+		const effectiveExpiry = whoisExpiryDate ?? domain.expiry_date;
+		const nextStatus: domainstatus =
+			effectiveExpiry.getTime() < Date.now() ? 'expired' : 'active';
+
+		const now = new Date();
+		await this.prisma.domains.update({
+			where: { id: domain.id },
+			data: {
+				expiry_date: effectiveExpiry,
+				status: nextStatus,
+				last_whois_check: now,
+				updated_at: now,
+			},
+		});
+
+		return {
+			domain_id: domain.id,
+			domain_name: domain.domain_name,
+			expiry_date: effectiveExpiry.toISOString().slice(0, 10),
+			status: nextStatus,
+		};
+	}
+
+	async processExpiryReminders(limit = 50) {
+		const safeLimit = Math.max(1, Math.min(500, Math.trunc(limit)));
+		const now = new Date();
+		const rows = await this.prisma.domains.findMany({
+			where: {
+				status: 'active',
+				expiry_date: { gte: now },
+			},
+			orderBy: { expiry_date: 'asc' },
+			take: safeLimit,
+		});
+
+		let remindersSent = 0;
+		for (const row of rows) {
+			const daysUntilExpiry = this.daysUntilExpiry(row.expiry_date);
+			if (daysUntilExpiry > row.reminder_days) {
+				continue;
+			}
+			if (row.last_reminder_sent) {
+				const elapsed = now.getTime() - row.last_reminder_sent.getTime();
+				if (elapsed < 24 * 60 * 60 * 1000) {
+					continue;
+				}
+			}
+
+			await this.prisma.domains.update({
+				where: { id: row.id },
+				data: {
+					last_reminder_sent: now,
+					updated_at: now,
+				},
+			});
+			remindersSent += 1;
+		}
+
+		return {
+			processed: rows.length,
+			reminders_sent: remindersSent,
+		};
 	}
 
 	async listDomains(query: {
@@ -167,90 +411,47 @@ export class DomainsService {
 			? this.normalizeRegistrar(query.registrar)
 			: null;
 
-		const countRows = await this.prisma.$queryRaw<{ total: bigint }[]>`
-			SELECT COUNT(*)::bigint AS total
-			FROM domains d
-			WHERE
-				(${status}::text IS NULL OR d.status::text = ${status})
-				AND (${query.client_id ?? null}::int IS NULL OR d.client_id = ${query.client_id ?? null})
-				AND (${registrar}::text IS NULL OR d.registrar::text = ${registrar})
-		`;
+		const where = {
+			...(status ? { status } : {}),
+			...(query.client_id ? { client_id: query.client_id } : {}),
+			...(registrar ? { registrar } : {}),
+		};
 
-		const rows = await this.prisma.$queryRaw<DbDomainRow[]>`
-			SELECT
-				d.id,
-				d.domain_name,
-				d.tld,
-				d.client_id,
-				d.project_id,
-				d.registrar::text AS registrar,
-				d.registrar_name,
-				d.registrar_url,
-				d.status::text AS status,
-				d.registration_date,
-				d.expiry_date,
-				d.last_renewed,
-				d.nameservers,
-				d.dns_provider,
-				d.auto_renew,
-				d.privacy_protection,
-				d.transfer_lock,
-				d.annual_cost,
-				d.currency,
-				d.notes,
-				d.last_whois_check,
-				d.created_at,
-				d.updated_at
-			FROM domains d
-			WHERE
-				(${status}::text IS NULL OR d.status::text = ${status})
-				AND (${query.client_id ?? null}::int IS NULL OR d.client_id = ${query.client_id ?? null})
-				AND (${registrar}::text IS NULL OR d.registrar::text = ${registrar})
-			ORDER BY d.expiry_date ASC
-			OFFSET ${offset}
-			LIMIT ${limit}
-		`;
+		const [total, rows] = await Promise.all([
+			this.prisma.domains.count({ where }),
+			this.prisma.domains.findMany({
+				where,
+				orderBy: { expiry_date: 'asc' },
+				skip: offset,
+				take: limit,
+			}),
+		]);
 
 		return {
-			domains: rows.map(row => this.normalizeDomainSummary(row)),
-			total: Number(countRows[0]?.total ?? 0),
+			domains: rows.map(row =>
+				this.normalizeDomainSummary(this.toDbDomainRow(row)),
+			),
+			total,
 		};
 	}
 
 	async listExpiringDomains(days = 60) {
 		const normalizedDays = Math.max(1, Math.min(3650, days));
-		const rows = await this.prisma.$queryRaw<DbDomainRow[]>`
-			SELECT
-				d.id,
-				d.domain_name,
-				d.tld,
-				d.client_id,
-				d.project_id,
-				d.registrar::text AS registrar,
-				d.registrar_name,
-				d.registrar_url,
-				d.status::text AS status,
-				d.registration_date,
-				d.expiry_date,
-				d.last_renewed,
-				d.nameservers,
-				d.dns_provider,
-				d.auto_renew,
-				d.privacy_protection,
-				d.transfer_lock,
-				d.annual_cost,
-				d.currency,
-				d.notes,
-				d.last_whois_check,
-				d.created_at,
-				d.updated_at
-			FROM domains d
-			WHERE
-				d.status = ${'active'}::domainstatus
-				AND d.expiry_date <= (CURRENT_DATE + (${normalizedDays} * INTERVAL '1 day'))::date
-				AND d.expiry_date >= CURRENT_DATE
-			ORDER BY d.expiry_date ASC
-		`;
+		const fromDate = new Date();
+		fromDate.setHours(0, 0, 0, 0);
+		const toDate = new Date(fromDate);
+		toDate.setDate(toDate.getDate() + normalizedDays);
+
+		const rows = await this.prisma.domains.findMany({
+			where: {
+				status: 'active',
+				expiry_date: {
+					gte: fromDate,
+					lte: toDate,
+				},
+			},
+			orderBy: { expiry_date: 'asc' },
+		});
 
 		return {
 			expiring_within_days: normalizedDays,
@@ -269,49 +470,18 @@ export class DomainsService {
 	}
 
 	async getDomain(domainId: number) {
-		const rows = await this.prisma.$queryRaw<DbDomainRow[]>`
-			SELECT
-				d.id,
-				d.domain_name,
-				d.tld,
-				d.client_id,
-				d.project_id,
-				d.registrar::text AS registrar,
-				d.registrar_name,
-				d.registrar_url,
-				d.status::text AS status,
-				d.registration_date,
-				d.expiry_date,
-				d.last_renewed,
-				d.nameservers,
-				d.dns_provider,
-				d.auto_renew,
-				d.privacy_protection,
-				d.transfer_lock,
-				d.annual_cost,
-				d.currency,
-				d.notes,
-				d.last_whois_check,
-				d.created_at,
-				d.updated_at
-			FROM domains d
-			WHERE d.id = ${domainId}
-			LIMIT 1
-		`;
+		const domain = await this.getDomainRecord(domainId);
 
-		const domain = rows[0];
-		if (!domain) {
-			throw new NotFoundException({ detail: 'Domain not found' });
-		}
-
-		const certRows = await this.prisma.$queryRaw<
-			{ id: number; provider: string; expiry_date: Date; is_active: boolean }[]
-		>`
-			SELECT id, provider::text AS provider, expiry_date, is_active
-			FROM ssl_certificates
-			WHERE domain_id = ${domainId}
-			ORDER BY expiry_date ASC
-		`;
+		const certRows = await this.prisma.ssl_certificates.findMany({
+			where: { domain_id: domainId },
+			orderBy: { expiry_date: 'asc' },
+			select: {
+				id: true,
+				provider: true,
+				expiry_date: true,
+				is_active: true,
+			},
+		});
 
 		const certs = certRows.map(cert => ({
 			id: cert.id,
@@ -320,16 +490,18 @@ export class DomainsService {
 			is_active: cert.is_active,
 		}));
 
-		return this.normalizeDomainDetail(domain, certs);
+		return this.normalizeDomainDetail(this.toDbDomainRow(domain), certs);
 	}
 
 	async refreshWhois(domainId: number) {
 		const domain = await this.getDomain(domainId);
-		await this.prisma.$executeRaw`
-			UPDATE domains
-			SET last_whois_check = NOW(), updated_at = NOW()
-			WHERE id = ${domainId}
-		`;
+		await this.prisma.domains.update({
+			where: { id: domainId },
+			data: {
+				last_whois_check: new Date(),
+				updated_at: new Date(),
+			},
+		});
 
 		return {
 			status: 'success',
@@ -343,24 +515,20 @@ export class DomainsService {
 	}
 
 	async createDomain(payload: DomainCreateDto) {
-		const clientRows = await this.prisma.$queryRaw<{ id: number }[]>`
-			SELECT id
-			FROM clients
-			WHERE id = ${payload.client_id}
-			LIMIT 1
-		`;
-		if (!clientRows[0]) {
+		const client = await this.prisma.clients.findUnique({
+			where: { id: payload.client_id },
+			select: { id: true },
+		});
+		if (!client) {
 			throw new NotFoundException({ detail: 'Client not found' });
 		}
 
 		const normalizedDomainName = payload.domain_name.toLowerCase();
-		const duplicateRows = await this.prisma.$queryRaw<{ id: number }[]>`
-			SELECT id
-			FROM domains
-			WHERE domain_name = ${normalizedDomainName}
-			LIMIT 1
-		`;
-		if (duplicateRows[0]) {
+		const duplicate = await this.prisma.domains.findUnique({
+			where: { domain_name: normalizedDomainName },
+			select: { id: true },
+		});
+		if (duplicate) {
 			throw new BadRequestException({ detail: 'Domain already exists' });
 		}
 
@@ -368,83 +536,75 @@ export class DomainsService {
 		const nameservers = payload.nameservers
 			? JSON.stringify(payload.nameservers)
 			: null;
+		const expiryDate = await this.resolveExpiryDate(
+			normalizedDomainName,
+			payload.expiry_date,
+		);
 
-		const rows = await this.prisma.$queryRaw<{ id: number }[]>`
-			INSERT INTO domains (
-				domain_name,
-				tld,
+		const created = await this.prisma.domains.create({
+			data: {
+				domain_name: normalizedDomainName,
+				tld: this.extractTld(normalizedDomainName),
 				registrar,
-				registrar_name,
-				registration_date,
-				expiry_date,
+				registrar_name: payload.registrar_name ?? null,
+				registration_date: payload.registration_date
+					? new Date(payload.registration_date)
+					: null,
+				expiry_date: expiryDate,
 				nameservers,
-				dns_provider,
-				status,
-				auto_renew,
-				privacy_protection,
-				transfer_lock,
-				annual_cost,
-				currency,
-				reminder_days,
-				client_id,
-				project_id,
-				updated_at
-			)
-			VALUES (
-				${normalizedDomainName},
-				${this.extractTld(normalizedDomainName)},
-				${registrar}::registrar,
-				${payload.registrar_name ?? null},
-				${payload.registration_date ? new Date(payload.registration_date) : null},
-				${new Date(payload.expiry_date)},
-				${nameservers},
-				${payload.dns_provider ?? null},
-				${'active'}::domainstatus,
-				${payload.auto_renew ?? true},
-				${payload.privacy_protection ?? true},
-				${true},
-				${payload.annual_cost ?? 0},
-				${(payload.currency ?? 'USD').toUpperCase()},
-				${30},
-				${payload.client_id},
-				${payload.project_id ?? null},
-				NOW()
-			)
-			RETURNING id
-		`;
+				dns_provider: payload.dns_provider ?? null,
+				status: 'active',
+				auto_renew: payload.auto_renew ?? true,
+				privacy_protection: payload.privacy_protection ?? true,
+				transfer_lock: true,
+				annual_cost: payload.annual_cost ?? 0,
+				currency: (payload.currency ?? 'USD').toUpperCase(),
+				reminder_days: 30,
+				client_id: payload.client_id,
+				project_id: payload.project_id ?? null,
+				updated_at: new Date(),
+			},
+			select: { id: true },
+		});
 
 		return {
 			status: 'success',
 			message: `Domain ${normalizedDomainName} added`,
-			domain_id: rows[0]?.id,
+			domain_id: created.id,
 		};
 	}
 
 	async updateDomain(domainId: number, updates: DomainUpdateDto) {
-		const current = await this.getDomain(domainId);
+		const current = await this.getDomainRecord(domainId);
 
 		const registrar = updates.registrar
 			? this.normalizeRegistrar(updates.registrar)
 			: current.registrar;
 		const status = this.normalizeStatus(updates.status) ?? current.status;
 
-		await this.prisma.$executeRaw`
-			UPDATE domains
-			SET
-				registrar = ${registrar}::registrar,
-				registrar_name = ${updates.registrar_name ?? current.registrar_name ?? null},
-				expiry_date = ${updates.expiry_date ? new Date(updates.expiry_date) : new Date(current.expiry_date)},
-				annual_cost = ${updates.annual_cost ?? current.annual_cost},
-				auto_renew = ${updates.auto_renew ?? current.auto_renew},
-				privacy_protection = ${updates.privacy_protection ?? current.privacy_protection},
-				transfer_lock = ${updates.transfer_lock ?? current.transfer_lock},
-				nameservers = ${updates.nameservers ? JSON.stringify(updates.nameservers) : JSON.stringify(current.nameservers)},
-				dns_provider = ${updates.dns_provider ?? current.dns_provider ?? null},
-				status = ${status}::domainstatus,
-				notes = ${updates.notes ?? current.notes ?? null},
-				updated_at = NOW()
-			WHERE id = ${domainId}
-		`;
+		await this.prisma.domains.update({
+			where: { id: domainId },
+			data: {
+				registrar,
+				registrar_name:
+					updates.registrar_name ?? current.registrar_name ?? null,
+				expiry_date: updates.expiry_date
+					? new Date(updates.expiry_date)
+					: current.expiry_date,
+				annual_cost: updates.annual_cost ?? current.annual_cost,
+				auto_renew: updates.auto_renew ?? current.auto_renew,
+				privacy_protection:
+					updates.privacy_protection ?? current.privacy_protection,
+				transfer_lock: updates.transfer_lock ?? current.transfer_lock,
+				nameservers: updates.nameservers
+					? JSON.stringify(updates.nameservers)
+					: current.nameservers,
+				dns_provider: updates.dns_provider ?? current.dns_provider ?? null,
+				status,
+				notes: updates.notes ?? current.notes ?? null,
+				updated_at: new Date(),
+			},
+		});
 
 		return {
 			status: 'success',
@@ -453,11 +613,8 @@ export class DomainsService {
 	}
 
 	async deleteDomain(domainId: number) {
-		const current = await this.getDomain(domainId);
-		await this.prisma.$executeRaw`
-			DELETE FROM domains
-			WHERE id = ${domainId}
-		`;
+		const current = await this.getDomainRecord(domainId);
+		await this.prisma.domains.delete({ where: { id: domainId } });
 		return {
 			status: 'success',
 			message: `Domain ${current.domain_name} removed`,
@@ -465,21 +622,21 @@ export class DomainsService {
 	}
 
 	async renewDomain(domainId: number, years = 1) {
-		const current = await this.getDomain(domainId);
+		const current = await this.getDomainRecord(domainId);
 		const nextYears = Math.max(1, Math.min(20, years));
-		const currentExpiry = new Date(current.expiry_date);
+		const currentExpiry = current.expiry_date;
 		const newExpiry = new Date(currentExpiry);
 		newExpiry.setUTCDate(newExpiry.getUTCDate() + nextYears * 365);
 
-		await this.prisma.$executeRaw`
-			UPDATE domains
-			SET
-				expiry_date = ${newExpiry},
-				last_renewed = CURRENT_DATE,
-				status = ${'active'}::domainstatus,
-				updated_at = NOW()
-			WHERE id = ${domainId}
-		`;
+		await this.prisma.domains.update({
+			where: { id: domainId },
+			data: {
+				expiry_date: newExpiry,
+				last_renewed: new Date(),
+				status: 'active',
+				updated_at: new Date(),
+			},
+		});
 
 		return {
 			status: 'success',
@@ -489,34 +646,9 @@ export class DomainsService {
 	}
 
 	async getDomainStats() {
-		const rows = await this.prisma.$queryRaw<DbDomainRow[]>`
-			SELECT
-				d.id,
-				d.domain_name,
-				d.tld,
-				d.client_id,
-				d.project_id,
-				d.registrar::text AS registrar,
-				d.registrar_name,
-				d.registrar_url,
-				d.status::text AS status,
-				d.registration_date,
-				d.expiry_date,
-				d.last_renewed,
-				d.nameservers,
-				d.dns_provider,
-				d.auto_renew,
-				d.privacy_protection,
-				d.transfer_lock,
-				d.annual_cost,
-				d.currency,
-				d.notes,
-				d.last_whois_check,
-				d.created_at,
-				d.updated_at
-			FROM domains d
-			WHERE d.status = ${'active'}::domainstatus
-		`;
+		const rows = await this.prisma.domains.findMany({
+			where: { status: 'active' },
+		});
 
 		const byRegistrar: Record<string, { count: number; annual_cost: number }> =
 			{};
@@ -524,7 +656,8 @@ export class DomainsService {
 		let expiringIn60 = 0;
 		let expiringIn30 = 0;
 
-		for (const row of rows) {
+		for (const domain of rows) {
+			const row = this.toDbDomainRow(domain);
 			if (!byRegistrar[row.registrar]) {
 				byRegistrar[row.registrar] = { count: 0, annual_cost: 0 };
 			}

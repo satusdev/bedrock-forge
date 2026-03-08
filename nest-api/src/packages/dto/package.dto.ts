@@ -9,6 +9,11 @@ import {
 } from 'class-validator';
 
 export class CreatePackageDto {
+	@IsOptional()
+	@IsString()
+	@MaxLength(20)
+	package_type?: string;
+
 	@IsString()
 	@MaxLength(100)
 	name!: string;
@@ -97,6 +102,11 @@ export class CreatePackageDto {
 }
 
 export class UpdatePackageDto {
+	@IsOptional()
+	@IsString()
+	@MaxLength(20)
+	package_type?: string;
+
 	@IsOptional()
 	@IsString()
 	@MaxLength(100)

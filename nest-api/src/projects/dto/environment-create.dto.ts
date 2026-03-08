@@ -38,20 +38,20 @@ export class EnvironmentCreateDto {
 	@MaxLength(500)
 	ssh_key_path?: string;
 
+	@IsOptional()
 	@IsString()
-	@MinLength(1)
 	@MaxLength(255)
-	database_name!: string;
+	database_name?: string;
 
+	@IsOptional()
 	@IsString()
-	@MinLength(1)
 	@MaxLength(255)
-	database_user!: string;
+	database_user?: string;
 
+	@IsOptional()
 	@IsString()
-	@MinLength(1)
 	@MaxLength(255)
-	database_password!: string;
+	database_password?: string;
 
 	@IsOptional()
 	@IsString()

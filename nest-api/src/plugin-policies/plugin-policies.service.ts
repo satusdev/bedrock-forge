@@ -265,45 +265,47 @@ export class PluginPoliciesService {
 	}
 
 	private loadBundles(): Record<string, PluginBundle> {
-		const configPath = join(
-			process.cwd(),
-			'..',
-			'forge',
-			'config',
-			'vendor-plugin-bundles.json',
-		);
+		const candidates = [
+			process.env.VENDOR_PLUGIN_BUNDLES_PATH,
+			join(process.cwd(), 'config', 'vendor-plugin-bundles.json'),
+			join(process.cwd(), 'nest-api', 'config', 'vendor-plugin-bundles.json'),
+		].filter((entry): entry is string => Boolean(entry));
 
-		try {
-			const raw = readFileSync(configPath, 'utf-8');
-			const parsed = JSON.parse(raw) as {
-				bundles?: Record<
-					string,
-					{
-						name?: string;
-						description?: string;
-						required_plugins?: string[];
-						pinned_versions?: Record<string, string>;
-					}
-				>;
-			};
-
-			const bundles = parsed.bundles ?? {};
-			const normalized: Record<string, PluginBundle> = {};
-			for (const [id, bundle] of Object.entries(bundles)) {
-				normalized[id] = {
-					id,
-					name: bundle.name ?? id,
-					description: bundle.description,
-					required_plugins: Array.isArray(bundle.required_plugins)
-						? bundle.required_plugins
-						: [],
-					pinned_versions: bundle.pinned_versions ?? {},
+		for (const configPath of candidates) {
+			try {
+				const raw = readFileSync(configPath, 'utf-8');
+				const parsed = JSON.parse(raw) as {
+					bundles?: Record<
+						string,
+						{
+							name?: string;
+							description?: string;
+							required_plugins?: string[];
+							pinned_versions?: Record<string, string>;
+						}
+					>;
 				};
+
+				const bundles = parsed.bundles ?? {};
+				const normalized: Record<string, PluginBundle> = {};
+				for (const [id, bundle] of Object.entries(bundles)) {
+					normalized[id] = {
+						id,
+						name: bundle.name ?? id,
+						description: bundle.description,
+						required_plugins: Array.isArray(bundle.required_plugins)
+							? bundle.required_plugins
+							: [],
+						pinned_versions: bundle.pinned_versions ?? {},
+					};
+				}
+				return normalized;
+			} catch {
+				continue;
 			}
-			return normalized;
-		} catch {
-			return {};
 		}
+
+		return {};
 	}
 
 	async getGlobalPolicy(ownerId?: number) {

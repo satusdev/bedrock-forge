@@ -5,6 +5,48 @@ import { TaskStatusService } from '../task-status/task-status.service';
 type MockPrisma = {
 	$queryRaw: jest.Mock;
 	$executeRaw: jest.Mock;
+	projects: {
+		findFirst: jest.Mock;
+		findUnique: jest.Mock;
+		create: jest.Mock;
+		delete: jest.Mock;
+		update: jest.Mock;
+		findMany: jest.Mock;
+	};
+	project_servers: {
+		findFirst: jest.Mock;
+		findMany: jest.Mock;
+		create: jest.Mock;
+		updateMany: jest.Mock;
+		update: jest.Mock;
+		delete: jest.Mock;
+	};
+	backups: {
+		create: jest.Mock;
+		updateMany: jest.Mock;
+		findMany: jest.Mock;
+		count: jest.Mock;
+	};
+	tags: {
+		findMany: jest.Mock;
+		findFirst: jest.Mock;
+		create: jest.Mock;
+		update: jest.Mock;
+	};
+	project_tags: {
+		createMany: jest.Mock;
+	};
+	servers: {
+		findUnique: jest.Mock;
+	};
+	clients: {
+		findUnique: jest.Mock;
+	};
+	domains: {
+		findUnique: jest.Mock;
+		create: jest.Mock;
+	};
+	$transaction: jest.Mock;
 };
 
 describe('ProjectsService', () => {
@@ -16,13 +58,61 @@ describe('ProjectsService', () => {
 		prisma = {
 			$queryRaw: jest.fn(),
 			$executeRaw: jest.fn(),
+			projects: {
+				findFirst: jest.fn(),
+				findUnique: jest.fn(),
+				create: jest.fn(),
+				delete: jest.fn(),
+				update: jest.fn(),
+				findMany: jest.fn(),
+			},
+			project_servers: {
+				findFirst: jest.fn(),
+				findMany: jest.fn(),
+				create: jest.fn(),
+				updateMany: jest.fn(),
+				update: jest.fn(),
+				delete: jest.fn(),
+			},
+			backups: {
+				create: jest.fn(),
+				updateMany: jest.fn(),
+				findMany: jest.fn(),
+				count: jest.fn(),
+			},
+			tags: {
+				findMany: jest.fn(),
+				findFirst: jest.fn(),
+				create: jest.fn(),
+				update: jest.fn(),
+			},
+			project_tags: {
+				createMany: jest.fn(),
+			},
+			servers: {
+				findUnique: jest.fn(),
+			},
+			clients: {
+				findUnique: jest.fn(),
+			},
+			domains: {
+				findUnique: jest.fn(),
+				create: jest.fn(),
+			},
+			$transaction: jest.fn(),
 		};
+		prisma.$transaction.mockImplementation(async input => {
+			if (typeof input === 'function') {
+				return input(prisma);
+			}
+			return Promise.all(input);
+		});
 		taskStatusService = new TaskStatusService();
 		service = new ProjectsService(prisma as unknown as any, taskStatusService);
 	});
 
 	it('returns remote projects with parsed tags and domain', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([
+		prisma.projects.findMany.mockResolvedValueOnce([
 			{
 				id: 1,
 				name: 'Acme Site',
@@ -30,7 +120,9 @@ describe('ProjectsService', () => {
 				wp_home: 'https://acme.test',
 				environment: 'production',
 				status: 'active',
-				server_name: 'srv-1',
+				servers: { name: 'srv-1' },
+				project_servers: [],
+				project_tags: [{ tags: { name: 'client' } }, { tags: { name: 'vip' } }],
 				tags: '["vip","client"]',
 				created_at: new Date('2025-01-01T00:00:00.000Z'),
 			},
@@ -41,12 +133,12 @@ describe('ProjectsService', () => {
 
 		expect(first?.name).toBe('Acme Site');
 		expect(first?.domain).toBe('https://acme.test');
-		expect(first?.tags).toEqual(['vip', 'client']);
+		expect(first?.tags).toEqual(['client', 'vip']);
 		expect(first?.health_score).toBe(90);
 	});
 
 	it('returns projects status list', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([
+		prisma.projects.findMany.mockResolvedValueOnce([
 			{
 				id: 1,
 				name: 'Acme Site',
@@ -54,7 +146,9 @@ describe('ProjectsService', () => {
 				wp_home: 'https://acme.test',
 				environment: 'production',
 				status: 'active',
-				server_name: 'srv-1',
+				servers: { name: 'srv-1' },
+				project_servers: [],
+				project_tags: [],
 				tags: '[]',
 				created_at: new Date('2025-01-01T00:00:00.000Z'),
 			},
@@ -65,10 +159,10 @@ describe('ProjectsService', () => {
 	});
 
 	it('returns sorted unique project tags', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([
-			{ tags: '["vip","client"]' },
-			{ tags: '["client","agency"]' },
-			{ tags: null },
+		prisma.tags.findMany.mockResolvedValueOnce([
+			{ name: 'vip' },
+			{ name: 'client' },
+			{ name: 'agency' },
 		]);
 
 		const result = await service.getAllTags();
@@ -76,7 +170,7 @@ describe('ProjectsService', () => {
 	});
 
 	it('returns comprehensive projects list', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([
+		prisma.projects.findMany.mockResolvedValueOnce([
 			{
 				id: 1,
 				name: 'Acme Site',
@@ -84,7 +178,9 @@ describe('ProjectsService', () => {
 				wp_home: 'https://acme.test',
 				environment: 'production',
 				status: 'active',
-				server_name: 'srv-1',
+				servers: { name: 'srv-1' },
+				project_servers: [],
+				project_tags: [],
 				tags: '[]',
 				created_at: new Date('2025-01-01T00:00:00.000Z'),
 			},
@@ -95,21 +191,20 @@ describe('ProjectsService', () => {
 	});
 
 	it('creates project with slug and default branch', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([
-			{
-				id: 5,
-				name: 'My New Site',
-				slug: 'my-new-site',
-				wp_home: 'https://mysite.test',
-				description: null,
-				status: 'active',
-				github_repo_url: null,
-				github_branch: 'main',
-				tags: '[]',
-				created_at: new Date('2025-01-01T00:00:00.000Z'),
-				updated_at: new Date('2025-01-01T00:00:00.000Z'),
-			},
-		]);
+		prisma.projects.findUnique.mockResolvedValueOnce(null);
+		prisma.projects.create.mockResolvedValueOnce({
+			id: 5,
+			name: 'My New Site',
+			slug: 'my-new-site',
+			wp_home: 'https://mysite.test',
+			description: null,
+			status: 'active',
+			github_repo_url: null,
+			github_branch: 'main',
+			tags: '[]',
+			created_at: new Date('2025-01-01T00:00:00.000Z'),
+			updated_at: new Date('2025-01-01T00:00:00.000Z'),
+		});
 
 		const result = await service.createProject({
 			name: 'My New Site',
@@ -120,27 +215,87 @@ describe('ProjectsService', () => {
 		expect(result.slug).toBe('my-new-site');
 		expect(result.github_branch).toBe('main');
 		expect(result.environments_count).toBe(0);
+
+		expect(prisma.projects.create).toHaveBeenCalled();
 	});
 
 	it('rejects create when slug already exists', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([{ id: 10 }]);
+		prisma.projects.findUnique.mockResolvedValueOnce({ id: 10 });
 
 		await expect(
 			service.createProject({ name: 'Acme', domain: 'https://acme.test' }),
 		).rejects.toBeInstanceOf(BadRequestException);
 	});
 
+	it('upserts apex domain when creating subdomain project', async () => {
+		prisma.projects.findUnique.mockResolvedValueOnce(null);
+		prisma.projects.create.mockResolvedValueOnce({
+			id: 15,
+			name: 'Staging Site',
+			slug: 'staging-site',
+			wp_home: 'something.staging.ly',
+			client_id: null,
+			description: null,
+			status: 'active',
+			github_repo_url: null,
+			github_branch: 'main',
+			tags: '[]',
+			created_at: new Date('2025-01-01T00:00:00.000Z'),
+			updated_at: new Date('2025-01-01T00:00:00.000Z'),
+		});
+		prisma.domains.findUnique.mockResolvedValueOnce(null);
+		prisma.clients.findUnique.mockResolvedValueOnce({ id: 1 });
+		prisma.domains.create.mockResolvedValueOnce({ id: 33 });
+
+		await service.createProject({
+			name: 'Staging Site',
+			domain: 'something.staging.ly',
+		});
+
+		expect(prisma.domains.findUnique).toHaveBeenCalledWith({
+			where: { domain_name: 'staging.ly' },
+			select: { id: true },
+		});
+		expect(prisma.domains.create).toHaveBeenCalled();
+	});
+
+	it('skips apex domain create when domain already exists', async () => {
+		prisma.projects.findUnique.mockResolvedValueOnce(null);
+		prisma.projects.create.mockResolvedValueOnce({
+			id: 16,
+			name: 'Existing Domain Site',
+			slug: 'existing-domain-site',
+			wp_home: 'blog.staging.ly',
+			client_id: null,
+			description: null,
+			status: 'active',
+			github_repo_url: null,
+			github_branch: 'main',
+			tags: '[]',
+			created_at: new Date('2025-01-01T00:00:00.000Z'),
+			updated_at: new Date('2025-01-01T00:00:00.000Z'),
+		});
+		prisma.domains.findUnique.mockResolvedValueOnce({ id: 99 });
+
+		await service.createProject({
+			name: 'Existing Domain Site',
+			domain: 'blog.staging.ly',
+		});
+
+		expect(prisma.domains.create).not.toHaveBeenCalled();
+	});
+
 	it('deletes project when it exists', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([{ id: 9 }]);
-		prisma.$executeRaw.mockResolvedValueOnce(1);
+		prisma.projects.findUnique.mockResolvedValueOnce({ id: 9 });
+		prisma.projects.delete.mockResolvedValueOnce({ id: 9 });
 
 		await service.deleteProject(9);
 
-		expect(prisma.$executeRaw).toHaveBeenCalled();
+		expect(prisma.projects.delete).toHaveBeenCalled();
 	});
 
 	it('throws not found when deleting missing project', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([]);
+		prisma.projects.findUnique.mockResolvedValueOnce(null);
 
 		await expect(service.deleteProject(999)).rejects.toBeInstanceOf(
 			NotFoundException,
@@ -148,13 +303,14 @@ describe('ProjectsService', () => {
 	});
 
 	it('returns environments for a project', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([{ id: 1 }]).mockResolvedValueOnce([
+		prisma.projects.findUnique.mockResolvedValueOnce({ id: 1 });
+		prisma.project_servers.findMany.mockResolvedValueOnce([
 			{
 				id: 3,
+				project_id: 1,
 				environment: 'staging',
 				server_id: 4,
-				server_name: 'srv-1',
-				server_hostname: 'srv1.local',
+				servers: { name: 'srv-1', hostname: 'srv1.local' },
 				wp_url: 'https://staging.acme.test',
 				wp_path: '/var/www/acme',
 				ssh_user: 'forge',
@@ -177,14 +333,14 @@ describe('ProjectsService', () => {
 	});
 
 	it('lists project servers with environment filter', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([{ id: 1 }]).mockResolvedValueOnce([
+		prisma.projects.findUnique.mockResolvedValueOnce({ id: 1 });
+		prisma.project_servers.findMany.mockResolvedValueOnce([
 			{
 				id: 4,
 				project_id: 1,
 				environment: 'production',
 				server_id: 2,
-				server_name: 'srv-1',
-				server_hostname: 'srv1.local',
+				servers: { name: 'srv-1', hostname: 'srv1.local' },
 				wp_url: 'https://acme.test',
 				wp_path: '/var/www/acme',
 				ssh_user: 'forge',
@@ -207,10 +363,18 @@ describe('ProjectsService', () => {
 	});
 
 	it('rejects linking environment when same environment exists', async () => {
-		prisma.$queryRaw
-			.mockResolvedValueOnce([{ id: 1 }])
-			.mockResolvedValueOnce([{ id: 2, name: 'srv', hostname: 'srv.local' }])
-			.mockResolvedValueOnce([{ id: 10 }]);
+		prisma.projects.findUnique.mockResolvedValueOnce({
+			id: 1,
+			server_id: null,
+			environment: 'production',
+			wp_home: null,
+		});
+		prisma.servers.findUnique.mockResolvedValueOnce({
+			id: 2,
+			name: 'srv',
+			hostname: 'srv.local',
+		});
+		prisma.project_servers.findFirst.mockResolvedValueOnce({ id: 10 });
 
 		await expect(
 			service.linkEnvironment(1, {
@@ -226,33 +390,38 @@ describe('ProjectsService', () => {
 	});
 
 	it('links environment and returns server metadata', async () => {
-		prisma.$queryRaw
-			.mockResolvedValueOnce([{ id: 1 }])
-			.mockResolvedValueOnce([
-				{ id: 2, name: 'server-main', hostname: 'srv.local' },
-			])
-			.mockResolvedValueOnce([])
-			.mockResolvedValueOnce([
-				{
-					id: 11,
-					project_id: 1,
-					server_id: 2,
-					environment: 'production',
-					wp_url: 'https://acme.test',
-					wp_path: '/var/www/acme',
-					ssh_user: 'forge',
-					ssh_key_path: null,
-					database_name: 'acme',
-					database_user: 'acme',
-					database_password: 'secret',
-					gdrive_backups_folder_id: null,
-					notes: null,
-					is_primary: true,
-					created_at: new Date(),
-					updated_at: new Date(),
-				},
-			]);
-		prisma.$executeRaw.mockResolvedValueOnce(1);
+		prisma.projects.findUnique.mockResolvedValueOnce({
+			id: 1,
+			server_id: null,
+			environment: 'production',
+			wp_home: null,
+		});
+		prisma.servers.findUnique.mockResolvedValueOnce({
+			id: 2,
+			name: 'server-main',
+			hostname: 'srv.local',
+		});
+		prisma.project_servers.findFirst.mockResolvedValueOnce(null);
+		prisma.project_servers.updateMany.mockResolvedValueOnce({ count: 0 });
+		prisma.project_servers.create.mockResolvedValueOnce({
+			id: 11,
+			project_id: 1,
+			server_id: 2,
+			environment: 'production',
+			wp_url: 'https://acme.test',
+			wp_path: '/var/www/acme',
+			ssh_user: 'forge',
+			ssh_key_path: null,
+			database_name: 'acme',
+			database_user: 'acme',
+			database_password: 'secret',
+			gdrive_backups_folder_id: null,
+			notes: null,
+			is_primary: true,
+			created_at: new Date(),
+			updated_at: new Date(),
+		});
+		prisma.projects.update.mockResolvedValueOnce({ id: 1 });
 
 		const result = await service.linkEnvironment(1, {
 			environment: 'production',
@@ -269,52 +438,46 @@ describe('ProjectsService', () => {
 		expect(result.server_name).toBe('server-main');
 		expect(result.environment).toBe('production');
 		expect(result.id).toBe(11);
-		expect(prisma.$executeRaw).toHaveBeenCalled();
+		expect(prisma.project_servers.create).toHaveBeenCalled();
 	});
 
 	it('updates environment and returns success envelope', async () => {
-		prisma.$queryRaw
-			.mockResolvedValueOnce([
-				{
-					id: 11,
-					project_id: 1,
-					server_id: 2,
-					environment: 'production',
-					wp_url: 'https://acme.test',
-					wp_path: '/var/www/acme',
-					ssh_user: 'forge',
-					ssh_key_path: null,
-					database_name: 'acme',
-					database_user: 'acme',
-					database_password: 'secret',
-					gdrive_backups_folder_id: null,
-					notes: null,
-					is_primary: true,
-					created_at: new Date(),
-					updated_at: new Date(),
-				},
-			])
-			.mockResolvedValueOnce([
-				{
-					id: 11,
-					project_id: 1,
-					server_id: 2,
-					environment: 'staging',
-					wp_url: 'https://staging.acme.test',
-					wp_path: '/var/www/acme',
-					ssh_user: 'forge',
-					ssh_key_path: null,
-					database_name: 'acme',
-					database_user: 'acme',
-					database_password: 'secret',
-					gdrive_backups_folder_id: null,
-					notes: 'updated',
-					is_primary: true,
-					created_at: new Date(),
-					updated_at: new Date(),
-				},
-			]);
-		prisma.$executeRaw.mockResolvedValueOnce(1);
+		prisma.project_servers.findFirst.mockResolvedValueOnce({
+			id: 11,
+			project_id: 1,
+			server_id: 2,
+			environment: 'production',
+			wp_url: 'https://acme.test',
+			wp_path: '/var/www/acme',
+			ssh_user: 'forge',
+			ssh_key_path: null,
+			database_name: 'acme',
+			database_user: 'acme',
+			database_password: 'secret',
+			gdrive_backups_folder_id: null,
+			notes: null,
+			is_primary: true,
+			created_at: new Date(),
+			updated_at: new Date(),
+		});
+		prisma.project_servers.update.mockResolvedValueOnce({
+			id: 11,
+			project_id: 1,
+			server_id: 2,
+			environment: 'staging',
+			wp_url: 'https://staging.acme.test',
+			wp_path: '/var/www/acme',
+			ssh_user: 'forge',
+			ssh_key_path: null,
+			database_name: 'acme',
+			database_user: 'acme',
+			database_password: 'secret',
+			gdrive_backups_folder_id: null,
+			notes: 'updated',
+			is_primary: true,
+			created_at: new Date(),
+			updated_at: new Date(),
+		});
 
 		const result = await service.updateEnvironment(1, 11, {
 			environment: 'staging',
@@ -327,16 +490,20 @@ describe('ProjectsService', () => {
 	});
 
 	it('unlinks environment after nulling backup references', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([{ id: 11 }]);
-		prisma.$executeRaw.mockResolvedValueOnce(1).mockResolvedValueOnce(1);
+		prisma.project_servers.findFirst.mockResolvedValueOnce({ id: 11 });
+		prisma.backups.updateMany.mockResolvedValueOnce({ count: 1 });
+		prisma.project_servers.delete.mockResolvedValueOnce({ id: 11 });
 
 		await service.unlinkEnvironment(1, 11);
 
-		expect(prisma.$executeRaw).toHaveBeenCalledTimes(2);
+		expect(prisma.backups.updateMany).toHaveBeenCalled();
+		expect(prisma.project_servers.delete).toHaveBeenCalled();
 	});
 
 	it('returns project backups with normalized sizes', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([{ id: 1 }]).mockResolvedValueOnce([
+		prisma.projects.findUnique.mockResolvedValueOnce({ id: 1 });
+		prisma.backups.count.mockResolvedValueOnce(1);
+		prisma.backups.findMany.mockResolvedValueOnce([
 			{
 				id: 12,
 				project_id: 1,
@@ -355,12 +522,13 @@ describe('ProjectsService', () => {
 		]);
 
 		const result = await service.getProjectBackups(1, 1, 10);
-		expect(result[0]?.size_bytes).toBe(1000);
-		expect(result[0]?.backup_type).toBe('full');
+		expect(result.items[0]?.size_bytes).toBe(1000);
+		expect(result.items[0]?.backup_type).toBe('full');
+		expect(result.total).toBe(1);
 	});
 
 	it('returns download metadata for project backup path', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([{ id: 1 }]);
+		prisma.projects.findUnique.mockResolvedValueOnce({ id: 1 });
 
 		const result = await service.getProjectBackupDownloadMetadata(
 			1,
@@ -373,19 +541,17 @@ describe('ProjectsService', () => {
 	});
 
 	it('returns project drive settings payload', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([
-			{
-				id: 1,
-				name: 'Acme',
-				slug: 'acme',
-				gdrive_connected: true,
-				gdrive_folder_id: 'root-folder',
-				gdrive_backups_folder_id: 'backup-folder',
-				gdrive_assets_folder_id: null,
-				gdrive_docs_folder_id: null,
-				gdrive_last_sync: null,
-			},
-		]);
+		prisma.projects.findUnique.mockResolvedValueOnce({
+			id: 1,
+			name: 'Acme',
+			slug: 'acme',
+			gdrive_connected: true,
+			gdrive_folder_id: 'root-folder',
+			gdrive_backups_folder_id: 'backup-folder',
+			gdrive_assets_folder_id: null,
+			gdrive_docs_folder_id: null,
+			gdrive_last_sync: null,
+		});
 
 		const result = await service.getProjectDriveSettings(1);
 		expect(result.gdrive_connected).toBe(true);
@@ -393,34 +559,30 @@ describe('ProjectsService', () => {
 	});
 
 	it('updates project drive settings and returns updated payload', async () => {
-		prisma.$queryRaw
-			.mockResolvedValueOnce([
-				{
-					id: 1,
-					name: 'Acme',
-					slug: 'acme',
-					gdrive_connected: false,
-					gdrive_folder_id: null,
-					gdrive_backups_folder_id: null,
-					gdrive_assets_folder_id: null,
-					gdrive_docs_folder_id: null,
-					gdrive_last_sync: null,
-				},
-			])
-			.mockResolvedValueOnce([
-				{
-					id: 1,
-					name: 'Acme',
-					slug: 'acme',
-					gdrive_connected: true,
-					gdrive_folder_id: null,
-					gdrive_backups_folder_id: 'backup-folder',
-					gdrive_assets_folder_id: null,
-					gdrive_docs_folder_id: null,
-					gdrive_last_sync: null,
-				},
-			]);
-		prisma.$executeRaw.mockResolvedValueOnce(1);
+		prisma.projects.findUnique
+			.mockResolvedValueOnce({
+				id: 1,
+				name: 'Acme',
+				slug: 'acme',
+				gdrive_connected: false,
+				gdrive_folder_id: null,
+				gdrive_backups_folder_id: null,
+				gdrive_assets_folder_id: null,
+				gdrive_docs_folder_id: null,
+				gdrive_last_sync: null,
+			})
+			.mockResolvedValueOnce({
+				id: 1,
+				name: 'Acme',
+				slug: 'acme',
+				gdrive_connected: true,
+				gdrive_folder_id: null,
+				gdrive_backups_folder_id: 'backup-folder',
+				gdrive_assets_folder_id: null,
+				gdrive_docs_folder_id: null,
+				gdrive_last_sync: null,
+			});
+		prisma.projects.update.mockResolvedValueOnce({ id: 1 });
 
 		const result = await service.updateProjectDriveSettings(1, {
 			gdrive_backups_folder_id: 'backup-folder',
@@ -431,24 +593,22 @@ describe('ProjectsService', () => {
 	});
 
 	it('returns drive backup index grouped by environments', async () => {
-		prisma.$queryRaw
-			.mockResolvedValueOnce([
-				{
-					id: 1,
-					name: 'Acme',
-					slug: 'acme',
-					gdrive_connected: true,
-					gdrive_folder_id: null,
-					gdrive_backups_folder_id: null,
-					gdrive_assets_folder_id: null,
-					gdrive_docs_folder_id: null,
-					gdrive_last_sync: null,
-				},
-			])
-			.mockResolvedValueOnce([
-				{ environment: 'production', gdrive_backups_folder_id: null },
-				{ environment: 'staging', gdrive_backups_folder_id: null },
-			]);
+		prisma.projects.findUnique.mockResolvedValueOnce({
+			id: 1,
+			name: 'Acme',
+			slug: 'acme',
+			gdrive_connected: true,
+			gdrive_folder_id: null,
+			gdrive_backups_folder_id: null,
+			gdrive_assets_folder_id: null,
+			gdrive_docs_folder_id: null,
+			gdrive_last_sync: null,
+		});
+		prisma.project_servers.findMany.mockResolvedValueOnce([
+			{ environment: 'production', gdrive_backups_folder_id: null },
+			{ environment: 'staging', gdrive_backups_folder_id: null },
+		]);
+		prisma.backups.findMany.mockResolvedValueOnce([]);
 
 		const result = await service.getProjectDriveBackupIndex(1);
 		expect(result.backup_root).toContain('Acme/Backups');
@@ -458,10 +618,12 @@ describe('ProjectsService', () => {
 	});
 
 	it('creates environment backup task payload', async () => {
-		prisma.$queryRaw
-			.mockResolvedValueOnce([{ id: 1, name: 'Acme' }])
-			.mockResolvedValueOnce([{ id: 2, environment: 'production' }])
-			.mockResolvedValueOnce([{ id: 99 }]);
+		prisma.projects.findFirst.mockResolvedValueOnce({ id: 1, name: 'Acme' });
+		prisma.project_servers.findFirst.mockResolvedValueOnce({
+			id: 2,
+			environment: 'production',
+		});
+		prisma.backups.create.mockResolvedValueOnce({ id: 99 });
 
 		const result = await service.createEnvironmentBackup(
 			1,
@@ -474,10 +636,18 @@ describe('ProjectsService', () => {
 		expect(result.backup_id).toBe(99);
 	});
 
+	it('rejects invalid backup type for environment backup', async () => {
+		await expect(
+			service.createEnvironmentBackup(1, 2, 'invalid', 'gdrive'),
+		).rejects.toBeInstanceOf(BadRequestException);
+	});
+
 	it('returns whois refresh payload', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([
-			{ id: 1, wp_home: 'https://acme.test', name: 'Acme' },
-		]);
+		prisma.projects.findUnique.mockResolvedValueOnce({
+			id: 1,
+			wp_home: 'https://acme.test',
+			name: 'Acme',
+		});
 
 		const result = await service.refreshProjectWhois(1);
 		expect(result.status).toBe('success');
@@ -491,18 +661,22 @@ describe('ProjectsService', () => {
 	});
 
 	it('lists environment users', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([
-			{ id: 7, environment: 'production', wp_url: 'https://acme.test' },
-		]);
+		prisma.project_servers.findFirst.mockResolvedValueOnce({
+			id: 7,
+			environment: 'production',
+			wp_url: 'https://acme.test',
+		});
 
 		const result = await service.listEnvironmentUsers(1, 7);
 		expect(result).toEqual([]);
 	});
 
 	it('creates environment user payload', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([
-			{ id: 7, environment: 'production', wp_url: 'https://acme.test' },
-		]);
+		prisma.project_servers.findFirst.mockResolvedValueOnce({
+			id: 7,
+			environment: 'production',
+			wp_url: 'https://acme.test',
+		});
 
 		const result = await service.createEnvironmentUser(1, 7, {
 			user_login: 'editor_user',
@@ -516,19 +690,23 @@ describe('ProjectsService', () => {
 	});
 
 	it('returns magic login URL', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([
-			{ id: 7, environment: 'production', wp_url: 'https://acme.test' },
-		]);
+		prisma.project_servers.findFirst.mockResolvedValueOnce({
+			id: 7,
+			environment: 'production',
+			wp_url: 'https://acme.test',
+		});
 
 		const result = await service.magicLogin(1, 7, '123');
 		expect(result.url).toContain('autologin=123');
 	});
 
 	it('updates github integration for project slug', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([
-			{ id: 1, name: 'Acme', slug: 'acme' },
-		]);
-		prisma.$executeRaw.mockResolvedValueOnce(1);
+		prisma.projects.findFirst.mockResolvedValueOnce({
+			id: 1,
+			name: 'Acme',
+			slug: 'acme',
+		});
+		prisma.projects.update.mockResolvedValueOnce({ id: 1 });
 
 		const result = await service.updateGitHubIntegration('acme', {
 			repo_url: 'https://github.com/acme/repo',
@@ -542,15 +720,13 @@ describe('ProjectsService', () => {
 	});
 
 	it('returns queued payload for project git pull', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([
-			{
-				id: 1,
-				name: 'Acme',
-				slug: 'acme',
-				github_repo_url: 'https://github.com/acme/repo',
-				github_branch: 'main',
-			},
-		]);
+		prisma.projects.findFirst.mockResolvedValueOnce({
+			id: 1,
+			name: 'Acme',
+			slug: 'acme',
+			github_repo_url: 'https://github.com/acme/repo',
+			github_branch: 'main',
+		});
 
 		const result = await service.pullRepository('acme', 'develop');
 		expect(result.status).toBe('accepted');
@@ -559,15 +735,13 @@ describe('ProjectsService', () => {
 	});
 
 	it('returns git status payload for project', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([
-			{
-				id: 1,
-				name: 'Acme',
-				slug: 'acme',
-				github_repo_url: 'https://github.com/acme/repo',
-				github_branch: 'main',
-			},
-		]);
+		prisma.projects.findFirst.mockResolvedValueOnce({
+			id: 1,
+			name: 'Acme',
+			slug: 'acme',
+			github_repo_url: 'https://github.com/acme/repo',
+			github_branch: 'main',
+		});
 
 		const result = await service.getRepositoryStatus('acme');
 		expect(result.project_name).toBe('Acme');
@@ -576,7 +750,7 @@ describe('ProjectsService', () => {
 	});
 
 	it('returns accepted payload for bulk ddev start', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([
+		prisma.projects.findMany.mockResolvedValueOnce([
 			{ id: 1, name: 'Acme', slug: 'acme' },
 		]);
 
@@ -590,11 +764,14 @@ describe('ProjectsService', () => {
 	});
 
 	it('runs compatibility security scan for project', async () => {
-		prisma.$queryRaw
-			.mockResolvedValueOnce([
-				{ id: 1, name: 'Acme', wp_home: 'https://acme.test' },
-			])
-			.mockResolvedValueOnce([{ wp_url: 'https://staging.acme.test' }]);
+		prisma.projects.findFirst.mockResolvedValueOnce({
+			id: 1,
+			name: 'Acme',
+			wp_home: 'https://acme.test',
+		});
+		prisma.project_servers.findFirst.mockResolvedValueOnce({
+			wp_url: 'https://staging.acme.test',
+		});
 
 		const result = await service.runSecurityScan(1, 8);
 		expect(result.project_id).toBe(1);
@@ -603,27 +780,26 @@ describe('ProjectsService', () => {
 	});
 
 	it('returns paginated environment backups payload', async () => {
-		prisma.$queryRaw
-			.mockResolvedValueOnce([{ id: 1, name: 'Acme' }])
-			.mockResolvedValueOnce([{ id: 7 }])
-			.mockResolvedValueOnce([{ total: BigInt(1) }])
-			.mockResolvedValueOnce([
-				{
-					id: 12,
-					project_id: 1,
-					name: 'Env Backup A',
-					backup_type: 'database',
-					storage_type: 'local',
-					status: 'completed',
-					storage_path: '/tmp/a.sql.gz',
-					size_bytes: BigInt(500),
-					created_at: new Date(),
-					completed_at: new Date(),
-					project_server_id: 7,
-					drive_folder_id: null,
-					storage_file_id: null,
-				},
-			]);
+		prisma.projects.findFirst.mockResolvedValueOnce({ id: 1, name: 'Acme' });
+		prisma.project_servers.findFirst.mockResolvedValueOnce({ id: 7 });
+		prisma.backups.count.mockResolvedValueOnce(1);
+		prisma.backups.findMany.mockResolvedValueOnce([
+			{
+				id: 12,
+				project_id: 1,
+				name: 'Env Backup A',
+				backup_type: 'database',
+				storage_type: 'local',
+				status: 'completed',
+				storage_path: '/tmp/a.sql.gz',
+				size_bytes: BigInt(500),
+				created_at: new Date(),
+				completed_at: new Date(),
+				project_server_id: 7,
+				drive_folder_id: null,
+				storage_file_id: null,
+			},
+		]);
 
 		const result = await service.getEnvironmentBackups(1, 7, 1, 10);
 		expect(result.total).toBe(1);
@@ -631,10 +807,18 @@ describe('ProjectsService', () => {
 	});
 
 	it('returns clone queued payload', async () => {
-		prisma.$queryRaw
-			.mockResolvedValueOnce([{ id: 1, name: 'Acme' }])
-			.mockResolvedValueOnce([{ id: 7, wp_url: 'https://acme.test' }])
-			.mockResolvedValueOnce([{ id: 3, name: 'srv-3' }]);
+		prisma.projects.findFirst.mockResolvedValueOnce({
+			id: 1,
+			name: 'Acme',
+		});
+		prisma.project_servers.findFirst.mockResolvedValueOnce({
+			id: 7,
+			wp_url: 'https://acme.test',
+		});
+		prisma.servers.findUnique.mockResolvedValueOnce({
+			id: 3,
+			name: 'srv-3',
+		});
 
 		const result = await service.cloneProjectEnvironment(1, {
 			source_env_id: 7,
@@ -647,17 +831,15 @@ describe('ProjectsService', () => {
 	});
 
 	it('returns project-name compatibility payloads', async () => {
-		prisma.$queryRaw.mockResolvedValue([
-			{
-				id: 1,
-				name: 'Acme',
-				slug: 'acme',
-				path: '/srv/acme',
-				wp_home: 'https://acme.test',
-				github_repo_url: 'https://github.com/acme/repo',
-				github_branch: 'main',
-			},
-		]);
+		prisma.projects.findFirst.mockResolvedValue({
+			id: 1,
+			name: 'Acme',
+			slug: 'acme',
+			path: '/srv/acme',
+			wp_home: 'https://acme.test',
+			github_repo_url: 'https://github.com/acme/repo',
+			github_branch: 'main',
+		});
 
 		const status = await service.getProjectStatusByName('acme');
 		const action = await service.executeProjectAction('acme', {
@@ -673,17 +855,15 @@ describe('ProjectsService', () => {
 	});
 
 	it('returns project deploy compatibility payloads', async () => {
-		prisma.$queryRaw.mockResolvedValue([
-			{
-				id: 1,
-				name: 'Acme',
-				slug: 'acme',
-				path: '/srv/acme',
-				wp_home: 'https://acme.test',
-				github_repo_url: 'https://github.com/acme/repo',
-				github_branch: 'main',
-			},
-		]);
+		prisma.projects.findFirst.mockResolvedValue({
+			id: 1,
+			name: 'Acme',
+			slug: 'acme',
+			path: '/srv/acme',
+			wp_home: 'https://acme.test',
+			github_repo_url: 'https://github.com/acme/repo',
+			github_branch: 'main',
+		});
 
 		const github = await service.deployFromGithub('acme', {
 			repo_url: 'https://github.com/acme/repo',
@@ -722,37 +902,43 @@ describe('ProjectsService', () => {
 	});
 
 	it('returns project-server link details and sync task payload', async () => {
-		prisma.$queryRaw
-			.mockResolvedValueOnce([
-				{
-					id: 8,
-					project_id: 2,
-					server_id: 1,
-					environment: 'staging',
-					wp_path: '/var/www/staging',
-					wp_url: 'https://staging.acme.test',
-					notes: null,
-					is_primary: true,
-					server_name: 'srv-1',
-					created_at: new Date(),
-					updated_at: new Date(),
-				},
-			])
-			.mockResolvedValueOnce([
-				{
-					id: 8,
-					project_id: 2,
-					server_id: 1,
-					environment: 'staging',
-					wp_path: '/var/www/staging',
-					wp_url: 'https://staging.acme.test',
-					notes: null,
-					is_primary: true,
-					server_name: 'srv-1',
-					created_at: new Date(),
-					updated_at: new Date(),
-				},
-			]);
+		prisma.projects.findFirst
+			.mockResolvedValueOnce({ id: 2 })
+			.mockResolvedValueOnce({ id: 2 });
+		prisma.project_servers.findFirst
+			.mockResolvedValueOnce({
+				id: 8,
+				project_id: 2,
+				server_id: 1,
+				environment: 'staging',
+				wp_path: '/var/www/staging',
+				wp_url: 'https://staging.acme.test',
+				gdrive_backups_folder_id: null,
+				notes: null,
+				is_primary: true,
+				created_at: new Date(),
+				updated_at: new Date(),
+				servers: { name: 'srv-1' },
+			})
+			.mockResolvedValueOnce({
+				id: 8,
+				project_id: 2,
+				server_id: 1,
+				environment: 'staging',
+				wp_path: '/var/www/staging',
+				wp_url: 'https://staging.acme.test',
+				ssh_user: null,
+				ssh_key_path: null,
+				database_name: null,
+				database_user: null,
+				database_password: null,
+				gdrive_backups_folder_id: null,
+				notes: null,
+				is_primary: true,
+				created_at: new Date(),
+				updated_at: new Date(),
+				servers: { name: 'srv-1' },
+			});
 
 		const link = await service.getProjectServerLink(2, 8);
 		const sync = await service.syncEnvironment(2, 8, { sync_database: true });

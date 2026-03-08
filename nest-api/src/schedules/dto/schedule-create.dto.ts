@@ -19,6 +19,11 @@ export class ScheduleCreateDto {
 	project_id!: number;
 
 	@IsOptional()
+	@IsInt()
+	@Min(1)
+	environment_id?: number;
+
+	@IsOptional()
 	@IsString()
 	frequency?: string;
 

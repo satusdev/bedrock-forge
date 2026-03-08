@@ -98,4 +98,15 @@ describe('SchedulesController', () => {
 		expect(service.resumeSchedule).toHaveBeenCalledWith(3, undefined);
 		expect(service.runScheduleNow).toHaveBeenCalledWith(3, undefined);
 	});
+
+	it('throws for invalid numeric query values', async () => {
+		await expect(controller.getSchedules('abc')).rejects.toMatchObject({
+			status: 400,
+		});
+		await expect(
+			controller.getSchedules(undefined, undefined, '0'),
+		).rejects.toMatchObject({
+			status: 400,
+		});
+	});
 });

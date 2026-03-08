@@ -4,6 +4,12 @@ import { SslService } from './ssl.service';
 type MockPrisma = {
 	$queryRaw: jest.Mock;
 	$executeRaw: jest.Mock;
+	ssl_certificates: {
+		findMany: jest.Mock;
+		updateMany: jest.Mock;
+		findUnique: jest.Mock;
+		update: jest.Mock;
+	};
 };
 
 describe('SslService', () => {
@@ -11,7 +17,16 @@ describe('SslService', () => {
 	let service: SslService;
 
 	beforeEach(() => {
-		prisma = { $queryRaw: jest.fn(), $executeRaw: jest.fn() };
+		prisma = {
+			$queryRaw: jest.fn(),
+			$executeRaw: jest.fn(),
+			ssl_certificates: {
+				findMany: jest.fn(),
+				updateMany: jest.fn(),
+				findUnique: jest.fn(),
+				update: jest.fn(),
+			},
+		};
 		service = new SslService(prisma as unknown as any);
 	});
 
@@ -76,6 +91,35 @@ describe('SslService', () => {
 		prisma.$queryRaw.mockResolvedValueOnce([]);
 		await expect(service.getCertificate(999)).rejects.toBeInstanceOf(
 			NotFoundException,
+		);
+	});
+
+	it('claims due renewals', async () => {
+		prisma.ssl_certificates.findMany.mockResolvedValueOnce([{ id: 7 }]);
+		prisma.ssl_certificates.updateMany.mockResolvedValueOnce({ count: 1 });
+
+		const result = await service.claimDueRenewals(3);
+
+		expect(result).toHaveLength(1);
+		expect(result[0]?.id).toBe(7);
+		expect(prisma.ssl_certificates.updateMany).toHaveBeenCalled();
+	});
+
+	it('runs certificate auto-renewal', async () => {
+		prisma.ssl_certificates.findUnique.mockResolvedValueOnce({
+			id: 4,
+			provider: 'lets_encrypt',
+			is_active: true,
+			auto_renew: true,
+			expiry_date: new Date('2026-04-01'),
+		});
+		prisma.ssl_certificates.update.mockResolvedValueOnce({ id: 4 });
+
+		const result = await service.runAutoRenewal(4);
+
+		expect(result.status).toBe('renewed');
+		expect(prisma.ssl_certificates.update).toHaveBeenCalledWith(
+			expect.objectContaining({ where: { id: 4 } }),
 		);
 	});
 });

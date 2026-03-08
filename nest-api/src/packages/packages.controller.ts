@@ -17,9 +17,13 @@ export class PackagesController {
 	constructor(private readonly packagesService: PackagesService) {}
 
 	@Get(['', '/'])
-	async listPackages(@Query('is_active') isActive?: string) {
+	async listPackages(
+		@Query('is_active') isActive?: string,
+		@Query('service_type') serviceType?: string,
+	) {
 		return this.packagesService.listPackages(
 			isActive !== undefined ? isActive === 'true' : true,
+			serviceType,
 		);
 	}
 

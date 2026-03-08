@@ -198,35 +198,13 @@ const DEMO_SERVERS = [
 
 const DEMO_PROJECTS = [];
 
-const DEMO_MONITORS = [
-	{
-		name: 'LamaHost Panel',
-		url: 'https://cp.lamahost.ly',
-		monitor_type: 'uptime',
-		interval_seconds: 300,
-		timeout_seconds: 30,
-	},
-	{
-		name: 'Lamah Production Panel',
-		url: 'https://cp.lamah.ly',
-		monitor_type: 'uptime',
-		interval_seconds: 300,
-		timeout_seconds: 30,
-	},
-	{
-		name: 'Staging Panel',
-		url: 'https://cp.staging.ly',
-		monitor_type: 'uptime',
-		interval_seconds: 300,
-		timeout_seconds: 30,
-	},
-];
+const DEMO_MONITORS = [];
 
 const DEMO_CLIENTS = [
 	{
-		name: 'Demo Client',
-		email: 'client@example.local',
-		notes: 'Demo client for local development and test workflows.',
+		name: 'Lamah Internal',
+		email: 'admin@lamah.com',
+		notes: 'Lamah client for local development and test workflows.',
 		billing_status: 'active',
 	},
 ];
@@ -235,6 +213,7 @@ const DEMO_PACKAGES = [
 	{
 		name: 'Starter Hosting',
 		slug: 'starter-hosting',
+		package_type: 'hosting',
 		description: 'Starter package for brochure and portfolio sites',
 		disk_space_gb: 20,
 		bandwidth_gb: 250,
@@ -253,6 +232,7 @@ const DEMO_PACKAGES = [
 	{
 		name: 'Business Hosting',
 		slug: 'business-hosting',
+		package_type: 'hosting',
 		description: 'Balanced hosting for growing business workloads',
 		disk_space_gb: 50,
 		bandwidth_gb: 1000,
@@ -266,6 +246,44 @@ const DEMO_PACKAGES = [
 		hosting_yearly_price: 499,
 		support_monthly_price: 29,
 		features: ['Up to 5 websites', 'Priority support', 'Staging included'],
+		is_featured: true,
+	},
+	{
+		name: 'Starter Support',
+		slug: 'starter-support',
+		package_type: 'support',
+		description: 'Email-first maintenance and support for small sites',
+		disk_space_gb: 0,
+		bandwidth_gb: 0,
+		domains_limit: 0,
+		databases_limit: 0,
+		email_accounts_limit: 0,
+		monthly_price: 19,
+		quarterly_price: 54,
+		yearly_price: 199,
+		biennial_price: 379,
+		hosting_yearly_price: 0,
+		support_monthly_price: 19,
+		features: ['Business-hours response', 'Core/plugin updates'],
+		is_featured: false,
+	},
+	{
+		name: 'Business Support',
+		slug: 'business-support',
+		package_type: 'support',
+		description: 'Priority support retainer with proactive maintenance',
+		disk_space_gb: 0,
+		bandwidth_gb: 0,
+		domains_limit: 0,
+		databases_limit: 0,
+		email_accounts_limit: 0,
+		monthly_price: 29,
+		quarterly_price: 84,
+		yearly_price: 319,
+		biennial_price: 599,
+		hosting_yearly_price: 0,
+		support_monthly_price: 29,
+		features: ['Priority queue', 'Security patching', 'Monthly reports'],
 		is_featured: true,
 	},
 ];
@@ -289,7 +307,7 @@ const DEMO_SUBSCRIPTIONS = [
 		billing_cycle: 'monthly',
 		status: 'active',
 		client_email: 'client@example.local',
-		package_slug: 'business-hosting',
+		package_slug: 'business-support',
 		project_slug: null,
 		auto_renew: true,
 		currency: 'USD',
@@ -968,6 +986,10 @@ async function upsertMonitors(ownerId, projectBySlug) {
 			: null;
 
 		const data = {
+			package_type:
+				toStringValue(seedPackage.package_type).toLowerCase() === 'support'
+					? 'support'
+					: 'hosting',
 			name,
 			url,
 			monitor_type: normalizeEnum(
@@ -1115,25 +1137,34 @@ async function upsertSubscriptions(
 				const pkg = await prisma.hosting_packages.findUnique({
 					where: { id: packageId },
 					select: {
+						package_type: true,
 						monthly_price: true,
 						quarterly_price: true,
 						yearly_price: true,
 						biennial_price: true,
 						support_monthly_price: true,
+						hosting_yearly_price: true,
 					},
 				});
 				if (pkg) {
 					if (type === 'support') {
-						amount = pkg.support_monthly_price || 0;
-					} else {
 						amount =
-							cycle === 'quarterly'
-								? pkg.quarterly_price
-								: cycle === 'yearly'
-									? pkg.yearly_price
-									: cycle === 'biennial'
-										? pkg.biennial_price
-										: pkg.monthly_price;
+							pkg.package_type === 'support'
+								? pkg.monthly_price || pkg.support_monthly_price || 0
+								: pkg.support_monthly_price || 0;
+					} else {
+						if (pkg.package_type === 'support') {
+							amount = pkg.hosting_yearly_price || 0;
+						} else {
+							amount =
+								cycle === 'quarterly'
+									? pkg.quarterly_price
+									: cycle === 'yearly'
+										? pkg.yearly_price || pkg.hosting_yearly_price
+										: cycle === 'biennial'
+											? pkg.biennial_price
+											: pkg.monthly_price;
+						}
 					}
 				}
 			}

@@ -15,6 +15,7 @@ describe('BackupsController', () => {
 			| 'scheduleBackup'
 			| 'getBackupSchedule'
 			| 'getBackupStatsSummary'
+			| 'getMaintenanceSnapshot'
 			| 'bulkCreateBackups'
 			| 'bulkDeleteBackups'
 			| 'getBackup'
@@ -37,6 +38,7 @@ describe('BackupsController', () => {
 			scheduleBackup: jest.fn(),
 			getBackupSchedule: jest.fn(),
 			getBackupStatsSummary: jest.fn(),
+			getMaintenanceSnapshot: jest.fn(),
 			bulkCreateBackups: jest.fn(),
 			bulkDeleteBackups: jest.fn(),
 			getBackup: jest.fn(),
@@ -73,6 +75,10 @@ describe('BackupsController', () => {
 		service.getBackupStatsSummary.mockResolvedValueOnce({
 			total_backups: 0,
 		} as never);
+		service.getMaintenanceSnapshot.mockReturnValueOnce({
+			runs_total: 1,
+			last_run_at: '2026-03-04T13:25:00.000Z',
+		} as never);
 		service.getBackup.mockResolvedValueOnce({ id: 1 } as never);
 		service.deleteBackup.mockResolvedValueOnce(undefined);
 		service.restoreBackup.mockResolvedValueOnce({ status: 'pending' } as never);
@@ -103,6 +109,7 @@ describe('BackupsController', () => {
 		await controller.scheduleBackup({ project_id: 1 }, undefined);
 		await controller.getBackupSchedule(1, undefined);
 		await controller.getBackupStatsSummary(undefined);
+		controller.getMaintenanceStatus();
 		await controller.getBackup(1, undefined);
 		await controller.deleteBackup(1, 'true', undefined);
 		await controller.restoreBackup(
@@ -150,6 +157,7 @@ describe('BackupsController', () => {
 		);
 		expect(service.getBackupSchedule).toHaveBeenCalledWith(1, undefined);
 		expect(service.getBackupStatsSummary).toHaveBeenCalledWith(undefined);
+		expect(service.getMaintenanceSnapshot).toHaveBeenCalled();
 		expect(service.getBackup).toHaveBeenCalledWith(1, undefined);
 		expect(service.deleteBackup).toHaveBeenCalledWith(1, true, undefined);
 		expect(service.restoreBackup).toHaveBeenCalledWith(

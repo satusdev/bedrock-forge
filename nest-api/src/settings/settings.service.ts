@@ -198,11 +198,12 @@ export class SettingsService {
 	}
 
 	async updateSystemSSHKey(privateKey: string) {
-		const publicKey = await this.derivePublicKey(privateKey);
+		const { normalized } = this.normalizePrivateKey(privateKey);
+		const publicKey = await this.derivePublicKey(normalized);
 
 		await this.upsertSetting(this.keyPrivate, {
 			value: null,
-			encryptedValue: privateKey,
+			encryptedValue: normalized,
 			isSensitive: true,
 		});
 		await this.upsertSetting(this.keyPublic, {

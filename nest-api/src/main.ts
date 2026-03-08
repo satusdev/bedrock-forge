@@ -1,8 +1,10 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { json, urlencoded } from 'express';
 import { Server } from 'http';
 import { WebSocketServer } from 'ws';
 import { AppModule } from './app.module';
+import { MalformedJsonExceptionFilter } from './common/filters/malformed-json.filter';
 import { WebsocketCompatService } from './websocket/websocket-compat.service';
 
 function parseCorsOrigins(rawOrigins: string | undefined): string[] {
@@ -34,9 +36,24 @@ function parseCorsOrigins(rawOrigins: string | undefined): string[] {
 }
 
 async function bootstrap() {
-	const app = await NestFactory.create(AppModule);
+	const app = await NestFactory.create(AppModule, {
+		bodyParser: false,
+	});
 	const apiPrefix = process.env.API_PREFIX ?? 'api/v1';
 	const corsOrigins = parseCorsOrigins(process.env.CORS_ORIGINS);
+
+	app.use(
+		json({
+			strict: false,
+			limit: '1mb',
+		}),
+	);
+	app.use(
+		urlencoded({
+			extended: true,
+			limit: '1mb',
+		}),
+	);
 
 	app.enableCors({
 		origin: corsOrigins.length > 0 ? corsOrigins : true,
@@ -50,6 +67,7 @@ async function bootstrap() {
 			forbidNonWhitelisted: true,
 		}),
 	);
+	app.useGlobalFilters(new MalformedJsonExceptionFilter());
 
 	app.setGlobalPrefix(apiPrefix);
 

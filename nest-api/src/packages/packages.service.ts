@@ -9,6 +9,7 @@ type PackageRow = {
 	id: number;
 	name: string;
 	slug: string;
+	package_type: string;
 	description: string | null;
 	disk_space_gb: number;
 	bandwidth_gb: number;
@@ -37,6 +38,44 @@ type PackageRow = {
 @Injectable()
 export class PackagesService {
 	constructor(private readonly prisma: PrismaService) {}
+
+	private hasBackfilledPackageTypes = false;
+
+	private async ensurePackageTypeBackfill() {
+		if (this.hasBackfilledPackageTypes) {
+			return;
+		}
+
+		await this.prisma.$executeRaw`
+			UPDATE hosting_packages
+			SET package_type = ${'support'}::packagetype,
+				updated_at = NOW()
+			WHERE package_type = ${'hosting'}::packagetype
+				AND (
+					LOWER(name) LIKE ${'%support%'}
+					OR LOWER(slug) LIKE ${'%support%'}
+					OR LOWER(COALESCE(description, '')) LIKE ${'%support%'}
+				)
+				AND (
+					COALESCE(hosting_yearly_price, 0) = 0
+					OR COALESCE(support_monthly_price, 0) > COALESCE(hosting_yearly_price, 0)
+				)
+		`;
+
+		await this.prisma.$executeRaw`
+			UPDATE hosting_packages
+			SET package_type = ${'hosting'}::packagetype,
+				updated_at = NOW()
+			WHERE package_type = ${'support'}::packagetype
+				AND (
+					LOWER(name) LIKE ${'%hosting%'}
+					OR LOWER(slug) LIKE ${'%hosting%'}
+					OR COALESCE(hosting_yearly_price, 0) > 0
+				)
+		`;
+
+		this.hasBackfilledPackageTypes = true;
+	}
 
 	private parseFeatures(raw: string | null) {
 		if (!raw) {
@@ -92,6 +131,7 @@ export class PackagesService {
 				id,
 				name,
 				slug,
+				package_type::text AS package_type,
 				description,
 				disk_space_gb,
 				bandwidth_gb,
@@ -126,12 +166,18 @@ export class PackagesService {
 		return pkg;
 	}
 
-	async listPackages(isActive = true) {
+	async listPackages(isActive = true, serviceType?: string) {
+		await this.ensurePackageTypeBackfill();
+		const normalizedType =
+			serviceType === 'hosting' || serviceType === 'support'
+				? serviceType
+				: null;
 		const rows = await this.prisma.$queryRaw<PackageRow[]>`
 			SELECT
 				id,
 				name,
 				slug,
+				package_type::text AS package_type,
 				description,
 				disk_space_gb,
 				bandwidth_gb,
@@ -157,6 +203,7 @@ export class PackagesService {
 				sort_order
 			FROM hosting_packages
 			WHERE is_active = ${isActive}
+				AND (${normalizedType}::text IS NULL OR package_type::text = ${normalizedType})
 			ORDER BY sort_order ASC, yearly_price ASC
 		`;
 
@@ -165,6 +212,7 @@ export class PackagesService {
 				id: pkg.id,
 				name: pkg.name,
 				slug: pkg.slug,
+				package_type: pkg.package_type,
 				description: pkg.description,
 				disk_space_gb: pkg.disk_space_gb,
 				bandwidth_gb: pkg.bandwidth_gb,
@@ -188,11 +236,13 @@ export class PackagesService {
 	}
 
 	async getPackage(packageId: number) {
+		await this.ensurePackageTypeBackfill();
 		const pkg = await this.getPackageOrThrow(packageId);
 		return {
 			id: pkg.id,
 			name: pkg.name,
 			slug: pkg.slug,
+			package_type: pkg.package_type,
 			description: pkg.description,
 			disk_space_gb: pkg.disk_space_gb,
 			bandwidth_gb: pkg.bandwidth_gb,
@@ -234,6 +284,7 @@ export class PackagesService {
 	}
 
 	async createPackage(payload: {
+		package_type?: string;
 		name: string;
 		slug: string;
 		description?: string;
@@ -268,6 +319,7 @@ export class PackagesService {
 
 		const insertedRows = await this.prisma.$queryRaw<{ id: number }[]>`
 			INSERT INTO hosting_packages (
+				package_type,
 				name,
 				slug,
 				description,
@@ -297,6 +349,7 @@ export class PackagesService {
 				updated_at
 			)
 			VALUES (
+				${payload.package_type === 'support' ? 'support' : 'hosting'}::packagetype,
 				${payload.name},
 				${normalizedSlug},
 				${payload.description ?? null},
@@ -338,6 +391,7 @@ export class PackagesService {
 	async updatePackage(
 		packageId: number,
 		payload: {
+			package_type?: string;
 			name?: string;
 			description?: string;
 			disk_space_gb?: number;
@@ -362,6 +416,7 @@ export class PackagesService {
 		await this.prisma.$executeRaw`
 			UPDATE hosting_packages
 			SET
+				package_type = COALESCE(${payload.package_type === 'support' ? 'support' : payload.package_type === 'hosting' ? 'hosting' : null}::packagetype, package_type),
 				name = COALESCE(${payload.name ?? null}, name),
 				description = COALESCE(${payload.description ?? null}, description),
 				disk_space_gb = COALESCE(${payload.disk_space_gb ?? null}, disk_space_gb),

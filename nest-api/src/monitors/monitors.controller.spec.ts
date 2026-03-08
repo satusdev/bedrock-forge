@@ -13,6 +13,7 @@ describe('MonitorsController', () => {
 			| 'listMonitors'
 			| 'listByProject'
 			| 'getOverview'
+			| 'getRunnerSnapshot'
 			| 'createMonitor'
 			| 'getMonitor'
 			| 'updateMonitor'
@@ -39,6 +40,7 @@ describe('MonitorsController', () => {
 			listMonitors: jest.fn(),
 			listByProject: jest.fn(),
 			getOverview: jest.fn(),
+			getRunnerSnapshot: jest.fn(),
 			createMonitor: jest.fn(),
 			getMonitor: jest.fn(),
 			updateMonitor: jest.fn(),
@@ -62,6 +64,7 @@ describe('MonitorsController', () => {
 		service.listMonitors.mockResolvedValueOnce([]);
 		service.listByProject.mockResolvedValueOnce([]);
 		service.getOverview.mockResolvedValueOnce({ total: 0 } as never);
+		service.getRunnerSnapshot.mockReturnValueOnce({ runs_total: 1 } as never);
 		service.createMonitor.mockResolvedValueOnce({ id: 1 } as never);
 		service.getMonitor.mockResolvedValueOnce({ id: 1 } as never);
 		service.updateMonitor.mockResolvedValueOnce({ id: 1 } as never);
@@ -77,6 +80,7 @@ describe('MonitorsController', () => {
 		await controller.listMonitors('0', '20');
 		await controller.listMonitorsByProject(2);
 		await controller.getOverview();
+		controller.getMaintenanceStatus();
 		await controller.createMonitor({ name: 'Site', url: 'https://acme.test' });
 		await controller.getMonitor(1);
 		await controller.updateMonitor(1, { name: 'Updated' });
@@ -92,6 +96,7 @@ describe('MonitorsController', () => {
 		expect(service.listMonitors).toHaveBeenCalledWith(0, 20, undefined);
 		expect(service.listByProject).toHaveBeenCalledWith(2, undefined);
 		expect(service.getOverview).toHaveBeenCalledWith(undefined);
+		expect(service.getRunnerSnapshot).toHaveBeenCalled();
 		expect(service.createMonitor).toHaveBeenCalledWith(
 			{
 				name: 'Site',

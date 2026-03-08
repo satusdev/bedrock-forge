@@ -40,7 +40,7 @@ describe('PackagesController', () => {
 		await controller.updatePackage(1, { is_featured: true });
 		await controller.deactivatePackage(1);
 
-		expect(service.listPackages).toHaveBeenCalledWith(true);
+		expect(service.listPackages).toHaveBeenCalledWith(true, undefined);
 		expect(service.getPackage).toHaveBeenCalledWith(1);
 		expect(service.createPackage).toHaveBeenCalledWith({
 			name: 'Starter',

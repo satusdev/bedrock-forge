@@ -1,4 +1,5 @@
 import {
+	BadRequestException,
 	Body,
 	Controller,
 	Delete,
@@ -29,6 +30,22 @@ export class SchedulesController {
 		);
 	}
 
+	private parseOptionalInteger(
+		value: string | undefined,
+		fieldName: string,
+	): number | undefined {
+		if (typeof value === 'undefined') {
+			return undefined;
+		}
+
+		const parsed = Number(value);
+		if (!Number.isInteger(parsed) || parsed < 1) {
+			throw new BadRequestException({ detail: `Invalid ${fieldName}` });
+		}
+
+		return parsed;
+	}
+
 	@Get()
 	async getSchedules(
 		@Query('project_id') projectId?: string,
@@ -38,11 +55,14 @@ export class SchedulesController {
 		@Headers('authorization') authorization?: string,
 	) {
 		const ownerId = await this.resolveOwnerId(authorization);
+		const parsedProjectId = this.parseOptionalInteger(projectId, 'project_id');
+		const parsedPage = this.parseOptionalInteger(page, 'page');
+		const parsedPageSize = this.parseOptionalInteger(pageSize, 'page_size');
 		return this.schedulesService.listSchedules({
-			project_id: projectId ? Number(projectId) : undefined,
-			status,
-			page: page ? Number(page) : undefined,
-			page_size: pageSize ? Number(pageSize) : undefined,
+			project_id: parsedProjectId,
+			status: status?.trim() || undefined,
+			page: parsedPage,
+			page_size: parsedPageSize,
 			owner_id: ownerId,
 		});
 	}

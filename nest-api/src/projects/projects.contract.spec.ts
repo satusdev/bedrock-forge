@@ -4,8 +4,10 @@ import {
 	NotFoundException,
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { json, urlencoded } from 'express';
 import request from 'supertest';
 import { AuthService } from '../auth/auth.service';
+import { MalformedJsonExceptionFilter } from '../common/filters/malformed-json.filter';
 import { ProjectsController } from './projects.controller';
 import { ProjectsService } from './projects.service';
 
@@ -87,7 +89,22 @@ describe('Projects HTTP Contract', () => {
 			],
 		}).compile();
 
-		app = moduleRef.createNestApplication();
+		app = moduleRef.createNestApplication({
+			bodyParser: false,
+		});
+		app.use(
+			json({
+				strict: false,
+				limit: '1mb',
+			}),
+		);
+		app.use(
+			urlencoded({
+				extended: true,
+				limit: '1mb',
+			}),
+		);
+		app.useGlobalFilters(new MalformedJsonExceptionFilter());
 		await app.init();
 	});
 
@@ -283,15 +300,19 @@ describe('Projects HTTP Contract', () => {
 	});
 
 	it('GET /projects/:id/backups returns backup list payload', async () => {
-		projectsService.getProjectBackups.mockResolvedValueOnce([
-			{ id: 1, name: 'Backup A', backup_type: 'full' },
-		]);
+		projectsService.getProjectBackups.mockResolvedValueOnce({
+			items: [{ id: 1, name: 'Backup A', backup_type: 'full' }],
+			total: 1,
+			page: 1,
+			page_size: 10,
+		});
 
 		const response = await request(app.getHttpServer())
 			.get('/projects/2/backups?page=1&page_size=10')
 			.expect(200);
 
-		expect(response.body[0].name).toBe('Backup A');
+		expect(response.body.items[0].name).toBe('Backup A');
+		expect(response.body.total).toBe(1);
 	});
 
 	it('GET /projects/:id/backups/download returns binary payload', async () => {
@@ -381,6 +402,71 @@ describe('Projects HTTP Contract', () => {
 			.expect(202);
 
 		expect(response.body.task_id).toBe('task-backup-1');
+	});
+
+	it('POST /projects/:id/environments/:envId/backups accepts JSON null body', async () => {
+		projectsService.createEnvironmentBackup.mockResolvedValueOnce({
+			task_id: 'task-backup-2',
+			status: 'pending',
+			message: 'Backup queued',
+			backup_id: 13,
+		});
+
+		const response = await request(app.getHttpServer())
+			.post(
+				'/projects/2/environments/7/backups?backup_type=full&storage_type=gdrive',
+			)
+			.set('content-type', 'application/json')
+			.send('null')
+			.expect(202);
+
+		expect(response.body.task_id).toBe('task-backup-2');
+		expect(projectsService.createEnvironmentBackup).toHaveBeenCalledWith(
+			2,
+			7,
+			'full',
+			'gdrive',
+			undefined,
+		);
+	});
+
+	it('POST /projects/:id/environments/:envId/backups accepts JSON null body with google_drive storage', async () => {
+		projectsService.createEnvironmentBackup.mockResolvedValueOnce({
+			task_id: 'task-backup-3',
+			status: 'pending',
+			message: 'Backup queued',
+			backup_id: 14,
+		});
+
+		const response = await request(app.getHttpServer())
+			.post(
+				'/projects/2/environments/7/backups?backup_type=full&storage_type=google_drive',
+			)
+			.set('content-type', 'application/json')
+			.send('null')
+			.expect(202);
+
+		expect(response.body.task_id).toBe('task-backup-3');
+		expect(projectsService.createEnvironmentBackup).toHaveBeenCalledWith(
+			2,
+			7,
+			'full',
+			'google_drive',
+			undefined,
+		);
+	});
+
+	it('POST /projects/:id/environments/:envId/backups returns normalized malformed JSON detail', async () => {
+		const response = await request(app.getHttpServer())
+			.post(
+				'/projects/2/environments/7/backups?backup_type=full&storage_type=gdrive',
+			)
+			.set('content-type', 'application/json')
+			.send('{"invalid"')
+			.expect(400);
+
+		expect(response.body).toEqual({ detail: 'Malformed JSON body' });
+		expect(projectsService.createEnvironmentBackup).not.toHaveBeenCalled();
 	});
 
 	it('GET /projects/:id/environments/:envId/backups returns env backup payload', async () => {

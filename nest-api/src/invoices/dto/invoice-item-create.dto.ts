@@ -29,4 +29,9 @@ export class InvoiceItemCreateDto {
 	@IsInt()
 	@Min(1)
 	project_id?: number;
+
+	@IsOptional()
+	@IsInt()
+	@Min(1)
+	subscription_id?: number;
 }

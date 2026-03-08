@@ -381,7 +381,12 @@ describe('ProjectsController', () => {
 		const send = jest.fn();
 		const response = { setHeader, send } as unknown as Response;
 
-		service.getProjectBackups.mockResolvedValueOnce([]);
+		service.getProjectBackups.mockResolvedValueOnce({
+			items: [],
+			total: 0,
+			page: 1,
+			page_size: 10,
+		} as never);
 		service.getEnvironmentBackups.mockResolvedValueOnce({ items: [] } as never);
 		service.cloneProjectEnvironment.mockResolvedValueOnce({
 			status: 'queued',

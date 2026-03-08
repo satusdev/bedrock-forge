@@ -3,6 +3,12 @@ import {
 	Injectable,
 	NotFoundException,
 } from '@nestjs/common';
+import {
+	backupstoragetype,
+	backuptype,
+	environmenttype,
+	serverenvironment,
+} from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { TaskStatusService } from '../task-status/task-status.service';
@@ -114,6 +120,18 @@ type DbProjectNameRow = {
 	github_branch: string | null;
 };
 
+const backupTypes = new Set<backuptype>(['full', 'database', 'files']);
+const backupStorageTypes = new Set<backupstoragetype>([
+	'local',
+	'google_drive',
+	's3',
+]);
+const serverEnvironments = new Set<serverenvironment>([
+	'development',
+	'staging',
+	'production',
+]);
+
 @Injectable()
 export class ProjectsService {
 	constructor(
@@ -149,55 +167,220 @@ export class ProjectsService {
 			.replace(/-+/g, '-');
 	}
 
+	private makeTagSlug(name: string): string {
+		return name
+			.toLowerCase()
+			.trim()
+			.replace(/[^a-z0-9\s-]/g, '')
+			.replace(/\s+/g, '-')
+			.replace(/-+/g, '-');
+	}
+
+	private extractHostname(value: string) {
+		const trimmed = value.trim();
+		if (!trimmed) {
+			return '';
+		}
+
+		try {
+			const withScheme = /^https?:\/\//i.test(trimmed)
+				? trimmed
+				: `https://${trimmed}`;
+			return new URL(withScheme).hostname.toLowerCase();
+		} catch {
+			return (
+				trimmed.replace(/^https?:\/\//i, '').split('/')[0] ?? ''
+			).toLowerCase();
+		}
+	}
+
+	private extractApexDomain(hostname: string) {
+		const labels = hostname
+			.toLowerCase()
+			.split('.')
+			.map(label => label.trim())
+			.filter(Boolean);
+
+		if (labels.length <= 2) {
+			return labels.join('.');
+		}
+
+		const publicSuffixPairs = new Set([
+			'co.uk',
+			'org.uk',
+			'gov.uk',
+			'ac.uk',
+			'com.au',
+			'net.au',
+			'org.au',
+			'co.nz',
+			'com.br',
+		]);
+
+		const suffixPair = labels.slice(-2).join('.');
+		if (publicSuffixPairs.has(suffixPair) && labels.length >= 3) {
+			return labels.slice(-3).join('.');
+		}
+
+		return labels.slice(-2).join('.');
+	}
+
+	private async ensureProjectApexDomainTracked(
+		projectId: number,
+		domainInput: string,
+		fallbackClientId: number,
+		projectClientId?: number | null,
+	) {
+		const hostname = this.extractHostname(domainInput);
+		if (!hostname) {
+			return;
+		}
+
+		const apexDomain = this.extractApexDomain(hostname);
+		if (!apexDomain || !apexDomain.includes('.')) {
+			return;
+		}
+
+		const existingDomain = await this.prisma.domains.findUnique({
+			where: { domain_name: apexDomain },
+			select: { id: true },
+		});
+		if (existingDomain) {
+			return;
+		}
+
+		const resolvedClientId = projectClientId ?? fallbackClientId;
+		const client = await this.prisma.clients.findUnique({
+			where: { id: resolvedClientId },
+			select: { id: true },
+		});
+		if (!client) {
+			return;
+		}
+
+		const expiryDate = new Date();
+		expiryDate.setUTCDate(expiryDate.getUTCDate() + 365);
+		expiryDate.setUTCHours(0, 0, 0, 0);
+
+		await this.prisma.domains.create({
+			data: {
+				domain_name: apexDomain,
+				tld: `.${apexDomain.split('.').pop() ?? 'com'}`,
+				registrar: 'other',
+				status: 'active',
+				auto_renew: true,
+				privacy_protection: true,
+				transfer_lock: true,
+				annual_cost: 0,
+				currency: 'USD',
+				reminder_days: 30,
+				expiry_date: expiryDate,
+				client_id: client.id,
+				project_id: projectId,
+				updated_at: new Date(),
+			},
+		});
+	}
+
+	private parseServerEnvironment(value: string): serverenvironment {
+		const normalized = value.trim().toLowerCase();
+		if (!serverEnvironments.has(normalized as serverenvironment)) {
+			throw new BadRequestException({
+				detail:
+					'Invalid environment. Expected one of: development, staging, production',
+			});
+		}
+
+		return normalized as serverenvironment;
+	}
+
 	private async findProjectByName(projectName: string, ownerId?: number) {
 		const resolvedOwnerId = ownerId ?? this.fallbackOwnerId;
-		const rows = await this.prisma.$queryRaw<DbProjectNameRow[]>`
-			SELECT id, name, slug, path, wp_home, github_repo_url, github_branch
-			FROM projects
-			WHERE (slug = ${projectName} OR name = ${projectName})
-				AND owner_id = ${resolvedOwnerId}
-			LIMIT 1
-		`;
-
-		const project = rows[0];
+		const project = await this.prisma.projects.findFirst({
+			where: {
+				owner_id: resolvedOwnerId,
+				OR: [{ slug: projectName }, { name: projectName }],
+			},
+			select: {
+				id: true,
+				name: true,
+				slug: true,
+				path: true,
+				wp_home: true,
+				github_repo_url: true,
+				github_branch: true,
+			},
+		});
 		if (!project) {
 			throw new NotFoundException({
 				detail: `Project ${projectName} not found`,
 			});
 		}
 
-		return project;
+		return project as DbProjectNameRow;
 	}
 
 	async getRemoteProjects() {
-		const rows = await this.prisma.$queryRaw<DbRemoteProjectRow[]>`
-			SELECT
-				p.id,
-				p.name,
-				p.slug,
-				p.wp_home,
-				p.environment,
-				p.status,
-				s.name AS server_name,
-				p.tags,
-				p.created_at
-			FROM projects p
-			LEFT JOIN servers s ON p.server_id = s.id
-			ORDER BY p.created_at DESC
-		`;
+		const rows = await this.prisma.projects.findMany({
+			select: {
+				id: true,
+				name: true,
+				slug: true,
+				wp_home: true,
+				environment: true,
+				status: true,
+				tags: true,
+				created_at: true,
+				project_servers: {
+					select: {
+						environment: true,
+						wp_url: true,
+						servers: {
+							select: {
+								name: true,
+							},
+						},
+					},
+					orderBy: [{ is_primary: 'desc' }, { updated_at: 'desc' }],
+					take: 1,
+				},
+				servers: {
+					select: {
+						name: true,
+					},
+				},
+				project_tags: {
+					select: {
+						tags: {
+							select: { name: true },
+						},
+					},
+				},
+			},
+			orderBy: { created_at: 'desc' },
+		});
 
-		return rows.map(project => ({
-			id: project.id,
-			name: project.name,
-			slug: project.slug,
-			domain: project.wp_home ?? '',
-			environment: project.environment,
-			status: project.status,
-			server_name: project.server_name,
-			health_score: 90,
-			tags: this.parseTags(project.tags),
-			created_at: project.created_at,
-		}));
+		return rows.map(project => {
+			const primaryEnv = project.project_servers[0];
+			const relationTags = project.project_tags
+				.map(tag => tag.tags.name)
+				.filter(name => Boolean(name))
+				.sort((left, right) => left.localeCompare(right));
+
+			return {
+				id: project.id,
+				name: project.name,
+				slug: project.slug,
+				domain: primaryEnv?.wp_url ?? project.wp_home ?? '',
+				environment: primaryEnv?.environment ?? project.environment,
+				status: project.status,
+				server_name: primaryEnv?.servers.name ?? project.servers?.name ?? null,
+				health_score: 90,
+				tags:
+					relationTags.length > 0 ? relationTags : this.parseTags(project.tags),
+				created_at: project.created_at,
+			};
+		});
 	}
 
 	async getProjectsStatus() {
@@ -205,15 +388,17 @@ export class ProjectsService {
 	}
 
 	async getAllTags() {
-		const rows = await this.prisma.$queryRaw<{ tags: string | null }[]>`
-			SELECT tags
-			FROM projects
-		`;
+		const rows = await this.prisma.tags.findMany({
+			select: {
+				name: true,
+			},
+			orderBy: { name: 'asc' },
+		});
 
 		const allTags = new Set<string>();
 		for (const row of rows) {
-			for (const tag of this.parseTags(row.tags)) {
-				allTags.add(tag);
+			if (row.name && row.name.trim().length > 0) {
+				allTags.add(row.name.trim());
 			}
 		}
 
@@ -237,55 +422,130 @@ export class ProjectsService {
 	async createProject(payload: ProjectCreateDto, ownerId?: number) {
 		const resolvedOwnerId = ownerId ?? this.fallbackOwnerId;
 		const slug = this.makeSlug(payload.name);
-		const existingRows = await this.prisma.$queryRaw<{ id: number }[]>`
-			SELECT id
-			FROM projects
-			WHERE slug = ${slug}
-			LIMIT 1
-		`;
+		const existing = await this.prisma.projects.findUnique({
+			where: { slug },
+			select: { id: true },
+		});
 
-		if (existingRows[0]) {
+		if (existing) {
 			throw new BadRequestException({
 				detail: `Project with slug '${slug}' already exists`,
 			});
 		}
 
-		const insertedRows = await this.prisma.$queryRaw<DbProjectRow[]>`
-			INSERT INTO projects (
-				name,
+		const project = await this.prisma.projects.create({
+			data: {
+				name: payload.name,
 				slug,
-				description,
-				path,
-				status,
-				environment,
-				wp_home,
-				github_repo_url,
-				github_branch,
-				owner_id,
-				tags,
-				gdrive_connected,
-				updated_at
-			)
-			VALUES (
-				${payload.name},
-				${slug},
-				${payload.description ?? null},
-				${''},
-				${'active'},
-				${'production'},
-				${payload.domain},
-				${payload.github_repo_url ?? null},
-				${payload.github_branch ?? 'main'},
-				${resolvedOwnerId},
-				${JSON.stringify(payload.tags ?? [])},
-				${false},
-				NOW()
-			)
-			RETURNING id, name, slug, wp_home, description, status, github_repo_url, github_branch, tags, created_at, updated_at
-		`;
-		const project = insertedRows[0];
+				description: payload.description ?? null,
+				path: '',
+				status: 'active',
+				environment: 'production',
+				wp_home: payload.domain,
+				github_repo_url: payload.github_repo_url ?? null,
+				github_branch: payload.github_branch ?? 'main',
+				owner_id: resolvedOwnerId,
+				tags: JSON.stringify(payload.tags ?? []),
+				gdrive_connected: false,
+				updated_at: new Date(),
+			},
+			select: {
+				id: true,
+				name: true,
+				slug: true,
+				wp_home: true,
+				client_id: true,
+				description: true,
+				status: true,
+				github_repo_url: true,
+				github_branch: true,
+				tags: true,
+				created_at: true,
+				updated_at: true,
+			},
+		});
 		if (!project) {
 			throw new NotFoundException({ detail: 'Failed to create project' });
+		}
+
+		await this.ensureProjectApexDomainTracked(
+			project.id,
+			payload.domain,
+			1,
+			project.client_id,
+		);
+
+		const normalizedTags = Array.from(
+			new Set(
+				(payload.tags ?? [])
+					.map(tag => tag.trim())
+					.filter(tag => tag.length > 0),
+			),
+		);
+
+		if (normalizedTags.length > 0) {
+			for (const tagName of normalizedTags) {
+				const existingTag = await this.prisma.tags.findFirst({
+					where: {
+						name: { equals: tagName, mode: 'insensitive' },
+					},
+					select: { id: true },
+				});
+
+				let tagId = existingTag?.id;
+				if (!tagId) {
+					const slug = this.makeTagSlug(tagName);
+					const insertedTag = await this.prisma.tags.create({
+						data: {
+							name: tagName,
+							slug,
+							color: '#6366f1',
+							icon: null,
+							description: null,
+							usage_count: 0,
+							created_at: new Date(),
+							updated_at: new Date(),
+						},
+						select: { id: true },
+					});
+					tagId = insertedTag.id;
+				}
+
+				if (tagId) {
+					await this.prisma.project_tags.createMany({
+						data: [{ project_id: project.id, tag_id: tagId }],
+						skipDuplicates: true,
+					});
+				}
+			}
+
+			const tags = await this.prisma.tags.findMany({
+				select: {
+					id: true,
+					_count: {
+						select: {
+							project_tags: true,
+							server_tags: true,
+							client_tags: true,
+						},
+					},
+				},
+			});
+
+			await this.prisma.$transaction(
+				tags.map(tag =>
+					this.prisma.tags.update({
+						where: { id: tag.id },
+						data: {
+							usage_count:
+								tag._count.project_tags +
+								tag._count.server_tags +
+								tag._count.client_tags,
+							updated_at: new Date(),
+						},
+					}),
+				),
+			);
 		}
 
 		return {
@@ -298,7 +558,10 @@ export class ProjectsService {
 			status: project.status,
 			github_repo_url: project.github_repo_url,
 			github_branch: project.github_branch,
-			tags: this.parseTags(project.tags),
+			tags:
+				normalizedTags.length > 0
+					? normalizedTags
+					: this.parseTags(project.tags),
 			environments_count: 0,
 			created_at: project.created_at,
 			updated_at: project.updated_at,
@@ -306,20 +569,17 @@ export class ProjectsService {
 	}
 
 	async deleteProject(projectId: number) {
-		const rows = await this.prisma.$queryRaw<{ id: number }[]>`
-			SELECT id
-			FROM projects
-			WHERE id = ${projectId}
-			LIMIT 1
-		`;
-		if (!rows[0]) {
+		const project = await this.prisma.projects.findUnique({
+			where: { id: projectId },
+			select: { id: true },
+		});
+		if (!project) {
 			throw new NotFoundException({ detail: 'Project not found' });
 		}
 
-		await this.prisma.$executeRaw`
-			DELETE FROM projects
-			WHERE id = ${projectId}
-		`;
+		await this.prisma.projects.delete({
+			where: { id: projectId },
+		});
 	}
 
 	async getProjectEnvironments(projectId: number) {
@@ -328,136 +588,159 @@ export class ProjectsService {
 	}
 
 	async listProjectServers(projectId: number, environment?: string) {
-		const projectRows = await this.prisma.$queryRaw<{ id: number }[]>`
-			SELECT id
-			FROM projects
-			WHERE id = ${projectId}
-			LIMIT 1
-		`;
-		if (!projectRows[0]) {
+		const project = await this.prisma.projects.findUnique({
+			where: { id: projectId },
+			select: { id: true },
+		});
+		if (!project) {
 			throw new NotFoundException({ detail: 'Project not found' });
 		}
 
-		const rows = await this.prisma.$queryRaw<DbEnvironmentRow[]>`
-			SELECT
-				ps.id,
-				ps.project_id,
-				ps.environment,
-				ps.server_id,
-				s.name AS server_name,
-				s.hostname AS server_hostname,
-				ps.wp_url,
-				ps.wp_path,
-				ps.ssh_user,
-				ps.ssh_key_path,
-				ps.database_name,
-				ps.database_user,
-				ps.database_password,
-				ps.gdrive_backups_folder_id,
-				ps.notes,
-				ps.is_primary,
-				ps.created_at,
-				ps.updated_at
-			FROM project_servers ps
-			JOIN servers s ON s.id = ps.server_id
-			WHERE ps.project_id = ${projectId}
-				AND (${environment ?? null}::text IS NULL OR ps.environment::text = ${environment ?? null})
-			ORDER BY ps.environment
-		`;
+		const rows = await this.prisma.project_servers.findMany({
+			where: {
+				project_id: projectId,
+			},
+			include: {
+				servers: {
+					select: {
+						name: true,
+						hostname: true,
+					},
+				},
+			},
+			orderBy: {
+				environment: 'asc',
+			},
+		});
 
-		return rows;
+		return rows
+			.filter(row => !environment || row.environment === environment)
+			.map(row => ({
+				id: row.id,
+				project_id: row.project_id,
+				environment: row.environment,
+				server_id: row.server_id,
+				server_name: row.servers.name,
+				server_hostname: row.servers.hostname,
+				wp_url: row.wp_url,
+				wp_path: row.wp_path,
+				ssh_user: row.ssh_user,
+				ssh_key_path: row.ssh_key_path,
+				database_name: row.database_name,
+				database_user: row.database_user,
+				database_password: row.database_password,
+				gdrive_backups_folder_id: row.gdrive_backups_folder_id,
+				notes: row.notes,
+				is_primary: row.is_primary,
+				created_at: row.created_at,
+				updated_at: row.updated_at,
+			}));
 	}
 
 	async linkEnvironment(projectId: number, payload: EnvironmentCreateDto) {
-		const projectRows = await this.prisma.$queryRaw<{ id: number }[]>`
-			SELECT id
-			FROM projects
-			WHERE id = ${projectId}
-			LIMIT 1
-		`;
-		if (!projectRows[0]) {
+		const project = await this.prisma.projects.findUnique({
+			where: { id: projectId },
+			select: {
+				id: true,
+				server_id: true,
+				environment: true,
+				wp_home: true,
+			},
+		});
+		if (!project) {
 			throw new NotFoundException({ detail: 'Project not found' });
 		}
+		const nextEnvironment = this.parseServerEnvironment(payload.environment);
 
-		const serverRows = await this.prisma.$queryRaw<
-			{ id: number; name: string; hostname: string }[]
-		>`
-			SELECT id, name, hostname
-			FROM servers
-			WHERE id = ${payload.server_id}
-			LIMIT 1
-		`;
-		const server = serverRows[0];
+		const server = await this.prisma.servers.findUnique({
+			where: { id: payload.server_id },
+			select: {
+				id: true,
+				name: true,
+				hostname: true,
+			},
+		});
 		if (!server) {
 			throw new NotFoundException({ detail: 'Server not found' });
 		}
 
-		const existingRows = await this.prisma.$queryRaw<{ id: number }[]>`
-			SELECT id
-			FROM project_servers
-			WHERE project_id = ${projectId}
-				AND server_id = ${payload.server_id}
-				AND environment = ${payload.environment}::serverenvironment
-			LIMIT 1
-		`;
-		if (existingRows[0]) {
+		const existing = await this.prisma.project_servers.findFirst({
+			where: {
+				project_id: projectId,
+				server_id: payload.server_id,
+				environment: nextEnvironment,
+			},
+			select: { id: true },
+		});
+		if (existing) {
 			throw new BadRequestException({
 				detail: `${payload.environment} environment already linked for this project`,
 			});
 		}
 
 		const nextIsPrimary = payload.is_primary ?? true;
-		if (nextIsPrimary) {
-			await this.prisma.$executeRaw`
-				UPDATE project_servers
-				SET is_primary = ${false}, updated_at = NOW()
-				WHERE project_id = ${projectId}
-					AND environment = ${payload.environment}::serverenvironment
-					AND is_primary = ${true}
-			`;
-		}
 
-		const insertedRows = await this.prisma.$queryRaw<DbProjectServerRow[]>`
-			INSERT INTO project_servers (
-				project_id,
-				server_id,
-				environment,
-				wp_url,
-				wp_path,
-				ssh_user,
-				ssh_key_path,
-				database_name,
-				database_user,
-				database_password,
-				gdrive_backups_folder_id,
-				notes,
-				is_primary,
-				updated_at
-			)
-			VALUES (
-				${projectId},
-				${payload.server_id},
-				${payload.environment}::serverenvironment,
-				${payload.wp_url},
-				${payload.wp_path},
-				${payload.ssh_user ?? null},
-				${payload.ssh_key_path ?? null},
-				${payload.database_name},
-				${payload.database_user},
-				${payload.database_password},
-				${payload.gdrive_backups_folder_id ?? null},
-				${payload.notes ?? null},
-				${nextIsPrimary},
-				NOW()
-			)
-			RETURNING id, project_id, server_id, environment, wp_url, wp_path, ssh_user, ssh_key_path, database_name, database_user, database_password, gdrive_backups_folder_id, notes, is_primary, created_at, updated_at
-		`;
-		const inserted = insertedRows[0];
-		if (!inserted) {
-			throw new NotFoundException({
-				detail: 'Failed to create environment link',
+		const inserted = await this.prisma.$transaction(async tx => {
+			if (nextIsPrimary) {
+				await tx.project_servers.updateMany({
+					where: {
+						project_id: projectId,
+						environment: nextEnvironment,
+						is_primary: true,
+					},
+					data: {
+						is_primary: false,
+						updated_at: new Date(),
+					},
+				});
+			}
+
+			const created = await tx.project_servers.create({
+				data: {
+					project_id: projectId,
+					server_id: payload.server_id,
+					environment: nextEnvironment,
+					wp_url: payload.wp_url,
+					wp_path: payload.wp_path,
+					ssh_user: payload.ssh_user ?? null,
+					ssh_key_path: payload.ssh_key_path ?? null,
+					database_name: payload.database_name ?? null,
+					database_user: payload.database_user ?? null,
+					database_password: payload.database_password ?? null,
+					gdrive_backups_folder_id: payload.gdrive_backups_folder_id ?? null,
+					notes: payload.notes ?? null,
+					is_primary: nextIsPrimary,
+					updated_at: new Date(),
+				},
 			});
-		}
+
+			const projectUpdateData: {
+				server_id?: number;
+				environment?: environmenttype;
+				wp_home?: string;
+				updated_at: Date;
+			} = { updated_at: new Date() };
+
+			if (nextIsPrimary) {
+				projectUpdateData.server_id = payload.server_id;
+				projectUpdateData.environment = nextEnvironment as environmenttype;
+				projectUpdateData.wp_home = payload.wp_url;
+			} else {
+				if (!project.server_id) {
+					projectUpdateData.server_id = payload.server_id;
+				}
+				if (!project.wp_home) {
+					projectUpdateData.wp_home = payload.wp_url;
+				}
+			}
+
+			await tx.projects.update({
+				where: { id: projectId },
+				data: projectUpdateData,
+			});
+
+			return created;
+		});
 
 		return {
 			id: inserted.id,
@@ -485,57 +768,50 @@ export class ProjectsService {
 		envId: number,
 		payload: EnvironmentUpdateDto,
 	) {
-		const rows = await this.prisma.$queryRaw<DbProjectServerRow[]>`
-			SELECT id, project_id, server_id, environment, wp_url, wp_path, ssh_user, ssh_key_path, database_name, database_user, database_password, gdrive_backups_folder_id, notes, is_primary, created_at, updated_at
-			FROM project_servers
-			WHERE id = ${envId} AND project_id = ${projectId}
-			LIMIT 1
-		`;
-		const existing = rows[0];
+		const existing = await this.prisma.project_servers.findFirst({
+			where: { id: envId, project_id: projectId },
+		});
 		if (!existing) {
 			throw new NotFoundException({ detail: 'Environment not found' });
 		}
 
-		const nextEnvironment = payload.environment ?? existing.environment;
+		const nextEnvironment = payload.environment
+			? this.parseServerEnvironment(payload.environment)
+			: existing.environment;
 		if (payload.is_primary === true) {
-			await this.prisma.$executeRaw`
-				UPDATE project_servers
-				SET is_primary = ${false}, updated_at = NOW()
-				WHERE project_id = ${projectId}
-					AND environment = ${nextEnvironment}::serverenvironment
-					AND is_primary = ${true}
-					AND id <> ${envId}
-			`;
+			await this.prisma.project_servers.updateMany({
+				where: {
+					project_id: projectId,
+					environment: nextEnvironment,
+					is_primary: true,
+					NOT: { id: envId },
+				},
+				data: {
+					is_primary: false,
+					updated_at: new Date(),
+				},
+			});
 		}
 
-		await this.prisma.$executeRaw`
-			UPDATE project_servers
-			SET
-				environment = ${nextEnvironment}::serverenvironment,
-				wp_url = ${payload.wp_url ?? existing.wp_url},
-				wp_path = ${payload.wp_path ?? existing.wp_path},
-				ssh_user = ${payload.ssh_user ?? existing.ssh_user},
-				ssh_key_path = ${payload.ssh_key_path ?? existing.ssh_key_path},
-				database_name = ${payload.database_name ?? existing.database_name},
-				database_user = ${payload.database_user ?? existing.database_user},
-				database_password = ${payload.database_password ?? existing.database_password},
-				gdrive_backups_folder_id = ${payload.gdrive_backups_folder_id ?? existing.gdrive_backups_folder_id},
-				notes = ${payload.notes ?? existing.notes},
-				is_primary = ${payload.is_primary ?? existing.is_primary},
-				updated_at = NOW()
-			WHERE id = ${envId}
-		`;
-
-		const updatedRows = await this.prisma.$queryRaw<DbProjectServerRow[]>`
-			SELECT id, project_id, server_id, environment, wp_url, wp_path, ssh_user, ssh_key_path, database_name, database_user, database_password, gdrive_backups_folder_id, notes, is_primary, created_at, updated_at
-			FROM project_servers
-			WHERE id = ${envId}
-			LIMIT 1
-		`;
-		const updated = updatedRows[0];
-		if (!updated) {
-			throw new NotFoundException({ detail: 'Environment not found' });
-		}
+		const updated = await this.prisma.project_servers.update({
+			where: { id: envId },
+			data: {
+				environment: nextEnvironment,
+				wp_url: payload.wp_url ?? existing.wp_url,
+				wp_path: payload.wp_path ?? existing.wp_path,
+				ssh_user: payload.ssh_user ?? existing.ssh_user,
+				ssh_key_path: payload.ssh_key_path ?? existing.ssh_key_path,
+				database_name: payload.database_name ?? existing.database_name,
+				database_user: payload.database_user ?? existing.database_user,
+				database_password:
+					payload.database_password ?? existing.database_password,
+				gdrive_backups_folder_id:
+					payload.gdrive_backups_folder_id ?? existing.gdrive_backups_folder_id,
+				notes: payload.notes ?? existing.notes,
+				is_primary: payload.is_primary ?? existing.is_primary,
+				updated_at: new Date(),
+			},
+		});
 
 		return {
 			status: 'success',
@@ -544,36 +820,30 @@ export class ProjectsService {
 	}
 
 	async unlinkEnvironment(projectId: number, envId: number) {
-		const rows = await this.prisma.$queryRaw<{ id: number }[]>`
-			SELECT id
-			FROM project_servers
-			WHERE id = ${envId} AND project_id = ${projectId}
-			LIMIT 1
-		`;
-		if (!rows[0]) {
+		const existing = await this.prisma.project_servers.findFirst({
+			where: { id: envId, project_id: projectId },
+			select: { id: true },
+		});
+		if (!existing) {
 			throw new NotFoundException({ detail: 'Environment link not found' });
 		}
 
-		await this.prisma.$executeRaw`
-			UPDATE backups
-			SET project_server_id = NULL
-			WHERE project_server_id = ${envId}
-		`;
+		await this.prisma.backups.updateMany({
+			where: { project_server_id: envId },
+			data: { project_server_id: null, updated_at: new Date() },
+		});
 
-		await this.prisma.$executeRaw`
-			DELETE FROM project_servers
-			WHERE id = ${envId}
-		`;
+		await this.prisma.project_servers.delete({
+			where: { id: envId },
+		});
 	}
 
 	async getProjectBackups(projectId: number, page = 1, pageSize = 10) {
-		const projectRows = await this.prisma.$queryRaw<{ id: number }[]>`
-			SELECT id
-			FROM projects
-			WHERE id = ${projectId}
-			LIMIT 1
-		`;
-		if (!projectRows[0]) {
+		const project = await this.prisma.projects.findUnique({
+			where: { id: projectId },
+			select: { id: true },
+		});
+		if (!project) {
 			throw new NotFoundException({ detail: 'Project not found' });
 		}
 
@@ -581,43 +851,52 @@ export class ProjectsService {
 		const safePageSize = Math.max(1, Math.min(100, pageSize));
 		const offset = (safePage - 1) * safePageSize;
 
-		const rows = await this.prisma.$queryRaw<DbProjectBackupRow[]>`
-			SELECT
-				id,
-				project_id,
-				name,
-				backup_type,
-				storage_type,
-				status,
-				storage_path,
-				size_bytes,
-				created_at,
-				completed_at,
-				project_server_id,
-				drive_folder_id,
-				storage_file_id
-			FROM backups
-			WHERE project_id = ${projectId}
-			ORDER BY created_at DESC
-			OFFSET ${offset}
-			LIMIT ${safePageSize}
-		`;
+		const total = await this.prisma.backups.count({
+			where: { project_id: projectId },
+		});
 
-		return rows.map(backup => ({
-			id: backup.id,
-			project_id: backup.project_id,
-			name: backup.name,
-			backup_type: backup.backup_type,
-			storage_type: backup.storage_type,
-			status: backup.status,
-			file_path: backup.storage_path,
-			size_bytes: backup.size_bytes ? Number(backup.size_bytes) : null,
-			created_at: backup.created_at,
-			completed_at: backup.completed_at,
-			environment_id: backup.project_server_id,
-			drive_folder_id: backup.drive_folder_id,
-			storage_file_id: backup.storage_file_id,
-		}));
+		const rows = await this.prisma.backups.findMany({
+			where: { project_id: projectId },
+			orderBy: { created_at: 'desc' },
+			skip: offset,
+			take: safePageSize,
+			select: {
+				id: true,
+				project_id: true,
+				name: true,
+				backup_type: true,
+				storage_type: true,
+				status: true,
+				storage_path: true,
+				size_bytes: true,
+				created_at: true,
+				completed_at: true,
+				project_server_id: true,
+				drive_folder_id: true,
+				storage_file_id: true,
+			},
+		});
+
+		return {
+			items: rows.map(backup => ({
+				id: backup.id,
+				project_id: backup.project_id,
+				name: backup.name,
+				backup_type: backup.backup_type,
+				storage_type: backup.storage_type,
+				status: backup.status,
+				file_path: backup.storage_path,
+				size_bytes: backup.size_bytes ? Number(backup.size_bytes) : null,
+				created_at: backup.created_at,
+				completed_at: backup.completed_at,
+				environment_id: backup.project_server_id,
+				drive_folder_id: backup.drive_folder_id,
+				storage_file_id: backup.storage_file_id,
+			})),
+			total,
+			page: safePage,
+			page_size: safePageSize,
+		};
 	}
 
 	async getEnvironmentBackups(
@@ -628,26 +907,28 @@ export class ProjectsService {
 		ownerId?: number,
 	) {
 		const resolvedOwnerId = ownerId ?? this.fallbackOwnerId;
-		const projectRows = await this.prisma.$queryRaw<
-			{ id: number; name: string }[]
-		>`
-			SELECT id, name
-			FROM projects
-			WHERE id = ${projectId} AND owner_id = ${resolvedOwnerId}
-			LIMIT 1
-		`;
-		const project = projectRows[0];
+		const project = await this.prisma.projects.findFirst({
+			where: {
+				id: projectId,
+				owner_id: resolvedOwnerId,
+			},
+			select: {
+				id: true,
+				name: true,
+			},
+		});
 		if (!project) {
 			throw new NotFoundException({ detail: 'Project not found' });
 		}
 
-		const environmentRows = await this.prisma.$queryRaw<{ id: number }[]>`
-			SELECT id
-			FROM project_servers
-			WHERE id = ${envId} AND project_id = ${projectId}
-			LIMIT 1
-		`;
-		if (!environmentRows[0]) {
+		const environment = await this.prisma.project_servers.findFirst({
+			where: {
+				id: envId,
+				project_id: projectId,
+			},
+			select: { id: true },
+		});
+		if (!environment) {
 			throw new NotFoundException({ detail: 'Environment not found' });
 		}
 
@@ -655,33 +936,37 @@ export class ProjectsService {
 		const safePageSize = Math.max(1, Math.min(100, pageSize));
 		const offset = (safePage - 1) * safePageSize;
 
-		const totalRows = await this.prisma.$queryRaw<{ total: bigint }[]>`
-			SELECT COUNT(*)::bigint AS total
-			FROM backups
-			WHERE project_id = ${projectId} AND project_server_id = ${envId}
-		`;
+		const total = await this.prisma.backups.count({
+			where: {
+				project_id: projectId,
+				project_server_id: envId,
+			},
+		});
 
-		const rows = await this.prisma.$queryRaw<DbProjectBackupRow[]>`
-			SELECT
-				id,
-				project_id,
-				name,
-				backup_type,
-				storage_type,
-				status,
-				storage_path,
-				size_bytes,
-				created_at,
-				completed_at,
-				project_server_id,
-				drive_folder_id,
-				storage_file_id
-			FROM backups
-			WHERE project_id = ${projectId} AND project_server_id = ${envId}
-			ORDER BY created_at DESC
-			OFFSET ${offset}
-			LIMIT ${safePageSize}
-		`;
+		const rows = await this.prisma.backups.findMany({
+			where: {
+				project_id: projectId,
+				project_server_id: envId,
+			},
+			orderBy: { created_at: 'desc' },
+			skip: offset,
+			take: safePageSize,
+			select: {
+				id: true,
+				project_id: true,
+				name: true,
+				backup_type: true,
+				storage_type: true,
+				status: true,
+				storage_path: true,
+				size_bytes: true,
+				created_at: true,
+				completed_at: true,
+				project_server_id: true,
+				drive_folder_id: true,
+				storage_file_id: true,
+			},
+		});
 
 		return {
 			items: rows.map(backup => ({
@@ -703,7 +988,7 @@ export class ProjectsService {
 				created_at: backup.created_at,
 				project_name: project.name,
 			})),
-			total: Number(totalRows[0]?.total ?? 0n),
+			total,
 			page: safePage,
 			page_size: safePageSize,
 		};
@@ -718,13 +1003,11 @@ export class ProjectsService {
 			throw new BadRequestException({ detail: 'Backup path is required' });
 		}
 
-		const projectRows = await this.prisma.$queryRaw<{ id: number }[]>`
-			SELECT id
-			FROM projects
-			WHERE id = ${projectId}
-			LIMIT 1
-		`;
-		if (!projectRows[0]) {
+		const project = await this.prisma.projects.findUnique({
+			where: { id: projectId },
+			select: { id: true },
+		});
+		if (!project) {
 			throw new NotFoundException({ detail: 'Project not found' });
 		}
 
@@ -737,26 +1020,24 @@ export class ProjectsService {
 	}
 
 	private async getProjectDriveRow(projectId: number) {
-		const rows = await this.prisma.$queryRaw<DbProjectDriveRow[]>`
-			SELECT
-				id,
-				name,
-				slug,
-				gdrive_connected,
-				gdrive_folder_id,
-				gdrive_backups_folder_id,
-				gdrive_assets_folder_id,
-				gdrive_docs_folder_id,
-				gdrive_last_sync
-			FROM projects
-			WHERE id = ${projectId}
-			LIMIT 1
-		`;
-		const project = rows[0];
+		const project = await this.prisma.projects.findUnique({
+			where: { id: projectId },
+			select: {
+				id: true,
+				name: true,
+				slug: true,
+				gdrive_connected: true,
+				gdrive_folder_id: true,
+				gdrive_backups_folder_id: true,
+				gdrive_assets_folder_id: true,
+				gdrive_docs_folder_id: true,
+				gdrive_last_sync: true,
+			},
+		});
 		if (!project) {
 			throw new NotFoundException({ detail: 'Project not found' });
 		}
-		return project;
+		return project as DbProjectDriveRow;
 	}
 
 	async getProjectDriveSettings(projectId: number) {
@@ -795,17 +1076,17 @@ export class ProjectsService {
 			nextFolder || nextBackups || nextAssets || nextDocs,
 		);
 
-		await this.prisma.$executeRaw`
-			UPDATE projects
-			SET
-				gdrive_folder_id = ${nextFolder},
-				gdrive_backups_folder_id = ${nextBackups},
-				gdrive_assets_folder_id = ${nextAssets},
-				gdrive_docs_folder_id = ${nextDocs},
-				gdrive_connected = ${nextConnected},
-				updated_at = NOW()
-			WHERE id = ${projectId}
-		`;
+		await this.prisma.projects.update({
+			where: { id: projectId },
+			data: {
+				gdrive_folder_id: nextFolder,
+				gdrive_backups_folder_id: nextBackups,
+				gdrive_assets_folder_id: nextAssets,
+				gdrive_docs_folder_id: nextDocs,
+				gdrive_connected: nextConnected,
+				updated_at: new Date(),
+			},
+		});
 
 		const updated = await this.getProjectDriveRow(projectId);
 		return {
@@ -822,13 +1103,35 @@ export class ProjectsService {
 
 	async getProjectDriveBackupIndex(projectId: number, environment?: string) {
 		const project = await this.getProjectDriveRow(projectId);
-		const envRows = await this.prisma.$queryRaw<
-			{ environment: string; gdrive_backups_folder_id: string | null }[]
-		>`
-			SELECT environment, gdrive_backups_folder_id
-			FROM project_servers
-			WHERE project_id = ${projectId}
-		`;
+		const envRows = await this.prisma.project_servers.findMany({
+			where: { project_id: projectId },
+			select: {
+				environment: true,
+				gdrive_backups_folder_id: true,
+			},
+		});
+
+		const backupRows = await this.prisma.backups.findMany({
+			where: { project_id: projectId },
+			orderBy: { created_at: 'desc' },
+			select: {
+				id: true,
+				name: true,
+				status: true,
+				storage_type: true,
+				storage_path: true,
+				size_bytes: true,
+				created_at: true,
+				completed_at: true,
+				drive_folder_id: true,
+				storage_file_id: true,
+				project_servers: {
+					select: {
+						environment: true,
+					},
+				},
+			},
+		});
 
 		const entries = envRows.reduce<
 			Record<string, Array<Record<string, unknown>>>
@@ -839,6 +1142,28 @@ export class ProjectsService {
 			acc[envRow.environment] = [];
 			return acc;
 		}, {});
+
+		for (const backup of backupRows) {
+			const envKey = backup.project_servers?.environment || 'project';
+			if (environment && envKey !== environment) {
+				continue;
+			}
+			if (!entries[envKey]) {
+				entries[envKey] = [];
+			}
+			entries[envKey].push({
+				id: backup.id,
+				name: backup.name,
+				status: backup.status,
+				storage_type: backup.storage_type,
+				storage_path: backup.storage_path,
+				size_bytes: backup.size_bytes ? Number(backup.size_bytes) : null,
+				created_at: backup.created_at,
+				completed_at: backup.completed_at,
+				drive_folder_id: backup.drive_folder_id,
+				storage_file_id: backup.storage_file_id,
+			});
+		}
 
 		if (environment && !entries[environment]) {
 			entries[environment] = [];
@@ -860,68 +1185,70 @@ export class ProjectsService {
 		ownerId?: number,
 	) {
 		const resolvedOwnerId = ownerId ?? this.fallbackOwnerId;
-		const projectRows = await this.prisma.$queryRaw<
-			{ id: number; name: string }[]
-		>`
-			SELECT id, name
-			FROM projects
-			WHERE id = ${projectId} AND owner_id = ${resolvedOwnerId}
-			LIMIT 1
-		`;
-		const project = projectRows[0];
+		const normalizedBackupType = backupType.trim().toLowerCase();
+		const normalizedStorageType =
+			storageType.trim().toLowerCase() === 'gdrive'
+				? 'google_drive'
+				: storageType.trim().toLowerCase();
+
+		if (!backupTypes.has(normalizedBackupType as backuptype)) {
+			throw new BadRequestException({
+				detail: 'Invalid backup_type',
+			});
+		}
+
+		if (!backupStorageTypes.has(normalizedStorageType as backupstoragetype)) {
+			throw new BadRequestException({
+				detail: 'Invalid storage_type',
+			});
+		}
+
+		const project = await this.prisma.projects.findFirst({
+			where: {
+				id: projectId,
+				owner_id: resolvedOwnerId,
+			},
+			select: {
+				id: true,
+				name: true,
+			},
+		});
 		if (!project) {
 			throw new NotFoundException({ detail: 'Project not found' });
 		}
 
-		const envRows = await this.prisma.$queryRaw<
-			{ id: number; environment: string }[]
-		>`
-			SELECT id, environment
-			FROM project_servers
-			WHERE id = ${envId} AND project_id = ${projectId}
-			LIMIT 1
-		`;
-		const env = envRows[0];
+		const env = await this.prisma.project_servers.findFirst({
+			where: {
+				id: envId,
+				project_id: projectId,
+			},
+			select: {
+				id: true,
+				environment: true,
+			},
+		});
 		if (!env) {
 			throw new NotFoundException({ detail: 'Environment not found' });
 		}
 
-		const normalizedBackupType = backupType.toLowerCase();
-		const normalizedStorageType =
-			storageType === 'gdrive' ? 'google_drive' : storageType;
+		const backupStoragePath = `/backups/${projectId}/${randomUUID()}.tar.gz`;
 
-		const insertRows = await this.prisma.$queryRaw<{ id: number }[]>`
-			INSERT INTO backups (
-				name,
-				backup_type,
-				storage_type,
-				storage_path,
-				status,
-				started_at,
-				project_id,
-				created_by_id,
-				project_server_id,
-				updated_at
-			)
-			VALUES (
-				${`Backup ${env.environment.toUpperCase()} - ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`},
-				${normalizedBackupType},
-				${normalizedStorageType},
-				${'pending'},
-				${'pending'},
-				NOW(),
-				${projectId},
-				${resolvedOwnerId},
-				${envId},
-				NOW()
-			)
-			RETURNING id
-		`;
-
-		const created = insertRows[0];
-		if (!created) {
-			throw new BadRequestException({ detail: 'Failed to queue backup' });
-		}
+		const created = await this.prisma.backups.create({
+			data: {
+				name: `Backup ${env.environment.toUpperCase()} - ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`,
+				backup_type: normalizedBackupType as backuptype,
+				storage_type: normalizedStorageType as backupstoragetype,
+				storage_path: backupStoragePath,
+				status: 'pending',
+				started_at: new Date(),
+				project_id: projectId,
+				created_by_id: resolvedOwnerId,
+				project_server_id: envId,
+			},
+			select: {
+				id: true,
+			},
+		});
 
 		return {
 			task_id: randomUUID(),
@@ -932,15 +1259,14 @@ export class ProjectsService {
 	}
 
 	async refreshProjectWhois(projectId: number) {
-		const rows = await this.prisma.$queryRaw<
-			{ id: number; wp_home: string | null; name: string }[]
-		>`
-			SELECT id, wp_home, name
-			FROM projects
-			WHERE id = ${projectId}
-			LIMIT 1
-		`;
-		const project = rows[0];
+		const project = await this.prisma.projects.findUnique({
+			where: { id: projectId },
+			select: {
+				id: true,
+				wp_home: true,
+				name: true,
+			},
+		});
 		if (!project) {
 			throw new NotFoundException({ detail: 'Project not found' });
 		}
@@ -969,19 +1295,25 @@ export class ProjectsService {
 	}
 
 	private async ensureEnvironment(projectId: number, envId: number) {
-		const rows = await this.prisma.$queryRaw<
-			{ id: number; environment: string; wp_url: string }[]
-		>`
-			SELECT id, environment, wp_url
-			FROM project_servers
-			WHERE id = ${envId} AND project_id = ${projectId}
-			LIMIT 1
-		`;
-		const env = rows[0];
+		const env = await this.prisma.project_servers.findFirst({
+			where: {
+				id: envId,
+				project_id: projectId,
+			},
+			select: {
+				id: true,
+				environment: true,
+				wp_url: true,
+			},
+		});
 		if (!env) {
 			throw new NotFoundException({ detail: 'Environment not found' });
 		}
-		return env;
+		return {
+			id: env.id,
+			environment: env.environment,
+			wp_url: env.wp_url,
+		};
 	}
 
 	async listEnvironmentUsers(projectId: number, envId: number) {
@@ -990,57 +1322,55 @@ export class ProjectsService {
 	}
 
 	async getProjectServerById(linkId: number) {
-		const rows = await this.prisma.$queryRaw<
-			Array<{
-				id: number;
-				project_id: number;
-				server_id: number;
-				environment: string;
-				wp_path: string;
-				wp_url: string;
-				ssh_user: string | null;
-				ssh_key_path: string | null;
-				database_name: string | null;
-				database_user: string | null;
-				database_password: string | null;
-				gdrive_backups_folder_id: string | null;
-				notes: string | null;
-				is_primary: boolean;
-				server_name: string;
-				created_at: Date;
-				updated_at: Date;
-			}>
-		>`
-			SELECT
-				ps.id,
-				ps.project_id,
-				ps.server_id,
-				ps.environment,
-				ps.wp_path,
-				ps.wp_url,
-				ps.ssh_user,
-				ps.ssh_key_path,
-				ps.database_name,
-				ps.database_user,
-				ps.database_password,
-				ps.gdrive_backups_folder_id,
-				ps.notes,
-				ps.is_primary,
-				s.name AS server_name,
-				ps.created_at,
-				ps.updated_at
-			FROM project_servers ps
-			JOIN servers s ON s.id = ps.server_id
-			WHERE ps.id = ${linkId}
-			LIMIT 1
-		`;
-
-		const link = rows[0];
+		const link = await this.prisma.project_servers.findFirst({
+			where: { id: linkId },
+			select: {
+				id: true,
+				project_id: true,
+				server_id: true,
+				environment: true,
+				wp_path: true,
+				wp_url: true,
+				ssh_user: true,
+				ssh_key_path: true,
+				database_name: true,
+				database_user: true,
+				database_password: true,
+				gdrive_backups_folder_id: true,
+				notes: true,
+				is_primary: true,
+				created_at: true,
+				updated_at: true,
+				servers: {
+					select: {
+						name: true,
+					},
+				},
+			},
+		});
 		if (!link) {
 			throw new NotFoundException({ detail: 'Project-server link not found' });
 		}
 
-		return link;
+		return {
+			id: link.id,
+			project_id: link.project_id,
+			server_id: link.server_id,
+			environment: link.environment,
+			wp_path: link.wp_path,
+			wp_url: link.wp_url,
+			ssh_user: link.ssh_user,
+			ssh_key_path: link.ssh_key_path,
+			database_name: link.database_name,
+			database_user: link.database_user,
+			database_password: link.database_password,
+			gdrive_backups_folder_id: link.gdrive_backups_folder_id,
+			notes: link.notes,
+			is_primary: link.is_primary,
+			server_name: link.servers.name,
+			created_at: link.created_at,
+			updated_at: link.updated_at,
+		};
 	}
 
 	async getProjectServerLink(
@@ -1049,49 +1379,58 @@ export class ProjectsService {
 		ownerId?: number,
 	) {
 		const resolvedOwnerId = ownerId ?? this.fallbackOwnerId;
-		const rows = await this.prisma.$queryRaw<
-			Array<{
-				id: number;
-				project_id: number;
-				server_id: number;
-				environment: string;
-				wp_path: string;
-				wp_url: string;
-				gdrive_backups_folder_id: string | null;
-				notes: string | null;
-				is_primary: boolean;
-				server_name: string;
-				created_at: Date;
-				updated_at: Date;
-			}>
-		>`
-			SELECT
-				ps.id,
-				ps.project_id,
-				ps.server_id,
-				ps.environment,
-				ps.wp_path,
-				ps.wp_url,
-				ps.gdrive_backups_folder_id,
-				ps.notes,
-				ps.is_primary,
-				s.name AS server_name,
-				ps.created_at,
-				ps.updated_at
-			FROM project_servers ps
-			JOIN projects p ON p.id = ps.project_id
-			JOIN servers s ON s.id = ps.server_id
-			WHERE ps.id = ${linkId} AND ps.project_id = ${projectId} AND p.owner_id = ${resolvedOwnerId}
-			LIMIT 1
-		`;
+		const project = await this.prisma.projects.findFirst({
+			where: {
+				id: projectId,
+				owner_id: resolvedOwnerId,
+			},
+			select: { id: true },
+		});
+		if (!project) {
+			throw new NotFoundException({ detail: 'Project-server link not found' });
+		}
 
-		const link = rows[0];
+		const link = await this.prisma.project_servers.findFirst({
+			where: {
+				id: linkId,
+				project_id: projectId,
+			},
+			select: {
+				id: true,
+				project_id: true,
+				server_id: true,
+				environment: true,
+				wp_path: true,
+				wp_url: true,
+				gdrive_backups_folder_id: true,
+				notes: true,
+				is_primary: true,
+				created_at: true,
+				updated_at: true,
+				servers: {
+					select: {
+						name: true,
+					},
+				},
+			},
+		});
 		if (!link) {
 			throw new NotFoundException({ detail: 'Project-server link not found' });
 		}
 
 		return {
-			...link,
+			id: link.id,
+			project_id: link.project_id,
+			server_id: link.server_id,
+			environment: link.environment,
+			wp_path: link.wp_path,
+			wp_url: link.wp_url,
+			gdrive_backups_folder_id: link.gdrive_backups_folder_id,
+			notes: link.notes,
+			is_primary: link.is_primary,
+			server_name: link.servers.name,
+			created_at: link.created_at,
+			updated_at: link.updated_at,
 			credentials_count: 0,
 		};
 	}
@@ -1143,41 +1482,38 @@ export class ProjectsService {
 		ownerId?: number,
 	) {
 		const resolvedOwnerId = ownerId ?? this.fallbackOwnerId;
-		const projectRows = await this.prisma.$queryRaw<
-			{ id: number; name: string }[]
-		>`
-			SELECT id, name
-			FROM projects
-			WHERE id = ${projectId} AND owner_id = ${resolvedOwnerId}
-			LIMIT 1
-		`;
-		const project = projectRows[0];
+		const project = await this.prisma.projects.findFirst({
+			where: {
+				id: projectId,
+				owner_id: resolvedOwnerId,
+			},
+			select: {
+				id: true,
+				name: true,
+			},
+		});
 		if (!project) {
 			throw new NotFoundException({ detail: 'Project not found' });
 		}
 
-		const sourceRows = await this.prisma.$queryRaw<
-			{ id: number; wp_url: string }[]
-		>`
-			SELECT id, wp_url
-			FROM project_servers
-			WHERE id = ${payload.source_env_id} AND project_id = ${projectId}
-			LIMIT 1
-		`;
-		const source = sourceRows[0];
+		const source = await this.prisma.project_servers.findFirst({
+			where: {
+				id: payload.source_env_id,
+				project_id: projectId,
+			},
+			select: {
+				id: true,
+				wp_url: true,
+			},
+		});
 		if (!source) {
 			throw new NotFoundException({ detail: 'Source environment not found' });
 		}
 
-		const serverRows = await this.prisma.$queryRaw<
-			{ id: number; name: string }[]
-		>`
-			SELECT id, name
-			FROM servers
-			WHERE id = ${payload.target_server_id}
-			LIMIT 1
-		`;
-		const targetServer = serverRows[0];
+		const targetServer = await this.prisma.servers.findUnique({
+			where: { id: payload.target_server_id },
+			select: { id: true, name: true },
+		});
 		if (!targetServer) {
 			throw new NotFoundException({ detail: 'Target server not found' });
 		}
@@ -1214,15 +1550,16 @@ export class ProjectsService {
 		ownerId?: number,
 	) {
 		const resolvedOwnerId = ownerId ?? this.fallbackOwnerId;
-		const projectRows = await this.prisma.$queryRaw<
-			{ id: number; name: string }[]
-		>`
-			SELECT id, name
-			FROM projects
-			WHERE id = ${projectId} AND owner_id = ${resolvedOwnerId}
-			LIMIT 1
-		`;
-		const project = projectRows[0];
+		const project = await this.prisma.projects.findFirst({
+			where: {
+				id: projectId,
+				owner_id: resolvedOwnerId,
+			},
+			select: {
+				id: true,
+				name: true,
+			},
+		});
 		if (!project) {
 			throw new NotFoundException({ detail: 'Project not found' });
 		}
@@ -1231,15 +1568,10 @@ export class ProjectsService {
 			throw new BadRequestException({ detail: 'backup_timestamp is required' });
 		}
 
-		const serverRows = await this.prisma.$queryRaw<
-			{ id: number; name: string }[]
-		>`
-			SELECT id, name
-			FROM servers
-			WHERE id = ${payload.target_server_id}
-			LIMIT 1
-		`;
-		const targetServer = serverRows[0];
+		const targetServer = await this.prisma.servers.findUnique({
+			where: { id: payload.target_server_id },
+			select: { id: true, name: true },
+		});
 		if (!targetServer) {
 			throw new NotFoundException({ detail: 'Target server not found' });
 		}
@@ -1449,17 +1781,17 @@ export class ProjectsService {
 		ownerId?: number,
 	) {
 		const resolvedOwnerId = ownerId ?? this.fallbackOwnerId;
-		const rows = await this.prisma.$queryRaw<
-			{ id: number; name: string; slug: string }[]
-		>`
-			SELECT id, name, slug
-			FROM projects
-			WHERE (slug = ${projectName} OR name = ${projectName})
-				AND owner_id = ${resolvedOwnerId}
-			LIMIT 1
-		`;
-
-		const project = rows[0];
+		const project = await this.prisma.projects.findFirst({
+			where: {
+				owner_id: resolvedOwnerId,
+				OR: [{ slug: projectName }, { name: projectName }],
+			},
+			select: {
+				id: true,
+				name: true,
+				slug: true,
+			},
+		});
 		if (!project) {
 			throw new NotFoundException({ detail: 'Project not found' });
 		}
@@ -1475,13 +1807,14 @@ export class ProjectsService {
 				? enabledRaw
 				: typeof repoUrl === 'string' && repoUrl.length > 0;
 
-		await this.prisma.$executeRaw`
-			UPDATE projects
-			SET github_repo_url = ${repoUrl},
-				github_branch = ${branch && branch.length > 0 ? branch : 'main'},
-				updated_at = NOW()
-			WHERE id = ${project.id}
-		`;
+		await this.prisma.projects.update({
+			where: { id: project.id },
+			data: {
+				github_repo_url: repoUrl,
+				github_branch: branch && branch.length > 0 ? branch : 'main',
+				updated_at: new Date(),
+			},
+		});
 
 		return {
 			status: 'success',
@@ -1496,23 +1829,19 @@ export class ProjectsService {
 
 	async pullRepository(projectName: string, branch?: string, ownerId?: number) {
 		const resolvedOwnerId = ownerId ?? this.fallbackOwnerId;
-		const rows = await this.prisma.$queryRaw<
-			{
-				id: number;
-				name: string;
-				slug: string;
-				github_repo_url: string | null;
-				github_branch: string | null;
-			}[]
-		>`
-			SELECT id, name, slug, github_repo_url, github_branch
-			FROM projects
-			WHERE (slug = ${projectName} OR name = ${projectName})
-				AND owner_id = ${resolvedOwnerId}
-			LIMIT 1
-		`;
-
-		const project = rows[0];
+		const project = await this.prisma.projects.findFirst({
+			where: {
+				owner_id: resolvedOwnerId,
+				OR: [{ slug: projectName }, { name: projectName }],
+			},
+			select: {
+				id: true,
+				name: true,
+				slug: true,
+				github_repo_url: true,
+				github_branch: true,
+			},
+		});
 		if (!project) {
 			throw new NotFoundException({ detail: 'Project not found' });
 		}
@@ -1618,23 +1947,19 @@ export class ProjectsService {
 
 	async getRepositoryStatus(projectName: string, ownerId?: number) {
 		const resolvedOwnerId = ownerId ?? this.fallbackOwnerId;
-		const rows = await this.prisma.$queryRaw<
-			{
-				id: number;
-				name: string;
-				slug: string;
-				github_repo_url: string | null;
-				github_branch: string | null;
-			}[]
-		>`
-			SELECT id, name, slug, github_repo_url, github_branch
-			FROM projects
-			WHERE (slug = ${projectName} OR name = ${projectName})
-				AND owner_id = ${resolvedOwnerId}
-			LIMIT 1
-		`;
-
-		const project = rows[0];
+		const project = await this.prisma.projects.findFirst({
+			where: {
+				owner_id: resolvedOwnerId,
+				OR: [{ slug: projectName }, { name: projectName }],
+			},
+			select: {
+				id: true,
+				name: true,
+				slug: true,
+				github_repo_url: true,
+				github_branch: true,
+			},
+		});
 		if (!project) {
 			throw new NotFoundException({ detail: 'Project not found' });
 		}
@@ -1659,14 +1984,17 @@ export class ProjectsService {
 			throw new BadRequestException({ detail: 'projects cannot be empty' });
 		}
 
-		const rows = await this.prisma.$queryRaw<
-			{ id: number; name: string; slug: string }[]
-		>`
-			SELECT id, name, slug
-			FROM projects
-			WHERE owner_id = ${resolvedOwnerId}
-				AND (slug = ANY(${projectNames}) OR name = ANY(${projectNames}))
-		`;
+		const rows = await this.prisma.projects.findMany({
+			where: {
+				owner_id: resolvedOwnerId,
+				OR: [{ slug: { in: projectNames } }, { name: { in: projectNames } }],
+			},
+			select: {
+				id: true,
+				name: true,
+				slug: true,
+			},
+		});
 
 		const foundBySlug = new Map(rows.map(row => [row.slug, row]));
 		const foundByName = new Map(rows.map(row => [row.name, row]));
@@ -1703,28 +2031,32 @@ export class ProjectsService {
 
 	async runSecurityScan(projectId: number, envId?: number, ownerId?: number) {
 		const resolvedOwnerId = ownerId ?? this.fallbackOwnerId;
-		const rows = await this.prisma.$queryRaw<
-			{ id: number; name: string; wp_home: string | null }[]
-		>`
-			SELECT id, name, wp_home
-			FROM projects
-			WHERE id = ${projectId} AND owner_id = ${resolvedOwnerId}
-			LIMIT 1
-		`;
-		const project = rows[0];
+		const project = await this.prisma.projects.findFirst({
+			where: {
+				id: projectId,
+				owner_id: resolvedOwnerId,
+			},
+			select: {
+				id: true,
+				name: true,
+				wp_home: true,
+			},
+		});
 		if (!project) {
 			throw new NotFoundException({ detail: 'Project not found' });
 		}
 
 		let siteUrl = project.wp_home;
 		if (envId) {
-			const envRows = await this.prisma.$queryRaw<{ wp_url: string }[]>`
-				SELECT ps.wp_url
-				FROM project_servers ps
-				WHERE ps.id = ${envId} AND ps.project_id = ${projectId}
-				LIMIT 1
-			`;
-			const env = envRows[0];
+			const env = await this.prisma.project_servers.findFirst({
+				where: {
+					id: envId,
+					project_id: projectId,
+				},
+				select: {
+					wp_url: true,
+				},
+			});
 			if (!env) {
 				throw new NotFoundException({ detail: 'Environment not found' });
 			}

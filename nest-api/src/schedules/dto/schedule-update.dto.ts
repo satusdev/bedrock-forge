@@ -9,6 +9,11 @@ import {
 
 export class ScheduleUpdateDto {
 	@IsOptional()
+	@IsInt()
+	@Min(1)
+	environment_id?: number;
+
+	@IsOptional()
 	@IsString()
 	@MaxLength(255)
 	name?: string;

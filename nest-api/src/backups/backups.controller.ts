@@ -147,6 +147,11 @@ export class BackupsController {
 		return this.backupsService.getBackupStatsSummary(ownerId);
 	}
 
+	@Get('maintenance/status')
+	getMaintenanceStatus() {
+		return this.backupsService.getMaintenanceSnapshot();
+	}
+
 	@Post('bulk')
 	@HttpCode(200)
 	async bulkCreateBackups(
@@ -210,7 +215,11 @@ export class BackupsController {
 			'Content-Disposition',
 			`attachment; filename="${file.filename}"`,
 		);
-		res.send(Buffer.from(file.content, 'utf-8'));
+		res.send(
+			Buffer.isBuffer(file.content)
+				? file.content
+				: Buffer.from(file.content, 'utf-8'),
+		);
 	}
 
 	@Post(':backupId/restore')
