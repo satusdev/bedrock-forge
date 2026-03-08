@@ -1,12 +1,13 @@
 <div align="center">
   <h1>Bedrock Forge 🚀</h1>
-  <p>A unified Python CLI for orchestrating Bedrock-based WordPress workflows</p>
+  <p>NestJS + Prisma platform for Bedrock-based WordPress operations</p>
   <img src="https://img.icons8.com/fluency/96/000000/server.png" alt="Bedrock Forge logo"/>
 </div>
 
 <div align="center">
 
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![NestJS](https://img.shields.io/badge/backend-NestJS-red.svg)](https://nestjs.com/)
+[![Node 22+](https://img.shields.io/badge/node-22+-green.svg)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](https://github.com/your-org/bedrock-forge/actions)
 [![Coverage](https://img.shields.io/badge/coverage-80%25+-brightgreen.svg)](https://github.com/your-org/bedrock-forge/actions)
@@ -17,6 +18,7 @@
 
 - [Status](#-current-status)
 - [Quick Start](#-quick-start)
+- [Testing](#-testing)
 - [Features](#-key-features)
 - [Commands](#-command-examples)
 - [Documentation](#-documentation)
@@ -77,96 +79,49 @@
 
 ### Installation
 
-#### 🎯 Super Easy Installation (Recommended)
-
-```bash
-# One-command installation
-curl -sSL https://raw.githubusercontent.com/bedrock-forge/bedrock-forge/main/install.sh | bash
-
-# Start using immediately
-forge --help
-```
-
-#### 📦 Alternative Installation Methods
-
-**Method 1: Direct pip install from GitHub**
-
-```bash
-pip install git+https://github.com/bedrock-forge/bedrock-forge.git
-```
-
-**Method 2: Clone and install manually**
+#### 🎯 Primary Runtime (Recommended)
 
 ```bash
 # Clone the repository
 git clone https://github.com/bedrock-forge/bedrock-forge.git
 cd bedrock-forge
 
-# Create virtual environment and install
-python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install -e .
+# Start full Nest + Dashboard stack
+cp .env.local.example .env
+docker compose up -d
 
-# Create global command (optional)
-ln -sf $(pwd)/.venv/bin/forge ~/.local/bin/forge
-
-# Verify installation
-forge --help
+# Apply schema + seed
+docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:push"
+docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:seed"
 ```
 
-> 💡 **Tip**: After installation, you can use either `forge` or
-> `python -m forge` to run commands.
+#### 🧭 Legacy Python CLI (Archived)
 
-### 🔧 Installation Management
+Legacy `forge` Python CLI has been archived. Migration notes are documented in:
+
+- [docs/archive/LEGACY_PYTHON_CLI.md](docs/archive/LEGACY_PYTHON_CLI.md)
+
+For Nest API local development without Docker:
 
 ```bash
-# Check installation health
-forge config doctor
-
-# Update to latest version
-forge update
-
-# Uninstall completely
-forge uninstall
+cd nest-api
+npm install
+npm run start:dev
 ```
 
-### 5-Minute Setup with Plugins
+### 5-Minute Backend + Dashboard Dev Loop
 
 ```bash
-# 1. Create a new blog project with optimized plugins
-forge local create-project myblog --plugin-preset=blog
+# API
+cd nest-api
+npm install
+npm run start:dev
 
-# 2. Create an e-commerce store
-forge local create-project mystore --plugin-preset=ecommerce
-
-# 3. Create a business website
-forge local create-project mybusiness --plugin-preset=business
-
-# 4. Start local development
-cd myproject
-ddev start
-
-# 5. Check installed plugins
-forge plugins status --project myproject
-
-# 6. Provision a server (optional)
-forge provision hetzner-create myserver
-
-# 7. Deploy to production
-forge deploy myproject production
-
-# 8. Backup your project
-forge sync backup myproject production
+# Dashboard (second terminal)
+cd dashboard
+npm install
+npm run dev
 ```
-
-**Plugin Presets Available:**
-
-- **blog** - Blog/content sites with SEO and engagement plugins
-- **business** - Professional business websites with forms and marketing
-- **ecommerce** - Complete e-commerce stores with WooCommerce and payments
-- **portfolio** - Creative sites with galleries and media optimization
-- **minimal** - Basic setup for development or custom builds
-- **performance** - Maximum speed optimization
 
 ---
 
@@ -240,6 +195,28 @@ docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:
 
 ---
 
+## 🧪 Testing
+
+Primary test workflow (Nest API):
+
+```bash
+cd nest-api
+npm test
+npm run test:cov
+```
+
+Targeted module tests:
+
+```bash
+cd nest-api
+npm test -- projects.service.spec.ts import-projects.service.spec.ts backups.service.spec.ts
+```
+
+Legacy Python CLI/testing notes are archived in
+`docs/archive/LEGACY_PYTHON_CLI.md`.
+
+---
+
 ## 🎯 Key Features
 
 ### 🏠 **Local Development**
@@ -308,69 +285,28 @@ docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:
 
 ## 🛠️ Command Examples
 
-### Local Development
+### Runtime + Database
 
 ```bash
-# Create new project
-forge local create-project mysite
-
-# List projects
-forge local list-projects
-
-# Switch to project
-forge local switch mysite
+docker compose up -d
+docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:push"
+docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:seed"
 ```
 
-### Server Provisioning
+### Testing
 
 ```bash
-# Create Hetzner server
-forge provision hetzner-create myserver
-
-# Setup CyberPanel
-forge provision cyberpanel myserver
-
-# Configure SSL
-forge provision ssl-cert myserver example.com
+cd nest-api
+npm test
+npm run test:cov
 ```
 
-### Deployment
+### Deploy helpers
 
 ```bash
-# Deploy to production
-forge deploy mysite production
-
-# Deploy with rollback
-forge deploy mysite staging --rollback
-
-# Check deployment status
-forge deploy status mysite
-```
-
-### Backup & Sync
-
-```bash
-# Backup project
-forge sync backup mysite production
-
-# Restore backup
-forge sync restore mysite production --version=2024-01-15
-
-# Sync database
-forge sync db mysite production --pull
-```
-
-### Monitoring
-
-```bash
-# List monitored sites
-forge monitor list-monitors
-
-# Add site monitoring
-forge monitor add mysite https://mysite.com
-
-# Check site health
-forge monitor health mysite
+./scripts/local-docker-smoke.sh
+./server-deploy --mode update
+./forge-deploy update
 ```
 
 ---
@@ -401,20 +337,13 @@ forge monitor health mysite
 
 ```
 bedrock-forge/
-├── forge/                    # Main CLI source code
-│   ├── main.py              # CLI entrypoint
-│   ├── commands/            # Subcommands (local, deploy, etc.)
-│   ├── utils/               # Shared utilities
-│   ├── provision/           # Server provisioning modules
-│   ├── tests/               # Test suite
-│   └── workflows/           # Workflow definitions
-├── docs/                    # Documentation
-│   ├── QUICK_START.md       # Quick start guide
-│   ├── DOCKER_QUICKSTART.md # Docker setup guide
-│   ├── COMMANDS.md          # Command reference
-│   ├── CONFIGURATION.md     # Configuration guide
-│   └── ARCHITECTURE.md      # Technical docs
-└── README.md               # This file
+├── nest-api/                # NestJS API runtime
+├── dashboard/               # React/Vite frontend
+├── docs/                    # Nest-first documentation
+├── docker-compose.yml       # Local + production orchestration
+├── server-deploy            # Server-side deployment helper
+├── forge-deploy             # SSH wrapper deploy helper
+└── README.md                # This file
 ```
 
 ---
@@ -472,16 +401,15 @@ We welcome contributions! Please see our
 
 ### System Requirements
 
-- **Python 3.9+** - Modern Python with type hints
-- **Git** - For version control
-- **SSH Client** - For server operations
+- **Docker + Docker Compose** - Primary runtime
+- **Node.js 22+** - Local API/dashboard development
+- **Git** - Version control
+- **SSH Client** - Server deployment operations
 
 ### Optional Dependencies
 
-- **DDEV** - For local WordPress development
-- **Docker** - For containerized environments
-- **Node.js** - For frontend build tools
 - **Cloud Accounts** - Hetzner, Cloudflare, Google Drive
+- **DDEV** - Only for legacy/local workflows outside default stack
 
 ---
 
