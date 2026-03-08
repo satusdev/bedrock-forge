@@ -35,9 +35,18 @@ const Subscriptions: React.FC = () => {
 	const [createForm, setCreateForm] = useState({
 		client_id: '',
 		project_id: '',
-		package_id: '',
+		hosting_package_id: '',
+		support_package_id: '',
+		create_hosting: true,
+		create_support: true,
 		start_date: '',
 	});
+	const hostingPackages = packages.filter(
+		pkg => pkg.package_type === 'hosting',
+	);
+	const supportPackages = packages.filter(
+		pkg => pkg.package_type === 'support',
+	);
 
 	const fetchSubscriptions = async () => {
 		try {
@@ -307,7 +316,7 @@ const Subscriptions: React.FC = () => {
 									New Subscription
 								</h2>
 								<p className='text-sm text-gray-500'>
-									Creates hosting + support subscriptions
+									Create hosting and/or support subscriptions
 								</p>
 							</div>
 							<button
@@ -359,23 +368,82 @@ const Subscriptions: React.FC = () => {
 								</select>
 							</div>
 
+							<div className='flex flex-wrap gap-4 text-sm text-gray-600'>
+								<label className='flex items-center'>
+									<input
+										type='checkbox'
+										className='mr-2'
+										checked={createForm.create_hosting}
+										onChange={e =>
+											setCreateForm({
+												...createForm,
+												create_hosting: e.target.checked,
+											})
+										}
+									/>
+									Include hosting
+								</label>
+								<label className='flex items-center'>
+									<input
+										type='checkbox'
+										className='mr-2'
+										checked={createForm.create_support}
+										onChange={e =>
+											setCreateForm({
+												...createForm,
+												create_support: e.target.checked,
+											})
+										}
+									/>
+									Include support
+								</label>
+							</div>
+
 							<div>
 								<label className='block text-sm font-medium text-gray-700 mb-1'>
-									Package
+									Hosting Package
 								</label>
 								<select
 									className='w-full border rounded-lg px-3 py-2'
-									value={createForm.package_id}
+									value={createForm.hosting_package_id}
 									onChange={e =>
-										setCreateForm({ ...createForm, package_id: e.target.value })
+										setCreateForm({
+											...createForm,
+											hosting_package_id: e.target.value,
+										})
 									}
+									disabled={!createForm.create_hosting}
 								>
-									<option value=''>Select package</option>
-									{packages.map(pkg => (
+									<option value=''>Select hosting package</option>
+									{hostingPackages.map(pkg => (
 										<option key={pkg.id} value={pkg.id}>
-											{pkg.name} • {pkg.currency || 'LYD'}{' '}
-											{pkg.hosting_yearly_price?.toFixed(0)}/yr +{' '}
-											{pkg.support_monthly_price?.toFixed(0)}/mo
+											{pkg.name} • {pkg.currency || 'USD'}{' '}
+											{pkg.yearly_price?.toFixed(0)}/yr
+										</option>
+									))}
+								</select>
+							</div>
+
+							<div>
+								<label className='block text-sm font-medium text-gray-700 mb-1'>
+									Support Package
+								</label>
+								<select
+									className='w-full border rounded-lg px-3 py-2'
+									value={createForm.support_package_id}
+									onChange={e =>
+										setCreateForm({
+											...createForm,
+											support_package_id: e.target.value,
+										})
+									}
+									disabled={!createForm.create_support}
+								>
+									<option value=''>Select support package</option>
+									{supportPackages.map(pkg => (
+										<option key={pkg.id} value={pkg.id}>
+											{pkg.name} • {pkg.currency || 'USD'}{' '}
+											{pkg.monthly_price?.toFixed(0)}/mo
 										</option>
 									))}
 								</select>
@@ -406,7 +474,12 @@ const Subscriptions: React.FC = () => {
 							<Button
 								variant='primary'
 								disabled={
-									creating || !createForm.client_id || !createForm.package_id
+									creating ||
+									!createForm.client_id ||
+									(!createForm.create_hosting && !createForm.create_support) ||
+									(createForm.create_hosting &&
+										!createForm.hosting_package_id) ||
+									(createForm.create_support && !createForm.support_package_id)
 								}
 								onClick={async () => {
 									try {
@@ -416,17 +489,25 @@ const Subscriptions: React.FC = () => {
 											project_id: createForm.project_id
 												? Number(createForm.project_id)
 												: undefined,
-											package_id: Number(createForm.package_id),
+											hosting_package_id: createForm.hosting_package_id
+												? Number(createForm.hosting_package_id)
+												: undefined,
+											support_package_id: createForm.support_package_id
+												? Number(createForm.support_package_id)
+												: undefined,
 											start_date: createForm.start_date || undefined,
-											create_hosting: true,
-											create_support: true,
+											create_hosting: createForm.create_hosting,
+											create_support: createForm.create_support,
 										});
 										toast.success('Subscriptions created');
 										setShowCreateModal(false);
 										setCreateForm({
 											client_id: '',
 											project_id: '',
-											package_id: '',
+											hosting_package_id: '',
+											support_package_id: '',
+											create_hosting: true,
+											create_support: true,
 											start_date: '',
 										});
 										handleRefresh();
@@ -437,7 +518,7 @@ const Subscriptions: React.FC = () => {
 									}
 								}}
 							>
-								{creating ? 'Creating…' : 'Create Subscriptions'}
+								{creating ? 'Creating…' : 'Create Subscription(s)'}
 							</Button>
 						</div>
 					</div>

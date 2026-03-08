@@ -34,6 +34,33 @@ const toSlug = (name: string) =>
 		.replace(/^-+|-+$/g, '')
 		.slice(0, 100);
 
+const parseFeatures = (raw?: string | string[] | null) => {
+	if (!raw) {
+		return [] as string[];
+	}
+	if (Array.isArray(raw)) {
+		return raw.filter(
+			(entry): entry is string =>
+				typeof entry === 'string' && entry.trim().length > 0,
+		);
+	}
+	try {
+		const parsed = JSON.parse(raw) as unknown;
+		if (Array.isArray(parsed)) {
+			return parsed.filter(
+				(entry): entry is string =>
+					typeof entry === 'string' && entry.trim().length > 0,
+			);
+		}
+	} catch {
+		// ignore non-json values
+	}
+	return raw
+		.split(/[\n,]/)
+		.map(feature => feature.trim())
+		.filter(Boolean);
+};
+
 const Packages: React.FC = () => {
 	const [packages, setPackages] = useState<HostingPackage[]>([]);
 	const [loading, setLoading] = useState(true);
@@ -44,12 +71,77 @@ const Packages: React.FC = () => {
 	const [clients, setClients] = useState<any[]>([]);
 	const [projects, setProjects] = useState<any[]>([]);
 	const [purchaseForm, setPurchaseForm] = useState({
-		package_id: '',
+		hosting_package_id: '',
+		support_package_id: '',
 		client_id: '',
 		project_id: '',
 		create_hosting: true,
 		create_support: true,
 	});
+
+	const hostingPackages = packages.filter(
+		pkg => pkg.package_type === 'hosting',
+	);
+	const supportPackages = packages.filter(
+		pkg => pkg.package_type === 'support',
+	);
+
+	const renderPackageDetails = (pkg: HostingPackage) => {
+		if (pkg.package_type === 'support') {
+			const features = parseFeatures(pkg.features).slice(0, 4);
+			return (
+				<div className='space-y-3 mb-6'>
+					<div className='flex items-center text-sm text-gray-600'>
+						<Server className='w-4 h-4 mr-3 text-gray-400' />
+						Support plan for ongoing maintenance
+					</div>
+					<div className='flex items-center text-sm text-gray-600'>
+						<Database className='w-4 h-4 mr-3 text-gray-400' />
+						Dedicated support pricing and SLA tracking
+					</div>
+					{features.length > 0 ? (
+						features.map(feature => (
+							<div
+								key={`${pkg.id}-${feature}`}
+								className='flex items-center text-sm text-gray-600'
+							>
+								<Globe className='w-4 h-4 mr-3 text-gray-400' />
+								{feature}
+							</div>
+						))
+					) : (
+						<div className='flex items-center text-sm text-gray-600'>
+							<Globe className='w-4 h-4 mr-3 text-gray-400' />
+							Proactive updates, monitoring, and support
+						</div>
+					)}
+				</div>
+			);
+		}
+
+		return (
+			<div className='space-y-3 mb-6'>
+				<div className='flex items-center text-sm text-gray-600'>
+					<HardDrive className='w-4 h-4 mr-3 text-gray-400' />
+					{pkg.disk_space_gb} GB Disk Space
+				</div>
+				<div className='flex items-center text-sm text-gray-600'>
+					<Globe className='w-4 h-4 mr-3 text-gray-400' />
+					{pkg.domains_limit} Domain
+					{pkg.domains_limit !== 1 ? 's' : ''}
+				</div>
+				<div className='flex items-center text-sm text-gray-600'>
+					<Database className='w-4 h-4 mr-3 text-gray-400' />
+					{pkg.databases_limit} Database
+					{pkg.databases_limit !== 1 ? 's' : ''}
+				</div>
+				<div className='flex items-center text-sm text-gray-600'>
+					<Server className='w-4 h-4 mr-3 text-gray-400' />
+					{pkg.bandwidth_gb} GB Bandwidth
+				</div>
+			</div>
+		);
+	};
 
 	const fetchPackages = async () => {
 		try {
@@ -106,6 +198,7 @@ const Packages: React.FC = () => {
 					return;
 				}
 				const createPayload: CreateHostingPackagePayload = {
+					package_type: data.package_type,
 					name,
 					slug,
 					description: data.description,
@@ -138,8 +231,20 @@ const Packages: React.FC = () => {
 	};
 
 	const handleManualPurchase = async () => {
-		if (!purchaseForm.package_id || !purchaseForm.client_id) {
-			toast.error('Select a package and client');
+		if (!purchaseForm.client_id) {
+			toast.error('Select a client');
+			return;
+		}
+		if (!purchaseForm.create_hosting && !purchaseForm.create_support) {
+			toast.error('Choose at least one service');
+			return;
+		}
+		if (purchaseForm.create_hosting && !purchaseForm.hosting_package_id) {
+			toast.error('Select a hosting package');
+			return;
+		}
+		if (purchaseForm.create_support && !purchaseForm.support_package_id) {
+			toast.error('Select a support package');
 			return;
 		}
 
@@ -149,7 +254,12 @@ const Packages: React.FC = () => {
 				project_id: purchaseForm.project_id
 					? Number(purchaseForm.project_id)
 					: undefined,
-				package_id: Number(purchaseForm.package_id),
+				hosting_package_id: purchaseForm.hosting_package_id
+					? Number(purchaseForm.hosting_package_id)
+					: undefined,
+				support_package_id: purchaseForm.support_package_id
+					? Number(purchaseForm.support_package_id)
+					: undefined,
 				create_hosting: purchaseForm.create_hosting,
 				create_support: purchaseForm.create_support,
 			});
@@ -171,9 +281,11 @@ const Packages: React.FC = () => {
 		<div className='space-y-6'>
 			<div className='flex justify-between items-center'>
 				<div>
-					<h1 className='text-2xl font-bold text-gray-900'>Hosting Packages</h1>
+					<h1 className='text-2xl font-bold text-gray-900'>
+						Hosting & Support Packages
+					</h1>
 					<p className='text-gray-600'>
-						Define resource limits and pricing tiers
+						Define separate service packages and pricing tiers
 					</p>
 				</div>
 				<div className='flex space-x-3'>
@@ -198,23 +310,47 @@ const Packages: React.FC = () => {
 							Create a hosting/support subscription manually
 						</p>
 					</div>
-					<div className='grid grid-cols-1 md:grid-cols-4 gap-4'>
+					<div className='grid grid-cols-1 md:grid-cols-5 gap-4'>
 						<div>
 							<label className='block text-xs text-gray-500 mb-1'>
-								Package
+								Hosting Package
 							</label>
 							<select
-								value={purchaseForm.package_id}
+								value={purchaseForm.hosting_package_id}
 								onChange={e =>
 									setPurchaseForm(prev => ({
 										...prev,
-										package_id: e.target.value,
+										hosting_package_id: e.target.value,
 									}))
 								}
+								disabled={!purchaseForm.create_hosting}
 								className='w-full border rounded-md px-3 py-2 text-sm'
 							>
-								<option value=''>Select package</option>
-								{packages.map(pkg => (
+								<option value=''>Select hosting package</option>
+								{hostingPackages.map(pkg => (
+									<option key={pkg.id} value={pkg.id}>
+										{pkg.name}
+									</option>
+								))}
+							</select>
+						</div>
+						<div>
+							<label className='block text-xs text-gray-500 mb-1'>
+								Support Package
+							</label>
+							<select
+								value={purchaseForm.support_package_id}
+								onChange={e =>
+									setPurchaseForm(prev => ({
+										...prev,
+										support_package_id: e.target.value,
+									}))
+								}
+								disabled={!purchaseForm.create_support}
+								className='w-full border rounded-md px-3 py-2 text-sm'
+							>
+								<option value=''>Select support package</option>
+								{supportPackages.map(pkg => (
 									<option key={pkg.id} value={pkg.id}>
 										{pkg.name}
 									</option>
@@ -320,6 +456,9 @@ const Packages: React.FC = () => {
 										<h3 className='text-xl font-bold text-gray-900'>
 											{pkg.name}
 										</h3>
+										<p className='text-xs uppercase tracking-wide text-gray-400 mt-1'>
+											{pkg.package_type}
+										</p>
 										<p className='text-sm text-gray-500 mt-1'>
 											{pkg.description}
 										</p>
@@ -338,26 +477,7 @@ const Packages: React.FC = () => {
 									</div>
 								</div>
 
-								<div className='space-y-3 mb-6'>
-									<div className='flex items-center text-sm text-gray-600'>
-										<HardDrive className='w-4 h-4 mr-3 text-gray-400' />
-										{pkg.disk_space_gb} GB Disk Space
-									</div>
-									<div className='flex items-center text-sm text-gray-600'>
-										<Globe className='w-4 h-4 mr-3 text-gray-400' />
-										{pkg.domains_limit} Domain
-										{pkg.domains_limit !== 1 ? 's' : ''}
-									</div>
-									<div className='flex items-center text-sm text-gray-600'>
-										<Database className='w-4 h-4 mr-3 text-gray-400' />
-										{pkg.databases_limit} Database
-										{pkg.databases_limit !== 1 ? 's' : ''}
-									</div>
-									<div className='flex items-center text-sm text-gray-600'>
-										<Server className='w-4 h-4 mr-3 text-gray-400' />
-										{pkg.bandwidth_gb} GB Bandwidth
-									</div>
-								</div>
+								{renderPackageDetails(pkg)}
 
 								<Button
 									variant='outline'

@@ -369,18 +369,22 @@ const DomainModal: React.FC<DomainModalProps> = ({
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
-		if (!formData.domain_name || !formData.expiry_date) {
+		if (!formData.domain_name) {
 			toast.error('Please fill in required fields');
 			return;
 		}
 
 		setIsSubmitting(true);
 		try {
+			const payload = {
+				...formData,
+				expiry_date: formData.expiry_date || undefined,
+			};
 			if (domain) {
-				await billingService.updateDomain(domain.id, formData);
+				await billingService.updateDomain(domain.id, payload);
 				toast.success('Domain updated');
 			} else {
-				await billingService.createDomain(formData);
+				await billingService.createDomain(payload);
 				toast.success('Domain added');
 			}
 			onSuccess();
@@ -460,22 +464,7 @@ const DomainModal: React.FC<DomainModalProps> = ({
 						</div>
 					</div>
 
-					<div className='grid grid-cols-2 gap-4'>
-						<div>
-							<label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
-								Expiry Date *
-							</label>
-							<input
-								type='date'
-								value={formData.expiry_date}
-								onChange={e =>
-									setFormData({ ...formData, expiry_date: e.target.value })
-								}
-								className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500'
-								required
-							/>
-						</div>
-
+					<div className='grid grid-cols-1 gap-4'>
 						<div>
 							<label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
 								Annual Cost (USD)

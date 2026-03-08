@@ -11,6 +11,8 @@ import toast from 'react-hot-toast';
 import { dashboardApi } from '../services/api';
 
 interface DriveFolderResult {
+	id?: string | null;
+	name?: string;
 	path: string;
 	source?: 'base' | 'shared';
 }
@@ -30,49 +32,49 @@ const GoogleDriveFolderPicker: React.FC<GoogleDriveFolderPickerProps> = ({
 	const [results, setResults] = useState<DriveFolderResult[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
 	const [currentPath, setCurrentPath] = useState(''); // Tracking navigation path
-    const [searchQuery, setSearchQuery] = useState(''); // Tracking search input
-    const [defaultPath, setDefaultPath] = useState('');
+	const [searchQuery, setSearchQuery] = useState(''); // Tracking search input
+	const [defaultPath, setDefaultPath] = useState('');
 
 	// Load initial folders (root or base)
 	useEffect(() => {
 		loadFolders('');
-        checkDefaultPath();
+		checkDefaultPath();
 	}, []);
 
-    const checkDefaultPath = async () => {
-        try {
-            const response = await dashboardApi.getDriveStatus();
-            if (response.data?.base_path) {
-                setDefaultPath(response.data.base_path);
-            }
-        } catch (e) {
-            console.error("Failed to check Drive status", e);
-        }
-    };
+	const checkDefaultPath = async () => {
+		try {
+			const response = await dashboardApi.getDriveStatus();
+			if (response.data?.base_path) {
+				setDefaultPath(response.data.base_path);
+			}
+		} catch (e) {
+			console.error('Failed to check Drive status', e);
+		}
+	};
 
 	const loadFolders = async (path: string, isSearch: boolean = false) => {
 		setIsLoading(true);
-        setResults([]); // Clear previous results to indicate loading
+		setResults([]); // Clear previous results to indicate loading
 		try {
-            // If searching, use query. If navigating (isSearch=false), use path.
-            const params: any = {
-                max_results: 50,
-                shared_with_me: true, // Always check shared items
-            };
+			// If searching, use query. If navigating (isSearch=false), use path.
+			const params: any = {
+				max_results: 50,
+				shared_with_me: true, // Always check shared items
+			};
 
-            if (isSearch) {
-                params.query = searchQuery;
-            } else if (path) {
-                params.path = path;
-            }
+			if (isSearch) {
+				params.query = searchQuery;
+			} else if (path) {
+				params.path = path;
+			}
 
 			const response = await dashboardApi.listDriveFolders(params);
 			setResults(response.data?.folders || []);
-            if (!isSearch) {
-                setCurrentPath(path);
-                // Also update search input to reflect current path but don't trigger search
-                setSearchQuery(path); 
-            }
+			if (!isSearch) {
+				setCurrentPath(path);
+				// Also update search input to reflect current path but don't trigger search
+				setSearchQuery(path);
+			}
 		} catch (error) {
 			console.error('Failed to load folders:', error);
 			toast.error('Failed to load folders');
@@ -82,37 +84,48 @@ const GoogleDriveFolderPicker: React.FC<GoogleDriveFolderPickerProps> = ({
 	};
 
 	const handleSearch = () => {
-        if (!searchQuery.trim()) return;
-        // If query looks like a path, treat as navigation
-        if (searchQuery.includes('/')) {
-            loadFolders(searchQuery, false);
-        } else {
-            loadFolders('', true);
-        }
+		if (!searchQuery.trim()) return;
+		// If query looks like a path, treat as navigation
+		if (searchQuery.includes('/')) {
+			loadFolders(searchQuery, false);
+		} else {
+			loadFolders('', true);
+		}
 	};
 
-    const handleNavigate = (path: string) => {
-        setSearchQuery(path);
-        loadFolders(path, false);
-    };
-    
-    const handleBreadcrumbClick = (index: number, parts: string[]) => {
-        // e.g. parts=["WebDev", "Projects"] -> index=0 -> "WebDev"
-        const newPath = parts.slice(0, index + 1).join('/');
-        handleNavigate(newPath);
-    };
-
-	const handleSelect = (path: string) => {
-        // Just select, don't navigate
-        // Although usually selecting a folder means "Use this one"
-        onSelect(path, path.split('/').pop() || path, path);
+	const handleNavigate = (path: string) => {
+		setSearchQuery(path);
+		loadFolders(path, false);
 	};
-    
-    const handleUseDefault = () => {
-        if (defaultPath) {
-             onSelect(defaultPath, defaultPath.split('/').pop() || defaultPath, defaultPath);
-        }
-    };
+
+	const handleBreadcrumbClick = (index: number, parts: string[]) => {
+		// e.g. parts=["WebDev", "Projects"] -> index=0 -> "WebDev"
+		const newPath = parts.slice(0, index + 1).join('/');
+		handleNavigate(newPath);
+	};
+
+	const handleSelect = (folder: DriveFolderResult) => {
+		// Just select, don't navigate
+		// Although usually selecting a folder means "Use this one"
+		const folderId = (folder.id || folder.path || '').trim();
+		const folderPath = (folder.path || folderId).trim();
+		const folderName = (
+			folder.name ||
+			folderPath.split('/').pop() ||
+			folderId
+		).trim();
+		onSelect(folderId, folderName, folderPath);
+	};
+
+	const handleUseDefault = () => {
+		if (defaultPath) {
+			onSelect(
+				defaultPath,
+				defaultPath.split('/').pop() || defaultPath,
+				defaultPath,
+			);
+		}
+	};
 
 	return (
 		<div className='bg-white dark:bg-gray-800 rounded-lg shadow-lg max-w-2xl mx-auto'>
@@ -154,18 +167,14 @@ const GoogleDriveFolderPicker: React.FC<GoogleDriveFolderPickerProps> = ({
 							className='px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50'
 							disabled={isLoading}
 						>
-							{isLoading ? (
-								<Loader2 className='w-4 h-4 animate-spin' />
-							) : (
-								'Go'
-							)}
+							{isLoading ? <Loader2 className='w-4 h-4 animate-spin' /> : 'Go'}
 						</button>
 					</div>
-					
+
 					{/* Breadcrumbs */}
 					{currentPath && (
 						<div className='mt-2 flex items-center text-sm text-gray-500 overflow-x-auto pb-1'>
-							<span 
+							<span
 								className='cursor-pointer hover:text-blue-600 hover:underline mr-1 font-medium'
 								onClick={() => handleNavigate('')}
 							>
@@ -174,7 +183,7 @@ const GoogleDriveFolderPicker: React.FC<GoogleDriveFolderPickerProps> = ({
 							{currentPath.split('/').map((part, index, arr) => (
 								<React.Fragment key={index}>
 									<span className='mx-1 text-gray-400'>/</span>
-									<span 
+									<span
 										className='cursor-pointer hover:text-blue-600 hover:underline whitespace-nowrap'
 										onClick={() => handleBreadcrumbClick(index, arr)}
 									>
@@ -195,27 +204,29 @@ const GoogleDriveFolderPicker: React.FC<GoogleDriveFolderPickerProps> = ({
 					) : results.length === 0 ? (
 						<div className='h-full flex flex-col items-center justify-center p-6 text-gray-500'>
 							<FolderOpen className='w-12 h-12 text-gray-300 mb-2' />
-							<p>{searchQuery ? 'No folders found.' : 'No folders available.'}</p>
-                            {defaultPath && (
-                                <button 
-                                    onClick={handleUseDefault}
-                                    className="mt-4 text-blue-600 hover:underline text-sm"
-                                >
-                                    Use Default: {defaultPath}
-                                </button>
-                            )}
+							<p>
+								{searchQuery ? 'No folders found.' : 'No folders available.'}
+							</p>
+							{defaultPath && (
+								<button
+									onClick={handleUseDefault}
+									className='mt-4 text-blue-600 hover:underline text-sm'
+								>
+									Use Default: {defaultPath}
+								</button>
+							)}
 						</div>
 					) : (
 						<ul className='divide-y divide-gray-200 dark:divide-gray-700'>
 							{results.map(result => (
 								<li
-									key={result.path}
+									key={`${result.id || result.path}`}
 									className='p-3 hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center justify-between group transition-colors'
 								>
-									<div 
-                                        className='flex items-center gap-3 overflow-hidden flex-1 cursor-pointer'
-                                        onClick={() => handleNavigate(result.path)}
-                                    >
+									<div
+										className='flex items-center gap-3 overflow-hidden flex-1 cursor-pointer'
+										onClick={() => handleNavigate(result.path)}
+									>
 										<Folder className='w-5 h-5 text-gray-400 flex-shrink-0 fill-current text-blue-100 dark:text-gray-600' />
 										<div className='min-w-0 text-left'>
 											<p className='text-sm font-medium text-gray-900 dark:text-white truncate group-hover:text-blue-600 dark:group-hover:text-blue-400'>
@@ -226,7 +237,7 @@ const GoogleDriveFolderPicker: React.FC<GoogleDriveFolderPickerProps> = ({
 											</p>
 										</div>
 									</div>
-									
+
 									<div className='flex items-center gap-2 pl-2'>
 										{result.source === 'shared' && (
 											<span className='px-2 py-0.5 text-xs bg-yellow-100 text-yellow-800 rounded-full hidden sm:inline-block'>
@@ -234,7 +245,7 @@ const GoogleDriveFolderPicker: React.FC<GoogleDriveFolderPickerProps> = ({
 											</span>
 										)}
 										<button
-											onClick={() => handleSelect(result.path)}
+											onClick={() => handleSelect(result)}
 											className='px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-50 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700'
 										>
 											Select
@@ -247,31 +258,37 @@ const GoogleDriveFolderPicker: React.FC<GoogleDriveFolderPickerProps> = ({
 				</div>
 
 				<div className='flex justify-between pt-2 items-center'>
-                    <div className="text-xs text-gray-500">
-                        {defaultPath && defaultPath !== currentPath && (
-                            <button 
-                                onClick={handleUseDefault}
-                                className="hover:text-blue-600 underline"
-                            >
-                                Use Default ({defaultPath})
-                            </button>
-                        )}
-                    </div>
-					<div className="flex gap-3">
-                        <button
-                            onClick={onCancel}
-                            className='px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
-                        >
-                            Cancel
-                        </button>
-                        <button
-                            onClick={() => handleSelect(currentPath || searchQuery)}
-                            className='px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed'
-                            disabled={!currentPath && !searchQuery}
-                        >
-                            Use Current Path
-                        </button>
-                    </div>
+					<div className='text-xs text-gray-500'>
+						{defaultPath && defaultPath !== currentPath && (
+							<button
+								onClick={handleUseDefault}
+								className='hover:text-blue-600 underline'
+							>
+								Use Default ({defaultPath})
+							</button>
+						)}
+					</div>
+					<div className='flex gap-3'>
+						<button
+							onClick={onCancel}
+							className='px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+						>
+							Cancel
+						</button>
+						<button
+							onClick={() =>
+								handleSelect({
+									id: currentPath || searchQuery,
+									path: currentPath || searchQuery,
+									name: (currentPath || searchQuery).split('/').pop(),
+								})
+							}
+							className='px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed'
+							disabled={!currentPath && !searchQuery}
+						>
+							Use Current Path
+						</button>
+					</div>
 				</div>
 			</div>
 		</div>

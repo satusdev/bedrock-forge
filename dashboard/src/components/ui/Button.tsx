@@ -1,9 +1,10 @@
 import * as React from 'react';
+import { Slot } from '@radix-ui/react-slot';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
 
 const buttonVariants = cva(
-	'inline-flex items-center justify-center rounded-lg border text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 disabled:pointer-events-none disabled:opacity-50',
+	'inline-flex items-center justify-center whitespace-nowrap rounded-md border text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 disabled:pointer-events-none disabled:opacity-50',
 	{
 		variants: {
 			variant: {
@@ -35,15 +36,27 @@ export interface ButtonProps
 		React.ButtonHTMLAttributes<HTMLButtonElement>,
 		VariantProps<typeof buttonVariants> {
 	loading?: boolean;
+	asChild?: boolean;
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 	(
-		{ className, variant, size, loading = false, disabled, children, ...props },
+		{
+			className,
+			variant,
+			size,
+			loading = false,
+			disabled,
+			children,
+			asChild = false,
+			...props
+		},
 		ref,
 	) => {
+		const Comp = asChild ? Slot : 'button';
+
 		return (
-			<button
+			<Comp
 				ref={ref}
 				className={cn(buttonVariants({ variant, size }), className)}
 				disabled={disabled || loading}
@@ -72,7 +85,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 					</svg>
 				)}
 				{children}
-			</button>
+			</Comp>
 		);
 	},
 );

@@ -76,8 +76,12 @@ const GoogleDriveBackup: React.FC<GoogleDriveBackupProps> = ({ project }) => {
 		try {
 			setDownloading(path);
 			toast.loading('Starting download...', { id: 'download-toast' });
-			const response = await dashboardApi.downloadProjectBackup(projectId, path, 'gdrive');
-			
+			const response = await dashboardApi.downloadProjectBackup(
+				projectId,
+				path,
+				'gdrive',
+			);
+
 			// Trigger download
 			const url = window.URL.createObjectURL(new Blob([response.data]));
 			const link = document.createElement('a');
@@ -86,7 +90,7 @@ const GoogleDriveBackup: React.FC<GoogleDriveBackupProps> = ({ project }) => {
 			document.body.appendChild(link);
 			link.click();
 			link.parentNode?.removeChild(link);
-			
+
 			toast.success('Download started', { id: 'download-toast' });
 		} catch (error) {
 			console.error(error);
@@ -125,7 +129,7 @@ const GoogleDriveBackup: React.FC<GoogleDriveBackupProps> = ({ project }) => {
 			});
 		});
 		return entries.sort((a, b) =>
-			(b.timestamp || '').localeCompare(a.timestamp || '')
+			(b.timestamp || '').localeCompare(a.timestamp || ''),
 		);
 	}, [driveIndex]);
 
@@ -146,31 +150,37 @@ const GoogleDriveBackup: React.FC<GoogleDriveBackupProps> = ({ project }) => {
 		);
 	}
 
-	const FileActions = ({ file }: { file: { name?: string; path?: string; link?: string } }) => {
-		if (!file || !file.path) return <span className="text-gray-400">—</span>;
-		
+	const FileActions = ({
+		file,
+	}: {
+		file: { name?: string; path?: string; link?: string };
+	}) => {
+		if (!file || !file.path) return <span className='text-gray-400'>—</span>;
+
 		return (
-			<div className="flex items-center space-x-2">
-				<span className="truncate max-w-[150px]" title={file.name}>{file.name}</span>
-				<div className="flex space-x-1">
+			<div className='flex items-center space-x-2'>
+				<span className='truncate max-w-[150px]' title={file.name}>
+					{file.name}
+				</span>
+				<div className='flex space-x-1'>
 					{file.link && (
-						<a 
-							href={file.link} 
-							target="_blank" 
-							rel="noopener noreferrer"
-							className="p-1 text-gray-400 hover:text-blue-600 transition-colors"
-							title="Open in Google Drive"
+						<a
+							href={file.link}
+							target='_blank'
+							rel='noopener noreferrer'
+							className='p-1 text-gray-400 hover:text-blue-600 transition-colors'
+							title='Open in Google Drive'
 						>
-							<HardDrive className="w-4 h-4" />
+							<HardDrive className='w-4 h-4' />
 						</a>
 					)}
 					<button
 						onClick={() => handleDownload(file.path!)}
 						disabled={downloading === file.path}
 						className={`p-1 text-gray-400 hover:text-green-600 transition-colors ${downloading === file.path ? 'opacity-50 cursor-wait' : ''}`}
-						title="Download"
+						title='Download'
 					>
-						<FolderOpen className="w-4 h-4" />
+						<FolderOpen className='w-4 h-4' />
 					</button>
 				</div>
 			</div>
@@ -231,7 +241,9 @@ const GoogleDriveBackup: React.FC<GoogleDriveBackupProps> = ({ project }) => {
 			{showPicker && (
 				<div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
 					<GoogleDriveFolderPicker
-						onSelect={(path: string) => updateDriveSettings.mutate(path)}
+						onSelect={(folderId: string) =>
+							updateDriveSettings.mutate(folderId)
+						}
 						onCancel={() => setShowPicker(false)}
 						initialFolderId={backupRoot || undefined}
 					/>
@@ -273,12 +285,12 @@ const GoogleDriveBackup: React.FC<GoogleDriveBackupProps> = ({ project }) => {
 										{entry.folder_link && (
 											<a
 												href={entry.folder_link}
-												target="_blank"
-												rel="noopener noreferrer"
-												className="text-gray-400 hover:text-blue-600 transition-colors"
-												title="Open environment folder"
+												target='_blank'
+												rel='noopener noreferrer'
+												className='text-gray-400 hover:text-blue-600 transition-colors'
+												title='Open environment folder'
 											>
-												<ExternalLink className="w-3.5 h-3.5" />
+												<ExternalLink className='w-3.5 h-3.5' />
 											</a>
 										)}
 										<span className='text-sm font-medium text-gray-900'>
@@ -286,12 +298,16 @@ const GoogleDriveBackup: React.FC<GoogleDriveBackupProps> = ({ project }) => {
 										</span>
 									</div>
 									<div className='grid grid-cols-2 gap-4 text-sm'>
-										<div className="flex items-center gap-2">
-											<span className="text-gray-500 text-xs uppercase w-8">DB:</span>
+										<div className='flex items-center gap-2'>
+											<span className='text-gray-500 text-xs uppercase w-8'>
+												DB:
+											</span>
 											<FileActions file={entry.db || {}} />
 										</div>
-										<div className="flex items-center gap-2">
-											<span className="text-gray-500 text-xs uppercase w-8">Files:</span>
+										<div className='flex items-center gap-2'>
+											<span className='text-gray-500 text-xs uppercase w-8'>
+												Files:
+											</span>
 											<FileActions file={entry.files || {}} />
 										</div>
 									</div>

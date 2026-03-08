@@ -1,7 +1,8 @@
 import React from 'react';
+import Label from './Label';
+import Textarea from './Textarea';
 
-interface LabeledTextareaProps
-	extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
+interface LabeledTextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
 	label: string;
 	required?: boolean;
 	containerClassName?: string;
@@ -19,20 +20,10 @@ const LabeledTextarea: React.FC<LabeledTextareaProps> = ({
 
 	return (
 		<div className={containerClassName}>
-			<label
-				htmlFor={textareaId}
-				className='block text-sm font-medium text-gray-700 mb-1'
-			>
+			<Label htmlFor={textareaId} required={required} className='mb-1 block'>
 				{label}
-				{required ? ' *' : ''}
-			</label>
-			<textarea
-				id={textareaId}
-				className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent ${
-					className || ''
-				}`}
-				{...props}
-			/>
+			</Label>
+			<Textarea id={textareaId} className={className} {...props} />
 		</div>
 	);
 };

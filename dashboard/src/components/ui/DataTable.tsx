@@ -64,7 +64,7 @@ function DataTable<TData, TValue>({
 	return (
 		<div className='space-y-4'>
 			{showFilter && (
-				<div className='flex items-center justify-between gap-4'>
+				<div className='flex items-center gap-4'>
 					<Input
 						placeholder={filterPlaceholder}
 						value={filterValue}
@@ -74,7 +74,7 @@ function DataTable<TData, TValue>({
 				</div>
 			)}
 
-			<div className='rounded-lg border border-gray-200 dark:border-gray-700'>
+			<div className='overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900'>
 				<Table>
 					<TableHeader>
 						{table.getHeaderGroups().map(headerGroup => (
@@ -112,7 +112,7 @@ function DataTable<TData, TValue>({
 							<TableRow>
 								<TableCell
 									colSpan={columns.length}
-									className='h-24 text-center'
+									className='h-28 text-center text-sm text-gray-500 dark:text-gray-400'
 								>
 									{emptyMessage}
 								</TableCell>
@@ -122,12 +122,16 @@ function DataTable<TData, TValue>({
 				</Table>
 			</div>
 
-			<div className='flex items-center justify-between'>
+			<div className='flex items-center justify-between gap-3'>
 				<div className='text-sm text-gray-500 dark:text-gray-400'>
-					Page {table.getState().pagination.pageIndex + 1} of{' '}
-					{table.getPageCount() || 1}
+					Showing {table.getRowModel().rows.length} of {data.length} result
+					{data.length === 1 ? '' : 's'}
 				</div>
-				<div className='flex items-center gap-2'>
+				<div className='flex items-center gap-3'>
+					<div className='text-sm text-gray-500 dark:text-gray-400'>
+						Page {table.getState().pagination.pageIndex + 1} of{' '}
+						{table.getPageCount() || 1}
+					</div>
 					<Button
 						variant='outline'
 						size='sm'

@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, {
+	useState,
+	useEffect,
+	useMemo,
+	useCallback,
+	useRef,
+} from 'react';
 import { useSearchParams } from '@/router/compat';
 import {
 	Database,
@@ -17,6 +23,7 @@ import DataTable from '@/components/ui/DataTable';
 import Badge from '../components/ui/Badge';
 import { createBackupsColumns } from '@/pages/backups/columns';
 import { useTaskStatusPolling } from '../hooks/useTaskStatusPolling';
+import websocketService, { WebSocketMessage } from '@/services/websocket';
 
 interface Project {
 	id: number;
@@ -85,6 +92,8 @@ const Backups: React.FC = () => {
 		localCount: 0,
 	});
 	const [tableFilter, setTableFilter] = useState('');
+	const [wsConnected, setWsConnected] = useState(false);
+	const refreshTimeoutRef = useRef<number | null>(null);
 
 	const selectedProject = useMemo(() => {
 		if (!filterProjectId) return null;
@@ -126,42 +135,114 @@ const Backups: React.FC = () => {
 		}));
 	}, [searchParams]);
 
-	const fetchBackups = async () => {
-		try {
-			setLoading(true);
-			const response = await dashboardApi.getBackups({
-				project_id: filterProjectId,
-				backup_type: filterBackupType,
-			});
-			// Handle both list response formats
-			const backupList = response.data.items || response.data || [];
-			setBackups(backupList);
+	const fetchBackups = useCallback(
+		async (showLoader = true) => {
+			try {
+				if (showLoader) {
+					setLoading(true);
+				}
+				const response = await dashboardApi.getBackups({
+					project_id: filterProjectId,
+					backup_type: filterBackupType,
+				});
+				// Handle both list response formats
+				const backupList = response.data.items || response.data || [];
+				setBackups(backupList);
 
-			// Calculate stats
-			const totalSize = backupList.reduce(
-				(acc: number, b: Backup) => acc + (b.size_bytes || 0),
-				0,
-			);
-			const googleDriveCount = backupList.filter(
-				(b: Backup) => b.storage_type === 'google_drive',
-			).length;
-			const localCount = backupList.filter(
-				(b: Backup) => b.storage_type === 'local',
-			).length;
+				// Calculate stats
+				const totalSize = backupList.reduce(
+					(acc: number, b: Backup) => acc + (b.size_bytes || 0),
+					0,
+				);
+				const googleDriveCount = backupList.filter(
+					(b: Backup) => b.storage_type === 'google_drive',
+				).length;
+				const localCount = backupList.filter(
+					(b: Backup) => b.storage_type === 'local',
+				).length;
 
-			setStats({
-				total: backupList.length,
-				totalSize,
-				googleDriveCount,
-				localCount,
-			});
-		} catch (error) {
-			console.error('Failed to fetch backups:', error);
-			toast.error('Failed to load backups');
-		} finally {
-			setLoading(false);
+				setStats({
+					total: backupList.length,
+					totalSize,
+					googleDriveCount,
+					localCount,
+				});
+			} catch (error) {
+				console.error('Failed to fetch backups:', error);
+				toast.error('Failed to load backups');
+			} finally {
+				if (showLoader) {
+					setLoading(false);
+				}
+			}
+		},
+		[filterProjectId, filterBackupType],
+	);
+
+	const hasActiveBackups = useMemo(
+		() =>
+			backups.some(backup => {
+				const status = String(backup.status || '').toLowerCase();
+				return (
+					status === 'pending' ||
+					status === 'running' ||
+					status === 'in_progress'
+				);
+			}),
+		[backups],
+	);
+
+	useEffect(() => {
+		const handleConnection = (message: WebSocketMessage) => {
+			if (message.type !== 'connection') {
+				return;
+			}
+			setWsConnected(message.status === 'connected');
+		};
+
+		const handleBackupUpdate = (message: WebSocketMessage) => {
+			if (message.type !== 'backup_update') {
+				return;
+			}
+
+			if (refreshTimeoutRef.current) {
+				window.clearTimeout(refreshTimeoutRef.current);
+			}
+
+			refreshTimeoutRef.current = window.setTimeout(() => {
+				void fetchBackups(false);
+			}, 300);
+		};
+
+		websocketService.on('connection', handleConnection);
+		websocketService.on('backup_update', handleBackupUpdate);
+		void websocketService.connect().then(() => {
+			setWsConnected(websocketService.isConnected());
+		});
+
+		return () => {
+			websocketService.off('connection', handleConnection);
+			websocketService.off('backup_update', handleBackupUpdate);
+			if (refreshTimeoutRef.current) {
+				window.clearTimeout(refreshTimeoutRef.current);
+				refreshTimeoutRef.current = null;
+			}
+		};
+	}, [fetchBackups]);
+
+	useEffect(() => {
+		if (!hasActiveBackups || wsConnected) {
+			return;
 		}
-	};
+
+		const intervalId = window.setInterval(() => {
+			void fetchBackups(false);
+		}, 5000);
+
+		return () => {
+			window.clearInterval(intervalId);
+		};
+	}, [hasActiveBackups, wsConnected, fetchBackups]);
 
 	const fetchProjects = async () => {
 		try {
@@ -313,7 +394,9 @@ const Backups: React.FC = () => {
 						backupId: backup.id,
 						backupName: backup.name,
 						isRunning:
-							backup.status === 'running' || backup.status === 'in_progress',
+							backup.status === 'pending' ||
+							backup.status === 'running' ||
+							backup.status === 'in_progress',
 					}),
 				onOpenRestore: openRestoreModal,
 				onDelete: handleDeleteBackup,
@@ -342,7 +425,9 @@ const Backups: React.FC = () => {
 				</h1>
 				<div className='flex gap-2'>
 					<button
-						onClick={fetchBackups}
+						onClick={() => {
+							void fetchBackups();
+						}}
 						className='p-2 text-gray-500 hover:text-indigo-600 border border-gray-200 dark:border-gray-700 rounded-lg transition-colors'
 						title='Refresh'
 					>

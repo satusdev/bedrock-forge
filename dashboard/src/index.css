@@ -3,86 +3,112 @@
 @tailwind utilities;
 
 @layer base {
-  html {
-    font-family: 'Inter', system-ui, sans-serif;
-  }
-  
-  /* Dark mode base colors */
-  :root {
-    --bg-primary: #ffffff;
-    --bg-secondary: #f9fafb;
-    --bg-tertiary: #f3f4f6;
-    --text-primary: #111827;
-    --text-secondary: #6b7280;
-    --border-color: #e5e7eb;
-  }
-  
-  .dark {
-    --bg-primary: #111827;
-    --bg-secondary: #1f2937;
-    --bg-tertiary: #374151;
-    --text-primary: #f9fafb;
-    --text-secondary: #9ca3af;
-    --border-color: #374151;
-  }
-  
-  .dark body {
-    @apply bg-gray-900 text-gray-100;
-  }
+	html {
+		font-family: 'Inter', system-ui, sans-serif;
+	}
+
+	input,
+	select,
+	textarea {
+		@apply text-sm;
+	}
+
+	input:not([type='checkbox']):not([type='radio']):not([type='range']):not(
+			[type='file']
+		),
+	select,
+	textarea {
+		@apply border border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 rounded-lg px-3 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500;
+	}
+
+	table {
+		@apply text-sm;
+	}
+
+	th {
+		@apply text-left font-medium text-gray-500 dark:text-gray-400;
+	}
+
+	td {
+		@apply text-gray-700 dark:text-gray-200;
+	}
+
+	/* Dark mode base colors */
+	:root {
+		--bg-primary: #ffffff;
+		--bg-secondary: #f9fafb;
+		--bg-tertiary: #f3f4f6;
+		--text-primary: #111827;
+		--text-secondary: #6b7280;
+		--border-color: #e5e7eb;
+	}
+
+	.dark {
+		--bg-primary: #111827;
+		--bg-secondary: #1f2937;
+		--bg-tertiary: #374151;
+		--text-primary: #f9fafb;
+		--text-secondary: #9ca3af;
+		--border-color: #374151;
+	}
+
+	.dark body {
+		@apply bg-gray-900 text-gray-100;
+	}
 }
 
 @layer components {
-  .btn {
-    @apply px-4 py-2 rounded-lg font-medium transition-colors duration-200;
-  }
+	.btn {
+		@apply px-4 py-2 rounded-lg font-medium transition-colors duration-200;
+	}
 
-  .btn-primary {
-    @apply bg-primary-600 hover:bg-primary-700 text-white;
-  }
+	.btn-primary {
+		@apply bg-primary-600 hover:bg-primary-700 text-white;
+	}
 
-  .btn-secondary {
-    @apply bg-gray-200 hover:bg-gray-300 text-gray-800 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200;
-  }
+	.btn-secondary {
+		@apply bg-gray-200 hover:bg-gray-300 text-gray-800 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200;
+	}
 
-  .btn-sm {
-    @apply px-3 py-1.5 text-sm;
-  }
+	.btn-sm {
+		@apply px-3 py-1.5 text-sm;
+	}
 
-  .card {
-    @apply bg-white rounded-lg shadow-sm border border-gray-200 p-6 dark:bg-gray-800 dark:border-gray-700;
-  }
+	.card {
+		@apply bg-white rounded-lg shadow-sm border border-gray-200 p-6 dark:bg-gray-800 dark:border-gray-700;
+	}
 
-  .input {
-    @apply w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100;
-  }
+	.input {
+		@apply w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100;
+	}
 
-  .badge {
-    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
-  }
+	.badge {
+		@apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+	}
 
-  .badge-success {
-    @apply bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400;
-  }
+	.badge-success {
+		@apply bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400;
+	}
 
-  .badge-warning {
-    @apply bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400;
-  }
+	.badge-warning {
+		@apply bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400;
+	}
 
-  .badge-error {
-    @apply bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400;
-  }
+	.badge-error {
+		@apply bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400;
+	}
 
-  .badge-info {
-    @apply bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400;
-  }
-  
-  /* Dark mode sidebar */
-  .sidebar {
-    @apply bg-gray-900 dark:bg-gray-950;
-  }
-  
-  /* Dark mode tables */
-  .table-row {
-    @apply hover:bg-gray-50 dark:hover:bg-gray-800;
-  }
+	.badge-info {
+		@apply bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400;
+	}
+
+	/* Dark mode sidebar */
+	.sidebar {
+		@apply bg-gray-900 dark:bg-gray-950;
+	}
+
+	/* Dark mode tables */
+	.table-row {
+		@apply hover:bg-gray-50 dark:hover:bg-gray-800;
+	}
 }

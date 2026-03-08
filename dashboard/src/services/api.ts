@@ -267,7 +267,7 @@ export const dashboardApi = {
 		await checkBackendAvailability();
 		return api.post(
 			`/projects/${projectId}/environments/${envId}/backups`,
-			null,
+			{},
 			{
 				params: {
 					backup_type: backupType,
@@ -695,23 +695,35 @@ export const dashboardApi = {
 			create_monitors?: boolean;
 			wordpress_only?: boolean;
 		},
-	) => api.post(`/servers/${serverId}/import-all`, null, { params: options }),
+	) => api.post(`/servers/${serverId}/import-all`, {}, { params: options }),
 
 	// Server Sync
 	scanServerDirectories: (serverId: number, path?: string) =>
-		api.post(`/servers/${serverId}/scan-directories`, null, {
-			params: { base_path: path },
-		}),
+		api.post(
+			`/servers/${serverId}/scan-directories`,
+			{},
+			{
+				params: { base_path: path },
+			},
+		),
 	getServerDirectories: (serverId: number) =>
 		api.get(`/servers/${serverId}/directories`),
 	scanServerSites: (serverId: number, basePath?: string) =>
-		api.post(`/servers/${serverId}/scan-sites`, null, {
-			params: { base_path: basePath || '/var/www' },
-		}),
+		api.post(
+			`/servers/${serverId}/scan-sites`,
+			{},
+			{
+				params: { base_path: basePath || '/var/www' },
+			},
+		),
 	readServerEnv: (serverId: number, path: string) =>
-		api.post(`/servers/${serverId}/read-env`, null, {
-			params: { path },
-		}),
+		api.post(
+			`/servers/${serverId}/read-env`,
+			{},
+			{
+				params: { path },
+			},
+		),
 
 	// Schedules (Backup Schedules)
 	getSchedules: (params?: {
@@ -724,6 +736,7 @@ export const dashboardApi = {
 	createSchedule: (data: {
 		name: string;
 		project_id: number;
+		environment_id?: number;
 		frequency?: string;
 		hour?: number;
 		minute?: number;
@@ -741,6 +754,7 @@ export const dashboardApi = {
 		scheduleId: number,
 		data: {
 			name?: string;
+			environment_id?: number;
 			frequency?: string;
 			hour?: number;
 			minute?: number;

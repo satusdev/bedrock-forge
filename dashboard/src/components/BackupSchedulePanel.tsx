@@ -40,7 +40,7 @@ const BackupSchedulePanel: React.FC<BackupSchedulePanelProps> = ({
 	const [loading, setLoading] = useState(true);
 	const [showCreateModal, setShowCreateModal] = useState(false);
 	const [editingSchedule, setEditingSchedule] = useState<BackupSchedule | null>(
-		null
+		null,
 	);
 	const [actionLoading, setActionLoading] = useState<number | null>(null);
 
@@ -56,7 +56,6 @@ const BackupSchedulePanel: React.FC<BackupSchedulePanelProps> = ({
 		storage_type: 'google_drive',
 		retention_count: 7,
 		description: '',
-		config: {},
 	});
 	const [s3Config, setS3Config] = useState({ bucket: '', remote: 's3' });
 
@@ -86,7 +85,7 @@ const BackupSchedulePanel: React.FC<BackupSchedulePanelProps> = ({
 			.replace(':', '-');
 		const projName = projectName || 'project';
 		const selectedEnv = environments.find(
-			e => e.id === formData.environment_id
+			e => e.id === formData.environment_id,
 		);
 		const envName = selectedEnv ? selectedEnv.environment : '{environment}';
 
@@ -97,7 +96,7 @@ const BackupSchedulePanel: React.FC<BackupSchedulePanelProps> = ({
 			if (selectedEnv && selectedEnv.gdrive_backups_folder_id) {
 				return `gdrive:folder-${selectedEnv.gdrive_backups_folder_id.substring(
 					0,
-					8
+					8,
 				)}.../${timestamp}`;
 			}
 			return `gdrive:forge-backups/${projName}/${envName}/${timestamp}`;
@@ -154,15 +153,10 @@ const BackupSchedulePanel: React.FC<BackupSchedulePanelProps> = ({
 
 		try {
 			setActionLoading(-1);
-			const payload = { ...formData };
-			if (formData.storage_type === 's3') {
-				payload.config = {
-					...(payload.config || {}),
-					s3_bucket: s3Config.bucket,
-					s3_remote: s3Config.remote,
-				};
-			}
-			await dashboardApi.createSchedule({ ...payload, project_id: projectId });
+			await dashboardApi.createSchedule({
+				...formData,
+				project_id: projectId,
+			});
 			toast.success('Schedule created successfully');
 			setShowCreateModal(false);
 			resetForm();
@@ -180,15 +174,7 @@ const BackupSchedulePanel: React.FC<BackupSchedulePanelProps> = ({
 
 		try {
 			setActionLoading(editingSchedule.id);
-			const payload = { ...formData };
-			if (formData.storage_type === 's3') {
-				payload.config = {
-					...(payload.config || {}),
-					s3_bucket: s3Config.bucket,
-					s3_remote: s3Config.remote,
-				};
-			}
-			await dashboardApi.updateSchedule(editingSchedule.id, payload);
+			await dashboardApi.updateSchedule(editingSchedule.id, formData);
 			toast.success('Schedule updated successfully');
 			setEditingSchedule(null);
 			resetForm();
@@ -265,7 +251,6 @@ const BackupSchedulePanel: React.FC<BackupSchedulePanelProps> = ({
 			storage_type: 'google_drive',
 			retention_count: 7,
 			description: '',
-			config: {},
 			environment_id: undefined,
 		});
 		setS3Config({ bucket: '', remote: 's3' });
@@ -289,13 +274,7 @@ const BackupSchedulePanel: React.FC<BackupSchedulePanelProps> = ({
 			description: schedule.description,
 			environment_id: schedule.environment_id,
 		});
-		// Extract S3 config
-		if (schedule.config) {
-			setS3Config({
-				bucket: schedule.config.s3_bucket || '',
-				remote: schedule.config.s3_remote || 's3',
-			});
-		}
+		setS3Config({ bucket: '', remote: 's3' });
 	};
 
 	const formatNextRun = (nextRun?: string) => {

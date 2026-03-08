@@ -62,6 +62,11 @@ interface WizardFormData {
 	db_user: string;
 	db_password: string;
 	issue_ssl: boolean;
+	gdrive_backups_folder_id: string;
+	auto_create_schedule: boolean;
+	schedule_frequency: 'hourly' | 'daily' | 'weekly' | 'monthly';
+	schedule_hour: number;
+	schedule_minute: number;
 }
 
 const INITIAL_FORM_DATA: WizardFormData = {
@@ -84,6 +89,11 @@ const INITIAL_FORM_DATA: WizardFormData = {
 	db_user: '',
 	db_password: '',
 	issue_ssl: true,
+	gdrive_backups_folder_id: '',
+	auto_create_schedule: false,
+	schedule_frequency: 'daily',
+	schedule_hour: 2,
+	schedule_minute: 0,
 };
 
 export default function CreateProjectWizard() {
@@ -97,6 +107,7 @@ export default function CreateProjectWizard() {
 	const [tagInput, setTagInput] = useState('');
 	const [isScanning, setIsScanning] = useState(false);
 	const [showAdvanced, setShowAdvanced] = useState(false);
+	const [isHydratingEnv, setIsHydratingEnv] = useState(false);
 
 	const { data: serversData, isLoading: serversLoading } = useQuery({
 		queryKey: ['servers'],
@@ -137,6 +148,7 @@ export default function CreateProjectWizard() {
 				`/servers/${serverId}/scan-sites?base_path=${encodeURIComponent(
 					basePath,
 				)}&max_depth=4`,
+				{},
 			),
 		onSuccess: (response: any) => {
 			setIsScanning(false);
@@ -204,21 +216,74 @@ export default function CreateProjectWizard() {
 				projectId
 			) {
 				try {
-					await dashboardApi.linkEnvironment(projectId, {
+					setIsHydratingEnv(true);
+					let resolvedDbName = formData.db_name;
+					let resolvedDbUser = formData.db_user;
+					let resolvedDbPassword = formData.db_password;
+					let resolvedWpUrl =
+						formData.scanned_site.site_url || `https://${formData.domain}`;
+
+					if (!resolvedDbName || !resolvedDbUser || !resolvedDbPassword) {
+						try {
+							const envResponse = await dashboardApi.readServerEnv(
+								formData.server_id,
+								formData.scanned_site.path,
+							);
+							const env = envResponse?.data?.env;
+							if (env) {
+								resolvedDbName = resolvedDbName || env.db_name || '';
+								resolvedDbUser = resolvedDbUser || env.db_user || '';
+								resolvedDbPassword =
+									resolvedDbPassword || env.db_password || '';
+								resolvedWpUrl = env.wp_home || env.wp_siteurl || resolvedWpUrl;
+							}
+						} catch (hydrateError) {
+							console.warn(
+								'Failed to hydrate environment from .env',
+								hydrateError,
+							);
+						}
+					}
+
+					const linkResponse = await dashboardApi.linkEnvironment(projectId, {
 						server_id: formData.server_id,
 						environment: formData.environment,
-						wp_url:
-							formData.scanned_site.site_url || `https://${formData.domain}`,
+						wp_url: resolvedWpUrl,
 						wp_path: formData.scanned_site.wp_path,
 						database_name:
-							formData.db_name || `${formData.name.replace(/-/g, '_')}_db`,
-						database_user: formData.db_user || 'wp_user',
-						database_password: formData.db_password || '',
+							resolvedDbName || `${formData.name.replace(/-/g, '_')}_db`,
+						database_user: resolvedDbUser || 'wp_user',
+						database_password: resolvedDbPassword || undefined,
+						gdrive_backups_folder_id:
+							formData.gdrive_backups_folder_id || undefined,
 					});
-					toast.success('Project created and linked to server!');
+
+					if (formData.auto_create_schedule) {
+						await dashboardApi.createSchedule({
+							name: `${formData.name} ${formData.environment} backup`,
+							project_id: projectId,
+							environment_id: linkResponse.data?.id,
+							frequency: formData.schedule_frequency,
+							hour: formData.schedule_hour,
+							minute: formData.schedule_minute,
+							backup_type: 'full',
+							storage_type: 'google_drive',
+							retention_count: 7,
+						});
+					}
+
+					if (!resolvedDbPassword) {
+						toast.success(
+							'Project linked. Database password was empty and can be updated later.',
+						);
+					} else {
+						toast.success('Project created and linked to server!');
+					}
 				} catch (err: any) {
 					console.error('Failed to link environment:', err);
 					toast.success('Project created, but failed to link environment');
+				} finally {
+					setIsHydratingEnv(false);
 				}
 			} else {
 				toast.success('Project created successfully!');
@@ -260,6 +325,14 @@ export default function CreateProjectWizard() {
 			updateForm('tags', [...formData.tags, trimmed]);
 		}
 		setTagInput('');
+	};
+
+	const toggleExistingTag = (tagName: string) => {
+		if (formData.tags.includes(tagName)) {
+			removeTag(tagName);
+			return;
+		}
+		addTag(tagName);
 	};
 
 	const removeTag = (tag: string) => {
@@ -690,34 +763,126 @@ export default function CreateProjectWizard() {
 										</Button>
 									</div>
 									{existingTags.length > 0 && (
-										<div className='flex flex-wrap gap-1 mt-2'>
-											{existingTags
-												.filter((t: any) => !formData.tags.includes(t.name))
-												.slice(0, 5)
-												.map((tag: any) => (
-													<button
-														key={tag.id}
-														type='button'
-														onClick={() => addTag(tag.name)}
-														className='text-xs px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded hover:bg-gray-200 dark:hover:bg-gray-600'
-													>
-														+ {tag.name}
-													</button>
-												))}
+										<div className='space-y-2 mt-2'>
+											<div className='flex flex-wrap gap-1'>
+												{existingTags
+													.filter((t: any) => !formData.tags.includes(t.name))
+													.slice(0, 5)
+													.map((tag: any) => (
+														<button
+															key={tag.id}
+															type='button'
+															onClick={() => addTag(tag.name)}
+															className='text-xs px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded hover:bg-gray-200 dark:hover:bg-gray-600'
+														>
+															+ {tag.name}
+														</button>
+													))}
+											</div>
+											<div className='max-h-28 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg p-2'>
+												<div className='grid grid-cols-1 sm:grid-cols-2 gap-2'>
+													{existingTags.map((tag: any) => {
+														const isSelected = formData.tags.includes(tag.name);
+														return (
+															<button
+																key={`multi-${tag.id}`}
+																type='button'
+																onClick={() => toggleExistingTag(tag.name)}
+																className={`text-left text-xs px-2 py-1 rounded border ${
+																	isSelected
+																		? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20'
+																		: 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+																}`}
+															>
+																{isSelected ? '✓ ' : ''}
+																{tag.name}
+															</button>
+														);
+													})}
+												</div>
+											</div>
+										</div>
+									)}
+								</div>
+
+								<div>
+									<label className='block text-sm font-medium mb-1'>
+										Google Drive Backup Folder ID (optional)
+									</label>
+									<input
+										type='text'
+										value={formData.gdrive_backups_folder_id}
+										onChange={e =>
+											updateForm('gdrive_backups_folder_id', e.target.value)
+										}
+										className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800'
+										placeholder='Drive folder ID (not full URL)'
+									/>
+								</div>
+
+								<div className='space-y-2 rounded-lg border border-gray-200 dark:border-gray-700 p-3'>
+									<label className='flex items-center gap-2 text-sm font-medium'>
+										<input
+											type='checkbox'
+											checked={formData.auto_create_schedule}
+											onChange={e =>
+												updateForm('auto_create_schedule', e.target.checked)
+											}
+										/>
+										Create backup schedule now
+									</label>
+									{formData.auto_create_schedule && (
+										<div className='grid grid-cols-3 gap-2'>
+											<select
+												value={formData.schedule_frequency}
+												onChange={e =>
+													updateForm('schedule_frequency', e.target.value)
+												}
+												className='px-2 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm'
+											>
+												<option value='hourly'>Hourly</option>
+												<option value='daily'>Daily</option>
+												<option value='weekly'>Weekly</option>
+												<option value='monthly'>Monthly</option>
+											</select>
+											<input
+												type='number'
+												min={0}
+												max={23}
+												value={formData.schedule_hour}
+												onChange={e =>
+													updateForm('schedule_hour', Number(e.target.value))
+												}
+												className='px-2 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm'
+											/>
+											<input
+												type='number'
+												min={0}
+												max={59}
+												value={formData.schedule_minute}
+												onChange={e =>
+													updateForm('schedule_minute', Number(e.target.value))
+												}
+												className='px-2 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm'
+											/>
 										</div>
 									)}
 								</div>
 
 								<Button
 									onClick={handleSubmit}
-									disabled={createMutation.isPending || !formData.name.trim()}
+									disabled={
+										createMutation.isPending ||
+										isHydratingEnv ||
+										!formData.name.trim()
+									}
 									className='w-full'
 									variant='primary'
 								>
-									{createMutation.isPending ? (
+									{createMutation.isPending || isHydratingEnv ? (
 										<>
 											<Loader2 className='w-4 h-4 animate-spin mr-2' />
-											Creating...
+											{isHydratingEnv ? 'Hydrating .env...' : 'Creating...'}
 										</>
 									) : (
 										<>
@@ -926,20 +1091,44 @@ export default function CreateProjectWizard() {
 								</Button>
 							</div>
 							{existingTags.length > 0 && (
-								<div className='flex flex-wrap gap-1 mt-2'>
-									{existingTags
-										.filter((t: any) => !formData.tags.includes(t.name))
-										.slice(0, 5)
-										.map((tag: any) => (
-											<button
-												key={tag.id}
-												type='button'
-												onClick={() => addTag(tag.name)}
-												className='text-xs px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded hover:bg-gray-200 dark:hover:bg-gray-600'
-											>
-												+ {tag.name}
-											</button>
-										))}
+								<div className='space-y-2 mt-2'>
+									<div className='flex flex-wrap gap-1'>
+										{existingTags
+											.filter((t: any) => !formData.tags.includes(t.name))
+											.slice(0, 5)
+											.map((tag: any) => (
+												<button
+													key={tag.id}
+													type='button'
+													onClick={() => addTag(tag.name)}
+													className='text-xs px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded hover:bg-gray-200 dark:hover:bg-gray-600'
+												>
+													+ {tag.name}
+												</button>
+											))}
+									</div>
+									<div className='max-h-28 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg p-2'>
+										<div className='grid grid-cols-1 sm:grid-cols-2 gap-2'>
+											{existingTags.map((tag: any) => {
+												const isSelected = formData.tags.includes(tag.name);
+												return (
+													<button
+														key={`create-multi-${tag.id}`}
+														type='button'
+														onClick={() => toggleExistingTag(tag.name)}
+														className={`text-left text-xs px-2 py-1 rounded border ${
+															isSelected
+																? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20'
+																: 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+														}`}
+													>
+														{isSelected ? '✓ ' : ''}
+														{tag.name}
+													</button>
+												);
+											})}
+										</div>
+									</div>
 								</div>
 							)}
 						</div>
