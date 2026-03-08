@@ -2,8 +2,11 @@ import { BadRequestException } from '@nestjs/common';
 import { GithubService } from './github.service';
 
 type MockPrisma = {
-	$queryRaw: jest.Mock;
-	$executeRaw: jest.Mock;
+	oauth_tokens: {
+		upsert: jest.Mock;
+		findFirst: jest.Mock;
+		deleteMany: jest.Mock;
+	};
 };
 
 describe('GithubService', () => {
@@ -11,12 +14,18 @@ describe('GithubService', () => {
 	let service: GithubService;
 
 	beforeEach(() => {
-		prisma = { $queryRaw: jest.fn(), $executeRaw: jest.fn() };
+		prisma = {
+			oauth_tokens: {
+				upsert: jest.fn(),
+				findFirst: jest.fn(),
+				deleteMany: jest.fn(),
+			},
+		};
 		service = new GithubService(prisma as unknown as any);
 	});
 
 	it('returns unauthenticated state when no token exists', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([]);
+		prisma.oauth_tokens.findFirst.mockResolvedValueOnce(null);
 
 		const result = await service.getAuthStatus();
 		expect(result.authenticated).toBe(false);

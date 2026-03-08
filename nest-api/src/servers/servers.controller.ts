@@ -155,10 +155,16 @@ export class ServersController {
 	async scanSites(
 		@Param('serverId', ParseIntPipe) serverId: number,
 		@Query('base_path') basePath?: string,
+		@Query('max_depth') maxDepth?: string,
 		@Headers('authorization') authorization?: string,
 	) {
 		const ownerId = await this.resolveOwnerId(authorization);
-		return this.serversService.scanSites(serverId, basePath, ownerId);
+		return this.serversService.scanSites(
+			serverId,
+			basePath,
+			maxDepth ? Number(maxDepth) : undefined,
+			ownerId,
+		);
 	}
 
 	@Post(':serverId/scan-directories')

@@ -2,8 +2,10 @@ import { NotFoundException } from '@nestjs/common';
 import { TagsService } from './tags.service';
 
 type MockPrisma = {
-	$queryRaw: jest.Mock;
-	$executeRaw: jest.Mock;
+	tags: {
+		findMany: jest.Mock;
+		findUnique: jest.Mock;
+	};
 };
 
 describe('TagsService', () => {
@@ -11,12 +13,17 @@ describe('TagsService', () => {
 	let service: TagsService;
 
 	beforeEach(() => {
-		prisma = { $queryRaw: jest.fn(), $executeRaw: jest.fn() };
+		prisma = {
+			tags: {
+				findMany: jest.fn(),
+				findUnique: jest.fn(),
+			},
+		};
 		service = new TagsService(prisma as unknown as any);
 	});
 
 	it('lists tags', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([
+		prisma.tags.findMany.mockResolvedValueOnce([
 			{ id: 1, name: 'WordPress', slug: 'wordpress' },
 		]);
 
@@ -25,7 +32,7 @@ describe('TagsService', () => {
 	});
 
 	it('throws when tag does not exist', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([]);
+		prisma.tags.findUnique.mockResolvedValueOnce(null);
 
 		await expect(service.getTag(999)).rejects.toBeInstanceOf(NotFoundException);
 	});

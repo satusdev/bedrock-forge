@@ -2,8 +2,23 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ClientsService } from './clients.service';
 
 type MockPrisma = {
-	$queryRaw: jest.Mock;
-	$executeRaw: jest.Mock;
+	clients: {
+		count: jest.Mock;
+		findMany: jest.Mock;
+		findUnique: jest.Mock;
+		findFirst: jest.Mock;
+		create: jest.Mock;
+		update: jest.Mock;
+	};
+	projects: {
+		findMany: jest.Mock;
+		findUnique: jest.Mock;
+		findFirst: jest.Mock;
+		update: jest.Mock;
+	};
+	invoices: {
+		findMany: jest.Mock;
+	};
 };
 
 describe('ClientsService', () => {
@@ -12,39 +27,52 @@ describe('ClientsService', () => {
 
 	beforeEach(() => {
 		prisma = {
-			$queryRaw: jest.fn(),
-			$executeRaw: jest.fn(),
+			clients: {
+				count: jest.fn(),
+				findMany: jest.fn(),
+				findUnique: jest.fn(),
+				findFirst: jest.fn(),
+				create: jest.fn(),
+				update: jest.fn(),
+			},
+			projects: {
+				findMany: jest.fn(),
+				findUnique: jest.fn(),
+				findFirst: jest.fn(),
+				update: jest.fn(),
+			},
+			invoices: {
+				findMany: jest.fn(),
+			},
 		};
 		service = new ClientsService(prisma as unknown as any);
 	});
 
 	it('lists clients with counts and projects', async () => {
-		prisma.$queryRaw
-			.mockResolvedValueOnce([{ total: 1 }])
-			.mockResolvedValueOnce([
-				{
-					id: 1,
-					name: 'Acme',
-					company: 'Acme Inc',
-					email: 'team@acme.com',
-					phone: null,
-					billing_status: 'active',
-					monthly_rate: 1000,
-					currency: 'USD',
-					created_at: new Date('2025-01-01T00:00:00.000Z'),
-					project_count: 2,
-					invoice_count: 3,
+		prisma.clients.count.mockResolvedValueOnce(1);
+		prisma.clients.findMany.mockResolvedValueOnce([
+			{
+				id: 1,
+				name: 'Acme',
+				company: 'Acme Inc',
+				email: 'team@acme.com',
+				phone: null,
+				billing_status: 'active',
+				monthly_rate: 1000,
+				currency: 'USD',
+				created_at: new Date('2025-01-01T00:00:00.000Z'),
+				projects: [
+					{
+						id: 8,
+						name: 'Project A',
+					},
+				],
+				_count: {
+					projects: 2,
+					invoices: 3,
 				},
-			])
-			.mockResolvedValueOnce([
-				{
-					id: 8,
-					name: 'Project A',
-					status: 'active',
-					environment: 'production',
-					wp_home: null,
-				},
-			]);
+			},
+		]);
 
 		const result = await service.getAllClients({ limit: 50, offset: 0 });
 		const firstClient = result.clients[0];
@@ -57,32 +85,28 @@ describe('ClientsService', () => {
 	});
 
 	it('returns client details with projects and recent invoices', async () => {
-		prisma.$queryRaw
-			.mockResolvedValueOnce([
-				{
-					id: 1,
-					name: 'Acme',
-					company: 'Acme Inc',
-					email: 'team@acme.com',
-					phone: null,
-					billing_email: 'billing@acme.com',
-					address: null,
-					website: null,
-					notes: null,
-					billing_status: 'active',
-					payment_terms: '30',
-					currency: 'USD',
-					tax_rate: 0,
-					auto_billing: false,
-					contract_start: null,
-					contract_end: null,
-					invoice_prefix: 'INV',
-					created_at: new Date('2025-01-01T00:00:00.000Z'),
-					updated_at: new Date('2025-01-01T00:00:00.000Z'),
-					monthly_rate: 1000,
-				},
-			])
-			.mockResolvedValueOnce([
+		prisma.clients.findUnique.mockResolvedValueOnce({
+			id: 1,
+			name: 'Acme',
+			company: 'Acme Inc',
+			email: 'team@acme.com',
+			phone: null,
+			billing_email: 'billing@acme.com',
+			address: null,
+			website: null,
+			notes: null,
+			billing_status: 'active',
+			payment_terms: '30',
+			currency: 'USD',
+			tax_rate: 0,
+			auto_billing: false,
+			contract_start: null,
+			contract_end: null,
+			invoice_prefix: 'INV',
+			created_at: new Date('2025-01-01T00:00:00.000Z'),
+			updated_at: new Date('2025-01-01T00:00:00.000Z'),
+			monthly_rate: 1000,
+			projects: [
 				{
 					id: 9,
 					name: 'Project A',
@@ -90,16 +114,19 @@ describe('ClientsService', () => {
 					environment: 'production',
 					wp_home: null,
 				},
-			])
-			.mockResolvedValueOnce([
+			],
+			invoices: [
 				{
 					id: 7,
 					invoice_number: 'INV-001',
 					status: 'paid',
 					total: 100,
 					amount_paid: 100,
+					issue_date: new Date(),
+					due_date: new Date(),
 				},
-			]);
+			],
+		});
 
 		const result = await service.getClient(1);
 		const firstProject = result.projects[0];
@@ -113,7 +140,7 @@ describe('ClientsService', () => {
 	});
 
 	it('throws not found when client detail is missing', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([]);
+		prisma.clients.findUnique.mockResolvedValueOnce(null);
 
 		await expect(service.getClient(999)).rejects.toBeInstanceOf(
 			NotFoundException,
@@ -121,9 +148,8 @@ describe('ClientsService', () => {
 	});
 
 	it('creates client when email is unique', async () => {
-		prisma.$queryRaw
-			.mockResolvedValueOnce([])
-			.mockResolvedValueOnce([{ id: 22 }]);
+		prisma.clients.findFirst.mockResolvedValueOnce(null);
+		prisma.clients.create.mockResolvedValueOnce({ id: 22 });
 
 		const result = await service.createClient({
 			name: 'Acme',
@@ -135,7 +161,7 @@ describe('ClientsService', () => {
 	});
 
 	it('rejects create when email already exists', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([{ id: 1 }]);
+		prisma.clients.findFirst.mockResolvedValueOnce({ id: 1 });
 
 		await expect(
 			service.createClient({ name: 'Acme', email: 'team@acme.com' }),
@@ -143,40 +169,38 @@ describe('ClientsService', () => {
 	});
 
 	it('updates client and returns success message', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([
-			{
-				id: 5,
-				name: 'Acme',
-				company: null,
-				email: 'team@acme.com',
-				phone: null,
-				billing_email: null,
-				address: null,
-				website: null,
-				notes: null,
-				billing_status: 'active',
-				payment_terms: '30',
-				currency: 'USD',
-				tax_rate: 0,
-				auto_billing: false,
-				contract_start: null,
-				contract_end: null,
-				invoice_prefix: 'INV',
-				created_at: new Date(),
-				updated_at: new Date(),
-				monthly_rate: 0,
-			},
-		]);
-		prisma.$executeRaw.mockResolvedValueOnce(1);
+		prisma.clients.findUnique.mockResolvedValueOnce({
+			id: 5,
+			name: 'Acme',
+			company: null,
+			email: 'team@acme.com',
+			phone: null,
+			billing_email: null,
+			address: null,
+			website: null,
+			notes: null,
+			billing_status: 'active',
+			payment_terms: '30',
+			currency: 'USD',
+			tax_rate: 0,
+			auto_billing: false,
+			contract_start: null,
+			contract_end: null,
+			invoice_prefix: 'INV',
+			created_at: new Date(),
+			updated_at: new Date(),
+			monthly_rate: 0,
+		});
+		prisma.clients.update.mockResolvedValueOnce({ id: 5 });
 
 		const result = await service.updateClient(5, { name: 'Acme Updated' });
 
 		expect(result.message).toContain('Acme Updated');
-		expect(prisma.$executeRaw).toHaveBeenCalled();
+		expect(prisma.clients.update).toHaveBeenCalled();
 	});
 
 	it('rejects update when client is missing', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([]);
+		prisma.clients.findUnique.mockResolvedValueOnce(null);
 
 		await expect(
 			service.updateClient(999, { name: 'Nope' }),
@@ -184,9 +208,11 @@ describe('ClientsService', () => {
 	});
 
 	it('rejects delete when client has active projects', async () => {
-		prisma.$queryRaw
-			.mockResolvedValueOnce([{ id: 5, name: 'Acme' }])
-			.mockResolvedValueOnce([{ total: 2 }]);
+		prisma.clients.findUnique.mockResolvedValueOnce({
+			id: 5,
+			name: 'Acme',
+			_count: { projects: 2 },
+		});
 
 		await expect(service.deleteClient(5)).rejects.toBeInstanceOf(
 			BadRequestException,
@@ -194,31 +220,32 @@ describe('ClientsService', () => {
 	});
 
 	it('deactivates client when no projects are attached', async () => {
-		prisma.$queryRaw
-			.mockResolvedValueOnce([{ id: 5, name: 'Acme' }])
-			.mockResolvedValueOnce([{ total: 0 }]);
-		prisma.$executeRaw.mockResolvedValueOnce(1);
+		prisma.clients.findUnique.mockResolvedValueOnce({
+			id: 5,
+			name: 'Acme',
+			_count: { projects: 0 },
+		});
+		prisma.clients.update.mockResolvedValueOnce({ id: 5 });
 
 		const result = await service.deleteClient(5);
 
 		expect(result.message).toContain('deactivated');
-		expect(prisma.$executeRaw).toHaveBeenCalled();
+		expect(prisma.clients.update).toHaveBeenCalled();
 	});
 
 	it('returns invoices summary with totals', async () => {
-		prisma.$queryRaw
-			.mockResolvedValueOnce([{ id: 5, name: 'Acme' }])
-			.mockResolvedValueOnce([
-				{
-					id: 1,
-					invoice_number: 'INV-001',
-					status: 'paid',
-					issue_date: new Date('2025-01-10T00:00:00.000Z'),
-					due_date: new Date('2025-01-20T00:00:00.000Z'),
-					total: 120,
-					amount_paid: 80,
-				},
-			]);
+		prisma.clients.findUnique.mockResolvedValueOnce({ id: 5, name: 'Acme' });
+		prisma.invoices.findMany.mockResolvedValueOnce([
+			{
+				id: 1,
+				invoice_number: 'INV-001',
+				status: 'paid',
+				issue_date: new Date('2025-01-10T00:00:00.000Z'),
+				due_date: new Date('2025-01-20T00:00:00.000Z'),
+				total: 120,
+				amount_paid: 80,
+			},
+		]);
 
 		const result = await service.getClientInvoices(5);
 		const firstInvoice = result.invoices[0];

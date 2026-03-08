@@ -476,7 +476,7 @@ describe('ServersService', () => {
 				status: 'offline',
 				ssh_user: 'root',
 				ssh_port: 22,
-				ssh_key_path: null,
+				ssh_key_path: '/tmp/id_rsa',
 				ssh_password: null,
 				ssh_private_key: null,
 				panel_type: 'none',
@@ -493,9 +493,109 @@ describe('ServersService', () => {
 				updated_at: new Date(),
 			},
 		]);
+		jest.spyOn(service as any, 'isReadableFile').mockResolvedValueOnce(true);
+		jest.spyOn(service as any, 'runSshCommand').mockResolvedValueOnce({
+			stdout: [
+				'DB_NAME=wordpress',
+				'DB_USER=forge',
+				'WP_HOME="https://acme.example"',
+			].join('\n'),
+			stderr: '',
+		});
 
 		const result = await service.readEnv(11, '/var/www/site');
 		expect(result.success).toBe(true);
 		expect(result.env.db_name).toBe('wordpress');
+		expect(result.env.wp_home).toBe('https://acme.example');
+		expect((service as any).runSshCommand).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.stringContaining('/var/www/.env'),
+			'/tmp/id_rsa',
+		);
+	});
+
+	it('returns explicit error when no env file exists in candidate paths', async () => {
+		prisma.$queryRaw.mockResolvedValueOnce([
+			{
+				id: 12,
+				name: 'Env Missing',
+				hostname: 'env-missing.test',
+				provider: 'custom',
+				status: 'offline',
+				ssh_user: 'root',
+				ssh_port: 22,
+				ssh_key_path: '/tmp/id_rsa',
+				ssh_password: null,
+				ssh_private_key: null,
+				panel_type: 'none',
+				panel_url: null,
+				panel_username: null,
+				panel_password: null,
+				panel_verified: false,
+				last_health_check: null,
+				owner_id: 1,
+				wp_root_paths: null,
+				uploads_path: null,
+				tags: null,
+				created_at: new Date(),
+				updated_at: new Date(),
+			},
+		]);
+		jest.spyOn(service as any, 'isReadableFile').mockResolvedValueOnce(true);
+		jest.spyOn(service as any, 'runSshCommand').mockResolvedValueOnce({
+			stdout: '__FORGE_ENV_NOT_FOUND__\n',
+			stderr: '',
+		});
+
+		await expect(service.readEnv(12, '/var/www/site')).rejects.toMatchObject({
+			response: expect.objectContaining({
+				detail: expect.stringContaining(
+					'No .env file found in expected locations',
+				),
+			}),
+		});
+	});
+
+	it('surfaces SSH stderr detail when command execution fails', async () => {
+		prisma.$queryRaw.mockResolvedValueOnce([
+			{
+				id: 13,
+				name: 'Env Error',
+				hostname: 'env-error.test',
+				provider: 'custom',
+				status: 'offline',
+				ssh_user: 'root',
+				ssh_port: 22,
+				ssh_key_path: '/tmp/id_rsa',
+				ssh_password: null,
+				ssh_private_key: null,
+				panel_type: 'none',
+				panel_url: null,
+				panel_username: null,
+				panel_password: null,
+				panel_verified: false,
+				last_health_check: null,
+				owner_id: 1,
+				wp_root_paths: null,
+				uploads_path: null,
+				tags: null,
+				created_at: new Date(),
+				updated_at: new Date(),
+			},
+		]);
+		jest.spyOn(service as any, 'isReadableFile').mockResolvedValueOnce(true);
+		const sshError = Object.assign(new Error('Command failed'), {
+			code: 255,
+			stderr: 'Permission denied (publickey).',
+		});
+		jest.spyOn(service as any, 'runSshCommand').mockRejectedValueOnce(sshError);
+
+		await expect(service.readEnv(13, '/var/www/site')).rejects.toMatchObject({
+			response: expect.objectContaining({
+				detail: expect.stringContaining(
+					'stderr=Permission denied (publickey).',
+				),
+			}),
+		});
 	});
 });

@@ -27,6 +27,11 @@ export class DomainsController {
 		return this.domainsService.getDomainStats();
 	}
 
+	@Get('maintenance/status')
+	getMaintenanceStatus() {
+		return this.domainsService.getRunnerSnapshot();
+	}
+
 	@Get()
 	async listDomains(
 		@Query('status') status?: string,

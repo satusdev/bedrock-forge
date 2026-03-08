@@ -13,6 +13,7 @@ describe('SubscriptionsController', () => {
 			| 'listSubscriptions'
 			| 'listExpiring'
 			| 'getStatsSummary'
+			| 'getRunnerSnapshot'
 			| 'getSubscription'
 			| 'createSubscription'
 			| 'updateSubscription'
@@ -33,6 +34,7 @@ describe('SubscriptionsController', () => {
 			listSubscriptions: jest.fn(),
 			listExpiring: jest.fn(),
 			getStatsSummary: jest.fn(),
+			getRunnerSnapshot: jest.fn(),
 			getSubscription: jest.fn(),
 			createSubscription: jest.fn(),
 			updateSubscription: jest.fn(),
@@ -53,6 +55,7 @@ describe('SubscriptionsController', () => {
 		} as never);
 		service.listExpiring.mockResolvedValueOnce({ count: 0 } as never);
 		service.getStatsSummary.mockResolvedValueOnce({ total_active: 0 } as never);
+		service.getRunnerSnapshot.mockReturnValueOnce({ runs_total: 1 } as never);
 		service.getSubscription.mockResolvedValueOnce({ id: 1 } as never);
 		service.createSubscription.mockResolvedValueOnce({
 			status: 'success',
@@ -73,6 +76,7 @@ describe('SubscriptionsController', () => {
 		await controller.listSubscriptions('hosting', 'active', '2', '10', '0');
 		await controller.listExpiring('30');
 		await controller.getStatsSummary();
+		controller.getMaintenanceStatus();
 		await controller.getSubscription(1);
 		await controller.createSubscription({
 			client_id: 2,
@@ -94,6 +98,7 @@ describe('SubscriptionsController', () => {
 		});
 		expect(service.listExpiring).toHaveBeenCalledWith(30, undefined);
 		expect(service.getStatsSummary).toHaveBeenCalledWith(undefined);
+		expect(service.getRunnerSnapshot).toHaveBeenCalled();
 		expect(service.getSubscription).toHaveBeenCalledWith(1, undefined);
 		expect(service.createSubscription).toHaveBeenCalledWith(
 			{

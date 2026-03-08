@@ -9,8 +9,13 @@ import * as jwt from 'jsonwebtoken';
 import { ClientAuthService } from './client-auth.service';
 
 type MockPrisma = {
-	$queryRaw: jest.Mock;
-	$executeRaw: jest.Mock;
+	client_users: {
+		findUnique: jest.Mock;
+		update: jest.Mock;
+	};
+	clients: {
+		findUnique: jest.Mock;
+	};
 };
 
 type MockConfig = {
@@ -26,8 +31,13 @@ describe('ClientAuthService', () => {
 
 	beforeEach(() => {
 		prisma = {
-			$queryRaw: jest.fn(),
-			$executeRaw: jest.fn(),
+			client_users: {
+				findUnique: jest.fn(),
+				update: jest.fn(),
+			},
+			clients: {
+				findUnique: jest.fn(),
+			},
 		};
 		config = {
 			get: jest.fn((key: string, defaultValue?: string | number) => {
@@ -49,27 +59,22 @@ describe('ClientAuthService', () => {
 
 	it('logs in a client user and returns tokens', async () => {
 		const passwordHash = await bcrypt.hash('ClientPassword123!', 10);
-		prisma.$queryRaw
-			.mockResolvedValueOnce([
-				{
-					id: 11,
-					email: 'client@example.com',
-					password_hash: passwordHash,
-					full_name: 'Client User',
-					client_id: 501,
-					is_active: true,
-					role: 'owner',
-					last_login_at: null,
-				},
-			])
-			.mockResolvedValueOnce([
-				{
-					id: 501,
-					name: 'Acme Corp',
-					company: 'Acme',
-				},
-			]);
-		prisma.$executeRaw.mockResolvedValueOnce(1);
+		prisma.client_users.findUnique.mockResolvedValueOnce({
+			id: 11,
+			email: 'client@example.com',
+			password_hash: passwordHash,
+			full_name: 'Client User',
+			client_id: 501,
+			is_active: true,
+			role: 'owner',
+			last_login_at: null,
+		});
+		prisma.clients.findUnique.mockResolvedValueOnce({
+			id: 501,
+			name: 'Acme Corp',
+			company: 'Acme',
+		});
+		prisma.client_users.update.mockResolvedValueOnce({ id: 11 });
 
 		const result = await service.login({
 			email: 'client@example.com',
@@ -80,11 +85,11 @@ describe('ClientAuthService', () => {
 		expect(result.client_id).toBe(501);
 		expect(result.client_name).toBe('Acme Corp');
 		expect(jwt.verify(result.access_token, jwtSecret)).toBeTruthy();
-		expect(prisma.$executeRaw).toHaveBeenCalled();
+		expect(prisma.client_users.update).toHaveBeenCalled();
 	});
 
 	it('rejects login with bad credentials', async () => {
-		prisma.$queryRaw.mockResolvedValueOnce([]);
+		prisma.client_users.findUnique.mockResolvedValueOnce(null);
 
 		await expect(
 			service.login({ email: 'nobody@example.com', password: 'Nope123!' }),
@@ -93,18 +98,16 @@ describe('ClientAuthService', () => {
 
 	it('rejects login when user is inactive', async () => {
 		const passwordHash = await bcrypt.hash('ClientPassword123!', 10);
-		prisma.$queryRaw.mockResolvedValueOnce([
-			{
-				id: 11,
-				email: 'client@example.com',
-				password_hash: passwordHash,
-				full_name: 'Client User',
-				client_id: 501,
-				is_active: false,
-				role: 'owner',
-				last_login_at: null,
-			},
-		]);
+		prisma.client_users.findUnique.mockResolvedValueOnce({
+			id: 11,
+			email: 'client@example.com',
+			password_hash: passwordHash,
+			full_name: 'Client User',
+			client_id: 501,
+			is_active: false,
+			role: 'owner',
+			last_login_at: null,
+		});
 
 		await expect(
 			service.login({
@@ -116,18 +119,16 @@ describe('ClientAuthService', () => {
 
 	it('rejects login when password is invalid', async () => {
 		const passwordHash = await bcrypt.hash('ClientPassword123!', 10);
-		prisma.$queryRaw.mockResolvedValueOnce([
-			{
-				id: 11,
-				email: 'client@example.com',
-				password_hash: passwordHash,
-				full_name: 'Client User',
-				client_id: 501,
-				is_active: true,
-				role: 'owner',
-				last_login_at: null,
-			},
-		]);
+		prisma.client_users.findUnique.mockResolvedValueOnce({
+			id: 11,
+			email: 'client@example.com',
+			password_hash: passwordHash,
+			full_name: 'Client User',
+			client_id: 501,
+			is_active: true,
+			role: 'owner',
+			last_login_at: null,
+		});
 
 		await expect(
 			service.login({ email: 'client@example.com', password: 'WrongPassword' }),
@@ -136,20 +137,17 @@ describe('ClientAuthService', () => {
 
 	it('rejects login when client account does not exist', async () => {
 		const passwordHash = await bcrypt.hash('ClientPassword123!', 10);
-		prisma.$queryRaw
-			.mockResolvedValueOnce([
-				{
-					id: 11,
-					email: 'client@example.com',
-					password_hash: passwordHash,
-					full_name: 'Client User',
-					client_id: 501,
-					is_active: true,
-					role: 'owner',
-					last_login_at: null,
-				},
-			])
-			.mockResolvedValueOnce([]);
+		prisma.client_users.findUnique.mockResolvedValueOnce({
+			id: 11,
+			email: 'client@example.com',
+			password_hash: passwordHash,
+			full_name: 'Client User',
+			client_id: 501,
+			is_active: true,
+			role: 'owner',
+			last_login_at: null,
+		});
+		prisma.clients.findUnique.mockResolvedValueOnce(null);
 
 		await expect(
 			service.login({
@@ -165,26 +163,21 @@ describe('ClientAuthService', () => {
 			jwtSecret,
 			{ expiresIn: '1h' },
 		);
-		prisma.$queryRaw
-			.mockResolvedValueOnce([
-				{
-					id: 11,
-					email: 'client@example.com',
-					password_hash: 'hash',
-					full_name: 'Client User',
-					client_id: 501,
-					is_active: true,
-					role: 'owner',
-					last_login_at: null,
-				},
-			])
-			.mockResolvedValueOnce([
-				{
-					id: 501,
-					name: 'Acme Corp',
-					company: 'Acme',
-				},
-			]);
+		prisma.client_users.findUnique.mockResolvedValueOnce({
+			id: 11,
+			email: 'client@example.com',
+			password_hash: 'hash',
+			full_name: 'Client User',
+			client_id: 501,
+			is_active: true,
+			role: 'owner',
+			last_login_at: null,
+		});
+		prisma.clients.findUnique.mockResolvedValueOnce({
+			id: 501,
+			name: 'Acme Corp',
+			company: 'Acme',
+		});
 
 		const result = await service.me(token);
 
@@ -210,7 +203,7 @@ describe('ClientAuthService', () => {
 			jwtSecret,
 			{ expiresIn: '1h' },
 		);
-		prisma.$queryRaw.mockResolvedValueOnce([]);
+		prisma.client_users.findUnique.mockResolvedValueOnce(null);
 
 		await expect(service.refresh(token)).rejects.toBeInstanceOf(
 			UnauthorizedException,
@@ -223,26 +216,21 @@ describe('ClientAuthService', () => {
 			jwtSecret,
 			{ expiresIn: '1h' },
 		);
-		prisma.$queryRaw
-			.mockResolvedValueOnce([
-				{
-					id: 11,
-					email: 'client@example.com',
-					password_hash: 'hash',
-					full_name: 'Client User',
-					client_id: 501,
-					is_active: true,
-					role: 'owner',
-					last_login_at: null,
-				},
-			])
-			.mockResolvedValueOnce([
-				{
-					id: 501,
-					name: 'Acme Corp',
-					company: 'Acme',
-				},
-			]);
+		prisma.client_users.findUnique.mockResolvedValueOnce({
+			id: 11,
+			email: 'client@example.com',
+			password_hash: 'hash',
+			full_name: 'Client User',
+			client_id: 501,
+			is_active: true,
+			role: 'owner',
+			last_login_at: null,
+		});
+		prisma.clients.findUnique.mockResolvedValueOnce({
+			id: 501,
+			name: 'Acme Corp',
+			company: 'Acme',
+		});
 
 		const result = await service.refresh(token);
 

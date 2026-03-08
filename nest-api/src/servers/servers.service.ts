@@ -3,9 +3,14 @@ import {
 	Injectable,
 	NotFoundException,
 } from '@nestjs/common';
+import { execFile } from 'child_process';
+import { promises as fs } from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { ServerCreateDto } from './dto/server-create.dto';
 import { ServerUpdateDto } from './dto/server-update.dto';
+import { promisify } from 'util';
 
 type DbServerRow = {
 	id: number;
@@ -36,6 +41,8 @@ type DbServerRow = {
 export class ServersService {
 	constructor(private readonly prisma: PrismaService) {}
 
+	private readonly execFileAsync = promisify(execFile);
+
 	private readonly fallbackOwnerId = 1;
 
 	private resolveOwnerId(ownerId?: number) {
@@ -54,6 +61,136 @@ export class ServersService {
 			return parsed.filter((item): item is string => typeof item === 'string');
 		} catch {
 			return null;
+		}
+	}
+
+	private normalizeScanPath(basePath?: string) {
+		if (!basePath || basePath.trim().length === 0) {
+			return '/home';
+		}
+		const trimmed = basePath.trim();
+		if (!trimmed.startsWith('/')) {
+			throw new BadRequestException({
+				detail: 'base_path must be an absolute path',
+			});
+		}
+		return trimmed;
+	}
+
+	private normalizeMaxDepth(maxDepth?: number) {
+		if (!Number.isFinite(maxDepth)) {
+			return 4;
+		}
+		return Math.max(1, Math.min(6, Math.trunc(maxDepth ?? 4)));
+	}
+
+	private shellQuote(value: string) {
+		return `'${value.replace(/'/g, `'"'"'`)}'`;
+	}
+
+	private normalizePath(input: string) {
+		return input.replace(/\/{2,}/g, '/').replace(/\/$/, '') || '/';
+	}
+
+	private detectDomainFromPath(sitePath: string) {
+		const parts = sitePath.split('/').filter(Boolean);
+		for (const part of parts) {
+			if (part.includes('.') && part.length > 3) {
+				return part;
+			}
+		}
+		return null;
+	}
+
+	private expandHomePath(input: string | null) {
+		if (!input) {
+			return null;
+		}
+		if (!input.startsWith('~/')) {
+			return input;
+		}
+		return path.join(os.homedir(), input.slice(2));
+	}
+
+	private async runSshCommand(
+		server: DbServerRow,
+		command: string,
+		privateKeyPath?: string,
+	) {
+		const args = ['-p', String(server.ssh_port ?? 22), '-o', 'BatchMode=yes'];
+		args.push('-o', 'StrictHostKeyChecking=no');
+		args.push('-o', 'UserKnownHostsFile=/dev/null');
+		if (privateKeyPath) {
+			args.push('-i', privateKeyPath);
+		}
+		const target = `${server.ssh_user || 'root'}@${server.hostname}`;
+		args.push(target, command);
+		return this.execFileAsync('ssh', args, {
+			timeout: 120000,
+			maxBuffer: 1024 * 1024 * 2,
+		});
+	}
+
+	private summarizeSshError(error: unknown) {
+		if (!(error instanceof Error)) {
+			return 'Unknown SSH error';
+		}
+
+		const execError = error as Error & {
+			code?: number | string;
+			stderr?: string;
+			stdout?: string;
+			signal?: string;
+		};
+		const parts: string[] = [];
+
+		if (typeof execError.code !== 'undefined') {
+			parts.push(`code=${String(execError.code)}`);
+		}
+		if (execError.signal) {
+			parts.push(`signal=${execError.signal}`);
+		}
+
+		const stderr = typeof execError.stderr === 'string' ? execError.stderr : '';
+		const stdout = typeof execError.stdout === 'string' ? execError.stdout : '';
+		const stderrTail = stderr.trim().split('\n').slice(-3).join(' | ');
+		const stdoutTail = stdout.trim().split('\n').slice(-2).join(' | ');
+
+		if (stderrTail) {
+			parts.push(`stderr=${stderrTail}`);
+		} else if (stdoutTail) {
+			parts.push(`stdout=${stdoutTail}`);
+		}
+
+		if (parts.length === 0) {
+			parts.push(error.message);
+		}
+
+		return parts.join('; ');
+	}
+
+	private async getSystemPrivateKey() {
+		const rows = await this.prisma.$queryRaw<
+			{ encrypted_value: string | null; value: string | null }[]
+		>`
+			SELECT encrypted_value, value
+			FROM app_settings
+			WHERE key = ${'system.ssh.private_key'}
+			LIMIT 1
+		`;
+		const row = rows[0];
+		if (!row) {
+			return null;
+		}
+		return row.encrypted_value ?? row.value;
+	}
+
+	private async isReadableFile(filePath: string) {
+		try {
+			await fs.access(filePath);
+			return true;
+		} catch {
+			return false;
 		}
 	}
 
@@ -375,16 +512,150 @@ export class ServersService {
 		};
 	}
 
-	async scanSites(serverId: number, basePath = '/var/www', ownerId?: number) {
-		const server = await this.getServer(serverId, ownerId);
-		return {
-			success: true,
-			message: `Scan completed on ${server.name}`,
-			sites: [],
-			server_id: server.id,
-			server_name: server.name,
-			base_path: basePath,
-		};
+	async scanSites(
+		serverId: number,
+		basePath = '/home',
+		maxDepth = 4,
+		ownerId?: number,
+	) {
+		const existing = await this.getServerRow(serverId, ownerId);
+		const scanPath = this.normalizeScanPath(basePath);
+		const depth = this.normalizeMaxDepth(maxDepth);
+
+		let keyFilePath: string | undefined;
+		let tempDirectory: string | undefined;
+		try {
+			if (existing.ssh_key_path) {
+				const expandedPath = this.expandHomePath(existing.ssh_key_path);
+				if (expandedPath && (await this.isReadableFile(expandedPath))) {
+					keyFilePath = expandedPath;
+				}
+			}
+
+			if (!keyFilePath) {
+				const inlinePrivateKeyRaw =
+					existing.ssh_private_key && existing.ssh_private_key.trim().length > 0
+						? existing.ssh_private_key
+						: await this.getSystemPrivateKey();
+				const inlinePrivateKey = inlinePrivateKeyRaw
+					? inlinePrivateKeyRaw.replace(/\r\n/g, '\n').replace(/\\n/g, '\n')
+					: null;
+
+				if (inlinePrivateKey && inlinePrivateKey.trim().length > 0) {
+					tempDirectory = await fs.mkdtemp(
+						path.join(os.tmpdir(), 'forge-ssh-'),
+					);
+					keyFilePath = path.join(tempDirectory, 'id_rsa');
+					await fs.writeFile(keyFilePath, `${inlinePrivateKey.trim()}\n`, {
+						encoding: 'utf-8',
+						mode: 0o600,
+					});
+				}
+			}
+
+			if (!keyFilePath && existing.ssh_password) {
+				return {
+					success: false,
+					message:
+						'SSH password auth is configured, but non-interactive scan requires SSH key auth in Nest API.',
+					sites: [],
+					server_id: existing.id,
+					server_name: existing.name,
+					base_path: scanPath,
+					max_depth: depth,
+				};
+			}
+
+			const findCommand = `find ${this.shellQuote(scanPath)} -maxdepth ${depth} -type f -name 'wp-config.php' 2>/dev/null || true`;
+			const findResult = await this.runSshCommand(
+				existing,
+				findCommand,
+				keyFilePath,
+			);
+			const lines = (findResult.stdout || '')
+				.split('\n')
+				.map(entry => entry.trim())
+				.filter(Boolean);
+
+			const projectLinks = await this.prisma.$queryRaw<{ wp_path: string }[]>`
+				SELECT wp_path
+				FROM project_servers
+				WHERE server_id = ${existing.id}
+			`;
+			const importedPaths = new Set(
+				projectLinks.map(row => this.normalizePath(row.wp_path)),
+			);
+
+			const discovered: Array<Record<string, unknown>> = [];
+			for (const configPath of lines) {
+				const wpDir = this.normalizePath(
+					configPath.replace(/\/wp-config\.php$/, ''),
+				);
+				let isBedrock = false;
+				let wpPath = wpDir;
+
+				const bedrockCheckCommand = `(test -d ${this.shellQuote(`${wpDir}/web/app`)} || test -d ${this.shellQuote(`${wpDir}/web/wp`)}) && echo bedrock || echo standard`;
+				const bedrockResult = await this.runSshCommand(
+					existing,
+					bedrockCheckCommand,
+					keyFilePath,
+				);
+				if ((bedrockResult.stdout || '').toLowerCase().includes('bedrock')) {
+					isBedrock = true;
+					wpPath = wpDir;
+				} else if (wpDir.includes('/web/app')) {
+					isBedrock = true;
+					wpPath = this.normalizePath(wpDir.split('/web/app')[0] || wpDir);
+				}
+
+				const normalizedWpPath = this.normalizePath(wpPath);
+				discovered.push({
+					path: wpDir,
+					wp_config_path: configPath,
+					is_bedrock: isBedrock,
+					wp_path: normalizedWpPath,
+					domain: this.detectDomainFromPath(wpDir),
+					imported:
+						importedPaths.has(wpDir) || importedPaths.has(normalizedWpPath),
+				});
+			}
+
+			await this.prisma.$executeRaw`
+				UPDATE servers
+				SET wp_root_paths = ${JSON.stringify(
+					discovered.map(site => String(site.path ?? '')),
+				)}, updated_at = NOW()
+				WHERE id = ${existing.id}
+			`;
+
+			return {
+				success: true,
+				message: `Scan completed on ${existing.name}`,
+				sites: discovered,
+				server_id: existing.id,
+				server_name: existing.name,
+				base_path: scanPath,
+				max_depth: depth,
+			};
+		} catch (error) {
+			const detail =
+				error instanceof Error
+					? error.message.slice(0, 300)
+					: 'Unknown scan error';
+			return {
+				success: false,
+				message: detail,
+				sites: [],
+				server_id: existing.id,
+				server_name: existing.name,
+				base_path: scanPath,
+				max_depth: depth,
+			};
+		} finally {
+			if (tempDirectory) {
+				await fs.rm(tempDirectory, { recursive: true, force: true });
+			}
+		}
 	}
 
 	async scanDirectories(
@@ -472,29 +743,105 @@ export class ServersService {
 		return result;
 	}
 
-	async readEnv(serverId: number, path: string, ownerId?: number) {
-		const server = await this.getServer(serverId, ownerId);
-		if (!path || path.trim().length === 0) {
+	async readEnv(serverId: number, targetDirectory: string, ownerId?: number) {
+		const server = await this.getServerRow(serverId, ownerId);
+		if (!targetDirectory || targetDirectory.trim().length === 0) {
 			throw new BadRequestException({ detail: 'Path is required' });
 		}
 
-		const placeholder = [
-			`# Simulated .env from ${server.hostname}`,
-			'DB_NAME=wordpress',
-			'DB_USER=wp_user',
-			'DB_PASSWORD=secret',
-			'DB_HOST=localhost',
-			'WP_HOME=https://example.test',
-			'WP_SITEURL=${WP_HOME}/wp',
-			'WP_ENV=production',
-			'TABLE_PREFIX=wp_',
-		].join('\n');
+		const targetPath = this.normalizeScanPath(targetDirectory);
+		let keyFilePath: string | undefined;
+		let tempDirectory: string | undefined;
+		try {
+			if (server.ssh_key_path) {
+				const expandedPath = this.expandHomePath(server.ssh_key_path);
+				if (expandedPath && (await this.isReadableFile(expandedPath))) {
+					keyFilePath = expandedPath;
+				}
+			}
 
-		return {
-			success: true,
-			server_id: server.id,
-			path,
-			env: this.parseBedrockEnv(placeholder),
-		};
+			if (!keyFilePath) {
+				const inlinePrivateKeyRaw =
+					server.ssh_private_key && server.ssh_private_key.trim().length > 0
+						? server.ssh_private_key
+						: await this.getSystemPrivateKey();
+				const inlinePrivateKey = inlinePrivateKeyRaw
+					? inlinePrivateKeyRaw.replace(/\r\n/g, '\n').replace(/\\n/g, '\n')
+					: null;
+
+				if (inlinePrivateKey && inlinePrivateKey.trim().length > 0) {
+					tempDirectory = await fs.mkdtemp(
+						path.join(os.tmpdir(), 'forge-ssh-'),
+					);
+					keyFilePath = path.join(tempDirectory, 'id_rsa');
+					await fs.writeFile(keyFilePath, `${inlinePrivateKey.trim()}\n`, {
+						encoding: 'utf-8',
+						mode: 0o600,
+					});
+				}
+			}
+
+			if (!keyFilePath && server.ssh_password) {
+				throw new BadRequestException({
+					detail:
+						'SSH password auth is configured, but reading .env requires SSH key auth in Nest API.',
+				});
+			}
+
+			if (!keyFilePath) {
+				throw new BadRequestException({
+					detail: 'No readable SSH key is configured for this server',
+				});
+			}
+
+			const parentPath =
+				targetPath === '/' ? '/' : targetPath.replace(/\/[^/]+$/, '') || '/';
+			const candidateEnvPaths = Array.from(
+				new Set([
+					`${targetPath}/.env`,
+					`${targetPath}/web/.env`,
+					`${parentPath}/.env`,
+				]),
+			);
+
+			const readCommand = [
+				...candidateEnvPaths.map(
+					candidatePath =>
+						`if [ -f ${this.shellQuote(candidatePath)} ]; then cat ${this.shellQuote(candidatePath)}; exit 0; fi`,
+				),
+				`echo ${this.shellQuote('__FORGE_ENV_NOT_FOUND__')}`,
+			].join(' ; ');
+
+			const readResult = await this.runSshCommand(
+				server,
+				readCommand,
+				keyFilePath,
+			);
+			if ((readResult.stdout || '').includes('__FORGE_ENV_NOT_FOUND__')) {
+				throw new BadRequestException({
+					detail: `No .env file found in expected locations: ${candidateEnvPaths.join(', ')}`,
+				});
+			}
+			const parsedEnv = this.parseBedrockEnv(readResult.stdout || '');
+
+			return {
+				success: true,
+				server_id: server.id,
+				path: targetPath,
+				env: parsedEnv,
+			};
+		} catch (error) {
+			if (error instanceof BadRequestException) {
+				throw error;
+			}
+			const detail = this.summarizeSshError(error).slice(0, 500);
+			throw new BadRequestException({
+				detail: `Failed to read .env: ${detail}`,
+			});
+		} finally {
+			if (tempDirectory) {
+				await fs.rm(tempDirectory, { recursive: true, force: true });
+			}
+		}
 	}
 }

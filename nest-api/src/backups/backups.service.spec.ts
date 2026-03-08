@@ -1,21 +1,52 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+	BadRequestException,
+	InternalServerErrorException,
+	NotFoundException,
+} from '@nestjs/common';
 import { BackupsService } from './backups.service';
 
 type MockPrisma = {
 	$queryRaw: jest.Mock;
 	$executeRaw: jest.Mock;
+	$transaction: jest.Mock;
+	backups: {
+		findMany: jest.Mock;
+		updateMany: jest.Mock;
+		update: jest.Mock;
+		deleteMany: jest.Mock;
+	};
+};
+
+type MockWebsocketCompatService = {
+	broadcast: jest.Mock;
 };
 
 describe('BackupsService', () => {
 	let prisma: MockPrisma;
 	let service: BackupsService;
+	let websocketCompatService: MockWebsocketCompatService;
 
 	beforeEach(() => {
 		prisma = {
 			$queryRaw: jest.fn(),
 			$executeRaw: jest.fn(),
+			$transaction: jest.fn(async callback =>
+				callback(prisma as unknown as any),
+			),
+			backups: {
+				findMany: jest.fn(),
+				updateMany: jest.fn(),
+				update: jest.fn(),
+				deleteMany: jest.fn(),
+			},
 		};
-		service = new BackupsService(prisma as unknown as any);
+		websocketCompatService = {
+			broadcast: jest.fn(),
+		};
+		service = new BackupsService(
+			prisma as unknown as any,
+			websocketCompatService as unknown as any,
+		);
 	});
 
 	it('lists backups with normalized fields', async () => {
@@ -57,6 +88,88 @@ describe('BackupsService', () => {
 
 		expect(result.status).toBe('pending');
 		expect(result.backup_id).toBe(5);
+	});
+
+	it('marks stale running backups as failed', async () => {
+		prisma.backups.findMany.mockResolvedValueOnce([
+			{ id: 21, error_message: null, completed_at: null },
+			{ id: 22, error_message: null, completed_at: null },
+		]);
+		prisma.backups.update.mockResolvedValue({ id: 21 });
+
+		const result = await service.markStaleRunningBackupsFailed(180, 2);
+		expect(result).toEqual([{ id: 21 }, { id: 22 }]);
+		expect(prisma.backups.update).toHaveBeenCalledTimes(2);
+	});
+
+	it('prunes terminal backups by retention policy', async () => {
+		prisma.backups.findMany.mockResolvedValueOnce([
+			{
+				id: 51,
+				project_id: 1,
+				storage_type: 'local',
+				storage_path: '/tmp/forge-backups/a.tar.gz',
+			},
+			{
+				id: 52,
+				project_id: 1,
+				storage_type: 'google_drive',
+				storage_path: '/tmp/forge-backups/b.tar.gz',
+			},
+			{
+				id: 53,
+				project_id: 1,
+				storage_type: 'local',
+				storage_path: '/tmp/forge-backups/c.tar.gz',
+			},
+		]);
+		prisma.backups.deleteMany.mockResolvedValueOnce({ count: 2 });
+
+		const result = await service.pruneTerminalBackups(45, 1, 2);
+
+		expect(result).toHaveLength(2);
+		expect(result[0]?.id).toBe(52);
+		expect(prisma.backups.deleteMany).toHaveBeenCalledTimes(1);
+	});
+
+	it('simulates local artifact cleanup in dry-run mode with path guardrails', async () => {
+		const result = await service.cleanupPrunedLocalArtifacts(
+			[
+				{
+					id: 1,
+					storage_type: 'local',
+					storage_path: '/tmp/forge-backups/a.tar.gz',
+				},
+				{ id: 2, storage_type: 'local', storage_path: '/etc/passwd' },
+				{
+					id: 3,
+					storage_type: 'google_drive',
+					storage_path: '/tmp/forge-backups/c.tar.gz',
+				},
+			],
+			true,
+		);
+
+		expect(result.dry_run).toBe(true);
+		expect(result.eligible).toBe(1);
+		expect(result.deleted).toBe(1);
+		expect(result.skipped_unsafe).toBe(1);
+	});
+
+	it('records and exposes maintenance snapshot counters', () => {
+		service.recordMaintenanceSnapshot({
+			stale_marked: 2,
+			pruned: 5,
+			cleanup_deleted: 3,
+			cleanup_failed: 1,
+			error: null,
+		});
+
+		const snapshot = service.getMaintenanceSnapshot();
+		expect(snapshot.runs_total).toBe(1);
+		expect(snapshot.last_run_at).toBeTruthy();
+		expect(snapshot.last_outcome?.stale_marked).toBe(2);
+		expect(snapshot.last_outcome?.pruned).toBe(5);
 	});
 
 	it('rejects create when project missing', async () => {
@@ -189,7 +302,7 @@ describe('BackupsService', () => {
 			database: true,
 			files: false,
 		});
-		expect(result.status).toBe('pending');
+		expect(result.status).toBe('completed');
 		expect(result.options.files).toBe(false);
 	});
 
@@ -208,6 +321,20 @@ describe('BackupsService', () => {
 		expect(result.total_requested).toBe(2);
 		expect(result.total_success).toBe(1);
 		expect(result.total_failed).toBe(1);
+
+		const insertCall = prisma.$queryRaw.mock.calls.find(
+			call =>
+				Array.isArray(call[0]) &&
+				(call[0] as unknown as TemplateStringsArray)
+					.join('')
+					.includes('INSERT INTO backups'),
+		);
+		const insertSql = (
+			insertCall?.[0] as unknown as TemplateStringsArray | undefined
+		)?.join('');
+		expect(insertSql).toContain('::backuptype');
+		expect(insertSql).toContain('::backupstoragetype');
+		expect(insertSql).toContain('::backupstatus');
 	});
 
 	it('deletes backups in bulk with force handling', async () => {
@@ -256,5 +383,90 @@ describe('BackupsService', () => {
 		expect(scheduled.schedule_type).toBe('daily');
 		expect(fetched.project_id).toBe(1);
 		expect(stats.total_backups).toBe(4);
+	});
+
+	it('claims pending backups for runner execution', async () => {
+		prisma.backups.findMany.mockResolvedValueOnce([
+			{ id: 3, created_by_id: 2 },
+		]);
+		prisma.backups.updateMany.mockResolvedValueOnce({ count: 1 });
+
+		const result = await service.claimPendingBackups(5);
+
+		expect(result).toEqual([{ id: 3, created_by_id: 2 }]);
+		expect(prisma.$transaction).toHaveBeenCalled();
+		expect(prisma.backups.updateMany).toHaveBeenCalled();
+	});
+
+	it('marks backup failed when run setup fails after runner claim', async () => {
+		jest.spyOn(service, 'getBackup').mockResolvedValueOnce({
+			id: 12,
+			project_id: 10,
+			name: 'Backup 12',
+			backup_type: 'full',
+			storage_type: 'local',
+			status: 'running',
+			project_server_id: 1,
+		} as unknown as any);
+		jest
+			.spyOn(service as any, 'getProjectBackupContext')
+			.mockRejectedValueOnce(new Error('context resolution failed'));
+		prisma.$executeRaw.mockResolvedValue(1);
+
+		await expect(service.runBackup(12, undefined, 1)).rejects.toBeInstanceOf(
+			InternalServerErrorException,
+		);
+		expect(prisma.$executeRaw.mock.calls.length).toBeGreaterThanOrEqual(2);
+	});
+
+	it('uploads archive to google drive backend and completes backup', async () => {
+		jest.spyOn(service, 'getBackup').mockResolvedValueOnce({
+			id: 44,
+			project_id: 10,
+			name: 'Backup 44',
+			backup_type: 'full',
+			storage_type: 'google_drive',
+			status: 'running',
+			project_server_id: 1,
+		} as unknown as any);
+		jest
+			.spyOn(service as any, 'getProjectBackupContext')
+			.mockResolvedValueOnce({
+				projectId: 10,
+				projectName: 'Acme',
+				projectSlug: 'acme',
+				projectPath: '/srv/acme',
+				projectDriveBackupsFolder: 'WebDev/Projects/Acme/Backups',
+				environmentId: 1,
+				environmentName: 'staging',
+				environmentPath: '/srv/acme/staging',
+				environmentDriveBackupsFolder: null,
+			});
+		jest.spyOn(service as any, 'resolveBackupSource').mockResolvedValueOnce({
+			sourcePath: '/srv/acme/staging',
+			cleanupPath: null,
+			logMessage: 'Using source path /srv/acme/staging',
+		});
+		jest
+			.spyOn(service as any, 'createTarArchive')
+			.mockResolvedValueOnce({ sizeBytes: 2048 });
+		jest
+			.spyOn(service as any, 'assertConfiguredDriveRemote')
+			.mockResolvedValueOnce(undefined);
+		const uploadSpy = jest
+			.spyOn(service as any, 'uploadArchiveToDriveFolder')
+			.mockResolvedValueOnce({
+				driveFolderId: 'WebDev/Projects/Acme/Backups/staging/2026/03',
+				storageFileId: 'archive.tar.gz',
+				remoteTarget:
+					'gdrive:WebDev/Projects/Acme/Backups/staging/2026/03/archive.tar.gz',
+			});
+		prisma.$executeRaw.mockResolvedValue(1);
+
+		const result = await service.runBackup(44, undefined, 1);
+
+		expect(result.status).toBe('accepted');
+		expect(uploadSpy).toHaveBeenCalledTimes(1);
+		expect(prisma.$executeRaw.mock.calls.length).toBeGreaterThanOrEqual(4);
 	});
 });

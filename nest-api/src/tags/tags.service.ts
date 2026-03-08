@@ -124,87 +124,107 @@ export class TagsService {
 	}
 
 	private async ensureTagExists(tagId: number) {
-		const rows = await this.prisma.$queryRaw<{ id: number }[]>`
-			SELECT id
-			FROM tags
-			WHERE id = ${tagId}
-			LIMIT 1
-		`;
-		if (!rows[0]) {
+		const tag = await this.prisma.tags.findUnique({
+			where: { id: tagId },
+			select: { id: true },
+		});
+		if (!tag) {
 			throw new NotFoundException({ detail: 'Tag not found' });
 		}
 	}
 
 	private async ensureProjectExists(projectId: number, ownerId?: number) {
 		const resolvedOwnerId = this.resolveOwnerId(ownerId);
-		const rows = await this.prisma.$queryRaw<{ id: number }[]>`
-			SELECT id
-			FROM projects
-			WHERE id = ${projectId} AND owner_id = ${resolvedOwnerId}
-			LIMIT 1
-		`;
-		if (!rows[0]) {
+		const project = await this.prisma.projects.findFirst({
+			where: {
+				id: projectId,
+				owner_id: resolvedOwnerId,
+			},
+			select: { id: true },
+		});
+		if (!project) {
 			throw new NotFoundException({ detail: 'Project not found' });
 		}
 	}
 
 	private async ensureClientExists(clientId: number, ownerId?: number) {
 		const resolvedOwnerId = this.resolveOwnerId(ownerId);
-		const rows = await this.prisma.$queryRaw<{ id: number }[]>`
-			SELECT id
-			FROM clients
-			WHERE id = ${clientId} AND owner_id = ${resolvedOwnerId}
-			LIMIT 1
-		`;
-		if (!rows[0]) {
+		const client = await this.prisma.clients.findFirst({
+			where: {
+				id: clientId,
+				owner_id: resolvedOwnerId,
+			},
+			select: { id: true },
+		});
+		if (!client) {
 			throw new NotFoundException({ detail: 'Client not found' });
 		}
 	}
 
 	private async ensureServerExists(serverId: number, ownerId?: number) {
 		const resolvedOwnerId = this.resolveOwnerId(ownerId);
-		const rows = await this.prisma.$queryRaw<{ id: number }[]>`
-			SELECT id
-			FROM servers
-			WHERE id = ${serverId} AND owner_id = ${resolvedOwnerId}
-			LIMIT 1
-		`;
-		if (!rows[0]) {
+		const server = await this.prisma.servers.findFirst({
+			where: {
+				id: serverId,
+				owner_id: resolvedOwnerId,
+			},
+			select: { id: true },
+		});
+		if (!server) {
 			throw new NotFoundException({ detail: 'Server not found' });
 		}
 	}
 
 	private async recalculateUsageCounts() {
-		await this.prisma.$executeRaw`
-			UPDATE tags t
-			SET
-				usage_count =
-					COALESCE((SELECT COUNT(*)::int FROM project_tags pt WHERE pt.tag_id = t.id), 0)
-					+ COALESCE((SELECT COUNT(*)::int FROM server_tags st WHERE st.tag_id = t.id), 0)
-					+ COALESCE((SELECT COUNT(*)::int FROM client_tags ct WHERE ct.tag_id = t.id), 0),
-				updated_at = NOW()
-		`;
+		const tags = await this.prisma.tags.findMany({
+			select: {
+				id: true,
+				_count: {
+					select: {
+						project_tags: true,
+						server_tags: true,
+						client_tags: true,
+					},
+				},
+			},
+		});
+
+		if (tags.length === 0) {
+			return;
+		}
+
+		await this.prisma.$transaction(
+			tags.map(tag =>
+				this.prisma.tags.update({
+					where: { id: tag.id },
+					data: {
+						usage_count:
+							tag._count.project_tags +
+							tag._count.server_tags +
+							tag._count.client_tags,
+						updated_at: new Date(),
+					},
+				}),
+			),
+		);
 	}
 
 	private async resolveTagIds(tagIds: number[]): Promise<number[]> {
 		const uniqueIds = Array.from(
 			new Set(tagIds.filter(tagId => Number.isInteger(tagId) && tagId > 0)),
 		);
-
-		const validIds: number[] = [];
-		for (const tagId of uniqueIds) {
-			const rows = await this.prisma.$queryRaw<{ id: number }[]>`
-				SELECT id
-				FROM tags
-				WHERE id = ${tagId}
-				LIMIT 1
-			`;
-			if (rows[0]) {
-				validIds.push(tagId);
-			}
+		if (uniqueIds.length === 0) {
+			return [];
 		}
 
-		return validIds;
+		const rows = await this.prisma.tags.findMany({
+			where: {
+				id: { in: uniqueIds },
+			},
+			select: { id: true },
+		});
+
+		return rows.map(row => row.id);
 	}
 
 	private async getLinkedTags(
@@ -214,60 +234,68 @@ export class TagsService {
 	) {
 		if (entity === 'project') {
 			await this.ensureProjectExists(id, ownerId);
-			return this.prisma.$queryRaw<DbTag[]>`
-				SELECT t.id, t.name, t.slug, t.color, t.icon, t.description, t.usage_count, t.created_at, t.updated_at
-				FROM tags t
-				INNER JOIN project_tags pt ON pt.tag_id = t.id
-				WHERE pt.project_id = ${id}
-				ORDER BY t.name ASC
-			`;
+			return this.prisma.tags.findMany({
+				where: {
+					project_tags: {
+						some: {
+							project_id: id,
+						},
+					},
+				},
+				orderBy: { name: 'asc' },
+			}) as Promise<DbTag[]>;
 		}
 
 		if (entity === 'client') {
 			await this.ensureClientExists(id, ownerId);
-			return this.prisma.$queryRaw<DbTag[]>`
-				SELECT t.id, t.name, t.slug, t.color, t.icon, t.description, t.usage_count, t.created_at, t.updated_at
-				FROM tags t
-				INNER JOIN client_tags ct ON ct.tag_id = t.id
-				WHERE ct.client_id = ${id}
-				ORDER BY t.name ASC
-			`;
+			return this.prisma.tags.findMany({
+				where: {
+					client_tags: {
+						some: {
+							client_id: id,
+						},
+					},
+				},
+				orderBy: { name: 'asc' },
+			}) as Promise<DbTag[]>;
 		}
 
 		await this.ensureServerExists(id, ownerId);
-		return this.prisma.$queryRaw<DbTag[]>`
-			SELECT t.id, t.name, t.slug, t.color, t.icon, t.description, t.usage_count, t.created_at, t.updated_at
-			FROM tags t
-			INNER JOIN server_tags st ON st.tag_id = t.id
-			WHERE st.server_id = ${id}
-			ORDER BY t.name ASC
-		`;
+		return this.prisma.tags.findMany({
+			where: {
+				server_tags: {
+					some: {
+						server_id: id,
+					},
+				},
+			},
+			orderBy: { name: 'asc' },
+		}) as Promise<DbTag[]>;
 	}
 
 	async listTags(search?: string) {
-		const searchTerm = search ? `%${search}%` : null;
-		return this.prisma.$queryRaw<DbTag[]>`
-			SELECT id, name, slug, color, icon, description, usage_count, created_at, updated_at
-			FROM tags
-			WHERE (${searchTerm}::text IS NULL OR name ILIKE ${searchTerm})
-			ORDER BY name ASC
-		`;
+		return this.prisma.tags.findMany({
+			where: search
+				? {
+						name: {
+							contains: search,
+							mode: 'insensitive',
+						},
+					}
+				: undefined,
+			orderBy: { name: 'asc' },
+		}) as Promise<DbTag[]>;
 	}
 
 	async getTag(tagId: number) {
-		const rows = await this.prisma.$queryRaw<DbTag[]>`
-			SELECT id, name, slug, color, icon, description, usage_count, created_at, updated_at
-			FROM tags
-			WHERE id = ${tagId}
-			LIMIT 1
-		`;
-
-		const tag = rows[0];
+		const tag = await this.prisma.tags.findUnique({
+			where: { id: tagId },
+		});
 		if (!tag) {
 			throw new NotFoundException({ detail: 'Tag not found' });
 		}
 
-		return tag;
+		return tag as DbTag;
 	}
 
 	async createTag(payload: TagCreateDto) {
@@ -278,32 +306,31 @@ export class TagsService {
 			throw new BadRequestException({ detail: 'Tag slug cannot be empty' });
 		}
 
-		const existingRows = await this.prisma.$queryRaw<{ id: number }[]>`
-			SELECT id
-			FROM tags
-			WHERE name = ${payload.name} OR slug = ${slug}
-			LIMIT 1
-		`;
-		if (existingRows[0]) {
+		const existing = await this.prisma.tags.findFirst({
+			where: {
+				OR: [{ name: payload.name }, { slug }],
+			},
+			select: { id: true },
+		});
+		if (existing) {
 			throw new BadRequestException({ detail: 'Tag already exists' });
 		}
 
-		const rows = await this.prisma.$queryRaw<{ id: number }[]>`
-			INSERT INTO tags (name, slug, color, icon, description, usage_count, created_at, updated_at)
-			VALUES (
-				${payload.name},
-				${slug},
-				${payload.color ?? '#6366f1'},
-				${payload.icon ?? null},
-				${payload.description ?? null},
-				${0},
-				NOW(),
-				NOW()
-			)
-			RETURNING id
-		`;
+		const created = await this.prisma.tags.create({
+			data: {
+				name: payload.name,
+				slug,
+				color: payload.color ?? '#6366f1',
+				icon: payload.icon ?? null,
+				description: payload.description ?? null,
+				usage_count: 0,
+				created_at: new Date(),
+				updated_at: new Date(),
+			},
+			select: { id: true },
+		});
 
-		const tagId = rows[0]?.id;
+		const tagId = created.id;
 		if (!tagId) {
 			throw new NotFoundException({ detail: 'Failed to create tag' });
 		}
@@ -326,66 +353,61 @@ export class TagsService {
 			throw new BadRequestException({ detail: 'Tag slug cannot be empty' });
 		}
 
-		const duplicateRows = await this.prisma.$queryRaw<{ id: number }[]>`
-			SELECT id
-			FROM tags
-			WHERE (name = ${nextName} OR slug = ${nextSlug}) AND id <> ${tagId}
-			LIMIT 1
-		`;
-		if (duplicateRows[0]) {
+		const duplicate = await this.prisma.tags.findFirst({
+			where: {
+				id: { not: tagId },
+				OR: [{ name: nextName }, { slug: nextSlug }],
+			},
+			select: { id: true },
+		});
+		if (duplicate) {
 			throw new BadRequestException({ detail: 'Tag already exists' });
 		}
 
-		await this.prisma.$executeRaw`
-			UPDATE tags
-			SET
-				name = ${nextName},
-				slug = ${nextSlug},
-				color = ${payload.color ?? current.color},
-				icon = ${payload.icon ?? current.icon},
-				description = ${payload.description ?? current.description},
-				updated_at = NOW()
-			WHERE id = ${tagId}
-		`;
+		await this.prisma.tags.update({
+			where: { id: tagId },
+			data: {
+				name: nextName,
+				slug: nextSlug,
+				color: payload.color ?? current.color,
+				icon: payload.icon ?? current.icon,
+				description: payload.description ?? current.description,
+				updated_at: new Date(),
+			},
+		});
 
 		return this.getTag(tagId);
 	}
 
 	async deleteTag(tagId: number) {
 		await this.ensureTagExists(tagId);
-		await this.prisma.$executeRaw`
-			DELETE FROM tags
-			WHERE id = ${tagId}
-		`;
+		await this.prisma.tags.delete({ where: { id: tagId } });
 		return { success: true };
 	}
 
 	async seedTags() {
 		let created = 0;
 		for (const tag of DEFAULT_TAGS) {
-			const rows = await this.prisma.$queryRaw<{ id: number }[]>`
-				SELECT id
-				FROM tags
-				WHERE slug = ${tag.slug}
-				LIMIT 1
-			`;
-			if (rows[0]) {
+			const existing = await this.prisma.tags.findUnique({
+				where: { slug: tag.slug },
+				select: { id: true },
+			});
+			if (existing) {
 				continue;
 			}
 
-			await this.prisma.$executeRaw`
-				INSERT INTO tags (name, slug, color, icon, description, usage_count, created_at, updated_at)
-				VALUES (
-					${tag.name},
-					${tag.slug},
-					${tag.color},
-					${tag.icon},
-					${tag.description},
-					${0},
-					NOW(),
-					NOW()
-				)
-			`;
+			await this.prisma.tags.create({
+				data: {
+					name: tag.name,
+					slug: tag.slug,
+					color: tag.color,
+					icon: tag.icon,
+					description: tag.description,
+					usage_count: 0,
+					created_at: new Date(),
+					updated_at: new Date(),
+				},
+			});
 			created += 1;
 		}
 
@@ -405,16 +427,15 @@ export class TagsService {
 		await this.ensureProjectExists(projectId, ownerId);
 		const tagIds = await this.resolveTagIds(payload.tag_ids);
 
-		await this.prisma.$executeRaw`
-			DELETE FROM project_tags
-			WHERE project_id = ${projectId}
-		`;
+		await this.prisma.project_tags.deleteMany({
+			where: { project_id: projectId },
+		});
 
-		for (const tagId of tagIds) {
-			await this.prisma.$executeRaw`
-				INSERT INTO project_tags (project_id, tag_id)
-				VALUES (${projectId}, ${tagId})
-			`;
+		if (tagIds.length > 0) {
+			await this.prisma.project_tags.createMany({
+				data: tagIds.map(tagId => ({ project_id: projectId, tag_id: tagId })),
+				skipDuplicates: true,
+			});
 		}
 
 		await this.recalculateUsageCounts();
@@ -425,19 +446,11 @@ export class TagsService {
 		await this.ensureProjectExists(projectId, ownerId);
 		await this.ensureTagExists(tagId);
 
-		const rows = await this.prisma.$queryRaw<{ tag_id: number }[]>`
-			SELECT tag_id
-			FROM project_tags
-			WHERE project_id = ${projectId} AND tag_id = ${tagId}
-			LIMIT 1
-		`;
-		if (!rows[0]) {
-			await this.prisma.$executeRaw`
-				INSERT INTO project_tags (project_id, tag_id)
-				VALUES (${projectId}, ${tagId})
-			`;
-			await this.recalculateUsageCounts();
-		}
+		await this.prisma.project_tags.createMany({
+			data: [{ project_id: projectId, tag_id: tagId }],
+			skipDuplicates: true,
+		});
+		await this.recalculateUsageCounts();
 
 		return { success: true };
 	}
@@ -446,10 +459,12 @@ export class TagsService {
 		await this.ensureProjectExists(projectId, ownerId);
 		await this.ensureTagExists(tagId);
 
-		await this.prisma.$executeRaw`
-			DELETE FROM project_tags
-			WHERE project_id = ${projectId} AND tag_id = ${tagId}
-		`;
+		await this.prisma.project_tags.deleteMany({
+			where: {
+				project_id: projectId,
+				tag_id: tagId,
+			},
+		});
 		await this.recalculateUsageCounts();
 		return { success: true };
 	}
@@ -466,16 +481,15 @@ export class TagsService {
 		await this.ensureClientExists(clientId, ownerId);
 		const tagIds = await this.resolveTagIds(payload.tag_ids);
 
-		await this.prisma.$executeRaw`
-			DELETE FROM client_tags
-			WHERE client_id = ${clientId}
-		`;
+		await this.prisma.client_tags.deleteMany({
+			where: { client_id: clientId },
+		});
 
-		for (const tagId of tagIds) {
-			await this.prisma.$executeRaw`
-				INSERT INTO client_tags (client_id, tag_id)
-				VALUES (${clientId}, ${tagId})
-			`;
+		if (tagIds.length > 0) {
+			await this.prisma.client_tags.createMany({
+				data: tagIds.map(tagId => ({ client_id: clientId, tag_id: tagId })),
+				skipDuplicates: true,
+			});
 		}
 
 		await this.recalculateUsageCounts();
@@ -486,19 +500,11 @@ export class TagsService {
 		await this.ensureClientExists(clientId, ownerId);
 		await this.ensureTagExists(tagId);
 
-		const rows = await this.prisma.$queryRaw<{ tag_id: number }[]>`
-			SELECT tag_id
-			FROM client_tags
-			WHERE client_id = ${clientId} AND tag_id = ${tagId}
-			LIMIT 1
-		`;
-		if (!rows[0]) {
-			await this.prisma.$executeRaw`
-				INSERT INTO client_tags (client_id, tag_id)
-				VALUES (${clientId}, ${tagId})
-			`;
-			await this.recalculateUsageCounts();
-		}
+		await this.prisma.client_tags.createMany({
+			data: [{ client_id: clientId, tag_id: tagId }],
+			skipDuplicates: true,
+		});
+		await this.recalculateUsageCounts();
 
 		return { success: true };
 	}
@@ -507,10 +513,12 @@ export class TagsService {
 		await this.ensureClientExists(clientId, ownerId);
 		await this.ensureTagExists(tagId);
 
-		await this.prisma.$executeRaw`
-			DELETE FROM client_tags
-			WHERE client_id = ${clientId} AND tag_id = ${tagId}
-		`;
+		await this.prisma.client_tags.deleteMany({
+			where: {
+				client_id: clientId,
+				tag_id: tagId,
+			},
+		});
 		await this.recalculateUsageCounts();
 		return { success: true };
 	}
@@ -527,16 +535,15 @@ export class TagsService {
 		await this.ensureServerExists(serverId, ownerId);
 		const tagIds = await this.resolveTagIds(payload.tag_ids);
 
-		await this.prisma.$executeRaw`
-			DELETE FROM server_tags
-			WHERE server_id = ${serverId}
-		`;
+		await this.prisma.server_tags.deleteMany({
+			where: { server_id: serverId },
+		});
 
-		for (const tagId of tagIds) {
-			await this.prisma.$executeRaw`
-				INSERT INTO server_tags (server_id, tag_id)
-				VALUES (${serverId}, ${tagId})
-			`;
+		if (tagIds.length > 0) {
+			await this.prisma.server_tags.createMany({
+				data: tagIds.map(tagId => ({ server_id: serverId, tag_id: tagId })),
+				skipDuplicates: true,
+			});
 		}
 
 		await this.recalculateUsageCounts();

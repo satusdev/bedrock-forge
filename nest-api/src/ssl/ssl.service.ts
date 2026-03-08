@@ -27,6 +27,10 @@ type DbSslRow = {
 	created_at: Date;
 };
 
+type DueSslClaim = {
+	id: number;
+};
+
 @Injectable()
 export class SslService {
 	constructor(private readonly prisma: PrismaService) {}
@@ -87,7 +91,7 @@ export class SslService {
 	}
 
 	private isFree(provider: string): boolean {
-		return provider === 'lets_encrypt';
+		return provider === 'letsencrypt' || provider === 'lets_encrypt';
 	}
 
 	private normalizeSummary(row: DbSslRow) {
@@ -475,6 +479,99 @@ export class SslService {
 			expiring_in_14_days: expiringIn14,
 			expiring_in_7_days: expiringIn7,
 			by_provider: byProvider,
+		};
+	}
+
+	async claimDueRenewals(limit = 5) {
+		const safeLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
+		const leadDays = Math.max(
+			1,
+			Math.min(
+				90,
+				Number.parseInt(process.env.SSL_RUNNER_LEAD_DAYS ?? '14', 10) || 14,
+			),
+		);
+
+		const now = new Date();
+		const latestExpiry = new Date();
+		latestExpiry.setDate(latestExpiry.getDate() + leadDays);
+		const renewalThreshold = new Date(now.getTime() - 6 * 60 * 60 * 1000);
+
+		const due = await this.prisma.ssl_certificates.findMany({
+			where: {
+				is_active: true,
+				auto_renew: true,
+				expiry_date: { lte: latestExpiry },
+				OR: [
+					{ last_renewal_attempt: null },
+					{ last_renewal_attempt: { lte: renewalThreshold } },
+				],
+			},
+			orderBy: [{ expiry_date: 'asc' }, { id: 'asc' }],
+			take: safeLimit,
+			select: { id: true },
+		});
+
+		if (due.length === 0) {
+			return [];
+		}
+
+		await this.prisma.ssl_certificates.updateMany({
+			where: { id: { in: due.map(row => row.id) } },
+			data: {
+				last_renewal_attempt: now,
+				updated_at: now,
+			},
+		});
+
+		return due;
+	}
+
+	async runAutoRenewal(certId: number) {
+		const certificate = await this.prisma.ssl_certificates.findUnique({
+			where: { id: certId },
+			select: {
+				id: true,
+				provider: true,
+				is_active: true,
+				auto_renew: true,
+				expiry_date: true,
+			},
+		});
+		if (!certificate) {
+			throw new NotFoundException({ detail: 'Certificate not found' });
+		}
+
+		if (!certificate.is_active || !certificate.auto_renew) {
+			return {
+				certificate_id: certificate.id,
+				status: 'skipped',
+			};
+		}
+
+		const issueDate = new Date();
+		const validityDays = certificate.provider === 'letsencrypt' ? 90 : 365;
+		const nextExpiry = new Date(
+			issueDate.getTime() + validityDays * 24 * 60 * 60 * 1000,
+		);
+
+		await this.prisma.ssl_certificates.update({
+			where: { id: certificate.id },
+			data: {
+				issue_date: issueDate,
+				expiry_date: nextExpiry,
+				is_active: true,
+				last_renewal_attempt: issueDate,
+				renewal_failure_count: 0,
+				last_renewal_error: null,
+				updated_at: issueDate,
+			},
+		});
+
+		return {
+			certificate_id: certificate.id,
+			status: 'renewed',
+			expiry_date: nextExpiry.toISOString().slice(0, 10),
 		};
 	}
 }

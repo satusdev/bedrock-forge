@@ -5,6 +5,7 @@ import {
 	UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import * as jwt from 'jsonwebtoken';
 import { JwtPayload } from 'jsonwebtoken';
@@ -15,29 +16,21 @@ import {
 	UserUpdateDto,
 } from './dto/user-create.dto';
 
-type DbUserWithRoleRow = {
-	id: number;
-	email: string;
-	username: string;
-	full_name: string | null;
-	is_active: boolean;
-	is_superuser: boolean;
-	avatar_url: string | null;
-	created_at: Date;
-	updated_at: Date;
-	role_id: number | null;
-	role_name: string | null;
-	role_display_name: string | null;
-	role_color: string | null;
-};
-
-type DbPermissionCode = { code: string };
-
 type DbUserMinimal = {
 	id: number;
 	is_active: boolean;
 	is_superuser: boolean;
 };
+
+type UserWithRolesEntity = Prisma.usersGetPayload<{
+	include: {
+		user_roles: {
+			include: {
+				roles: true;
+			};
+		};
+	};
+}>;
 
 type TokenPayload = JwtPayload & {
 	sub?: string;
@@ -83,155 +76,81 @@ export class UsersService {
 		return configuredAlgorithm as jwt.Algorithm;
 	}
 
-	private normalizeUsers(rows: DbUserWithRoleRow[]): UserView[] {
-		const map = new Map<number, UserView>();
-
-		for (const row of rows) {
-			let user = map.get(row.id);
-			if (!user) {
-				user = {
-					id: row.id,
-					email: row.email,
-					username: row.username,
-					full_name: row.full_name,
-					is_active: row.is_active,
-					is_superuser: row.is_superuser,
-					avatar_url: row.avatar_url,
-					created_at: row.created_at,
-					updated_at: row.updated_at,
-					roles: [],
-				};
-				map.set(row.id, user);
-			}
-
-			if (
-				row.role_id !== null &&
-				row.role_name &&
-				row.role_display_name &&
-				row.role_color
-			) {
-				user.roles.push({
-					id: row.role_id,
-					name: row.role_name,
-					display_name: row.role_display_name,
-					color: row.role_color,
-				});
-			}
-		}
-
-		return Array.from(map.values());
-	}
-
-	private async getUsersWithRoles(
-		whereSql: string,
-		value: string | number | null,
-	) {
-		if (whereSql === 'search') {
-			const searchTerm = typeof value === 'string' ? `%${value}%` : null;
-			return this.prisma.$queryRaw<DbUserWithRoleRow[]>`
-				SELECT
-					u.id,
-					u.email,
-					u.username,
-					u.full_name,
-					u.is_active,
-					u.is_superuser,
-					u.avatar_url,
-					u.created_at,
-					u.updated_at,
-					r.id AS role_id,
-					r.name AS role_name,
-					r.display_name AS role_display_name,
-					r.color AS role_color
-				FROM users u
-				LEFT JOIN user_roles ur ON ur.user_id = u.id
-				LEFT JOIN roles r ON r.id = ur.role_id
-				WHERE
-					(${searchTerm}::text IS NULL)
-					OR u.email ILIKE ${searchTerm}
-					OR u.username ILIKE ${searchTerm}
-					OR COALESCE(u.full_name, '') ILIKE ${searchTerm}
-				ORDER BY u.id ASC, r.name ASC NULLS LAST
-			`;
-		}
-
-		return this.prisma.$queryRaw<DbUserWithRoleRow[]>`
-			SELECT
-				u.id,
-				u.email,
-				u.username,
-				u.full_name,
-				u.is_active,
-				u.is_superuser,
-				u.avatar_url,
-				u.created_at,
-				u.updated_at,
-				r.id AS role_id,
-				r.name AS role_name,
-				r.display_name AS role_display_name,
-				r.color AS role_color
-			FROM users u
-			LEFT JOIN user_roles ur ON ur.user_id = u.id
-			LEFT JOIN roles r ON r.id = ur.role_id
-			WHERE u.id = ${Number(value)}
-			ORDER BY u.id ASC, r.name ASC NULLS LAST
-		`;
+	private normalizeUser(user: UserWithRolesEntity): UserView {
+		return {
+			id: user.id,
+			email: user.email,
+			username: user.username,
+			full_name: user.full_name,
+			is_active: user.is_active,
+			is_superuser: user.is_superuser,
+			avatar_url: user.avatar_url,
+			created_at: user.created_at,
+			updated_at: user.updated_at,
+			roles: user.user_roles
+				.map(userRole => ({
+					id: userRole.roles.id,
+					name: userRole.roles.name,
+					display_name: userRole.roles.display_name,
+					color: userRole.roles.color,
+				}))
+				.sort((left, right) => left.name.localeCompare(right.name)),
+		};
 	}
 
 	private async ensureUniqueEmail(email: string, ignoreUserId?: number) {
-		const rows = await this.prisma.$queryRaw<{ id: number }[]>`
-			SELECT id
-			FROM users
-			WHERE email = ${email}
-			LIMIT 1
-		`;
-
-		const existing = rows[0];
+		const existing = await this.prisma.users.findUnique({
+			where: { email },
+			select: { id: true },
+		});
 		if (existing && existing.id !== ignoreUserId) {
 			throw new BadRequestException({ detail: 'Email already registered' });
 		}
 	}
 
 	private async ensureUniqueUsername(username: string, ignoreUserId?: number) {
-		const rows = await this.prisma.$queryRaw<{ id: number }[]>`
-			SELECT id
-			FROM users
-			WHERE username = ${username}
-			LIMIT 1
-		`;
-
-		const existing = rows[0];
+		const existing = await this.prisma.users.findUnique({
+			where: { username },
+			select: { id: true },
+		});
 		if (existing && existing.id !== ignoreUserId) {
 			throw new BadRequestException({ detail: 'Username already taken' });
 		}
 	}
 
 	private async setUserRoles(userId: number, roleIds: number[]) {
-		await this.prisma.$executeRaw`
-			DELETE FROM user_roles
-			WHERE user_id = ${userId}
-		`;
-
 		const uniqueRoleIds = Array.from(
 			new Set(roleIds.filter(roleId => Number.isInteger(roleId) && roleId > 0)),
 		);
 
-		for (const roleId of uniqueRoleIds) {
-			const roleRows = await this.prisma.$queryRaw<{ id: number }[]>`
-				SELECT id
-				FROM roles
-				WHERE id = ${roleId}
-				LIMIT 1
-			`;
-			if (!roleRows[0]) {
-				continue;
+		await this.prisma.$transaction(async tx => {
+			await tx.user_roles.deleteMany({ where: { user_id: userId } });
+
+			if (uniqueRoleIds.length === 0) {
+				return;
 			}
 
-			await this.prisma.$executeRaw`
-				INSERT INTO user_roles (user_id, role_id)
-				VALUES (${userId}, ${roleId})
-			`;
-		}
+			const existingRoles = await tx.roles.findMany({
+				where: {
+					id: {
+						in: uniqueRoleIds,
+					},
+				},
+				select: { id: true },
+			});
+
+			if (existingRoles.length === 0) {
+				return;
+			}
+
+			await tx.user_roles.createMany({
+				data: existingRoles.map(role => ({
+					user_id: userId,
+					role_id: role.id,
+				})),
+				skipDuplicates: true,
+			});
+		});
 	}
 
 	private verifyAccessToken(
@@ -272,13 +191,10 @@ export class UsersService {
 			});
 		}
 
-		const userRows = await this.prisma.$queryRaw<DbUserMinimal[]>`
-			SELECT id, is_active, is_superuser
-			FROM users
-			WHERE id = ${userId}
-			LIMIT 1
-		`;
-		const user = userRows[0];
+		const user = await this.prisma.users.findUnique({
+			where: { id: userId },
+			select: { id: true, is_active: true, is_superuser: true },
+		});
 		if (!user || !user.is_active) {
 			throw new UnauthorizedException({
 				detail: 'Could not validate credentials',
@@ -289,49 +205,66 @@ export class UsersService {
 	}
 
 	async listUsers(search?: string) {
-		const rows = await this.getUsersWithRoles('search', search ?? null);
-		return this.normalizeUsers(rows);
+		const trimmedSearch = search?.trim();
+		const users = await this.prisma.users.findMany({
+			where: trimmedSearch
+				? {
+						OR: [
+							{ email: { contains: trimmedSearch, mode: 'insensitive' } },
+							{ username: { contains: trimmedSearch, mode: 'insensitive' } },
+							{ full_name: { contains: trimmedSearch, mode: 'insensitive' } },
+						],
+					}
+				: undefined,
+			include: {
+				user_roles: {
+					include: {
+						roles: true,
+					},
+				},
+			},
+			orderBy: { id: 'asc' },
+		});
+
+		return users.map(user => this.normalizeUser(user));
 	}
 
 	async getUser(userId: number) {
-		const rows = await this.getUsersWithRoles('id', userId);
-		const users = this.normalizeUsers(rows);
-		const user = users[0];
+		const user = await this.prisma.users.findUnique({
+			where: { id: userId },
+			include: {
+				user_roles: {
+					include: {
+						roles: true,
+					},
+				},
+			},
+		});
 		if (!user) {
 			throw new NotFoundException({ detail: 'User not found' });
 		}
-		return user;
+		return this.normalizeUser(user);
 	}
 
 	async createUser(payload: UserCreateDto) {
 		await this.ensureUniqueEmail(payload.email);
 		await this.ensureUniqueUsername(payload.username);
 
-		const rows = await this.prisma.$queryRaw<{ id: number }[]>`
-			INSERT INTO users (
-				email,
-				username,
-				hashed_password,
-				full_name,
-				is_active,
-				is_superuser,
-				created_at,
-				updated_at
-			)
-			VALUES (
-				${payload.email},
-				${payload.username},
-				${bcrypt.hashSync(payload.password, 12)},
-				${payload.full_name ?? null},
-				${payload.is_active ?? true},
-				${payload.is_superuser ?? false},
-				NOW(),
-				NOW()
-			)
-			RETURNING id
-		`;
+		const created = await this.prisma.users.create({
+			data: {
+				email: payload.email,
+				username: payload.username,
+				hashed_password: bcrypt.hashSync(payload.password, 12),
+				full_name: payload.full_name ?? null,
+				is_active: payload.is_active ?? true,
+				is_superuser: payload.is_superuser ?? false,
+				created_at: new Date(),
+				updated_at: new Date(),
+			},
+			select: { id: true },
+		});
 
-		const userId = rows[0]?.id;
+		const userId = created.id;
 		if (!userId) {
 			throw new NotFoundException({ detail: 'Failed to create user' });
 		}
@@ -359,18 +292,18 @@ export class UsersService {
 			? bcrypt.hashSync(passwordValue, 12)
 			: null;
 
-		await this.prisma.$executeRaw`
-			UPDATE users
-			SET
-				email = ${payload.email ?? current.email},
-				username = ${payload.username ?? current.username},
-				hashed_password = COALESCE(${passwordHash}, hashed_password),
-				full_name = ${payload.full_name ?? current.full_name},
-				is_active = ${payload.is_active ?? current.is_active},
-				is_superuser = ${payload.is_superuser ?? current.is_superuser},
-				updated_at = NOW()
-			WHERE id = ${userId}
-		`;
+		await this.prisma.users.update({
+			where: { id: userId },
+			data: {
+				email: payload.email ?? current.email,
+				username: payload.username ?? current.username,
+				hashed_password: passwordHash ?? undefined,
+				full_name: payload.full_name ?? current.full_name,
+				is_active: payload.is_active ?? current.is_active,
+				is_superuser: payload.is_superuser ?? current.is_superuser,
+				updated_at: new Date(),
+			},
+		});
 
 		if (payload.role_ids) {
 			await this.setUserRoles(userId, payload.role_ids);
@@ -388,23 +321,20 @@ export class UsersService {
 		}
 
 		await this.getUser(userId);
-		await this.prisma.$executeRaw`
-			DELETE FROM users
-			WHERE id = ${userId}
-		`;
+		await this.prisma.users.delete({ where: { id: userId } });
 
 		return { success: true };
 	}
 
 	async resetPassword(userId: number, payload: UserResetPasswordDto) {
 		await this.getUser(userId);
-		await this.prisma.$executeRaw`
-			UPDATE users
-			SET
-				hashed_password = ${bcrypt.hashSync(payload.new_password, 12)},
-				updated_at = NOW()
-			WHERE id = ${userId}
-		`;
+		await this.prisma.users.update({
+			where: { id: userId },
+			data: {
+				hashed_password: bcrypt.hashSync(payload.new_password, 12),
+				updated_at: new Date(),
+			},
+		});
 
 		return { status: 'success', message: 'Password reset successfully' };
 	}
@@ -413,24 +343,42 @@ export class UsersService {
 		const currentUser =
 			await this.getActiveUserFromAuthorization(authorizationHeader);
 
-		const roleRows = await this.prisma.$queryRaw<
-			{ id: number; name: string; display_name: string; color: string }[]
-		>`
-			SELECT r.id, r.name, r.display_name, r.color
-			FROM roles r
-			INNER JOIN user_roles ur ON ur.role_id = r.id
-			WHERE ur.user_id = ${currentUser.id}
-			ORDER BY r.name ASC
-		`;
-
-		const permissionRows = await this.prisma.$queryRaw<DbPermissionCode[]>`
-			SELECT DISTINCT p.code
-			FROM permissions p
-			INNER JOIN role_permissions rp ON rp.permission_id = p.id
-			INNER JOIN user_roles ur ON ur.role_id = rp.role_id
-			WHERE ur.user_id = ${currentUser.id}
-			ORDER BY p.code ASC
-		`;
+		const [roleRows, permissionRows] = await Promise.all([
+			this.prisma.roles.findMany({
+				where: {
+					user_roles: {
+						some: {
+							user_id: currentUser.id,
+						},
+					},
+				},
+				orderBy: { name: 'asc' },
+				select: {
+					id: true,
+					name: true,
+					display_name: true,
+					color: true,
+				},
+			}),
+			this.prisma.permissions.findMany({
+				where: {
+					role_permissions: {
+						some: {
+							roles: {
+								user_roles: {
+									some: {
+										user_id: currentUser.id,
+									},
+								},
+							},
+						},
+					},
+				},
+				select: { code: true },
+				distinct: ['code'],
+				orderBy: { code: 'asc' },
+			}),
+		]);
 
 		const permissions = permissionRows.map(row => row.code);
 		if (currentUser.is_superuser && !permissions.includes('*')) {

@@ -33,8 +33,9 @@ export class DomainCreateDto {
 	@MaxLength(100)
 	registrar_name?: string;
 
+	@IsOptional()
 	@IsDateString()
-	expiry_date!: string;
+	expiry_date?: string;
 
 	@IsOptional()
 	@IsDateString()

@@ -93,6 +93,10 @@ export class GdriveService {
 		return (value ?? '').trim().replace(/^\/+|\/+$/g, '');
 	}
 
+	private isDriveFolderId(value: string | null | undefined) {
+		return /^[A-Za-z0-9_-]{10,}$/.test((value ?? '').trim());
+	}
+
 	async getStatus() {
 		const { remoteName, basePath } = await this.getConfig();
 		const configPath = this.getConfigPath();
@@ -161,21 +165,65 @@ export class GdriveService {
 				/^\/+|\/+$/g,
 				'',
 			);
-			const entries: Array<{ path: string; source: 'base' | 'shared' }> = [
-				{ path: projectPrefix, source: 'base' },
+			const entries: Array<{
+				id: string | null;
+				path: string;
+				name: string;
+				source: 'base' | 'shared';
+			}> = [
+				{
+					id: null,
+					path: projectPrefix,
+					name: row.name,
+					source: 'base',
+				},
 			];
 
 			if (row.gdrive_folder_id) {
-				entries.push({ path: row.gdrive_folder_id, source: 'base' });
+				entries.push({
+					id: this.isDriveFolderId(row.gdrive_folder_id)
+						? this.normalizePath(row.gdrive_folder_id)
+						: null,
+					path: this.normalizePath(row.gdrive_folder_id),
+					name: row.name,
+					source: 'base',
+				});
 			}
 			if (row.gdrive_backups_folder_id) {
-				entries.push({ path: row.gdrive_backups_folder_id, source: 'base' });
+				entries.push({
+					id: this.isDriveFolderId(row.gdrive_backups_folder_id)
+						? this.normalizePath(row.gdrive_backups_folder_id)
+						: null,
+					path: this.normalizePath(row.gdrive_backups_folder_id),
+					name: `${row.name} Backups`,
+					source: this.isDriveFolderId(row.gdrive_backups_folder_id)
+						? 'shared'
+						: 'base',
+				});
 			}
 			if (row.gdrive_assets_folder_id) {
-				entries.push({ path: row.gdrive_assets_folder_id, source: 'base' });
+				entries.push({
+					id: this.isDriveFolderId(row.gdrive_assets_folder_id)
+						? this.normalizePath(row.gdrive_assets_folder_id)
+						: null,
+					path: this.normalizePath(row.gdrive_assets_folder_id),
+					name: `${row.name} Assets`,
+					source: this.isDriveFolderId(row.gdrive_assets_folder_id)
+						? 'shared'
+						: 'base',
+				});
 			}
 			if (row.gdrive_docs_folder_id) {
-				entries.push({ path: row.gdrive_docs_folder_id, source: 'base' });
+				entries.push({
+					id: this.isDriveFolderId(row.gdrive_docs_folder_id)
+						? this.normalizePath(row.gdrive_docs_folder_id)
+						: null,
+					path: this.normalizePath(row.gdrive_docs_folder_id),
+					name: `${row.name} Docs`,
+					source: this.isDriveFolderId(row.gdrive_docs_folder_id)
+						? 'shared'
+						: 'base',
+				});
 			}
 
 			return entries;
@@ -183,21 +231,30 @@ export class GdriveService {
 
 		const seen = new Set<string>();
 		const filtered = folderCandidates.filter(entry => {
-			const normalized = this.normalizePath(entry.path);
+			const normalized = this.normalizePath(entry.id ?? entry.path);
 			if (!normalized || seen.has(normalized)) {
 				return false;
 			}
 			seen.add(normalized);
-			if (pathFilter && !normalized.startsWith(pathFilter)) {
+			const pathValue = this.normalizePath(entry.path);
+			const idValue = this.normalizePath(entry.id);
+			if (
+				pathFilter &&
+				!pathValue.startsWith(pathFilter) &&
+				!idValue.startsWith(pathFilter)
+			) {
 				return false;
 			}
-			if (queryFilter && !normalized.toLowerCase().includes(queryFilter)) {
+			const haystack = `${pathValue} ${idValue} ${entry.name}`.toLowerCase();
+			if (queryFilter && !haystack.includes(queryFilter)) {
 				return false;
 			}
 			return true;
 		});
 
 		const folders = filtered.slice(0, maxResults).map(entry => ({
+			id: entry.id,
+			name: entry.name,
 			path: this.normalizePath(entry.path),
 			source: entry.source,
 		}));

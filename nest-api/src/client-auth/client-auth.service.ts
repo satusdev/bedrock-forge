@@ -52,23 +52,38 @@ export class ClientAuthService {
 	private async findClientUserByEmail(
 		email: string,
 	): Promise<DbClientUser | null> {
-		const users = await this.prisma.$queryRaw<DbClientUser[]>`
-			SELECT id, client_id, email, password_hash, full_name, is_active, last_login_at, role
-			FROM client_users
-			WHERE email = ${email}
-			LIMIT 1
-		`;
-		return users[0] ?? null;
+		const user = await this.prisma.client_users.findUnique({
+			where: { email },
+			select: {
+				id: true,
+				client_id: true,
+				email: true,
+				password_hash: true,
+				full_name: true,
+				is_active: true,
+				last_login_at: true,
+				role: true,
+			},
+		});
+		if (!user) {
+			return null;
+		}
+		return {
+			...user,
+			role: user.role,
+		};
 	}
 
 	private async findClientById(clientId: number): Promise<DbClient | null> {
-		const clients = await this.prisma.$queryRaw<DbClient[]>`
-			SELECT id, name, company
-			FROM clients
-			WHERE id = ${clientId}
-			LIMIT 1
-		`;
-		return clients[0] ?? null;
+		const client = await this.prisma.clients.findUnique({
+			where: { id: clientId },
+			select: {
+				id: true,
+				name: true,
+				company: true,
+			},
+		});
+		return client ?? null;
 	}
 
 	private createClientAccessToken(data: {
@@ -137,11 +152,13 @@ export class ClientAuthService {
 			throw new BadRequestException({ detail: 'Client account not found' });
 		}
 
-		await this.prisma.$executeRaw`
-			UPDATE client_users
-			SET last_login_at = NOW(), updated_at = NOW()
-			WHERE id = ${user.id}
-		`;
+		await this.prisma.client_users.update({
+			where: { id: user.id },
+			data: {
+				last_login_at: new Date(),
+				updated_at: new Date(),
+			},
+		});
 
 		const accessToken = this.createClientAccessToken({
 			sub: user.email,

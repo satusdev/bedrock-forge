@@ -68,6 +68,11 @@ export class SubscriptionsController {
 		return this.subscriptionsService.getStatsSummary(ownerId);
 	}
 
+	@Get('maintenance/status')
+	getMaintenanceStatus() {
+		return this.subscriptionsService.getRunnerSnapshot();
+	}
+
 	@Get(':subscriptionId')
 	async getSubscription(
 		@Param('subscriptionId', ParseIntPipe) subscriptionId: number,
