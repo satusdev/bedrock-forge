@@ -30,5 +30,5 @@ This document defines high-level service boundaries for the backend.
 
 ## Logging
 
-- Use structured logging via forge/utils/logging.py.
+- Use NestJS `Logger`-based structured logs from the `nest-api` runtime.
 - Record security-sensitive actions to audit logs.

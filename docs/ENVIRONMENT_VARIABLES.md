@@ -26,21 +26,22 @@ cp .env.production.example .env
 
 ## Common Docker Variables
 
-| Variable               | Used By                  | Notes                                 |
-| ---------------------- | ------------------------ | ------------------------------------- |
-| `COMPOSE_PROJECT_NAME` | Compose                  | Isolates container/network names      |
-| `POSTGRES_USER`        | `postgres`, app services | DB username                           |
-| `POSTGRES_PASSWORD`    | `postgres`, app services | DB password                           |
-| `POSTGRES_DB`          | `postgres`, app services | DB name                               |
-| `SECRET_KEY`           | API                      | App auth/signing secret               |
-| `ENCRYPTION_KEY`       | API                      | Optional, recommended in production   |
-| `DEBUG`                | API                      | `true` local, `false` production      |
-| `CORS_ORIGINS`         | API                      | Allowed dashboard origins             |
-| `VITE_API_BASE_URL`    | Dashboard build          | API endpoint for UI                   |
-| `VITE_WS_URL`          | Dashboard build          | Optional websocket endpoint           |
-| `SEED_DEMO_MODE`       | Prisma seed              | `true` local demo; `false` production |
-| `SEED_ADMIN_EMAIL`     | Prisma seed              | Required when `SEED_DEMO_MODE=false`  |
-| `SEED_ADMIN_PASSWORD`  | Prisma seed              | Required when `SEED_DEMO_MODE=false`  |
+| Variable                     | Used By                  | Notes                                                                  |
+| ---------------------------- | ------------------------ | ---------------------------------------------------------------------- |
+| `COMPOSE_PROJECT_NAME`       | Compose                  | Isolates container/network names                                       |
+| `POSTGRES_USER`              | `postgres`, app services | DB username                                                            |
+| `POSTGRES_PASSWORD`          | `postgres`, app services | DB password                                                            |
+| `POSTGRES_DB`                | `postgres`, app services | DB name                                                                |
+| `SECRET_KEY`                 | API                      | App auth/signing secret                                                |
+| `ENCRYPTION_KEY`             | API                      | Optional, recommended in production                                    |
+| `DEBUG`                      | API                      | `true` local, `false` production                                       |
+| `CORS_ORIGINS`               | API                      | Allowed dashboard origins                                              |
+| `VITE_API_BASE_URL`          | Dashboard build          | API endpoint for UI                                                    |
+| `VITE_WS_URL`                | Dashboard build          | Optional websocket endpoint                                            |
+| `FORGE_BACKUP_GDRIVE_REMOTE` | API                      | Rclone remote name for Google Drive backup uploads (default: `gdrive`) |
+| `SEED_DEMO_MODE`             | Prisma seed              | `true` local demo; `false` production                                  |
+| `SEED_ADMIN_EMAIL`           | Prisma seed              | Required when `SEED_DEMO_MODE=false`                                   |
+| `SEED_ADMIN_PASSWORD`        | Prisma seed              | Required when `SEED_DEMO_MODE=false`                                   |
 
 ## Optional Integrations
 
@@ -65,6 +66,9 @@ Keep empty unless used:
 - `CLOUDFLARE_API_TOKEN`
 - `RCLONE_CONFIG` (optional path to `rclone.conf` file; if empty, default is
   `~/.config/rclone/rclone.conf`)
+
+For Google Drive backup uploads, ensure the configured rclone remote exists in
+the API runtime (`FORGE_BACKUP_GDRIVE_REMOTE` / `RCLONE_CONFIG`).
 
 ## Related Docs
 
