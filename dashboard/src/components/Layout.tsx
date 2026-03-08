@@ -1,24 +1,13 @@
 import React from 'react';
 import { Link, useLocation } from '@/router/compat';
-import {
-	LayoutDashboard,
-	FolderKanban,
-	Users,
-	HardDrive,
-	Settings,
-	ArrowLeftRight,
-	Github,
-	Cloud,
-	Menu,
-	X,
-	Server,
-	Activity,
-	Shield,
-	Tag,
-	BarChart3,
-	FileText,
-} from 'lucide-react';
+import { Github, Cloud, Menu, X } from 'lucide-react';
 import { useDashboardStore } from '@/store/useDashboardStore';
+import {
+	navSections,
+	primaryNavigation,
+	type SidebarNavItem,
+} from '@/components/navigation/sidebar-config';
+import { cn } from '@/lib/utils';
 
 interface LayoutProps {
 	children: React.ReactNode;
@@ -29,39 +18,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 	const [sidebarOpen, setSidebarOpen] = React.useState(false);
 	const { githubAuthenticated, googleDriveAuthenticated, stats } =
 		useDashboardStore();
-
-	const navigation = [
-		{ name: 'Dashboard', href: '/', icon: LayoutDashboard },
-		{ name: 'Projects', href: '/projects', icon: FolderKanban },
-		{ name: 'Migrations', href: '/migrations', icon: ArrowLeftRight },
-		{ name: 'Backups', href: '/backups', icon: HardDrive },
-	];
-
-	const operationsNav = [
-		{ name: 'Servers', href: '/servers', icon: Server },
-		{ name: 'Monitoring', href: '/monitoring', icon: Activity },
-		{ name: 'Analytics', href: '/analytics', icon: BarChart3 },
-		{ name: 'Clients', href: '/clients', icon: Users },
-		{ name: 'Audit Logs', href: '/audit-logs', icon: Shield },
-		{ name: 'Settings', href: '/settings', icon: Settings },
-	];
-
-	const billingNav = [
-		{ name: 'Invoices', href: '/billing/invoices', icon: FileText },
-		{ name: 'Subscriptions', href: '/billing/subscriptions', icon: Users }, // Placeholder icon
-		{ name: 'Packages', href: '/billing/packages', icon: FolderKanban }, // Placeholder icon
-	];
-
-	const assetsNav = [
-		{ name: 'Domains', href: '/assets/domains', icon: Cloud }, // Placeholder icon
-		{ name: 'SSL Certs', href: '/assets/ssl', icon: Activity }, // Placeholder icon
-	];
-
-	const adminNav = [
-		{ name: 'Users', href: '/users', icon: Users },
-		{ name: 'Roles', href: '/roles', icon: Shield },
-		{ name: 'Tags', href: '/tags', icon: Tag },
-	];
 
 	const isActive = (href: string) => {
 		const pathname =
@@ -78,6 +34,33 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 		return pathname.startsWith(normalizedHref);
 	};
 
+	const navItemClass = (href: string) =>
+		cn(
+			'group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors duration-200',
+			isActive(href)
+				? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400 border-r-2 border-primary-700'
+				: 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white',
+		);
+
+	const renderNavItems = (items: SidebarNavItem[]) => (
+		<div className='mt-2 space-y-1'>
+			{items.map(item => {
+				const Icon = item.icon;
+				return (
+					<Link
+						key={item.name}
+						to={item.href}
+						className={navItemClass(item.href)}
+						onClick={() => setSidebarOpen(false)}
+					>
+						<Icon className='w-5 h-5 mr-3' />
+						{item.name}
+					</Link>
+				);
+			})}
+		</div>
+	);
+
 	return (
 		<div className='min-h-screen bg-gray-50 dark:bg-gray-900'>
 			{/* Mobile sidebar backdrop */}
@@ -90,10 +73,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
 			{/* Sidebar */}
 			<div
-				className={`
-        fixed inset-y-0 left-0 z-50 w-64 bg-white dark:bg-gray-800 shadow-lg transform transition-transform duration-300 ease-in-out lg:translate-x-0
-        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
-      `}
+				className={cn(
+					'fixed inset-y-0 left-0 z-50 w-64 bg-white dark:bg-gray-800 shadow-lg transform transition-transform duration-300 ease-in-out lg:translate-x-0',
+					sidebarOpen ? 'translate-x-0' : '-translate-x-full',
+				)}
 			>
 				<div className='flex items-center justify-between h-16 px-6 border-b border-gray-200 dark:border-gray-700'>
 					<div className='flex items-center'>
@@ -111,20 +94,13 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 					style={{ maxHeight: 'calc(100vh - 5rem)' }}
 				>
 					<div className='space-y-1'>
-						{navigation.map(item => {
+						{primaryNavigation.map(item => {
 							const Icon = item.icon;
 							return (
 								<Link
 									key={item.name}
 									to={item.href}
-									className={`
-                      group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors duration-200
-                      ${
-												isActive(item.href)
-													? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400 border-r-2 border-primary-700'
-													: 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white'
-											}
-                    `}
+									className={navItemClass(item.href)}
 									onClick={() => setSidebarOpen(false)}
 								>
 									<Icon className='w-5 h-5 mr-3' />
@@ -134,92 +110,17 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 						})}
 					</div>
 
-					{/* Operations Section */}
-					<div className='mt-8 pt-6 border-t border-gray-200 dark:border-gray-700'>
-						<h3 className='px-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
-							Operations
-						</h3>
-						<div className='mt-2 space-y-1'>
-							{operationsNav.map(item => {
-								const Icon = item.icon;
-								return (
-									<Link
-										key={item.name}
-										to={item.href}
-										className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors duration-200 ${
-											isActive(item.href)
-												? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400 border-r-2 border-primary-700'
-												: 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white'
-										}`}
-										onClick={() => setSidebarOpen(false)}
-									>
-										<Icon className='w-5 h-5 mr-3' />
-										{item.name}
-									</Link>
-								);
-							})}
+					{navSections.map(section => (
+						<div
+							key={section.title}
+							className='mt-8 pt-6 border-t border-gray-200 dark:border-gray-700'
+						>
+							<h3 className='px-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
+								{section.title}
+							</h3>
+							{renderNavItems(section.items)}
 						</div>
-					</div>
-
-					{/* Billing Section */}
-					<div className='mt-8 pt-6 border-t border-gray-200 dark:border-gray-700'>
-						<h3 className='px-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
-							Billing
-						</h3>
-						<div className='mt-2 space-y-1'>
-							{billingNav.map(item => {
-								const Icon = item.icon;
-								return (
-									<Link
-										key={item.name}
-										to={item.href}
-										className={`
-                        group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors duration-200
-                        ${
-													isActive(item.href)
-														? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400 border-r-2 border-primary-700'
-														: 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white'
-												}
-                      `}
-										onClick={() => setSidebarOpen(false)}
-									>
-										<Icon className='w-5 h-5 mr-3' />
-										{item.name}
-									</Link>
-								);
-							})}
-						</div>
-					</div>
-
-					{/* Assets Section */}
-					<div className='mt-8 pt-6 border-t border-gray-200 dark:border-gray-700'>
-						<h3 className='px-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
-							Assets
-						</h3>
-						<div className='mt-2 space-y-1'>
-							{assetsNav.map(item => {
-								const Icon = item.icon;
-								return (
-									<Link
-										key={item.name}
-										to={item.href}
-										className={`
-                        group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors duration-200
-                        ${
-													isActive(item.href)
-														? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400 border-r-2 border-primary-700'
-														: 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white'
-												}
-                      `}
-										onClick={() => setSidebarOpen(false)}
-									>
-										<Icon className='w-5 h-5 mr-3' />
-										{item.name}
-									</Link>
-								);
-							})}
-						</div>
-					</div>
+					))}
 
 					{/* Integration Status */}
 					<div className='mt-8 pt-6 border-t border-gray-200 dark:border-gray-700'>
@@ -253,36 +154,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 									}`}
 								/>
 							</div>
-						</div>
-					</div>
-
-					{/* Admin Section */}
-					<div className='mt-8 pt-6 border-t border-gray-200 dark:border-gray-700'>
-						<h3 className='px-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
-							Administration
-						</h3>
-						<div className='mt-2 space-y-1'>
-							{adminNav.map(item => {
-								const Icon = item.icon;
-								return (
-									<Link
-										key={item.name}
-										to={item.href}
-										className={`
-                        group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors duration-200
-                        ${
-													isActive(item.href)
-														? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400 border-r-2 border-primary-700'
-														: 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white'
-												}
-                      `}
-										onClick={() => setSidebarOpen(false)}
-									>
-										<Icon className='w-5 h-5 mr-3' />
-										{item.name}
-									</Link>
-								);
-							})}
 						</div>
 					</div>
 				</nav>

@@ -23,6 +23,8 @@ export interface CreateSubscriptionPayload {
 	project_id?: number;
 	start_date?: string;
 	package_id?: number;
+	hosting_package_id?: number;
+	support_package_id?: number;
 	create_hosting?: boolean;
 	create_support?: boolean;
 }
@@ -31,6 +33,7 @@ export interface HostingPackage {
 	id: number;
 	name: string;
 	slug: string;
+	package_type: 'hosting' | 'support';
 	description?: string | null;
 	disk_space_gb: number;
 	bandwidth_gb: number;
@@ -51,6 +54,7 @@ export interface HostingPackage {
 }
 
 export interface CreateHostingPackagePayload {
+	package_type?: 'hosting' | 'support';
 	name: string;
 	slug: string;
 	description?: string;
@@ -72,6 +76,7 @@ export interface CreateHostingPackagePayload {
 }
 
 export interface UpdateHostingPackagePayload {
+	package_type?: 'hosting' | 'support';
 	name?: string;
 	description?: string;
 	disk_space_gb?: number;
@@ -144,7 +149,7 @@ export const billingService = {
 		client_id: number;
 		domain_name: string;
 		registrar: string;
-		expiry_date: string;
+		expiry_date?: string;
 		registration_date?: string;
 		annual_cost?: number;
 		auto_renew?: boolean;
@@ -159,7 +164,7 @@ export const billingService = {
 		id: number,
 		data: Partial<{
 			registrar: string;
-			expiry_date: string;
+			expiry_date?: string;
 			annual_cost: number;
 			auto_renew: boolean;
 			notes: string;
@@ -233,9 +238,13 @@ export const billingService = {
 	},
 
 	// Packages
-	getPackages: async (): Promise<HostingPackage[]> => {
+	getPackages: async (
+		serviceType?: 'hosting' | 'support',
+	): Promise<HostingPackage[]> => {
 		try {
-			const response = await api.get('/packages/');
+			const response = await api.get('/packages/', {
+				params: serviceType ? { service_type: serviceType } : undefined,
+			});
 			// Backend returns { packages: [...] }
 			return response.data?.packages || [];
 		} catch {
@@ -281,6 +290,7 @@ export const billingService = {
 			unit_price: number;
 			item_type?: string;
 			project_id?: number;
+			subscription_id?: number;
 		}>;
 		issue_date?: string;
 		due_date?: string;

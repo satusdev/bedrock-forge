@@ -413,7 +413,6 @@ export interface ScheduleCreateInput {
 	retention_count?: number;
 	retention_days?: number;
 	description?: string;
-	config?: Record<string, any>;
 }
 
 export interface ScheduleUpdateInput {
@@ -432,5 +431,4 @@ export interface ScheduleUpdateInput {
 	retention_days?: number;
 	status?: ScheduleStatus;
 	description?: string;
-	config?: Record<string, any>;
 }

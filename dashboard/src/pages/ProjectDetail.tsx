@@ -45,6 +45,7 @@ import { dashboardApi, getApiErrorMessage } from '../services/api';
 import toast from 'react-hot-toast';
 import TaskLogModal from '../components/TaskLogModal';
 import { useTaskStatusPolling } from '../hooks/useTaskStatusPolling';
+import websocketService, { WebSocketMessage } from '@/services/websocket';
 
 type TabId =
 	| 'overview'
@@ -113,6 +114,7 @@ export default function ProjectDetail() {
 	const [runnerArgs, setRunnerArgs] = useState<string>('');
 	const [runnerTaskId, setRunnerTaskId] = useState<string | null>(null);
 	const [runnerStatus, setRunnerStatus] = useState<any>(null);
+	const [wsConnected, setWsConnected] = useState(false);
 
 	const [globalPolicyForm, setGlobalPolicyForm] = useState({
 		name: 'Default Policy',
@@ -217,7 +219,65 @@ export default function ProjectDetail() {
 			dashboardApi.getProjectBackups(projectId, backupsPage, backupsPageSize),
 		enabled: !!projectId,
 		keepPreviousData: true,
+		refetchInterval: response => {
+			if (wsConnected) {
+				return false;
+			}
+			const payload = response?.data as
+				| { items?: Array<{ status?: string }> }
+				| undefined;
+			const items = Array.isArray(payload?.items) ? payload.items : [];
+			const hasActive = items.some(backup => {
+				const status = String(backup.status || '').toLowerCase();
+				return (
+					status === 'pending' ||
+					status === 'running' ||
+					status === 'in_progress'
+				);
+			});
+			return hasActive ? 5000 : false;
+		},
 	});
+
+	useEffect(() => {
+		if (!projectId) {
+			return;
+		}
+
+		const handleConnection = (message: WebSocketMessage) => {
+			if (message.type !== 'connection') {
+				return;
+			}
+			setWsConnected(message.status === 'connected');
+		};
+
+		const handleBackupUpdate = (message: WebSocketMessage) => {
+			if (message.type !== 'backup_update') {
+				return;
+			}
+			if (Number((message as any).project_id) !== projectId) {
+				return;
+			}
+
+			queryClient.invalidateQueries({
+				queryKey: ['project-backups', projectId, backupsPage, backupsPageSize],
+			});
+			queryClient.invalidateQueries({
+				queryKey: ['project-drive-backups-index', projectId],
+			});
+		};
+
+		websocketService.on('connection', handleConnection);
+		websocketService.on('backup_update', handleBackupUpdate);
+		void websocketService.connect().then(() => {
+			setWsConnected(websocketService.isConnected());
+		});
+
+		return () => {
+			websocketService.off('connection', handleConnection);
+			websocketService.off('backup_update', handleBackupUpdate);
+		};
+	}, [projectId, backupsPage, backupsPageSize, queryClient]);
 
 	// Drive settings state
 	const [driveForm, setDriveForm] = useState({
@@ -2489,6 +2549,7 @@ export default function ProjectDetail() {
 																		backupId: backup.id,
 																		backupName: backup.name,
 																		isRunning:
+																			backup.status === 'pending' ||
 																			backup.status === 'running' ||
 																			backup.status === 'in_progress',
 																	})
