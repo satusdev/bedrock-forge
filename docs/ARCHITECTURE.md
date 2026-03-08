@@ -1,6 +1,11 @@
 # Architecture Guide
 
-System architecture, design patterns, and technical implementation details of Bedrock Forge.
+System architecture, design patterns, and technical implementation details of
+Bedrock Forge.
+
+> **Status:** This document contains legacy Python CLI architecture notes kept
+> for historical context. The active runtime in this repository is Docker + Nest
+> API + Dashboard. Some `forge/...` paths referenced below have been removed.
 
 ## 📋 Table of Contents
 
@@ -17,7 +22,8 @@ System architecture, design patterns, and technical implementation details of Be
 
 ## 🎯 Overview
 
-Bedrock Forge is built using a modular, plugin-based architecture that emphasizes:
+Bedrock Forge is built using a modular, plugin-based architecture that
+emphasizes:
 
 - **Modularity**: Clear separation of concerns with well-defined interfaces
 - **Extensibility**: Plugin system for adding new functionality
@@ -28,21 +34,27 @@ Bedrock Forge is built using a modular, plugin-based architecture that emphasize
 ## 🏛️ Design Principles
 
 ### 1. Single Responsibility Principle
+
 Each module and class has a single, well-defined responsibility:
+
 - Commands handle CLI interface
 - Utilities provide reusable functionality
 - Provisioning modules manage server operations
 - Models define data structures
 
 ### 2. Dependency Injection
+
 Dependencies are injected rather than hardcoded:
+
 ```python
 # Instead of: HetznerClient()
 # Use: provider_factory.create("hetzner", config)
 ```
 
 ### 3. Configuration-Driven
+
 Behavior is controlled through configuration rather than code:
+
 ```python
 # Configuration determines providers, settings, and behavior
 config = load_config()
@@ -50,7 +62,9 @@ strategy = create_deployment_strategy(config.deployment.method)
 ```
 
 ### 4. Fail-Fast Philosophy
+
 Errors are detected and reported early:
+
 ```python
 # Validate configuration before operations
 validate_deployment_config(config)
@@ -59,7 +73,9 @@ check_server_connectivity(server_config)
 ```
 
 ### 5. Immutable State
+
 Where possible, state is immutable to prevent side effects:
+
 ```python
 # Return new configuration objects
 new_config = config.with_environment("production")
@@ -124,6 +140,7 @@ app.add_typer(provision.app, name="provision", help="Provision servers and servi
 ```
 
 **Features:**
+
 - Automatic help generation
 - Rich markup support
 - Subcommand organization
@@ -153,6 +170,7 @@ class ConfigManager:
 ```
 
 **Features:**
+
 - JSON-based configuration
 - Environment variable interpolation
 - Validation and schema checking
@@ -191,6 +209,7 @@ def push(
 ```
 
 **Pattern:**
+
 - Command-line argument parsing
 - Configuration loading
 - Service instantiation
@@ -233,6 +252,7 @@ class ProviderFactory:
 ```
 
 **Benefits:**
+
 - Consistent interface across providers
 - Easy addition of new providers
 - Provider-specific optimizations
@@ -275,6 +295,7 @@ class EnhancedDeployment:
 ```
 
 **Features:**
+
 - Multiple deployment strategies
 - Automatic rollback on failure
 - Health checks and verification
@@ -361,6 +382,7 @@ class PluginManager:
 ```
 
 **Plugin Features:**
+
 - Dynamic command registration
 - Configuration integration
 - Lifecycle hooks
@@ -725,31 +747,37 @@ class HealthChecker:
 ## 🎯 Design Patterns Used
 
 ### 1. Factory Pattern
+
 - Provider creation
 - Deployment strategy selection
 - Service instantiation
 
 ### 2. Strategy Pattern
+
 - Deployment strategies
 - Backup methods
 - Authentication methods
 
 ### 3. Observer Pattern
+
 - Event system
 - Logging and monitoring
 - Notification system
 
 ### 4. Command Pattern
+
 - CLI command execution
 - Workflow step execution
 - Undo/redo functionality
 
 ### 5. Builder Pattern
+
 - Configuration building
 - Query building
 - Deployment planning
 
 ### 6. Singleton Pattern
+
 - Configuration manager
 - Logging system
 - Cache manager
@@ -765,6 +793,7 @@ class HealthChecker:
 5. **AI/ML Integration**: Intelligent optimization and recommendations
 
 For implementation details, see:
+
 - [API Documentation](API.md)
 - [Development Guide](DEVELOPMENT.md)
 - [Testing Guide](TESTING.md)
