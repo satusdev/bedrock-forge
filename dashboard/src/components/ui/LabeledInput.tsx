@@ -1,7 +1,8 @@
 import React from 'react';
+import Input from './Input';
+import Label from './Label';
 
-interface LabeledInputProps
-	extends React.InputHTMLAttributes<HTMLInputElement> {
+interface LabeledInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
 	label: string;
 	required?: boolean;
 	containerClassName?: string;
@@ -19,20 +20,10 @@ const LabeledInput: React.FC<LabeledInputProps> = ({
 
 	return (
 		<div className={containerClassName}>
-			<label
-				htmlFor={inputId}
-				className='block text-sm font-medium text-gray-700 mb-1'
-			>
+			<Label htmlFor={inputId} required={required} className='mb-1 block'>
 				{label}
-				{required ? ' *' : ''}
-			</label>
-			<input
-				id={inputId}
-				className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent ${
-					className || ''
-				}`}
-				{...props}
-			/>
+			</Label>
+			<Input id={inputId} className={className} {...props} />
 		</div>
 	);
 };

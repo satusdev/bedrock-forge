@@ -53,6 +53,7 @@ const Projects: React.FC = () => {
 	const [activeTagProject, setActiveTagProject] =
 		useState<RemoteProject | null>(null);
 	const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
+	const [selectedTagNames, setSelectedTagNames] = useState<string[]>([]);
 
 	// Fetch local projects
 	const {
@@ -153,8 +154,19 @@ const Projects: React.FC = () => {
 			project.server_name?.toLowerCase().includes(searchQuery.toLowerCase());
 		const matchesStatus =
 			statusFilter === 'all' || project.status === statusFilter;
-		return matchesSearch && matchesStatus;
+		const matchesTags =
+			selectedTagNames.length === 0 ||
+			selectedTagNames.some(tagName => project.tags?.includes(tagName));
+		return matchesSearch && matchesStatus && matchesTags;
 	});
+
+	const toggleProjectFilterTag = (tagName: string) => {
+		setSelectedTagNames(prev =>
+			prev.includes(tagName)
+				? prev.filter(existing => existing !== tagName)
+				: [...prev, tagName],
+		);
+	};
 
 	const executeProjectAction = async (projectName: string, action: string) => {
 		try {
@@ -440,6 +452,42 @@ const Projects: React.FC = () => {
 						</div>
 					</div>
 				</div>
+				{activeTab === 'remote' && tagOptions.length > 0 && (
+					<div className='pt-3 mt-3 border-t border-gray-200 dark:border-gray-700'>
+						<div className='flex flex-wrap items-center gap-2'>
+							<span className='text-xs text-gray-500 dark:text-gray-400'>
+								Filter by tags:
+							</span>
+							{tagOptions.map(tag => {
+								const isActive = selectedTagNames.includes(tag.name);
+								return (
+									<button
+										key={tag.id}
+										type='button'
+										onClick={() => toggleProjectFilterTag(tag.name)}
+										className={`px-2 py-1 text-xs rounded border transition-colors ${
+											isActive
+												? 'border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300'
+												: 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
+										}`}
+									>
+										{isActive ? '✓ ' : ''}
+										{tag.name}
+									</button>
+								);
+							})}
+							{selectedTagNames.length > 0 && (
+								<button
+									type='button'
+									onClick={() => setSelectedTagNames([])}
+									className='px-2 py-1 text-xs rounded border border-gray-200 dark:border-gray-700 text-gray-500 hover:text-gray-700'
+								>
+									Clear
+								</button>
+							)}
+						</div>
+					</div>
+				)}
 			</Card>
 
 			{/* Projects Display */}

@@ -18,6 +18,7 @@ interface PackageEditorProps {
 }
 
 type FormData = {
+	package_type: 'hosting' | 'support';
 	name: string;
 	description: string;
 	disk_space_gb: number;
@@ -37,6 +38,7 @@ type FormData = {
 };
 
 const defaultFormData: FormData = {
+	package_type: 'hosting',
 	name: '',
 	description: '',
 	disk_space_gb: 10,
@@ -63,6 +65,7 @@ const PackageEditor: React.FC<PackageEditorProps> = ({
 	const [formData, setFormData] = React.useState<FormData>(
 		initialData
 			? {
+					package_type: initialData.package_type || 'hosting',
 					name: initialData.name,
 					description: initialData.description || '',
 					disk_space_gb: initialData.disk_space_gb,
@@ -84,7 +87,9 @@ const PackageEditor: React.FC<PackageEditorProps> = ({
 	);
 
 	const handleChange = (
-		e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+		e: React.ChangeEvent<
+			HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+		>,
 	) => {
 		const { name, value, type } = e.target;
 		setFormData(prev => ({
@@ -104,6 +109,7 @@ const PackageEditor: React.FC<PackageEditorProps> = ({
 			.map(entry => entry.trim())
 			.filter(Boolean);
 		const payloadBase = {
+			package_type: formData.package_type,
 			name: formData.name.trim(),
 			description: formData.description.trim() || undefined,
 			disk_space_gb: formData.disk_space_gb,
@@ -174,6 +180,21 @@ const PackageEditor: React.FC<PackageEditorProps> = ({
 							rows={2}
 							className='mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500'
 						/>
+					</div>
+
+					<div>
+						<label className='block text-sm font-medium text-gray-700'>
+							Service Type
+						</label>
+						<select
+							name='package_type'
+							value={formData.package_type}
+							onChange={handleChange}
+							className='mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500'
+						>
+							<option value='hosting'>Hosting</option>
+							<option value='support'>Support</option>
+						</select>
 					</div>
 
 					<div className='grid grid-cols-2 gap-4'>

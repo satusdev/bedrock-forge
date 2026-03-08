@@ -223,7 +223,8 @@ export function RemoteProjectCard({
 							onClick={() => onOpenTagModal(project)}
 							title='Manage tags'
 						>
-							<Tag className='w-4 h-4' />
+							<Tag className='w-4 h-4 mr-1' />
+							Tags
 						</Button>
 						<Button
 							variant='ghost'
@@ -231,7 +232,8 @@ export function RemoteProjectCard({
 							onClick={() => onDeleteProject(project.id, project.name)}
 							className='text-red-600 hover:text-red-700 hover:bg-red-50'
 						>
-							<Trash2 className='w-4 h-4' />
+							<Trash2 className='w-4 h-4 mr-1' />
+							Delete
 						</Button>
 					</div>
 				</div>

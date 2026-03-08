@@ -8,6 +8,7 @@ const clientApi = createApiClient({
 export const clientPortalApi = {
 	login: (data: { email: string; password: string }) =>
 		clientApi.post('/client/auth/login', data),
+	logout: () => clientApi.post('/client/auth/logout'),
 	getProfile: () => clientApi.get('/client/auth/me'),
 	refreshToken: () => clientApi.post('/client/auth/refresh'),
 	getProjects: () => clientApi.get('/client/projects'),
