@@ -151,4 +151,19 @@ describe('PluginPoliciesService', () => {
 			NotFoundException,
 		);
 	});
+
+	it('returns default project policy when project exists but policy row is missing', async () => {
+		prisma.$queryRaw
+			.mockResolvedValueOnce([{ id: 10 }])
+			.mockResolvedValueOnce([]);
+
+		const result = await service.getProjectPolicy(10);
+
+		expect(result.project_id).toBe(10);
+		expect(result.inherit_default).toBe(true);
+		expect(result.allowed_plugins).toEqual([]);
+		expect(result.required_plugins).toEqual([]);
+		expect(result.blocked_plugins).toEqual([]);
+		expect(result.pinned_versions).toEqual({});
+	});
 });

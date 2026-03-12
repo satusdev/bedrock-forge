@@ -17,6 +17,7 @@ describe('Sync HTTP Contract', () => {
 		pullFiles: jest.fn(),
 		pushFiles: jest.fn(),
 		getStatus: jest.fn(),
+		getProjectTaskHistory: jest.fn(),
 		fullSync: jest.fn(),
 		runRemoteComposer: jest.fn(),
 	};

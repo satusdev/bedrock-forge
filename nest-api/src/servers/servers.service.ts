@@ -594,16 +594,26 @@ export class ServersService {
 				let isBedrock = false;
 				let wpPath = wpDir;
 
-				const bedrockCheckCommand = `(test -d ${this.shellQuote(`${wpDir}/web/app`)} || test -d ${this.shellQuote(`${wpDir}/web/wp`)}) && echo bedrock || echo standard`;
-				const bedrockResult = await this.runSshCommand(
-					existing,
-					bedrockCheckCommand,
-					keyFilePath,
-				);
-				if ((bedrockResult.stdout || '').toLowerCase().includes('bedrock')) {
-					isBedrock = true;
-					wpPath = wpDir;
-				} else if (wpDir.includes('/web/app')) {
+				const baseRoot = wpDir.endsWith('/web')
+					? this.normalizePath(wpDir.slice(0, -4))
+					: wpDir;
+				const bedrockCandidates = Array.from(new Set([baseRoot, wpDir]));
+
+				for (const candidateRoot of bedrockCandidates) {
+					const bedrockCheckCommand = `(test -d ${this.shellQuote(`${candidateRoot}/web/app`)} || test -d ${this.shellQuote(`${candidateRoot}/web/wp`)}) && echo bedrock || echo standard`;
+					const bedrockResult = await this.runSshCommand(
+						existing,
+						bedrockCheckCommand,
+						keyFilePath,
+					);
+					if ((bedrockResult.stdout || '').toLowerCase().includes('bedrock')) {
+						isBedrock = true;
+						wpPath = candidateRoot;
+						break;
+					}
+				}
+
+				if (!isBedrock && wpDir.includes('/web/app')) {
 					isBedrock = true;
 					wpPath = this.normalizePath(wpDir.split('/web/app')[0] || wpDir);
 				}
@@ -796,13 +806,15 @@ export class ServersService {
 
 			const parentPath =
 				targetPath === '/' ? '/' : targetPath.replace(/\/[^/]+$/, '') || '/';
-			const candidateEnvPaths = Array.from(
-				new Set([
-					`${targetPath}/.env`,
-					`${targetPath}/web/.env`,
-					`${parentPath}/.env`,
-				]),
-			);
+			const candidateEnvPaths = targetPath.endsWith('/web')
+				? Array.from(new Set([`${parentPath}/.env`, `${targetPath}/.env`]))
+				: Array.from(
+						new Set([
+							`${targetPath}/.env`,
+							`${targetPath}/web/.env`,
+							`${parentPath}/.env`,
+						]),
+					);
 
 			const readCommand = [
 				...candidateEnvPaths.map(

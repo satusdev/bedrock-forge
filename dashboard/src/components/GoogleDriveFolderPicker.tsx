@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
 	Folder,
 	FolderOpen,
@@ -14,6 +14,9 @@ interface DriveFolderResult {
 	id?: string | null;
 	name?: string;
 	path: string;
+	display_path?: string;
+	parent_path?: string | null;
+	drive_type?: 'my_drive' | 'shared_with_me';
 	source?: 'base' | 'shared';
 }
 
@@ -28,74 +31,99 @@ const GoogleDriveFolderPicker: React.FC<GoogleDriveFolderPickerProps> = ({
 	onCancel,
 	initialFolderId,
 }) => {
-	const [query, setQuery] = useState('');
 	const [results, setResults] = useState<DriveFolderResult[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
 	const [currentPath, setCurrentPath] = useState(''); // Tracking navigation path
 	const [searchQuery, setSearchQuery] = useState(''); // Tracking search input
 	const [defaultPath, setDefaultPath] = useState('');
 
-	// Load initial folders (root or base)
+	// Load initial folders from selected/default/base path
 	useEffect(() => {
-		loadFolders('');
-		checkDefaultPath();
+		initializePicker();
 	}, []);
 
-	const checkDefaultPath = async () => {
+	const initializePicker = async () => {
 		try {
 			const response = await dashboardApi.getDriveStatus();
-			if (response.data?.base_path) {
-				setDefaultPath(response.data.base_path);
+			const statusBasePath = (response.data?.base_path || '').trim();
+			if (statusBasePath) {
+				setDefaultPath(statusBasePath);
 			}
+
+			const initialTarget = (initialFolderId || statusBasePath || '').trim();
+			setSearchQuery(initialTarget);
+			if (initialTarget) {
+				const folders = await loadFolders({ path: initialTarget });
+				if (folders.length === 0 && initialTarget.includes('/')) {
+					await loadFolders({ query: initialTarget });
+				}
+				return;
+			}
+
+			await loadFolders({ path: '' });
 		} catch (e) {
 			console.error('Failed to check Drive status', e);
+			await loadFolders({ path: '' });
 		}
 	};
 
-	const loadFolders = async (path: string, isSearch: boolean = false) => {
+	const loadFolders = async (payload: { path?: string; query?: string }) => {
 		setIsLoading(true);
 		setResults([]); // Clear previous results to indicate loading
 		try {
-			// If searching, use query. If navigating (isSearch=false), use path.
 			const params: any = {
 				max_results: 50,
 				shared_with_me: true, // Always check shared items
 			};
+			const nextPath = (payload.path || '').trim();
+			const nextQuery = (payload.query || '').trim();
 
-			if (isSearch) {
-				params.query = searchQuery;
-			} else if (path) {
-				params.path = path;
+			if (nextQuery) {
+				params.query = nextQuery;
+			} else if (nextPath) {
+				params.path = nextPath;
 			}
 
 			const response = await dashboardApi.listDriveFolders(params);
-			setResults(response.data?.folders || []);
-			if (!isSearch) {
-				setCurrentPath(path);
-				// Also update search input to reflect current path but don't trigger search
-				setSearchQuery(path);
+			const folders = response.data?.folders || [];
+			setResults(folders);
+			if (nextPath && !nextQuery) {
+				setCurrentPath(nextPath);
+				setSearchQuery(nextPath);
+			} else if (!nextQuery) {
+				setCurrentPath('');
 			}
+			return folders;
 		} catch (error) {
 			console.error('Failed to load folders:', error);
 			toast.error('Failed to load folders');
+			return [] as DriveFolderResult[];
 		} finally {
 			setIsLoading(false);
 		}
 	};
 
-	const handleSearch = () => {
-		if (!searchQuery.trim()) return;
-		// If query looks like a path, treat as navigation
-		if (searchQuery.includes('/')) {
-			loadFolders(searchQuery, false);
-		} else {
-			loadFolders('', true);
+	const handleSearch = async () => {
+		const input = searchQuery.trim();
+		if (!input) {
+			await loadFolders({ path: '' });
+			return;
 		}
+
+		if (input.includes('/')) {
+			const pathResults = await loadFolders({ path: input });
+			if (pathResults.length === 0) {
+				await loadFolders({ query: input });
+			}
+			return;
+		}
+
+		await loadFolders({ query: input });
 	};
 
 	const handleNavigate = (path: string) => {
 		setSearchQuery(path);
-		loadFolders(path, false);
+		loadFolders({ path });
 	};
 
 	const handleBreadcrumbClick = (index: number, parts: string[]) => {
@@ -105,10 +133,8 @@ const GoogleDriveFolderPicker: React.FC<GoogleDriveFolderPickerProps> = ({
 	};
 
 	const handleSelect = (folder: DriveFolderResult) => {
-		// Just select, don't navigate
-		// Although usually selecting a folder means "Use this one"
 		const folderId = (folder.id || folder.path || '').trim();
-		const folderPath = (folder.path || folderId).trim();
+		const folderPath = (folder.display_path || folder.path || folderId).trim();
 		const folderName = (
 			folder.name ||
 			folderPath.split('/').pop() ||
@@ -225,21 +251,24 @@ const GoogleDriveFolderPicker: React.FC<GoogleDriveFolderPickerProps> = ({
 								>
 									<div
 										className='flex items-center gap-3 overflow-hidden flex-1 cursor-pointer'
-										onClick={() => handleNavigate(result.path)}
+										onClick={() => handleNavigate(result.id || result.path)}
 									>
 										<Folder className='w-5 h-5 text-gray-400 flex-shrink-0 fill-current text-blue-100 dark:text-gray-600' />
 										<div className='min-w-0 text-left'>
 											<p className='text-sm font-medium text-gray-900 dark:text-white truncate group-hover:text-blue-600 dark:group-hover:text-blue-400'>
-												{result.path.split('/').pop()}
+												{result.name ||
+													result.display_path?.split('/').pop() ||
+													result.path.split('/').pop()}
 											</p>
 											<p className='text-xs text-gray-500 truncate'>
-												{result.path}
+												{result.display_path || result.path}
 											</p>
 										</div>
 									</div>
 
 									<div className='flex items-center gap-2 pl-2'>
-										{result.source === 'shared' && (
+										{(result.source === 'shared' ||
+											result.drive_type === 'shared_with_me') && (
 											<span className='px-2 py-0.5 text-xs bg-yellow-100 text-yellow-800 rounded-full hidden sm:inline-block'>
 												Shared
 											</span>

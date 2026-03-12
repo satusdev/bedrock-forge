@@ -4,13 +4,17 @@
 	"version": "0.1.0",
 	"description": "Shortcut commands for local Docker lifecycle",
 	"scripts": {
-		"up": "docker compose --env-file .env up -d --build --wait",
-		"down": "docker compose --env-file .env down --remove-orphans",
-		"reset": "./reset-seed.sh",
-		"reset:noseed": "RUN_SEED=false ./reset-seed.sh",
-		"migrate": "MIGRATION_STRATEGY=auto RUN_SEED=false ./reset-seed.sh",
-		"seed": "docker compose --env-file .env --profile seed run --rm --no-deps --build nest-api sh -c \"npm run prisma:seed\"",
-		"seed:demo": "docker compose --env-file .env --profile seed run --rm --no-deps --build -e SEED_DEMO_MODE=true nest-api sh -c \"npm run prisma:seed\"",
+		"project": "./scripts/compose-safe.sh project",
+		"up": "./scripts/compose-safe.sh up",
+		"down": "./scripts/compose-safe.sh down",
+		"down:hard": "./scripts/compose-safe.sh down-hard",
+		"update": "./scripts/compose-safe.sh update",
+		"migrate": "./scripts/compose-safe.sh migrate",
+		"seed": "./scripts/compose-safe.sh seed",
+		"reset": "WIPE_VOLUMES=true ./reset-seed.sh",
+		"reset:noseed": "WIPE_VOLUMES=false RUN_SEED=false ./reset-seed.sh",
+		"reset:migrate": "WIPE_VOLUMES=false MIGRATION_STRATEGY=auto RUN_SEED=false ./reset-seed.sh",
+		"seed:demo": "./scripts/compose-safe.sh seed-demo",
 		"smoke": "SEED_STRATEGY=prisma ./scripts/local-docker-smoke.sh"
 	}
 }

@@ -21,6 +21,7 @@ type ProjectServerRow = {
 type PendingSyncTask = {
 	task_id: string;
 	kind: string;
+	project_id: number | null;
 	payload: Record<string, unknown>;
 };
 
@@ -33,6 +34,65 @@ export class SyncService {
 
 	private readonly fallbackOwnerId = 1;
 	private readonly taskQueue: PendingSyncTask[] = [];
+
+	private formatLogLine(message: string) {
+		return `[${new Date().toISOString()}] ${message}`;
+	}
+
+	private async appendTaskLog(taskId: string, message: string) {
+		const current = await this.taskStatusService.getTaskStatus(taskId, {
+			category: 'sync',
+			status: 'pending',
+			message: 'Task is queued',
+			progress: 0,
+			logs: '',
+		});
+		const nextLogs = [current.logs, this.formatLogLine(message)]
+			.filter(Boolean)
+			.join('\n');
+		await this.taskStatusService.upsertTaskStatus(taskId, {
+			category: 'sync',
+			project_id: current.project_id ?? null,
+			task_kind: current.task_kind ?? null,
+			logs: nextLogs,
+		});
+	}
+
+	private buildCommandTrace(task: PendingSyncTask) {
+		const payload = task.payload;
+		switch (task.kind) {
+			case 'sync.full':
+				return [
+					`wp db export /tmp/${task.task_id}-source.sql --path=<source_wp_path> --allow-root`,
+					`rsync -avz <source_uploads>/ <target_uploads>/`,
+					`wp db import /tmp/${task.task_id}-source.sql --path=<target_wp_path> --allow-root`,
+				];
+			case 'sync.pull_database':
+				return [
+					`wp db export /tmp/${task.task_id}-remote.sql --path=<remote_wp_path> --allow-root`,
+					`wp db import /tmp/${task.task_id}-remote.sql --path=<local_wp_path> --allow-root`,
+				];
+			case 'sync.push_database':
+				return [
+					`wp db export /tmp/${task.task_id}-local.sql --path=<local_wp_path> --allow-root`,
+					`wp db import /tmp/${task.task_id}-local.sql --path=<remote_wp_path> --allow-root`,
+				];
+			case 'sync.pull_files':
+				return [
+					`rsync -avz <remote_paths:${JSON.stringify(payload.paths ?? ['uploads'])}> <local_target>`,
+				];
+			case 'sync.push_files':
+				return [
+					`rsync -avz <local_paths:${JSON.stringify(payload.paths ?? ['uploads'])}> <remote_target>`,
+				];
+			case 'sync.composer':
+				return [
+					`composer ${typeof payload.command === 'string' ? payload.command : 'update'} ${Array.isArray(payload.packages) ? payload.packages.join(' ') : ''}`.trim(),
+				];
+			default:
+				return ['no-op'];
+		}
+	}
 
 	private getPanelSyncMethod(panelType: string) {
 		switch (panelType) {
@@ -92,18 +152,27 @@ export class SyncService {
 		} satisfies ProjectServerRow;
 	}
 
-	private enqueueTask(kind: string, payload: Record<string, unknown>) {
+	private enqueueTask(
+		kind: string,
+		payload: Record<string, unknown>,
+		projectId: number | null,
+	) {
 		const taskId = randomUUID();
 		this.taskQueue.push({
 			task_id: taskId,
 			kind,
+			project_id: projectId,
 			payload,
 		});
-		this.taskStatusService.upsertTaskStatus(taskId, {
+		void this.taskStatusService.upsertTaskStatus(taskId, {
+			category: 'sync',
+			project_id: projectId,
+			task_kind: kind,
 			status: 'pending',
 			message: `${kind} task queued`,
 			progress: 0,
 			result: null,
+			logs: this.formatLogLine(`${kind} task queued`),
 		});
 		return taskId;
 	}
@@ -113,19 +182,51 @@ export class SyncService {
 		return this.taskQueue.splice(0, safeLimit);
 	}
 
-	processPendingTask(task: PendingSyncTask) {
-		this.taskStatusService.upsertTaskStatus(task.task_id, {
+	async processPendingTask(task: PendingSyncTask) {
+		await this.taskStatusService.upsertTaskStatus(task.task_id, {
+			category: 'sync',
+			project_id: task.project_id,
+			task_kind: task.kind,
 			status: 'running',
 			message: `${task.kind} task running`,
-			progress: 50,
+			progress: 20,
 		});
+		await this.appendTaskLog(task.task_id, `${task.kind} task running`);
 
-		this.taskStatusService.upsertTaskStatus(task.task_id, {
+		const commandTrace = this.buildCommandTrace(task);
+		for (const [index, command] of commandTrace.entries()) {
+			await this.appendTaskLog(
+				task.task_id,
+				`CMD[${index + 1}/${commandTrace.length}] ${command}`,
+			);
+			await this.appendTaskLog(
+				task.task_id,
+				`RESULT[${index + 1}] simulated success`,
+			);
+		}
+
+		await this.taskStatusService.upsertTaskStatus(task.task_id, {
+			category: 'sync',
+			project_id: task.project_id,
+			task_kind: task.kind,
+			progress: 60,
+			message: `${task.kind} task processing payload`,
+		});
+		await this.appendTaskLog(
+			task.task_id,
+			`${task.kind} task processing payload`,
+		);
+
+		await this.taskStatusService.upsertTaskStatus(task.task_id, {
+			category: 'sync',
+			project_id: task.project_id,
+			task_kind: task.kind,
 			status: 'completed',
 			message: `${task.kind} task completed`,
 			progress: 100,
 			result: task.payload,
 		});
+		await this.appendTaskLog(task.task_id, `${task.kind} task completed`);
 
 		return {
 			task_id: task.task_id,
@@ -145,10 +246,15 @@ export class SyncService {
 			payload.source_project_server_id,
 			ownerId,
 		).then(source => {
-			const taskId = this.enqueueTask('sync.pull_database', {
-				source_project_server_id: payload.source_project_server_id,
-				target: payload.target ?? 'local',
-			});
+			const taskId = this.enqueueTask(
+				'sync.pull_database',
+				{
+					project_id: source.project_id,
+					source_project_server_id: payload.source_project_server_id,
+					target: payload.target ?? 'local',
+				},
+				source.project_id,
+			);
 			return {
 				status: 'accepted',
 				task_id: taskId,
@@ -176,10 +282,15 @@ export class SyncService {
 			payload.target_project_server_id,
 			ownerId,
 		).then(target => {
-			const taskId = this.enqueueTask('sync.push_database', {
-				target_project_server_id: payload.target_project_server_id,
-				source: payload.source ?? 'local',
-			});
+			const taskId = this.enqueueTask(
+				'sync.push_database',
+				{
+					project_id: target.project_id,
+					target_project_server_id: payload.target_project_server_id,
+					source: payload.source ?? 'local',
+				},
+				target.project_id,
+			);
 			return {
 				status: 'accepted',
 				task_id: taskId,
@@ -208,11 +319,16 @@ export class SyncService {
 			payload.source_project_server_id,
 			ownerId,
 		).then(source => {
-			const taskId = this.enqueueTask('sync.pull_files', {
-				source_project_server_id: payload.source_project_server_id,
-				target: payload.target ?? 'local',
-				paths: payload.paths ?? ['uploads'],
-			});
+			const taskId = this.enqueueTask(
+				'sync.pull_files',
+				{
+					project_id: source.project_id,
+					source_project_server_id: payload.source_project_server_id,
+					target: payload.target ?? 'local',
+					paths: payload.paths ?? ['uploads'],
+				},
+				source.project_id,
+			);
 			return {
 				status: 'accepted',
 				task_id: taskId,
@@ -242,11 +358,16 @@ export class SyncService {
 			payload.target_project_server_id,
 			ownerId,
 		).then(target => {
-			const taskId = this.enqueueTask('sync.push_files', {
-				target_project_server_id: payload.target_project_server_id,
-				source: payload.source ?? 'local',
-				paths: payload.paths ?? ['uploads'],
-			});
+			const taskId = this.enqueueTask(
+				'sync.push_files',
+				{
+					project_id: target.project_id,
+					target_project_server_id: payload.target_project_server_id,
+					source: payload.source ?? 'local',
+					paths: payload.paths ?? ['uploads'],
+				},
+				target.project_id,
+			);
 			return {
 				status: 'accepted',
 				task_id: taskId,
@@ -265,13 +386,40 @@ export class SyncService {
 
 	getStatus(taskId: string) {
 		return this.taskStatusService.getTaskStatus(taskId, {
+			category: 'sync',
 			status: 'pending',
 			progress: 0,
 			message: 'Task is waiting to be processed',
+			logs: '',
 			started_at: null,
 			completed_at: null,
 			result: null,
 		});
+	}
+
+	async getProjectTaskHistory(projectId: number, ownerId?: number, limit = 20) {
+		const resolvedOwnerId = ownerId ?? this.fallbackOwnerId;
+		const project = await this.prisma.projects.findFirst({
+			where: {
+				id: projectId,
+				owner_id: resolvedOwnerId,
+			},
+			select: { id: true },
+		});
+
+		if (!project) {
+			throw new NotFoundException({ detail: 'Project not found' });
+		}
+
+		const history = await this.taskStatusService.listSyncTaskStatuses(
+			projectId,
+			limit,
+		);
+
+		return {
+			project_id: projectId,
+			tasks: history,
+		};
 	}
 
 	async fullSync(
@@ -300,10 +448,15 @@ export class SyncService {
 			targetName = target.server_name;
 		}
 
-		const taskId = this.enqueueTask('sync.full', {
-			source_project_server_id: payload.source_project_server_id,
-			target_project_server_id: payload.target_project_server_id ?? null,
-		});
+		const taskId = this.enqueueTask(
+			'sync.full',
+			{
+				project_id: source.project_id,
+				source_project_server_id: payload.source_project_server_id,
+				target_project_server_id: payload.target_project_server_id ?? null,
+			},
+			source.project_id,
+		);
 
 		return {
 			status: 'accepted',
@@ -344,11 +497,16 @@ export class SyncService {
 			payload.project_server_id,
 			ownerId,
 		);
-		const taskId = this.enqueueTask('sync.composer', {
-			project_server_id: payload.project_server_id,
-			command,
-			packages: payload.packages ?? null,
-		});
+		const taskId = this.enqueueTask(
+			'sync.composer',
+			{
+				project_id: target.project_id,
+				project_server_id: payload.project_server_id,
+				command,
+				packages: payload.packages ?? null,
+			},
+			target.project_id,
+		);
 		return {
 			status: 'accepted',
 			task_id: taskId,

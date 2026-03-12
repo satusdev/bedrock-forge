@@ -1,39 +1,49 @@
-import { existsSync } from 'fs';
-import { readFile, stat } from 'fs/promises';
 import { GdriveService } from './gdrive.service';
 
 type MockPrisma = {
 	$queryRaw: jest.Mock;
 };
 
-jest.mock('fs', () => ({
-	existsSync: jest.fn(),
-}));
-
-jest.mock('fs/promises', () => ({
-	readFile: jest.fn(),
-	stat: jest.fn(),
-}));
+type MockDriveRuntimeConfigService = {
+	getRuntimeConfig: jest.Mock;
+	checkRemoteConfigured: jest.Mock;
+};
 
 describe('GdriveService', () => {
 	let prisma: MockPrisma;
 	let service: GdriveService;
+	let driveRuntimeConfigService: MockDriveRuntimeConfigService;
 
 	beforeEach(() => {
 		prisma = { $queryRaw: jest.fn() };
-		service = new GdriveService(prisma as unknown as any);
+		driveRuntimeConfigService = {
+			getRuntimeConfig: jest.fn(),
+			checkRemoteConfigured: jest.fn(),
+		};
+		service = new GdriveService(
+			prisma as unknown as any,
+			driveRuntimeConfigService as unknown as any,
+		);
 		jest.clearAllMocks();
 	});
 
 	it('returns status for configured remote', async () => {
-		prisma.$queryRaw
-			.mockResolvedValueOnce([{ value: 'gdrive', encrypted_value: null }])
-			.mockResolvedValueOnce([
-				{ value: 'WebDev/Projects', encrypted_value: null },
-			]);
-		(existsSync as jest.Mock).mockReturnValueOnce(true);
-		(stat as jest.Mock).mockResolvedValueOnce({ isDirectory: () => false });
-		(readFile as jest.Mock).mockResolvedValueOnce('[gdrive]\ntype = drive\n');
+		driveRuntimeConfigService.getRuntimeConfig.mockResolvedValueOnce({
+			remoteName: 'gdrive',
+			remoteSource: 'default',
+			basePath: 'WebDev/Projects',
+			configPath: '/tmp/rclone.conf',
+		});
+		driveRuntimeConfigService.checkRemoteConfigured.mockResolvedValueOnce({
+			configured: true,
+			message: 'rclone remote configured',
+			runtime: {
+				remoteName: 'gdrive',
+				remoteSource: 'default',
+				basePath: 'WebDev/Projects',
+				configPath: '/tmp/rclone.conf',
+			},
+		});
 
 		const result = await service.getStatus();
 
@@ -57,20 +67,29 @@ describe('GdriveService', () => {
 	});
 
 	it('returns filtered folder list', async () => {
-		prisma.$queryRaw
-			.mockResolvedValueOnce([{ value: 'gdrive', encrypted_value: null }])
+		driveRuntimeConfigService.getRuntimeConfig.mockResolvedValueOnce({
+			remoteName: 'gdrive',
+			remoteSource: 'default',
+			basePath: 'WebDev/Projects',
+			configPath: '/tmp/rclone.conf',
+		});
+		driveRuntimeConfigService.checkRemoteConfigured.mockResolvedValueOnce({
+			configured: true,
+			message: 'rclone remote configured',
+			runtime: {
+				remoteName: 'gdrive',
+				remoteSource: 'default',
+				basePath: 'WebDev/Projects',
+				configPath: '/tmp/rclone.conf',
+			},
+		});
+
+		jest
+			.spyOn(service as any, 'runRcloneJson')
 			.mockResolvedValueOnce([
-				{ value: 'WebDev/Projects', encrypted_value: null },
+				{ Name: 'Acme', Path: 'Acme', ID: 'id-acme', IsDir: true },
 			])
-			.mockResolvedValueOnce([
-				{
-					name: 'Acme',
-					gdrive_folder_id: null,
-					gdrive_backups_folder_id: 'WebDev/Projects/Acme/Backups',
-					gdrive_assets_folder_id: null,
-					gdrive_docs_folder_id: null,
-				},
-			]);
+			.mockResolvedValueOnce([]);
 
 		const result = await service.listFolders({
 			query: 'acme',
@@ -78,6 +97,89 @@ describe('GdriveService', () => {
 		});
 		expect(result.remote_name).toBe('gdrive');
 		expect(result.folders.length).toBeGreaterThan(0);
-		expect(result.folders[0]?.path.toLowerCase()).toContain('acme');
+		expect(result.folders[0]?.display_path?.toLowerCase()).toContain('acme');
+	});
+
+	it('returns configured=false payload when remote is unavailable', async () => {
+		driveRuntimeConfigService.getRuntimeConfig.mockResolvedValueOnce({
+			remoteName: 'gdrive',
+			remoteSource: 'default',
+			basePath: 'WebDev/Projects',
+			configPath: '/tmp/rclone.conf',
+		});
+		driveRuntimeConfigService.checkRemoteConfigured.mockResolvedValueOnce({
+			configured: false,
+			message: 'rclone config not found at /tmp/rclone.conf',
+			runtime: {
+				remoteName: 'gdrive',
+				remoteSource: 'default',
+				basePath: 'WebDev/Projects',
+				configPath: '/tmp/rclone.conf',
+			},
+		});
+
+		const listFolderSetSpy = jest.spyOn(service as any, 'listFolderSet');
+
+		const result = await service.listFolders({
+			shared_with_me: true,
+			max_results: 10,
+		});
+
+		expect(result.configured).toBe(false);
+		expect(result.folders).toEqual([]);
+		expect(listFolderSetSpy).not.toHaveBeenCalled();
+	});
+
+	it('dedupes matching folders returned from base and shared sets', async () => {
+		driveRuntimeConfigService.getRuntimeConfig.mockResolvedValueOnce({
+			remoteName: 'gdrive',
+			remoteSource: 'default',
+			basePath: 'WebDev/Projects',
+			configPath: '/tmp/rclone.conf',
+		});
+		driveRuntimeConfigService.checkRemoteConfigured.mockResolvedValueOnce({
+			configured: true,
+			message: 'rclone remote configured',
+			runtime: {
+				remoteName: 'gdrive',
+				remoteSource: 'default',
+				basePath: 'WebDev/Projects',
+				configPath: '/tmp/rclone.conf',
+			},
+		});
+
+		jest
+			.spyOn(service as any, 'listFolderSet')
+			.mockResolvedValueOnce([
+				{
+					id: 'same-folder-id',
+					name: 'MG',
+					path: 'same-folder-id',
+					display_path: 'WebDev/Projects/MG',
+					parent_path: 'WebDev/Projects',
+					source: 'base',
+					drive_type: 'my_drive',
+				},
+			])
+			.mockResolvedValueOnce([
+				{
+					id: 'same-folder-id',
+					name: 'MG Shared',
+					path: 'same-folder-id',
+					display_path: 'WebDev/Projects/MG',
+					parent_path: 'WebDev/Projects',
+					source: 'shared',
+					drive_type: 'shared_with_me',
+				},
+			]);
+
+		const result = await service.listFolders({
+			query: 'mg',
+			shared_with_me: true,
+			max_results: 20,
+		});
+
+		expect(result.folders).toHaveLength(1);
+		expect(result.folders[0]?.id).toBe('same-folder-id');
 	});
 });

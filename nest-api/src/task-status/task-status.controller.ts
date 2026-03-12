@@ -26,7 +26,7 @@ export class TaskStatusController {
 	}
 
 	@Get(':taskId')
-	getTaskStatus(
+	async getTaskStatus(
 		@Param('taskId') taskId: string,
 		@Headers() headers: Record<string, string | undefined>,
 	) {
@@ -39,7 +39,7 @@ export class TaskStatusController {
 	}
 
 	@Put(':taskId')
-	upsertTaskStatus(
+	async upsertTaskStatus(
 		@Param('taskId') taskId: string,
 		@Headers() headers: Record<string, string | undefined>,
 		@Body() payload: UpsertTaskStatusDto,
