@@ -642,6 +642,8 @@ export class ProjectsService {
 			where: { id: projectId },
 			select: {
 				id: true,
+				name: true,
+				owner_id: true,
 				server_id: true,
 				environment: true,
 				wp_home: true,
@@ -679,6 +681,8 @@ export class ProjectsService {
 		}
 
 		const nextIsPrimary = payload.is_primary ?? true;
+		const shouldCreateMonitor =
+			nextEnvironment === 'staging' || nextEnvironment === 'production';
 
 		const inserted = await this.prisma.$transaction(async tx => {
 			if (nextIsPrimary) {
@@ -738,6 +742,37 @@ export class ProjectsService {
 				where: { id: projectId },
 				data: projectUpdateData,
 			});
+
+			if (shouldCreateMonitor) {
+				const existingMonitor = await tx.monitors.findFirst({
+					where: {
+						project_id: projectId,
+						created_by_id: project.owner_id,
+						monitor_type: 'uptime',
+						url: payload.wp_url,
+					},
+					select: { id: true },
+				});
+
+				if (!existingMonitor) {
+					await tx.monitors.create({
+						data: {
+							name: `${project.name} - ${nextEnvironment}`,
+							monitor_type: 'uptime',
+							url: payload.wp_url,
+							interval_seconds: 300,
+							timeout_seconds: 30,
+							is_active: true,
+							alert_on_down: true,
+							consecutive_failures: 3,
+							project_id: projectId,
+							project_server_id: created.id,
+							created_by_id: project.owner_id,
+							updated_at: new Date(),
+						},
+					});
+				}
+			}
 
 			return created;
 		});
@@ -1931,7 +1966,7 @@ export class ProjectsService {
 
 	async getDeployStatus(projectName: string, taskId: string, ownerId?: number) {
 		const project = await this.findProjectByName(projectName, ownerId);
-		const task = this.taskStatusService.getTaskStatus(taskId, {
+		const task = await this.taskStatusService.getTaskStatus(taskId, {
 			status: 'PENDING',
 			message: 'Task is queued',
 			progress: 0,

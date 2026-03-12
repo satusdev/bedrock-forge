@@ -12,6 +12,7 @@ describe('SyncController', () => {
 			| 'pullFiles'
 			| 'pushFiles'
 			| 'getStatus'
+			| 'getProjectTaskHistory'
 			| 'fullSync'
 			| 'runRemoteComposer'
 		>
@@ -27,6 +28,7 @@ describe('SyncController', () => {
 			pullFiles: jest.fn(),
 			pushFiles: jest.fn(),
 			getStatus: jest.fn(),
+			getProjectTaskHistory: jest.fn(),
 			fullSync: jest.fn(),
 			runRemoteComposer: jest.fn(),
 		};
@@ -48,6 +50,10 @@ describe('SyncController', () => {
 		service.pullFiles.mockResolvedValueOnce({ status: 'accepted' } as never);
 		service.pushFiles.mockResolvedValueOnce({ status: 'accepted' } as never);
 		service.getStatus.mockResolvedValueOnce({ status: 'pending' } as never);
+		service.getProjectTaskHistory.mockResolvedValueOnce({
+			project_id: 10,
+			tasks: [],
+		} as never);
 		service.fullSync.mockResolvedValueOnce({ status: 'accepted' } as never);
 		service.runRemoteComposer.mockResolvedValueOnce({
 			status: 'accepted',
@@ -58,6 +64,7 @@ describe('SyncController', () => {
 		await controller.pullFiles({ source_project_server_id: 1 }, undefined);
 		await controller.pushFiles({ target_project_server_id: 2 }, undefined);
 		await controller.getStatus('task-1');
+		await controller.getHistory(10, undefined, undefined);
 		await controller.fullSync(
 			1,
 			'2',
@@ -101,6 +108,11 @@ describe('SyncController', () => {
 			undefined,
 		);
 		expect(service.getStatus).toHaveBeenCalledWith('task-1');
+		expect(service.getProjectTaskHistory).toHaveBeenCalledWith(
+			10,
+			undefined,
+			undefined,
+		);
 		expect(service.fullSync).toHaveBeenCalledWith(
 			{
 				source_project_server_id: 1,

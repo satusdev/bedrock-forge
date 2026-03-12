@@ -7,8 +7,8 @@ describe('TaskStatusService', () => {
 		service = new TaskStatusService();
 	});
 
-	it('returns fallback payload when task is missing', () => {
-		const result = service.getTaskStatus('task-1', {
+	it('returns fallback payload when task is missing', async () => {
+		const result = await service.getTaskStatus('task-1', {
 			status: 'pending',
 			message: 'queued',
 			progress: 0,
@@ -19,8 +19,8 @@ describe('TaskStatusService', () => {
 		expect(result.message).toBe('queued');
 	});
 
-	it('stores updates and auto-populates timestamps', () => {
-		const running = service.upsertTaskStatus('task-2', {
+	it('stores updates and auto-populates timestamps', async () => {
+		const running = await service.upsertTaskStatus('task-2', {
 			status: 'running',
 			message: 'started',
 			progress: 10,
@@ -28,7 +28,7 @@ describe('TaskStatusService', () => {
 		expect(running.started_at).toBeTruthy();
 		expect(running.completed_at).toBeNull();
 
-		const completed = service.upsertTaskStatus('task-2', {
+		const completed = await service.upsertTaskStatus('task-2', {
 			status: 'completed',
 			progress: 100,
 			result: { ok: true },
@@ -38,8 +38,8 @@ describe('TaskStatusService', () => {
 		expect(completed.result).toEqual({ ok: true });
 	});
 
-	it('normalizes out-of-range progress values', () => {
-		const result = service.upsertTaskStatus('task-3', {
+	it('normalizes out-of-range progress values', async () => {
+		const result = await service.upsertTaskStatus('task-3', {
 			status: 'running',
 			progress: 999,
 		});
@@ -47,37 +47,49 @@ describe('TaskStatusService', () => {
 		expect(result.progress).toBe(100);
 	});
 
-	it('prunes completed and failed task records older than retention threshold', () => {
+	it('prunes completed and failed task records older than retention threshold', async () => {
 		const oldTimestamp = new Date(Date.now() - 5 * 60_000).toISOString();
 		(service as any).store.set('task-completed', {
 			task_id: 'task-completed',
+			project_id: null,
+			task_kind: null,
+			category: null,
 			status: 'completed',
 			message: '',
 			progress: 100,
 			result: null,
+			logs: '',
 			started_at: oldTimestamp,
 			completed_at: oldTimestamp,
 			updated_at: oldTimestamp,
 		});
 		(service as any).store.set('task-failed', {
 			task_id: 'task-failed',
+			project_id: null,
+			task_kind: null,
+			category: null,
 			status: 'failed',
 			message: '',
 			progress: 100,
 			result: null,
+			logs: '',
 			started_at: oldTimestamp,
 			completed_at: oldTimestamp,
 			updated_at: oldTimestamp,
 		});
-		service.upsertTaskStatus('task-running', {
+		await service.upsertTaskStatus('task-running', {
 			status: 'running',
 			progress: 50,
 		});
 
-		const removed = service.pruneTerminalStatuses(1);
+		const removed = await service.pruneTerminalStatuses(1);
 
 		expect(removed).toBe(2);
-		expect(service.getTaskStatus('task-running').status).toBe('running');
-		expect(service.getTaskStatus('task-completed').status).toBe('pending');
+		expect((await service.getTaskStatus('task-running')).status).toBe(
+			'running',
+		);
+		expect((await service.getTaskStatus('task-completed')).status).toBe(
+			'pending',
+		);
 	});
 });

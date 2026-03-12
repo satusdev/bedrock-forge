@@ -49,6 +49,23 @@ interface LinkEnvironmentModalProps {
 	existingEnvironments: string[];
 }
 
+interface LinkEnvironmentFormData {
+	environment: 'staging' | 'production' | 'development';
+	server_id: number | null;
+	wp_url: string;
+	wp_path: string;
+	database_name: string;
+	database_user: string;
+	database_password: string;
+	backup_path: string;
+	gdrive_backups_folder_id: string;
+	backup_folder_name: string;
+	notes: string;
+	wp_admin_username: string;
+	wp_admin_password: string;
+	wp_admin_email: string;
+}
+
 export default function LinkEnvironmentModal({
 	projectId,
 	projectName,
@@ -58,7 +75,41 @@ export default function LinkEnvironmentModal({
 }: LinkEnvironmentModalProps) {
 	const queryClient = useQueryClient();
 
-	const [formData, setFormData] = useState({
+	const normalizeOptional = (value?: string) => {
+		const trimmed = value?.trim() || '';
+		return trimmed.length > 0 ? trimmed : undefined;
+	};
+
+	const buildLinkPayload = (data: LinkEnvironmentFormData) => ({
+		environment: data.environment.toLowerCase(),
+		server_id: data.server_id,
+		wp_url: data.wp_url.trim(),
+		wp_path: data.wp_path.trim(),
+		database_name: data.database_name.trim(),
+		database_user: data.database_user.trim(),
+		database_password: data.database_password,
+		gdrive_backups_folder_id: normalizeOptional(data.gdrive_backups_folder_id),
+		notes: normalizeOptional(data.notes),
+	});
+
+	const resolveEnvironmentId = (payload: any): number | null => {
+		if (typeof payload?.id === 'number') return payload.id;
+		if (typeof payload?.data?.id === 'number') return payload.data.id;
+		if (typeof payload?.environment?.id === 'number')
+			return payload.environment.id;
+		return null;
+	};
+
+	const buildCredentialNotes = (baseNotes: string, email: string) => {
+		const notesParts = [normalizeOptional(baseNotes)];
+		const normalizedEmail = normalizeOptional(email);
+		if (normalizedEmail) {
+			notesParts.push(`Admin email: ${normalizedEmail}`);
+		}
+		return normalizeOptional(notesParts.filter(Boolean).join('\n'));
+	};
+
+	const [formData, setFormData] = useState<LinkEnvironmentFormData>({
 		environment: 'staging' as 'staging' | 'production' | 'development',
 		server_id: null as number | null,
 		wp_url: '',
@@ -94,12 +145,33 @@ export default function LinkEnvironmentModal({
 
 	// Link mutation
 	const linkMutation = useMutation({
-		mutationFn: (data: any) => 
-			dashboardApi.linkEnvironment(projectId, {
-				...data,
-				environment: data.environment.toLowerCase(),
-			}),
-		onSuccess: () => {
+		mutationFn: (data: LinkEnvironmentFormData) =>
+			dashboardApi.linkEnvironment(projectId, buildLinkPayload(data)),
+		onSuccess: async (response, submittedData) => {
+			const username = normalizeOptional(submittedData.wp_admin_username);
+			const password = normalizeOptional(submittedData.wp_admin_password);
+			const envId = resolveEnvironmentId(response?.data);
+
+			if (envId && username && password) {
+				try {
+					await dashboardApi.createEnvironmentCredential(envId, {
+						label: 'Admin',
+						username,
+						password,
+						notes: buildCredentialNotes(
+							submittedData.notes,
+							submittedData.wp_admin_email,
+						),
+					});
+				} catch (error: any) {
+					console.error('Credential save error:', error);
+					toast.error(
+						error.response?.data?.detail ||
+							'Environment linked, but failed to save admin credentials',
+					);
+				}
+			}
+
 			queryClient.invalidateQueries({
 				queryKey: ['project-environments', projectId],
 			});
@@ -147,10 +219,14 @@ export default function LinkEnvironmentModal({
 
 		// Determine base path based on server panel type
 		const selectedServer = servers.find(s => s.id === formData.server_id);
-		const basePath = selectedServer?.panel_type === 'cyberpanel' ? '/home' : '/var/www';
+		const basePath =
+			selectedServer?.panel_type === 'cyberpanel' ? '/home' : '/var/www';
 
 		try {
-			const response = await dashboardApi.scanServerSites(formData.server_id, basePath);
+			const response = await dashboardApi.scanServerSites(
+				formData.server_id,
+				basePath,
+			);
 			if (response.data?.success) {
 				const sites = response.data.sites || [];
 				setScannedSites(sites);
@@ -173,17 +249,18 @@ export default function LinkEnvironmentModal({
 	// Select a scanned site and populate form
 	const handleSelectSite = async (site: ScannedSite) => {
 		setSelectedSite(site);
+		const selectedWpPath = site.wp_path || site.path;
 		setFormData(prev => ({
 			...prev,
 			wp_url: site.site_url || `https://${site.domain}`,
-			wp_path: site.path,
+			wp_path: selectedWpPath,
 			// Auto-detect environment from path or domain
 			environment:
-				site.domain?.includes('staging') || site.path?.includes('staging')
+				site.domain?.includes('staging') || selectedWpPath?.includes('staging')
 					? 'staging'
-					: site.domain?.includes('dev') || site.path?.includes('dev')
-					? 'development'
-					: prev.environment,
+					: site.domain?.includes('dev') || selectedWpPath?.includes('dev')
+						? 'development'
+						: prev.environment,
 		}));
 
 		// Auto-fetch .env for Bedrock sites
@@ -192,7 +269,7 @@ export default function LinkEnvironmentModal({
 			try {
 				const response = await dashboardApi.readServerEnv(
 					formData.server_id,
-					site.path
+					selectedWpPath,
 				);
 				if (response.data?.success && response.data.env) {
 					const env = response.data.env;
@@ -214,7 +291,6 @@ export default function LinkEnvironmentModal({
 		}
 	};
 
-
 	// Fetch .env credentials from Bedrock site
 	const handleFetchEnv = async () => {
 		if (!formData.server_id || !selectedSite) {
@@ -224,7 +300,7 @@ export default function LinkEnvironmentModal({
 
 		if (!selectedSite.is_bedrock) {
 			toast.error(
-				'This site is not a Bedrock installation. Cannot auto-fetch credentials.'
+				'This site is not a Bedrock installation. Cannot auto-fetch credentials.',
 			);
 			return;
 		}
@@ -233,7 +309,7 @@ export default function LinkEnvironmentModal({
 		try {
 			const response = await dashboardApi.readServerEnv(
 				formData.server_id,
-				selectedSite.path
+				selectedSite.wp_path || selectedSite.path,
 			);
 			if (response.data?.success && response.data.env) {
 				const env = response.data.env;
@@ -258,7 +334,7 @@ export default function LinkEnvironmentModal({
 	const handleDriveFolderSelect = (
 		folderId: string,
 		folderName: string,
-		path: string
+		path: string,
 	) => {
 		setFormData(prev => ({
 			...prev,
@@ -284,7 +360,7 @@ export default function LinkEnvironmentModal({
 	};
 
 	const availableEnvironments = ['staging', 'production', 'development'].filter(
-		env => !existingEnvironments.includes(env)
+		env => !existingEnvironments.includes(env),
 	);
 
 	if (!isOpen) return null;
@@ -336,8 +412,8 @@ export default function LinkEnvironmentModal({
 												? env === 'production'
 													? 'border-red-500 bg-red-50 text-red-700 ring-2 ring-red-500'
 													: env === 'staging'
-													? 'border-yellow-500 bg-yellow-50 text-yellow-700 ring-2 ring-yellow-500'
-													: 'border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-500'
+														? 'border-yellow-500 bg-yellow-50 text-yellow-700 ring-2 ring-yellow-500'
+														: 'border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-500'
 												: 'border-gray-200 hover:border-gray-300'
 										}`}
 									>

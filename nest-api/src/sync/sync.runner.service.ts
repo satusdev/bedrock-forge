@@ -29,7 +29,7 @@ export class SyncRunnerService {
 			const tasks = this.syncService.claimPendingTasks(this.batchSize);
 			for (const task of tasks) {
 				try {
-					this.syncService.processPendingTask(task);
+					await this.syncService.processPendingTask(task);
 				} catch (error) {
 					const detail =
 						error instanceof Error

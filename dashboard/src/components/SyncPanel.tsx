@@ -23,14 +23,21 @@ import {
 import Card from './ui/Card';
 import Button from './ui/Button';
 import Badge from './ui/Badge';
+import SyncTaskLogsModal from './SyncTaskLogsModal';
 import api from '../services/api';
 import toast from 'react-hot-toast';
+import {
+	readSyncTaskHistory,
+	upsertSyncTaskHistory,
+	type SyncTaskSnapshot,
+} from '../utils/syncLogStorage';
 
 interface SyncStatus {
 	task_id: string;
 	status: 'pending' | 'running' | 'completed' | 'failed';
 	progress: number;
 	message: string;
+	logs?: string;
 	result?: any;
 }
 
@@ -67,13 +74,17 @@ const SyncPanel: React.FC<SyncPanelProps> = ({
 	onServerLink,
 }) => {
 	const [selectedServer, setSelectedServer] = useState<ProjectServer | null>(
-		projectServers.find(s => s.is_primary) || projectServers[0] || null
+		projectServers.find(s => s.is_primary) || projectServers[0] || null,
 	);
 	const [syncDirection, setSyncDirection] = useState<'pull' | 'push'>('pull');
 	const [showOptions, setShowOptions] = useState(false);
 	const [showConfirmModal, setShowConfirmModal] = useState(false);
 	const [pendingAction, setPendingAction] = useState<string | null>(null);
 	const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+	const [isTaskTerminal, setIsTaskTerminal] = useState(false);
+	const [showLogsModal, setShowLogsModal] = useState(false);
+	const [taskHistory, setTaskHistory] = useState<SyncTaskSnapshot[]>([]);
+	const storageKey = `sync-active-task:${projectId}`;
 
 	const [syncOptions, setSyncOptions] = useState<SyncOptions>({
 		sync_database: true,
@@ -86,6 +97,30 @@ const SyncPanel: React.FC<SyncPanelProps> = ({
 
 	const queryClient = useQueryClient();
 
+	const { data: persistedHistory } = useQuery<SyncTaskSnapshot[]>({
+		queryKey: ['sync-history', projectId],
+		queryFn: async () => {
+			const response = await api.get(`/sync/history/${projectId}`, {
+				params: { limit: 50 },
+			});
+			const tasks = Array.isArray(response.data?.tasks)
+				? response.data.tasks
+				: [];
+			return tasks.map((task: any) => ({
+				task_id: task.task_id,
+				status: task.status,
+				message: task.message,
+				progress: typeof task.progress === 'number' ? task.progress : 0,
+				logs: typeof task.logs === 'string' ? task.logs : '',
+				updated_at:
+					typeof task.updated_at === 'string'
+						? task.updated_at
+						: new Date().toISOString(),
+			}));
+		},
+		enabled: projectId > 0,
+	});
+
 	// Sync status polling
 	const { data: syncStatus } = useQuery<SyncStatus>({
 		queryKey: ['sync-status', activeTaskId],
@@ -93,13 +128,55 @@ const SyncPanel: React.FC<SyncPanelProps> = ({
 			const response = await api.get(`/sync/status/${activeTaskId}`);
 			return response.data;
 		},
-		enabled: !!activeTaskId,
-		refetchInterval: activeTaskId ? 3000 : false,
+		enabled: !!activeTaskId && !isTaskTerminal,
+		refetchInterval: 3000,
 	});
+
+	useEffect(() => {
+		const existingTaskId = window.localStorage.getItem(storageKey);
+		if (existingTaskId) {
+			setActiveTaskId(existingTaskId);
+			setIsTaskTerminal(false);
+		}
+	}, [projectId, storageKey]);
+
+	useEffect(() => {
+		if (persistedHistory && persistedHistory.length > 0) {
+			setTaskHistory(persistedHistory);
+			return;
+		}
+		setTaskHistory(readSyncTaskHistory(projectId));
+	}, [persistedHistory, projectId]);
+
+	useEffect(() => {
+		if (!activeTaskId) {
+			window.localStorage.removeItem(storageKey);
+			setIsTaskTerminal(false);
+			return;
+		}
+		window.localStorage.setItem(storageKey, activeTaskId);
+	}, [activeTaskId, storageKey]);
+
+	useEffect(() => {
+		if (!activeTaskId || !syncStatus) {
+			return;
+		}
+
+		const nextHistory = upsertSyncTaskHistory(projectId, {
+			task_id: activeTaskId,
+			status: syncStatus.status,
+			message: syncStatus.message,
+			progress: syncStatus.progress,
+			logs: syncStatus.logs || '',
+			updated_at: new Date().toISOString(),
+		});
+		setTaskHistory(nextHistory);
+	}, [activeTaskId, projectId, syncStatus]);
 
 	// Handle task completion
 	useEffect(() => {
 		if (syncStatus?.status === 'completed' || syncStatus?.status === 'failed') {
+			setIsTaskTerminal(true);
 			if (syncStatus.status === 'completed') {
 				toast.success('Sync completed successfully!');
 			} else {
@@ -119,7 +196,21 @@ const SyncPanel: React.FC<SyncPanelProps> = ({
 			});
 		},
 		onSuccess: data => {
-			setActiveTaskId(data.data?.task_id || null);
+			const nextTaskId = data.data?.task_id || null;
+			setActiveTaskId(nextTaskId);
+			setIsTaskTerminal(false);
+			if (nextTaskId) {
+				setTaskHistory(
+					upsertSyncTaskHistory(projectId, {
+						task_id: nextTaskId,
+						status: 'pending',
+						message: 'sync.pull_database task queued',
+						progress: 0,
+						logs: '',
+						updated_at: new Date().toISOString(),
+					}),
+				);
+			}
 			toast.success('Database pull started');
 			queryClient.invalidateQueries({ queryKey: ['project', projectName] });
 		},
@@ -194,7 +285,7 @@ const SyncPanel: React.FC<SyncPanelProps> = ({
 			if (!selectedServer) throw new Error('No server selected');
 			return api.post(
 				`/projects/${projectId}/servers/${selectedServer.id}/sync`,
-				syncOptions
+				syncOptions,
 			);
 		},
 		onSuccess: () => {
@@ -309,8 +400,8 @@ const SyncPanel: React.FC<SyncPanelProps> = ({
 								syncStatus.status === 'completed'
 									? 'bg-green-50 border border-green-200'
 									: syncStatus.status === 'failed'
-									? 'bg-red-50 border border-red-200'
-									: 'bg-blue-50 border border-blue-200'
+										? 'bg-red-50 border border-red-200'
+										: 'bg-blue-50 border border-blue-200'
 							}`}
 						>
 							<div className='flex items-center justify-between mb-2'>
@@ -337,8 +428,8 @@ const SyncPanel: React.FC<SyncPanelProps> = ({
 										syncStatus.status === 'completed'
 											? 'bg-green-500'
 											: syncStatus.status === 'failed'
-											? 'bg-red-500'
-											: 'bg-blue-500'
+												? 'bg-red-500'
+												: 'bg-blue-500'
 									}`}
 									style={{ width: `${syncStatus.progress}%` }}
 								/>
@@ -350,11 +441,28 @@ const SyncPanel: React.FC<SyncPanelProps> = ({
 									variant='secondary'
 									size='sm'
 									className='mt-3'
-									onClick={() => setActiveTaskId(null)}
+									onClick={() => {
+										setActiveTaskId(null);
+										setIsTaskTerminal(false);
+										window.localStorage.removeItem(storageKey);
+									}}
 								>
 									Dismiss
 								</Button>
 							)}
+							{syncStatus.logs && (
+								<pre className='mt-3 max-h-56 overflow-auto rounded-md bg-gray-900 text-gray-200 p-3 text-xs whitespace-pre-wrap break-all'>
+									{syncStatus.logs}
+								</pre>
+							)}
+							<Button
+								variant='secondary'
+								size='sm'
+								className='mt-3'
+								onClick={() => setShowLogsModal(true)}
+							>
+								View Full Logs
+							</Button>
 						</div>
 					)}
 
@@ -604,7 +712,7 @@ const SyncPanel: React.FC<SyncPanelProps> = ({
 											<Badge
 												variant={
 													getEnvironmentColor(
-														selectedServer?.environment || ''
+														selectedServer?.environment || '',
 													) as any
 												}
 											>
@@ -619,7 +727,7 @@ const SyncPanel: React.FC<SyncPanelProps> = ({
 											<Badge
 												variant={
 													getEnvironmentColor(
-														selectedServer?.environment || ''
+														selectedServer?.environment || '',
 													) as any
 												}
 											>
@@ -634,7 +742,7 @@ const SyncPanel: React.FC<SyncPanelProps> = ({
 											<Badge
 												variant={
 													getEnvironmentColor(
-														selectedServer?.environment || ''
+														selectedServer?.environment || '',
 													) as any
 												}
 											>
@@ -668,6 +776,16 @@ const SyncPanel: React.FC<SyncPanelProps> = ({
 					</div>
 				</div>
 			)}
+
+			<SyncTaskLogsModal
+				isOpen={showLogsModal}
+				onClose={() => setShowLogsModal(false)}
+				title='Sync Task Logs'
+				activeTaskId={activeTaskId}
+				activeStatus={syncStatus?.status}
+				activeLogs={syncStatus?.logs}
+				history={taskHistory}
+			/>
 		</>
 	);
 };

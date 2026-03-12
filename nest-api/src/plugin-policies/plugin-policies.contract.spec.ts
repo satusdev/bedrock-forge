@@ -1,4 +1,4 @@
-import { INestApplication, NotFoundException } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { AuthService } from '../auth/auth.service';
@@ -73,16 +73,25 @@ describe('PluginPolicies HTTP Contract', () => {
 		expect(response.body.project_id).toBe(10);
 	});
 
-	it('GET /plugin-policies/projects/:id returns 404 detail when missing', async () => {
-		pluginPoliciesService.getProjectPolicy.mockRejectedValueOnce(
-			new NotFoundException({ detail: 'Project policy not found' }),
-		);
+	it('GET /plugin-policies/projects/:id returns default project policy when missing', async () => {
+		pluginPoliciesService.getProjectPolicy.mockResolvedValueOnce({
+			id: 0,
+			project_id: 999,
+			inherit_default: true,
+			name: 'Project Override',
+			allowed_plugins: [],
+			required_plugins: [],
+			blocked_plugins: [],
+			pinned_versions: {},
+			notes: null,
+		});
 
 		const response = await request(app.getHttpServer())
 			.get('/plugin-policies/projects/999')
-			.expect(404);
+			.expect(200);
 
-		expect(response.body).toEqual({ detail: 'Project policy not found' });
+		expect(response.body.project_id).toBe(999);
+		expect(response.body.inherit_default).toBe(true);
 	});
 
 	it('GET /plugin-policies/bundles returns bundles list', async () => {
