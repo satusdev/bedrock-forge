@@ -34,6 +34,7 @@ export class SchedulesRunnerService {
 					await this.schedulesService.runScheduleNow(
 						claim.id,
 						claim.created_by_id,
+						claim.claim_token,
 					);
 				} catch (error) {
 					const detail =

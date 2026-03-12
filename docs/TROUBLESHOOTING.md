@@ -42,6 +42,25 @@ npm install
 npm run dev
 ```
 
+## Google Drive backup/folder issues
+
+If backup logs show `didn't find section in config file ("<remote>")` or the
+folder picker cannot load folders:
+
+```bash
+docker compose exec api printenv FORGE_BACKUP_GDRIVE_REMOTE RCLONE_CONFIG
+docker compose exec api sh -lc 'test -f "${RCLONE_CONFIG:-$HOME/.config/rclone/rclone.conf}" && echo "rclone config present" || echo "rclone config missing"'
+docker compose exec api sh -lc 'rclone --config "${RCLONE_CONFIG:-$HOME/.config/rclone/rclone.conf}" listremotes'
+curl -s http://localhost:8000/api/v1/gdrive/status
+```
+
+Expected:
+
+- `/gdrive/status` reports `configured: true`.
+- The remote in status matches `FORGE_BACKUP_GDRIVE_REMOTE` when that env var is
+  set, otherwise `app_settings.gdrive_rclone_remote`.
+- `listremotes` includes `<remote>:` for the resolved remote.
+
 ## Deploy helper issues
 
 ```bash

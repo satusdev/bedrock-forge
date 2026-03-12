@@ -172,7 +172,8 @@ export class BackupsController {
 	@Delete('bulk')
 	@HttpCode(200)
 	async bulkDeleteBackups(
-		@Body() payload: { backup_ids: number[]; force?: boolean },
+		@Body()
+		payload: { backup_ids: number[]; force?: boolean; delete_file?: boolean },
 		@Headers('authorization') authorization?: string,
 	) {
 		const ownerId = await this.resolveOwnerId(authorization);
@@ -193,10 +194,18 @@ export class BackupsController {
 	async deleteBackup(
 		@Param('backupId', ParseIntPipe) backupId: number,
 		@Query('force') force?: string,
+		@Query('delete_file') deleteFile?: string,
 		@Headers('authorization') authorization?: string,
 	) {
 		const ownerId = await this.resolveOwnerId(authorization);
-		await this.backupsService.deleteBackup(backupId, force === 'true', ownerId);
+		const shouldDeleteFile =
+			deleteFile === undefined ? true : deleteFile === 'true';
+		await this.backupsService.deleteBackup(
+			backupId,
+			force === 'true',
+			ownerId,
+			shouldDeleteFile,
+		);
 	}
 
 	@Get(':backupId/download')

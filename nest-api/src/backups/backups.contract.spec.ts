@@ -211,10 +211,16 @@ describe('Backups HTTP Contract', () => {
 		);
 
 		const response = await request(app.getHttpServer())
-			.delete('/backups/8')
+			.delete('/backups/8?delete_file=true')
 			.expect(400);
 
 		expect(response.body.detail).toContain('force=true');
+		expect(backupsService.deleteBackup).toHaveBeenCalledWith(
+			8,
+			false,
+			undefined,
+			true,
+		);
 	});
 
 	it('POST /backups/:id/restore returns restore task payload', async () => {

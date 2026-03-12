@@ -18,12 +18,19 @@ describe('TaskStatusController', () => {
 		);
 	});
 
-	it('delegates get and upsert to service', () => {
+	it('delegates get and upsert to service', async () => {
 		service.getTaskStatus.mockReturnValueOnce({ task_id: 't1' } as never);
 		service.upsertTaskStatus.mockReturnValueOnce({ task_id: 't1' } as never);
 
-		controller.getTaskStatus('t1', {});
-		controller.upsertTaskStatus('t1', {}, { status: 'running', progress: 25 });
+		await controller.getTaskStatus('t1', {});
+		await controller.upsertTaskStatus(
+			't1',
+			{},
+			{
+				status: 'running',
+				progress: 25,
+			},
+		);
 
 		expect(service.getTaskStatus).toHaveBeenCalledWith('t1', {
 			status: 'pending',

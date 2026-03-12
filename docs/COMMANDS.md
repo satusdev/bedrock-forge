@@ -5,12 +5,17 @@ Current default operations are Docker + Nest API + Prisma.
 ## Core runtime
 
 ```bash
-# Start stack
-cp .env.local.example .env
-docker compose up -d
+# Start stack safely (auto-detects active compose project)
+npm run up
 
-# Stop stack
-docker compose down
+# Stop stack and clean stale named containers
+npm run down
+
+# Hard stop + remove named volumes
+npm run down:hard
+
+# Non-destructive backend+frontend update (no volume wipe)
+npm run update
 
 # View logs
 docker compose logs -f
@@ -20,13 +25,19 @@ docker compose logs -f
 
 ```bash
 # Prisma schema sync
-docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:push"
+npm run migrate
 
 # Prisma seed
-docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:seed"
+npm run seed
+
+# Prisma demo seed override
+npm run seed:demo
+
+# Reset containers only (preserve DB/Redis volumes, skip seed)
+npm run reset:noseed
 
 # Full reset + seed
-./reset-seed.sh
+npm run reset
 ```
 
 ## Testing

@@ -111,7 +111,7 @@ describe('BackupsController', () => {
 		await controller.getBackupStatsSummary(undefined);
 		controller.getMaintenanceStatus();
 		await controller.getBackup(1, undefined);
-		await controller.deleteBackup(1, 'true', undefined);
+		await controller.deleteBackup(1, 'true', 'true', undefined);
 		await controller.restoreBackup(
 			1,
 			{ database: true, files: true },
@@ -159,7 +159,15 @@ describe('BackupsController', () => {
 		expect(service.getBackupStatsSummary).toHaveBeenCalledWith(undefined);
 		expect(service.getMaintenanceSnapshot).toHaveBeenCalled();
 		expect(service.getBackup).toHaveBeenCalledWith(1, undefined);
-		expect(service.deleteBackup).toHaveBeenCalledWith(1, true, undefined);
+		expect(service.deleteBackup).toHaveBeenCalledWith(1, true, undefined, true);
+
+		await controller.deleteBackup(2, 'false', 'false', undefined);
+		expect(service.deleteBackup).toHaveBeenCalledWith(
+			2,
+			false,
+			undefined,
+			false,
+		);
 		expect(service.restoreBackup).toHaveBeenCalledWith(
 			1,
 			{

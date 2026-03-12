@@ -3,6 +3,7 @@ import {
 	Injectable,
 	NotFoundException,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import {
 	backupstoragetype,
 	backuptype,
@@ -38,6 +39,7 @@ type DbScheduleRow = {
 	environment_id: number | null;
 	created_at: Date;
 	updated_at: Date;
+	celery_task_id: string | null;
 };
 
 const scheduleSelect = {
@@ -61,6 +63,7 @@ const scheduleSelect = {
 	project_id: true,
 	created_by_id: true,
 	environment_id: true,
+	celery_task_id: true,
 	created_at: true,
 	updated_at: true,
 } satisfies Prisma.backup_schedulesSelect;
@@ -95,6 +98,45 @@ export class SchedulesService {
 	) {}
 
 	private readonly fallbackOwnerId = 1;
+	private readonly scheduleLeaseSeconds = Math.max(
+		30,
+		Math.min(
+			3600,
+			Number.parseInt(process.env.SCHEDULE_RUNNER_LEASE_SECONDS ?? '300', 10) ||
+				300,
+		),
+	);
+	private readonly scheduleLeaseHeartbeatMs = Math.max(
+		1000,
+		Math.floor((this.scheduleLeaseSeconds * 1000) / 3),
+	);
+
+	private startScheduleLeaseHeartbeat(scheduleId: number, claimToken?: string) {
+		if (!claimToken) {
+			return () => undefined;
+		}
+
+		const timer = setInterval(() => {
+			void this.prisma.backup_schedules
+				.updateMany({
+					where: {
+						id: scheduleId,
+						status: 'active',
+						celery_task_id: claimToken,
+					},
+					data: {
+						updated_at: new Date(),
+					},
+				})
+				.catch(() => undefined);
+		}, this.scheduleLeaseHeartbeatMs);
+
+		timer.unref();
+
+		return () => {
+			clearInterval(timer);
+		};
+	}
 
 	private resolveOwnerId(ownerId?: number) {
 		return ownerId ?? this.fallbackOwnerId;
@@ -483,11 +525,26 @@ export class SchedulesService {
 		return this.updateSchedule(scheduleId, { status: 'active' }, ownerId);
 	}
 
-	async runScheduleNow(scheduleId: number, ownerId?: number) {
+	async runScheduleNow(
+		scheduleId: number,
+		ownerId?: number,
+		claimToken?: string,
+	) {
 		const schedule = await this.getScheduleRow(scheduleId, ownerId);
 		const resolvedOwnerId = this.resolveOwnerId(ownerId);
 		const startedAt = new Date();
 		const runName = `${schedule.name} - ${startedAt.toISOString()}`;
+
+		if (claimToken && schedule.celery_task_id !== claimToken) {
+			throw new BadRequestException({
+				detail: 'Schedule lease token is invalid or expired',
+			});
+		}
+
+		const stopLeaseHeartbeat = this.startScheduleLeaseHeartbeat(
+			scheduleId,
+			claimToken,
+		);
 
 		try {
 			const backupType = this.normalizeBackupType(schedule.backup_type, 'full');
@@ -519,17 +576,43 @@ export class SchedulesService {
 				resolvedOwnerId,
 			);
 
-			await this.prisma.backup_schedules.update({
-				where: { id: scheduleId },
-				data: {
-					last_run_at: startedAt,
-					next_run_at: this.calculateNextRunAt(schedule, startedAt),
-					last_run_success: true,
-					last_run_error: null,
-					run_count: { increment: 1 },
-					updated_at: new Date(),
-				},
-			});
+			if (claimToken) {
+				const updated = await this.prisma.backup_schedules.updateMany({
+					where: {
+						id: scheduleId,
+						status: 'active',
+						celery_task_id: claimToken,
+					},
+					data: {
+						last_run_at: startedAt,
+						next_run_at: this.calculateNextRunAt(schedule, startedAt),
+						last_run_success: true,
+						last_run_error: null,
+						celery_task_id: null,
+						run_count: { increment: 1 },
+						updated_at: new Date(),
+					},
+				});
+
+				if (updated.count !== 1) {
+					throw new BadRequestException({
+						detail: 'Schedule lease expired before completion',
+					});
+				}
+			} else {
+				await this.prisma.backup_schedules.update({
+					where: { id: scheduleId },
+					data: {
+						last_run_at: startedAt,
+						next_run_at: this.calculateNextRunAt(schedule, startedAt),
+						last_run_success: true,
+						last_run_error: null,
+						celery_task_id: null,
+						run_count: { increment: 1 },
+						updated_at: new Date(),
+					},
+				});
+			}
 
 			return {
 				task_id: execution.task_id,
@@ -541,29 +624,63 @@ export class SchedulesService {
 		} catch (error) {
 			const detail =
 				error instanceof Error ? error.message : 'Schedule execution failed';
-			await this.prisma.backup_schedules.update({
-				where: { id: scheduleId },
-				data: {
-					last_run_at: startedAt,
-					next_run_at: this.calculateNextRunAt(schedule, startedAt),
-					last_run_success: false,
-					last_run_error: detail,
-					run_count: { increment: 1 },
-					failure_count: { increment: 1 },
-					updated_at: new Date(),
-				},
-			});
+			if (claimToken) {
+				await this.prisma.backup_schedules.updateMany({
+					where: {
+						id: scheduleId,
+						status: 'active',
+						celery_task_id: claimToken,
+					},
+					data: {
+						last_run_at: startedAt,
+						next_run_at: this.calculateNextRunAt(schedule, startedAt),
+						last_run_success: false,
+						last_run_error: detail,
+						celery_task_id: null,
+						run_count: { increment: 1 },
+						failure_count: { increment: 1 },
+						updated_at: new Date(),
+					},
+				});
+			} else {
+				await this.prisma.backup_schedules.update({
+					where: { id: scheduleId },
+					data: {
+						last_run_at: startedAt,
+						next_run_at: this.calculateNextRunAt(schedule, startedAt),
+						last_run_success: false,
+						last_run_error: detail,
+						celery_task_id: null,
+						run_count: { increment: 1 },
+						failure_count: { increment: 1 },
+						updated_at: new Date(),
+					},
+				});
+			}
 			throw error;
+		} finally {
+			stopLeaseHeartbeat();
 		}
 	}
 
 	async claimDueSchedules(limit = 5) {
 		const safeLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
 		const now = new Date();
+		const staleLeaseThreshold = new Date(
+			now.getTime() - this.scheduleLeaseSeconds * 1000,
+		);
 		const rows = await this.prisma.backup_schedules.findMany({
 			where: {
 				status: 'active',
 				OR: [{ next_run_at: null }, { next_run_at: { lte: now } }],
+				AND: [
+					{
+						OR: [
+							{ celery_task_id: null },
+							{ updated_at: { lt: staleLeaseThreshold } },
+						],
+					},
+				],
 			},
 			orderBy: [{ next_run_at: 'asc' }, { created_at: 'asc' }, { id: 'asc' }],
 			take: safeLimit,
@@ -574,17 +691,38 @@ export class SchedulesService {
 			return [];
 		}
 
-		await this.prisma.backup_schedules.updateMany({
-			where: {
-				id: { in: rows.map(row => row.id) },
-				status: 'active',
-			},
-			data: {
-				next_run_at: null,
-				updated_at: now,
-			},
-		});
+		const claimed: Array<{
+			id: number;
+			created_by_id: number;
+			claim_token: string;
+		}> = [];
 
-		return rows;
+		for (const row of rows) {
+			const claimToken = `schedule-lease-${randomUUID()}`;
+			const updateResult = await this.prisma.backup_schedules.updateMany({
+				where: {
+					id: row.id,
+					status: 'active',
+					OR: [
+						{ celery_task_id: null },
+						{ updated_at: { lt: staleLeaseThreshold } },
+					],
+				},
+				data: {
+					celery_task_id: claimToken,
+					updated_at: now,
+				},
+			});
+
+			if (updateResult.count === 1) {
+				claimed.push({
+					id: row.id,
+					created_by_id: row.created_by_id,
+					claim_token: claimToken,
+				});
+			}
+		}
+
+		return claimed;
 	}
 }

@@ -1,93 +1,21 @@
 import { Injectable } from '@nestjs/common';
-import { existsSync } from 'fs';
-import { readFile, stat } from 'fs/promises';
-import { homedir } from 'os';
-import { resolve } from 'path';
+import { spawn } from 'child_process';
+import { DriveRuntimeConfigService } from '../drive-runtime/drive-runtime-config.service';
 import { PrismaService } from '../prisma/prisma.service';
 
-type SettingRow = {
-	value: string | null;
-	encrypted_value: string | null;
-};
-
-type ProjectDriveFoldersRow = {
-	name: string;
-	gdrive_folder_id: string | null;
-	gdrive_backups_folder_id: string | null;
-	gdrive_assets_folder_id: string | null;
-	gdrive_docs_folder_id: string | null;
+type RcloneLsjsonEntry = {
+	Path?: string;
+	Name?: string;
+	ID?: string;
+	IsDir?: boolean;
 };
 
 @Injectable()
 export class GdriveService {
-	constructor(private readonly prisma: PrismaService) {}
-
-	private readonly remoteKey = 'gdrive_rclone_remote';
-	private readonly basePathKey = 'gdrive_base_path';
-
-	private async getSetting(key: string) {
-		const rows = await this.prisma.$queryRaw<SettingRow[]>`
-			SELECT value, encrypted_value
-			FROM app_settings
-			WHERE key = ${key}
-			LIMIT 1
-		`;
-		return rows[0] ?? null;
-	}
-
-	private async getConfig() {
-		const remote = await this.getSetting(this.remoteKey);
-		const basePath = await this.getSetting(this.basePathKey);
-		return {
-			remoteName:
-				(remote?.value ?? remote?.encrypted_value ?? 'gdrive').trim() ||
-				'gdrive',
-			basePath:
-				(
-					basePath?.value ??
-					basePath?.encrypted_value ??
-					'WebDev/Projects'
-				).trim() || 'WebDev/Projects',
-		};
-	}
-
-	private getConfigPath() {
-		const envPath = process.env.RCLONE_CONFIG?.trim();
-		if (!envPath) {
-			return resolve(`${homedir()}/.config/rclone/rclone.conf`);
-		}
-		return resolve(envPath);
-	}
-
-	private async hasConfiguredRemote(remoteName: string, configPath: string) {
-		if (!existsSync(configPath)) {
-			return {
-				configured: false,
-				message: 'rclone config file not found',
-			};
-		}
-
-		const stats = await stat(configPath);
-		if (stats.isDirectory()) {
-			return {
-				configured: false,
-				message: 'rclone config path points to a directory',
-			};
-		}
-
-		const raw = await readFile(configPath, 'utf-8');
-		const sectionPattern = new RegExp(
-			`^\\[${remoteName.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\]$`,
-			'm',
-		);
-		const configured = sectionPattern.test(raw);
-		return {
-			configured,
-			message: configured
-				? 'rclone remote configured'
-				: `Remote '${remoteName}' not found in rclone config`,
-		};
-	}
+	constructor(
+		private readonly prisma: PrismaService,
+		private readonly driveRuntimeConfigService: DriveRuntimeConfigService,
+	) {}
 
 	private normalizePath(value: string | null | undefined) {
 		return (value ?? '').trim().replace(/^\/+|\/+$/g, '');
@@ -97,17 +25,145 @@ export class GdriveService {
 		return /^[A-Za-z0-9_-]{10,}$/.test((value ?? '').trim());
 	}
 
+	private async runRcloneJson(args: string[]) {
+		return new Promise<RcloneLsjsonEntry[]>((resolvePromise, rejectPromise) => {
+			const child = spawn('rclone', args, {
+				stdio: ['ignore', 'pipe', 'pipe'],
+			});
+			let stdout = '';
+			let stderr = '';
+
+			child.stdout.on('data', chunk => {
+				stdout += chunk.toString();
+			});
+
+			child.stderr.on('data', chunk => {
+				stderr += chunk.toString();
+			});
+
+			child.on('error', error => {
+				rejectPromise(error);
+			});
+
+			child.on('close', code => {
+				if (code !== 0) {
+					rejectPromise(
+						new Error(
+							`rclone exited with code ${code ?? 'unknown'}${stderr ? `: ${stderr.trim()}` : ''}`,
+						),
+					);
+					return;
+				}
+
+				try {
+					const parsed = JSON.parse(stdout) as RcloneLsjsonEntry[];
+					resolvePromise(parsed);
+				} catch (error) {
+					rejectPromise(
+						new Error(
+							`Failed to parse rclone JSON output${
+								error instanceof Error ? `: ${error.message}` : ''
+							}`,
+						),
+					);
+				}
+			});
+		});
+	}
+
+	private buildRemoteTarget(remoteName: string, pathOrId?: string) {
+		const target = this.normalizePath(pathOrId);
+		if (!target) {
+			return `${remoteName}:`;
+		}
+		if (this.isDriveFolderId(target) && !target.includes('/')) {
+			return `${remoteName},root_folder_id=${target}:`;
+		}
+		return `${remoteName}:${target}`;
+	}
+
+	private async listFolderSet(options: {
+		remoteName: string;
+		configPath: string;
+		path?: string;
+		query?: string;
+		maxResults: number;
+		includeShared: boolean;
+		source: 'base' | 'shared';
+	}) {
+		const query = (options.query ?? '').trim().toLowerCase();
+		const normalizedPath = this.normalizePath(options.path);
+		const remoteTarget = this.buildRemoteTarget(
+			options.remoteName,
+			options.path,
+		);
+		const baseArgs = [
+			'--config',
+			options.configPath,
+			'lsjson',
+			remoteTarget,
+			'--dirs-only',
+			'--metadata',
+			'--fast-list',
+		];
+
+		if (options.includeShared) {
+			baseArgs.push('--drive-shared-with-me');
+		}
+
+		if (query.length > 0) {
+			baseArgs.push('--recursive');
+		}
+
+		const rawEntries = await this.runRcloneJson(baseArgs);
+		const directories = rawEntries
+			.filter(entry => entry.IsDir !== false)
+			.map(entry => {
+				const name = (entry.Name ?? entry.Path ?? '').trim();
+				const entryPath = (entry.Path ?? name).trim().replace(/\/+$/g, '');
+				const displayPath = normalizedPath
+					? this.normalizePath(`${normalizedPath}/${entryPath}`)
+					: this.normalizePath(entryPath);
+				const id = (entry.ID ?? '').trim() || null;
+				const tokenPath = id ?? displayPath;
+
+				return {
+					id,
+					name: name || (displayPath.split('/').pop() ?? tokenPath),
+					path: tokenPath,
+					display_path: displayPath || name || tokenPath,
+					parent_path: normalizedPath || null,
+					source: options.source,
+					drive_type: options.includeShared ? 'shared_with_me' : 'my_drive',
+				};
+			})
+			.filter(folder => {
+				if (!folder.path) {
+					return false;
+				}
+				if (!query) {
+					return true;
+				}
+				const haystack =
+					`${folder.name} ${folder.display_path} ${folder.path}`.toLowerCase();
+				return haystack.includes(query);
+			});
+
+		return directories.slice(0, options.maxResults);
+	}
+
 	async getStatus() {
-		const { remoteName, basePath } = await this.getConfig();
-		const configPath = this.getConfigPath();
-		const status = await this.hasConfiguredRemote(remoteName, configPath);
+		const config = await this.driveRuntimeConfigService.getRuntimeConfig();
+		const status =
+			await this.driveRuntimeConfigService.checkRemoteConfigured(config);
 
 		return {
 			configured: status.configured,
 			message: status.message,
-			remote_name: remoteName,
-			base_path: this.normalizePath(basePath),
-			config_path: configPath,
+			remote_name: config.remoteName,
+			remote_source: config.remoteSource,
+			base_path: this.normalizePath(config.basePath),
+			config_path: config.configPath,
 		};
 	}
 
@@ -143,127 +199,71 @@ export class GdriveService {
 		shared_with_me?: boolean;
 		max_results?: number;
 	}) {
-		const { remoteName, basePath } = await this.getConfig();
-		const basePathNorm = this.normalizePath(basePath);
-		const pathFilter = this.normalizePath(payload.path);
-		const queryFilter = (payload.query ?? '').trim().toLowerCase();
+		const runtimeConfig =
+			await this.driveRuntimeConfigService.getRuntimeConfig();
+		const remoteStatus =
+			await this.driveRuntimeConfigService.checkRemoteConfigured(runtimeConfig);
+		const basePathNorm = this.normalizePath(runtimeConfig.basePath);
+		const queryFilter = (payload.query ?? '').trim();
 		const maxResults = Math.max(1, Math.min(1000, payload.max_results ?? 200));
+		const includeShared = payload.shared_with_me !== false;
+		const requestedPath = this.normalizePath(payload.path);
+		const listingPath = requestedPath || (queryFilter ? '' : basePathNorm);
 
-		const rows = await this.prisma.$queryRaw<ProjectDriveFoldersRow[]>`
-			SELECT
-				name,
-				gdrive_folder_id,
-				gdrive_backups_folder_id,
-				gdrive_assets_folder_id,
-				gdrive_docs_folder_id
-			FROM projects
-			ORDER BY name ASC
-		`;
+		if (!remoteStatus.configured) {
+			return {
+				folders: [],
+				count: 0,
+				remote_name: runtimeConfig.remoteName,
+				remote_source: runtimeConfig.remoteSource,
+				base_path: basePathNorm,
+				configured: false,
+				message: remoteStatus.message,
+			};
+		}
 
-		const folderCandidates = rows.flatMap(row => {
-			const projectPrefix = `${basePathNorm}/${row.name}`.replace(
-				/^\/+|\/+$/g,
-				'',
-			);
-			const entries: Array<{
-				id: string | null;
-				path: string;
-				name: string;
-				source: 'base' | 'shared';
-			}> = [
-				{
-					id: null,
-					path: projectPrefix,
-					name: row.name,
-					source: 'base',
-				},
-			];
+		const [baseFolders, sharedFolders] = await Promise.all([
+			this.listFolderSet({
+				remoteName: runtimeConfig.remoteName,
+				configPath: runtimeConfig.configPath,
+				path: listingPath,
+				query: queryFilter,
+				maxResults,
+				includeShared: false,
+				source: 'base',
+			}),
+			includeShared
+				? this.listFolderSet({
+						remoteName: runtimeConfig.remoteName,
+						configPath: runtimeConfig.configPath,
+						path: listingPath,
+						query: queryFilter,
+						maxResults,
+						includeShared: true,
+						source: 'shared',
+					})
+				: Promise.resolve([]),
+		]);
 
-			if (row.gdrive_folder_id) {
-				entries.push({
-					id: this.isDriveFolderId(row.gdrive_folder_id)
-						? this.normalizePath(row.gdrive_folder_id)
-						: null,
-					path: this.normalizePath(row.gdrive_folder_id),
-					name: row.name,
-					source: 'base',
-				});
+		const deduped = new Map<string, (typeof baseFolders)[number]>();
+		for (const entry of [...baseFolders, ...sharedFolders]) {
+			const dedupeKey = this.normalizePath(entry.id ?? entry.path);
+			if (!dedupeKey || deduped.has(dedupeKey)) {
+				continue;
 			}
-			if (row.gdrive_backups_folder_id) {
-				entries.push({
-					id: this.isDriveFolderId(row.gdrive_backups_folder_id)
-						? this.normalizePath(row.gdrive_backups_folder_id)
-						: null,
-					path: this.normalizePath(row.gdrive_backups_folder_id),
-					name: `${row.name} Backups`,
-					source: this.isDriveFolderId(row.gdrive_backups_folder_id)
-						? 'shared'
-						: 'base',
-				});
-			}
-			if (row.gdrive_assets_folder_id) {
-				entries.push({
-					id: this.isDriveFolderId(row.gdrive_assets_folder_id)
-						? this.normalizePath(row.gdrive_assets_folder_id)
-						: null,
-					path: this.normalizePath(row.gdrive_assets_folder_id),
-					name: `${row.name} Assets`,
-					source: this.isDriveFolderId(row.gdrive_assets_folder_id)
-						? 'shared'
-						: 'base',
-				});
-			}
-			if (row.gdrive_docs_folder_id) {
-				entries.push({
-					id: this.isDriveFolderId(row.gdrive_docs_folder_id)
-						? this.normalizePath(row.gdrive_docs_folder_id)
-						: null,
-					path: this.normalizePath(row.gdrive_docs_folder_id),
-					name: `${row.name} Docs`,
-					source: this.isDriveFolderId(row.gdrive_docs_folder_id)
-						? 'shared'
-						: 'base',
-				});
-			}
+			deduped.set(dedupeKey, entry);
+		}
 
-			return entries;
-		});
-
-		const seen = new Set<string>();
-		const filtered = folderCandidates.filter(entry => {
-			const normalized = this.normalizePath(entry.id ?? entry.path);
-			if (!normalized || seen.has(normalized)) {
-				return false;
-			}
-			seen.add(normalized);
-			const pathValue = this.normalizePath(entry.path);
-			const idValue = this.normalizePath(entry.id);
-			if (
-				pathFilter &&
-				!pathValue.startsWith(pathFilter) &&
-				!idValue.startsWith(pathFilter)
-			) {
-				return false;
-			}
-			const haystack = `${pathValue} ${idValue} ${entry.name}`.toLowerCase();
-			if (queryFilter && !haystack.includes(queryFilter)) {
-				return false;
-			}
-			return true;
-		});
-
-		const folders = filtered.slice(0, maxResults).map(entry => ({
-			id: entry.id,
-			name: entry.name,
-			path: this.normalizePath(entry.path),
-			source: entry.source,
-		}));
+		const folders = Array.from(deduped.values()).slice(0, maxResults);
 
 		return {
 			folders,
 			count: folders.length,
-			remote_name: remoteName,
+			remote_name: runtimeConfig.remoteName,
+			remote_source: runtimeConfig.remoteSource,
 			base_path: basePathNorm,
+			configured: true,
+			message: 'ok',
 		};
 	}
 }

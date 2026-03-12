@@ -246,6 +246,18 @@ export const dashboardApi = {
 		await checkBackendAvailability();
 		return api.post(`/projects/${projectId}/environments/${envId}/users`, data);
 	},
+	createEnvironmentCredential: async (
+		envId: number,
+		data: {
+			label?: string;
+			username: string;
+			password: string;
+			notes?: string;
+		},
+	) => {
+		await checkBackendAvailability();
+		return api.post(`/credentials/${envId}/credentials`, data);
+	},
 	magicLogin: async (projectId: number, envId: number, userId: string) => {
 		await checkBackendAvailability();
 		return api.post(

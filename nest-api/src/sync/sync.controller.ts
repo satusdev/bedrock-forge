@@ -95,6 +95,23 @@ export class SyncController {
 		return this.syncService.getStatus(taskId);
 	}
 
+	@Get('history/:projectId')
+	async getHistory(
+		@Param('projectId', ParseIntPipe) projectId: number,
+		@Query('limit') limit?: string,
+		@Headers('authorization') authorization?: string,
+	) {
+		const ownerId =
+			await this.authService.resolveOptionalUserIdFromAuthorizationHeader(
+				authorization,
+			);
+		return this.syncService.getProjectTaskHistory(
+			projectId,
+			ownerId,
+			limit ? Number(limit) : undefined,
+		);
+	}
+
 	@Post('full')
 	async fullSync(
 		@Query('source_project_server_id', ParseIntPipe)

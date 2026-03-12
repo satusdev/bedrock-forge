@@ -21,14 +21,14 @@ export class TaskStatusRunnerService {
 	constructor(private readonly taskStatusService: TaskStatusService) {}
 
 	@Interval(60_000)
-	runCleanup() {
+	async runCleanup() {
 		if (!this.enabled || this.isProcessing) {
 			return;
 		}
 
 		this.isProcessing = true;
 		try {
-			const removed = this.taskStatusService.pruneTerminalStatuses(
+			const removed = await this.taskStatusService.pruneTerminalStatuses(
 				this.maxAgeMinutes,
 			);
 			if (removed > 0) {

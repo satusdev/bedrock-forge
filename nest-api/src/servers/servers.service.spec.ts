@@ -514,6 +514,106 @@ describe('ServersService', () => {
 		);
 	});
 
+	it('classifies wp-config inside /web as bedrock and normalizes wp_path to project root', async () => {
+		prisma.$queryRaw
+			.mockResolvedValueOnce([
+				{
+					id: 14,
+					name: 'Scan Bedrock',
+					hostname: 'scan-bedrock.test',
+					provider: 'custom',
+					status: 'offline',
+					ssh_user: 'root',
+					ssh_port: 22,
+					ssh_key_path: '/tmp/id_rsa',
+					ssh_password: null,
+					ssh_private_key: null,
+					panel_type: 'none',
+					panel_url: null,
+					panel_username: null,
+					panel_password: null,
+					panel_verified: false,
+					last_health_check: null,
+					owner_id: 1,
+					wp_root_paths: null,
+					uploads_path: null,
+					tags: null,
+					created_at: new Date(),
+					updated_at: new Date(),
+				},
+			])
+			.mockResolvedValueOnce([]);
+		prisma.$executeRaw.mockResolvedValueOnce(1);
+
+		jest.spyOn(service as any, 'isReadableFile').mockResolvedValueOnce(true);
+		jest
+			.spyOn(service as any, 'runSshCommand')
+			.mockResolvedValueOnce({
+				stdout: '/home/misrata.gov.ly/public_html/web/wp-config.php\n',
+				stderr: '',
+			})
+			.mockResolvedValueOnce({
+				stdout: 'bedrock\n',
+				stderr: '',
+			});
+
+		const result = await service.scanSites(14, '/home', 4);
+		expect(result.success).toBe(true);
+		expect(result.sites).toHaveLength(1);
+		expect(result.sites[0]).toMatchObject({
+			path: '/home/misrata.gov.ly/public_html/web',
+			is_bedrock: true,
+			wp_path: '/home/misrata.gov.ly/public_html',
+		});
+	});
+
+	it('checks parent .env first when readEnv target is /web path', async () => {
+		prisma.$queryRaw.mockResolvedValueOnce([
+			{
+				id: 15,
+				name: 'Env Web',
+				hostname: 'env-web.test',
+				provider: 'custom',
+				status: 'offline',
+				ssh_user: 'root',
+				ssh_port: 22,
+				ssh_key_path: '/tmp/id_rsa',
+				ssh_password: null,
+				ssh_private_key: null,
+				panel_type: 'none',
+				panel_url: null,
+				panel_username: null,
+				panel_password: null,
+				panel_verified: false,
+				last_health_check: null,
+				owner_id: 1,
+				wp_root_paths: null,
+				uploads_path: null,
+				tags: null,
+				created_at: new Date(),
+				updated_at: new Date(),
+			},
+		]);
+		jest.spyOn(service as any, 'isReadableFile').mockResolvedValueOnce(true);
+		jest.spyOn(service as any, 'runSshCommand').mockResolvedValueOnce({
+			stdout: 'DB_NAME=wordpress\nDB_USER=forge\n',
+			stderr: '',
+		});
+
+		await service.readEnv(15, '/home/misrata.gov.ly/public_html/web');
+
+		expect((service as any).runSshCommand).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.stringContaining('/home/misrata.gov.ly/public_html/.env'),
+			'/tmp/id_rsa',
+		);
+		expect((service as any).runSshCommand).not.toHaveBeenCalledWith(
+			expect.anything(),
+			expect.stringContaining('/home/misrata.gov.ly/public_html/web/web/.env'),
+			'/tmp/id_rsa',
+		);
+	});
+
 	it('returns explicit error when no env file exists in candidate paths', async () => {
 		prisma.$queryRaw.mockResolvedValueOnce([
 			{

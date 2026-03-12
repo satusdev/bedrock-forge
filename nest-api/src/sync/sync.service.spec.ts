@@ -6,6 +6,9 @@ type MockPrisma = {
 	project_servers: {
 		findFirst: jest.Mock;
 	};
+	projects: {
+		findFirst: jest.Mock;
+	};
 };
 
 describe('SyncService', () => {
@@ -16,6 +19,9 @@ describe('SyncService', () => {
 	beforeEach(() => {
 		prisma = {
 			project_servers: {
+				findFirst: jest.fn(),
+			},
+			projects: {
 				findFirst: jest.fn(),
 			},
 		};
@@ -111,10 +117,28 @@ describe('SyncService', () => {
 		const claimed = service.claimPendingTasks(5);
 		expect(claimed).toHaveLength(1);
 
-		const processed = service.processPendingTask(claimed[0] as any);
+		const processed = await service.processPendingTask(claimed[0] as any);
 		expect(processed.status).toBe('completed');
 
-		const status = service.getStatus(created.task_id);
+		const status = await service.getStatus(created.task_id);
 		expect(status.status).toBe('completed');
+	});
+
+	it('returns sync history for an owned project', async () => {
+		prisma.projects.findFirst.mockResolvedValueOnce({ id: 10 });
+		await taskStatusService.upsertTaskStatus('task-history-1', {
+			category: 'sync',
+			project_id: 10,
+			task_kind: 'sync.full',
+			status: 'completed',
+			message: 'sync.full task completed',
+			progress: 100,
+			logs: 'log line',
+		});
+
+		const result = await service.getProjectTaskHistory(10);
+
+		expect(result.project_id).toBe(10);
+		expect(result.tasks[0]?.task_id).toBe('task-history-1');
 	});
 });

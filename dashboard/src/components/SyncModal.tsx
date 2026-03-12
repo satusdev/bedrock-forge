@@ -23,8 +23,14 @@ import {
 } from 'lucide-react';
 import Button from './ui/Button';
 import Badge from './ui/Badge';
+import SyncTaskLogsModal from './SyncTaskLogsModal';
 import api from '../services/api';
 import toast from 'react-hot-toast';
+import {
+	readSyncTaskHistory,
+	upsertSyncTaskHistory,
+	type SyncTaskSnapshot,
+} from '../utils/syncLogStorage';
 
 interface Environment {
 	id: number;
@@ -60,6 +66,7 @@ interface SyncStatus {
 	status: 'pending' | 'running' | 'completed' | 'failed';
 	progress: number;
 	message: string;
+	logs?: string;
 	result?: any;
 }
 
@@ -92,10 +99,10 @@ const SyncModal: React.FC<SyncModalProps> = ({
 	};
 
 	const [sourceEnv, setSourceEnv] = useState<Environment | undefined>(
-		getInitialSource()
+		getInitialSource(),
 	);
 	const [targetEnv, setTargetEnv] = useState<Environment | undefined>(
-		getInitialTarget()
+		getInitialTarget(),
 	);
 	const [syncOptions, setSyncOptions] = useState<SyncOptions>({
 		sync_database: true,
@@ -107,16 +114,57 @@ const SyncModal: React.FC<SyncModalProps> = ({
 	});
 	const [showConfirm, setShowConfirm] = useState(false);
 	const [taskId, setTaskId] = useState<string | null>(null);
+	const [isTaskTerminal, setIsTaskTerminal] = useState(false);
+	const [showLogsModal, setShowLogsModal] = useState(false);
+	const [taskHistory, setTaskHistory] = useState<SyncTaskSnapshot[]>([]);
+	const storageKey = `sync-active-task:${projectId}`;
+
+	const { data: persistedHistory } = useQuery<SyncTaskSnapshot[]>({
+		queryKey: ['sync-history', projectId],
+		queryFn: async () => {
+			const response = await api.get(`/sync/history/${projectId}`, {
+				params: { limit: 50 },
+			});
+			const tasks = Array.isArray(response.data?.tasks)
+				? response.data.tasks
+				: [];
+			return tasks.map((task: any) => ({
+				task_id: task.task_id,
+				status: task.status,
+				message: task.message,
+				progress: typeof task.progress === 'number' ? task.progress : 0,
+				logs: typeof task.logs === 'string' ? task.logs : '',
+				updated_at:
+					typeof task.updated_at === 'string'
+						? task.updated_at
+						: new Date().toISOString(),
+			}));
+		},
+		enabled: isOpen && projectId > 0,
+	});
 
 	// Reset state when modal opens
 	useEffect(() => {
 		if (isOpen) {
 			setSourceEnv(getInitialSource());
 			setTargetEnv(getInitialTarget());
-			setTaskId(null);
+			const existingTaskId = window.localStorage.getItem(storageKey);
+			setTaskId(existingTaskId || null);
+			setIsTaskTerminal(false);
 			setShowConfirm(false);
 		}
-	}, [isOpen, initialSource, initialDirection]);
+	}, [isOpen, initialSource, initialDirection, projectId, storageKey]);
+
+	useEffect(() => {
+		if (!isOpen) {
+			return;
+		}
+		if (persistedHistory && persistedHistory.length > 0) {
+			setTaskHistory(persistedHistory);
+			return;
+		}
+		setTaskHistory(readSyncTaskHistory(projectId));
+	}, [isOpen, persistedHistory, projectId]);
 
 	// Sync status polling
 	const { data: syncStatus } = useQuery<SyncStatus>({
@@ -125,13 +173,14 @@ const SyncModal: React.FC<SyncModalProps> = ({
 			const response = await api.get(`/sync/status/${taskId}`);
 			return response.data;
 		},
-		enabled: !!taskId,
-		refetchInterval: taskId ? 3000 : false, // Poll every 3 seconds while task is active
+		enabled: !!taskId && !isTaskTerminal,
+		refetchInterval: 3000,
 	});
 
 	// Stop polling when task completes
 	useEffect(() => {
 		if (syncStatus?.status === 'completed' || syncStatus?.status === 'failed') {
+			setIsTaskTerminal(true);
 			if (syncStatus.status === 'completed') {
 				toast.success('Sync completed successfully!');
 			} else {
@@ -139,6 +188,30 @@ const SyncModal: React.FC<SyncModalProps> = ({
 			}
 		}
 	}, [syncStatus?.status]);
+
+	useEffect(() => {
+		if (!taskId) {
+			window.localStorage.removeItem(storageKey);
+			return;
+		}
+		window.localStorage.setItem(storageKey, taskId);
+	}, [taskId, storageKey]);
+
+	useEffect(() => {
+		if (!taskId || !syncStatus) {
+			return;
+		}
+
+		const nextHistory = upsertSyncTaskHistory(projectId, {
+			task_id: taskId,
+			status: syncStatus.status,
+			message: syncStatus.message,
+			progress: syncStatus.progress,
+			logs: syncStatus.logs || '',
+			updated_at: new Date().toISOString(),
+		});
+		setTaskHistory(nextHistory);
+	}, [projectId, taskId, syncStatus]);
 
 	// Sync mutation
 	const syncMutation = useMutation({
@@ -160,9 +233,20 @@ const SyncModal: React.FC<SyncModalProps> = ({
 		},
 		onSuccess: data => {
 			setTaskId(data.task_id);
+			setIsTaskTerminal(false);
 			setShowConfirm(false);
+			setTaskHistory(
+				upsertSyncTaskHistory(projectId, {
+					task_id: data.task_id,
+					status: 'pending',
+					message: 'sync.full task queued',
+					progress: 0,
+					logs: '',
+					updated_at: new Date().toISOString(),
+				}),
+			);
 			toast.success(
-				syncOptions.dry_run ? 'Dry run started...' : 'Sync started...'
+				syncOptions.dry_run ? 'Dry run started...' : 'Sync started...',
 			);
 		},
 		onError: (error: any) => {
@@ -261,8 +345,8 @@ const SyncModal: React.FC<SyncModalProps> = ({
 								syncStatus.status === 'completed'
 									? 'bg-green-50 border border-green-200'
 									: syncStatus.status === 'failed'
-									? 'bg-red-50 border border-red-200'
-									: 'bg-blue-50 border border-blue-200'
+										? 'bg-red-50 border border-red-200'
+										: 'bg-blue-50 border border-blue-200'
 							}`}
 						>
 							<div className='flex items-center justify-between mb-2'>
@@ -283,8 +367,8 @@ const SyncModal: React.FC<SyncModalProps> = ({
 										syncStatus.status === 'completed'
 											? 'bg-green-500'
 											: syncStatus.status === 'failed'
-											? 'bg-red-500'
-											: 'bg-blue-500'
+												? 'bg-red-500'
+												: 'bg-blue-500'
 									}`}
 									style={{ width: `${syncStatus.progress}%` }}
 								/>
@@ -297,11 +381,30 @@ const SyncModal: React.FC<SyncModalProps> = ({
 									variant='secondary'
 									size='sm'
 									className='mt-3'
-									onClick={() => setTaskId(null)}
+									onClick={() => {
+										setTaskId(null);
+										setIsTaskTerminal(false);
+										window.localStorage.removeItem(storageKey);
+									}}
 								>
 									Start New Sync
 								</Button>
 							) : null}
+
+							{syncStatus.logs && (
+								<pre className='mt-3 max-h-56 overflow-auto rounded-md bg-gray-900 text-gray-200 p-3 text-xs whitespace-pre-wrap break-all'>
+									{syncStatus.logs}
+								</pre>
+							)}
+
+							<Button
+								variant='secondary'
+								size='sm'
+								className='mt-3'
+								onClick={() => setShowLogsModal(true)}
+							>
+								View Full Logs
+							</Button>
 						</div>
 					)}
 
@@ -315,7 +418,7 @@ const SyncModal: React.FC<SyncModalProps> = ({
 										value={sourceEnv?.id || ''}
 										onChange={e => {
 											const env = environments.find(
-												env => env.id === Number(e.target.value)
+												env => env.id === Number(e.target.value),
 											);
 											setSourceEnv(env);
 											// Auto-set target to other environment
@@ -351,7 +454,7 @@ const SyncModal: React.FC<SyncModalProps> = ({
 										value={targetEnv?.id || ''}
 										onChange={e => {
 											const env = environments.find(
-												env => env.id === Number(e.target.value)
+												env => env.id === Number(e.target.value),
 											);
 											setTargetEnv(env);
 										}}
@@ -633,6 +736,16 @@ const SyncModal: React.FC<SyncModalProps> = ({
 					</div>
 				)}
 			</div>
+
+			<SyncTaskLogsModal
+				isOpen={showLogsModal}
+				onClose={() => setShowLogsModal(false)}
+				title='Sync Task Logs'
+				activeTaskId={taskId}
+				activeStatus={syncStatus?.status}
+				activeLogs={syncStatus?.logs}
+				history={taskHistory}
+			/>
 		</div>
 	);
 };

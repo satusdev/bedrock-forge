@@ -20,6 +20,10 @@ export class UpsertTaskStatusDto {
 
 	@IsOptional()
 	@IsString()
+	logs?: string;
+
+	@IsOptional()
+	@IsString()
 	started_at?: string | null;
 
 	@IsOptional()

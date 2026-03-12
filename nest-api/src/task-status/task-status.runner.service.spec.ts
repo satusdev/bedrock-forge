@@ -1,15 +1,15 @@
 import { TaskStatusRunnerService } from './task-status.runner.service';
 
 describe('TaskStatusRunnerService', () => {
-	it('prunes terminal task statuses during cleanup', () => {
+	it('prunes terminal task statuses during cleanup', async () => {
 		const taskStatusService = {
-			pruneTerminalStatuses: jest.fn().mockReturnValue(2),
+			pruneTerminalStatuses: jest.fn().mockResolvedValue(2),
 		};
 		const service = new TaskStatusRunnerService(
 			taskStatusService as unknown as any,
 		);
 
-		service.runCleanup();
+		await service.runCleanup();
 
 		expect(taskStatusService.pruneTerminalStatuses).toHaveBeenCalled();
 	});

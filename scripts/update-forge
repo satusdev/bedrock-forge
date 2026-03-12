@@ -23,9 +23,7 @@ if [[ ! -f .env && -f .env.local.example ]]; then
   echo "✓ Created .env from .env.local.example"
 fi
 
-docker compose up -d --build
-
-echo "Running Prisma migrations/sync"
-docker compose --profile seed run --rm --no-deps --build nest-api sh -c "npm run prisma:push"
+echo "Running non-destructive update (schema sync + api/dashboard rebuild)"
+./scripts/compose-safe.sh update
 
 echo "✅ Update complete"

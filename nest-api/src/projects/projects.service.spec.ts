@@ -39,6 +39,10 @@ type MockPrisma = {
 	servers: {
 		findUnique: jest.Mock;
 	};
+	monitors: {
+		findFirst: jest.Mock;
+		create: jest.Mock;
+	};
 	clients: {
 		findUnique: jest.Mock;
 	};
@@ -91,6 +95,10 @@ describe('ProjectsService', () => {
 			},
 			servers: {
 				findUnique: jest.fn(),
+			},
+			monitors: {
+				findFirst: jest.fn(),
+				create: jest.fn(),
 			},
 			clients: {
 				findUnique: jest.fn(),
@@ -365,6 +373,8 @@ describe('ProjectsService', () => {
 	it('rejects linking environment when same environment exists', async () => {
 		prisma.projects.findUnique.mockResolvedValueOnce({
 			id: 1,
+			name: 'Acme Site',
+			owner_id: 1,
 			server_id: null,
 			environment: 'production',
 			wp_home: null,
@@ -392,6 +402,8 @@ describe('ProjectsService', () => {
 	it('links environment and returns server metadata', async () => {
 		prisma.projects.findUnique.mockResolvedValueOnce({
 			id: 1,
+			name: 'Acme Site',
+			owner_id: 1,
 			server_id: null,
 			environment: 'production',
 			wp_home: null,
@@ -422,6 +434,8 @@ describe('ProjectsService', () => {
 			updated_at: new Date(),
 		});
 		prisma.projects.update.mockResolvedValueOnce({ id: 1 });
+		prisma.monitors.findFirst.mockResolvedValueOnce(null);
+		prisma.monitors.create.mockResolvedValueOnce({ id: 200 });
 
 		const result = await service.linkEnvironment(1, {
 			environment: 'production',
@@ -439,6 +453,120 @@ describe('ProjectsService', () => {
 		expect(result.environment).toBe('production');
 		expect(result.id).toBe(11);
 		expect(prisma.project_servers.create).toHaveBeenCalled();
+		expect(prisma.monitors.create).toHaveBeenCalledWith(
+			expect.objectContaining({
+				data: expect.objectContaining({
+					name: 'Acme Site - production',
+					url: 'https://acme.test',
+					project_id: 1,
+					project_server_id: 11,
+					created_by_id: 1,
+				}),
+			}),
+		);
+	});
+
+	it('skips monitor creation for development environment links', async () => {
+		prisma.projects.findUnique.mockResolvedValueOnce({
+			id: 1,
+			name: 'Acme Site',
+			owner_id: 1,
+			server_id: null,
+			environment: 'production',
+			wp_home: null,
+		});
+		prisma.servers.findUnique.mockResolvedValueOnce({
+			id: 2,
+			name: 'server-main',
+			hostname: 'srv.local',
+		});
+		prisma.project_servers.findFirst.mockResolvedValueOnce(null);
+		prisma.project_servers.updateMany.mockResolvedValueOnce({ count: 0 });
+		prisma.project_servers.create.mockResolvedValueOnce({
+			id: 12,
+			project_id: 1,
+			server_id: 2,
+			environment: 'development',
+			wp_url: 'https://dev.acme.test',
+			wp_path: '/var/www/acme',
+			ssh_user: null,
+			ssh_key_path: null,
+			database_name: 'acme',
+			database_user: 'acme',
+			database_password: 'secret',
+			gdrive_backups_folder_id: null,
+			notes: null,
+			is_primary: true,
+			created_at: new Date(),
+			updated_at: new Date(),
+		});
+		prisma.projects.update.mockResolvedValueOnce({ id: 1 });
+
+		await service.linkEnvironment(1, {
+			environment: 'development',
+			server_id: 2,
+			wp_url: 'https://dev.acme.test',
+			wp_path: '/var/www/acme',
+			database_name: 'acme',
+			database_user: 'acme',
+			database_password: 'secret',
+			is_primary: true,
+		});
+
+		expect(prisma.monitors.findFirst).not.toHaveBeenCalled();
+		expect(prisma.monitors.create).not.toHaveBeenCalled();
+	});
+
+	it('skips monitor creation when matching project monitor already exists', async () => {
+		prisma.projects.findUnique.mockResolvedValueOnce({
+			id: 1,
+			name: 'Acme Site',
+			owner_id: 1,
+			server_id: null,
+			environment: 'production',
+			wp_home: null,
+		});
+		prisma.servers.findUnique.mockResolvedValueOnce({
+			id: 2,
+			name: 'server-main',
+			hostname: 'srv.local',
+		});
+		prisma.project_servers.findFirst.mockResolvedValueOnce(null);
+		prisma.project_servers.updateMany.mockResolvedValueOnce({ count: 0 });
+		prisma.project_servers.create.mockResolvedValueOnce({
+			id: 13,
+			project_id: 1,
+			server_id: 2,
+			environment: 'staging',
+			wp_url: 'https://staging.acme.test',
+			wp_path: '/var/www/acme',
+			ssh_user: null,
+			ssh_key_path: null,
+			database_name: 'acme',
+			database_user: 'acme',
+			database_password: 'secret',
+			gdrive_backups_folder_id: null,
+			notes: null,
+			is_primary: true,
+			created_at: new Date(),
+			updated_at: new Date(),
+		});
+		prisma.projects.update.mockResolvedValueOnce({ id: 1 });
+		prisma.monitors.findFirst.mockResolvedValueOnce({ id: 301 });
+
+		await service.linkEnvironment(1, {
+			environment: 'staging',
+			server_id: 2,
+			wp_url: 'https://staging.acme.test',
+			wp_path: '/var/www/acme',
+			database_name: 'acme',
+			database_user: 'acme',
+			database_password: 'secret',
+			is_primary: true,
+		});
+
+		expect(prisma.monitors.findFirst).toHaveBeenCalled();
+		expect(prisma.monitors.create).not.toHaveBeenCalled();
 	});
 
 	it('updates environment and returns success envelope', async () => {

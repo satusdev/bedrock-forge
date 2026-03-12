@@ -6,10 +6,19 @@ import {
 } from '@nestjs/common';
 import { spawn } from 'child_process';
 import { randomUUID } from 'crypto';
-import { existsSync } from 'fs';
-import { access, mkdir, readFile, rm, stat, writeFile } from 'fs/promises';
+import {
+	access,
+	cp,
+	mkdir,
+	mkdtemp,
+	readFile,
+	rm,
+	stat,
+	writeFile,
+} from 'fs/promises';
 import { homedir, tmpdir } from 'os';
 import { basename, dirname, join, resolve } from 'path';
+import { DriveRuntimeConfigService } from '../drive-runtime/drive-runtime-config.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { WebsocketCompatService } from '../websocket/websocket-compat.service';
 import { BackupCreateDto } from './dto/backup-create.dto';
@@ -44,6 +53,15 @@ type ProjectBackupContext = {
 	environmentName: string | null;
 	environmentPath: string | null;
 	environmentDriveBackupsFolder: string | null;
+	databaseName: string | null;
+	databaseUser: string | null;
+	databasePassword: string | null;
+	serverHostname: string | null;
+	sshUser: string | null;
+	sshPort: number | null;
+	sshKeyPath: string | null;
+	sshPrivateKey: string | null;
+	sshPassword: string | null;
 };
 
 type PendingBackupClaim = {
@@ -77,6 +95,7 @@ type BackupMaintenanceSnapshot = {
 export class BackupsService {
 	constructor(
 		private readonly prisma: PrismaService,
+		private readonly driveRuntimeConfigService: DriveRuntimeConfigService,
 		private readonly websocketCompatService: WebsocketCompatService,
 	) {}
 
@@ -87,9 +106,6 @@ export class BackupsService {
 		process.env.FORGE_RESTORE_ROOT?.trim() || '/tmp/forge-restores';
 	private readonly driveMirrorRoot =
 		process.env.FORGE_GDRIVE_MIRROR_ROOT?.trim() || '/tmp/forge-gdrive';
-	private readonly gdriveRcloneRemote =
-		process.env.FORGE_BACKUP_GDRIVE_REMOTE?.trim() || 'gdrive';
-	private readonly rcloneConfigPath = process.env.RCLONE_CONFIG?.trim() || null;
 	private maintenanceSnapshot: BackupMaintenanceSnapshot = {
 		enabled:
 			(process.env.BACKUP_MAINTENANCE_ENABLED ?? 'true').toLowerCase() !==
@@ -139,7 +155,6 @@ export class BackupsService {
 
 	async claimPendingBackups(limit = 5) {
 		const safeLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
-		const now = new Date();
 		return this.prisma.$transaction(async tx => {
 			const claimed = await tx.backups.findMany({
 				where: { status: 'pending' },
@@ -152,18 +167,26 @@ export class BackupsService {
 				return [];
 			}
 
-			await tx.backups.updateMany({
-				where: {
-					id: { in: claimed.map(row => row.id) },
-					status: 'pending',
-				},
-				data: {
-					status: 'running',
-					updated_at: now,
-				},
-			});
+			const owned: PendingBackupClaim[] = [];
+			for (const row of claimed) {
+				const now = new Date();
+				const updated = await tx.backups.updateMany({
+					where: {
+						id: row.id,
+						status: 'pending',
+					},
+					data: {
+						status: 'running',
+						updated_at: now,
+					},
+				});
 
-			return claimed as PendingBackupClaim[];
+				if (updated.count === 1) {
+					owned.push({ id: row.id, created_by_id: row.created_by_id });
+				}
+			}
+
+			return owned;
 		});
 	}
 
@@ -189,9 +212,14 @@ export class BackupsService {
 		}
 
 		const now = new Date();
+		const marked: Array<{ id: number }> = [];
 		for (const row of stale) {
-			await this.prisma.backups.update({
-				where: { id: row.id },
+			const updated = await this.prisma.backups.updateMany({
+				where: {
+					id: row.id,
+					status: 'running',
+					updated_at: { lt: threshold },
+				},
 				data: {
 					status: 'failed',
 					error_message:
@@ -201,9 +229,13 @@ export class BackupsService {
 					updated_at: now,
 				},
 			});
+
+			if (updated.count === 1) {
+				marked.push({ id: row.id });
+			}
 		}
 
-		return stale.map(row => ({ id: row.id }));
+		return marked;
 	}
 
 	async pruneTerminalBackups(
@@ -391,44 +423,15 @@ export class BackupsService {
 		return /^[A-Za-z0-9_-]{10,}$/.test(value) && !value.includes('/');
 	}
 
-	private getRcloneConfigPath() {
-		if (this.rcloneConfigPath) {
-			return resolve(this.rcloneConfigPath);
-		}
-		return resolve(`${homedir()}/.config/rclone/rclone.conf`);
-	}
-
-	private getRemoteSectionPattern(remoteName: string) {
-		return new RegExp(
-			`^\\[${remoteName.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\]$`,
-			'm',
-		);
-	}
-
 	private async assertConfiguredDriveRemote() {
-		const configPath = this.getRcloneConfigPath();
-		if (!existsSync(configPath)) {
-			throw new Error(
-				`Google Drive backup remote '${this.gdriveRcloneRemote}' is unavailable: rclone config not found at ${configPath}. Configure it via /api/v1/rclone/authorize or provide RCLONE_CONFIG.`,
-			);
+		const status = await this.driveRuntimeConfigService.checkRemoteConfigured();
+		if (status.configured) {
+			return status.runtime;
 		}
 
-		const configStats = await stat(configPath);
-		if (configStats.isDirectory()) {
-			throw new Error(
-				`Google Drive backup remote '${this.gdriveRcloneRemote}' is unavailable: RCLONE_CONFIG points to a directory (${configPath}).`,
-			);
-		}
-
-		const rawConfig = await readFile(configPath, 'utf-8');
-		const remoteSectionPattern = this.getRemoteSectionPattern(
-			this.gdriveRcloneRemote,
+		throw new Error(
+			`Google Drive backup remote '${status.runtime.remoteName}' is unavailable: ${status.message}. Configure it via /api/v1/rclone/authorize or update FORGE_BACKUP_GDRIVE_REMOTE / app_settings.gdrive_rclone_remote and RCLONE_CONFIG.`,
 		);
-		if (!remoteSectionPattern.test(rawConfig)) {
-			throw new Error(
-				`Google Drive backup remote '${this.gdriveRcloneRemote}' is missing in ${configPath}. Add section [${this.gdriveRcloneRemote}] or update FORGE_BACKUP_GDRIVE_REMOTE.`,
-			);
-		}
 	}
 
 	private emitBackupRealtimeEvent(payload: Record<string, unknown>) {
@@ -450,7 +453,10 @@ export class BackupsService {
 
 	private async runProcess(command: string, args: string[]) {
 		await new Promise<void>((resolvePromise, rejectPromise) => {
-			const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+			const child = spawn(command, args, {
+				stdio: ['ignore', 'pipe', 'pipe'],
+				env: process.env,
+			});
 			let stderr = '';
 
 			child.stderr.on('data', chunk => {
@@ -473,6 +479,1187 @@ export class BackupsService {
 				);
 			});
 		});
+	}
+
+	private async runProcessCapture(
+		command: string,
+		args: string[],
+		environment?: NodeJS.ProcessEnv,
+	) {
+		return await new Promise<{ stdout: string; stderr: string }>(
+			(resolvePromise, rejectPromise) => {
+				const child = spawn(command, args, {
+					stdio: ['ignore', 'pipe', 'pipe'],
+					env: environment ?? process.env,
+				});
+				let stdout = '';
+				let stderr = '';
+
+				child.stdout.on('data', chunk => {
+					stdout += chunk.toString();
+				});
+
+				child.stderr.on('data', chunk => {
+					stderr += chunk.toString();
+				});
+
+				child.on('error', error => {
+					rejectPromise(error);
+				});
+
+				child.on('close', code => {
+					if (code === 0) {
+						resolvePromise({ stdout, stderr });
+						return;
+					}
+					rejectPromise(
+						new Error(
+							`${command} exited with code ${code ?? 'unknown'}${stderr ? `: ${stderr.trim()}` : ''}`,
+						),
+					);
+				});
+			},
+		);
+	}
+
+	private shellQuote(value: string) {
+		return `'${value.replace(/'/g, `'"'"'`)}'`;
+	}
+
+	private expandHomePath(filePath: string | null | undefined) {
+		if (!filePath) {
+			return null;
+		}
+		const trimmed = filePath.trim();
+		if (!trimmed) {
+			return null;
+		}
+		if (trimmed === '~') {
+			return homedir();
+		}
+		if (trimmed.startsWith('~/')) {
+			return resolve(homedir(), trimmed.slice(2));
+		}
+		return resolve(trimmed);
+	}
+
+	private async getSystemPrivateKey() {
+		const rows = await this.prisma.$queryRaw<
+			{ encrypted_value: string | null; value: string | null }[]
+		>`
+			SELECT encrypted_value, value
+			FROM app_settings
+			WHERE key = ${'system.ssh.private_key'}
+			LIMIT 1
+		`;
+		const row = rows[0];
+		if (!row) {
+			return null;
+		}
+		return row.encrypted_value ?? row.value;
+	}
+
+	private buildSshArgs(context: ProjectBackupContext, privateKeyPath?: string) {
+		const sshPort = context.sshPort ?? 22;
+		const sshUser = context.sshUser?.trim() || 'root';
+		const sshHost = context.serverHostname?.trim();
+		const connectTimeoutSeconds = this.getDumpConnectTimeoutSeconds();
+		if (!sshHost) {
+			throw new Error('SSH host is not configured for environment server');
+		}
+
+		const args = [
+			'-p',
+			String(sshPort),
+			'-o',
+			'BatchMode=yes',
+			'-o',
+			`ConnectTimeout=${connectTimeoutSeconds}`,
+			'-o',
+			'LogLevel=ERROR',
+			'-o',
+			'StrictHostKeyChecking=no',
+			'-o',
+			'UserKnownHostsFile=/dev/null',
+		];
+		if (privateKeyPath) {
+			args.push('-i', privateKeyPath);
+		}
+
+		return {
+			args,
+			sshTarget: `${sshUser}@${sshHost}`,
+		};
+	}
+
+	private async withSshKey<T>(
+		context: ProjectBackupContext,
+		handler: (keyFilePath: string) => Promise<T>,
+	) {
+		let keyFilePath: string | undefined;
+		let tempDirectory: string | undefined;
+
+		const candidatePath = this.expandHomePath(context.sshKeyPath);
+		if (candidatePath && (await this.pathExists(candidatePath))) {
+			keyFilePath = candidatePath;
+		}
+
+		if (!keyFilePath) {
+			const inlinePrivateKeyRaw =
+				context.sshPrivateKey && context.sshPrivateKey.trim().length > 0
+					? context.sshPrivateKey
+					: await this.getSystemPrivateKey();
+			const inlinePrivateKey = inlinePrivateKeyRaw
+				? inlinePrivateKeyRaw.replace(/\r\n/g, '\n').replace(/\\n/g, '\n')
+				: null;
+
+			if (inlinePrivateKey && inlinePrivateKey.trim().length > 0) {
+				tempDirectory = await mkdtemp(join(tmpdir(), 'forge-ssh-'));
+				keyFilePath = join(tempDirectory, 'id_rsa');
+				await writeFile(keyFilePath, `${inlinePrivateKey.trim()}\n`, {
+					encoding: 'utf-8',
+					mode: 0o600,
+				});
+			}
+		}
+
+		if (!keyFilePath) {
+			if (context.sshPassword && context.sshPassword.trim().length > 0) {
+				throw new Error(
+					'SSH password auth is configured, but non-interactive DB backup requires SSH key auth in Nest API',
+				);
+			}
+			throw new Error('No SSH key configured for remote database dump');
+		}
+
+		try {
+			return await handler(keyFilePath);
+		} finally {
+			if (tempDirectory) {
+				await rm(tempDirectory, { recursive: true, force: true });
+			}
+		}
+	}
+
+	private async runSshCommand(
+		context: ProjectBackupContext,
+		command: string,
+		privateKeyPath?: string,
+	) {
+		const { args, sshTarget } = this.buildSshArgs(context, privateKeyPath);
+		args.push(sshTarget, command);
+
+		await this.runProcess('ssh', args);
+	}
+
+	private async runSshCommandCapture(
+		context: ProjectBackupContext,
+		command: string,
+		privateKeyPath?: string,
+	) {
+		const { args, sshTarget } = this.buildSshArgs(context, privateKeyPath);
+		args.push(sshTarget, command);
+		return this.runProcessCapture('ssh', args);
+	}
+
+	private async scpFromRemote(
+		context: ProjectBackupContext,
+		remotePath: string,
+		localPath: string,
+		privateKeyPath?: string,
+	) {
+		const sshPort = context.sshPort ?? 22;
+		const sshUser = context.sshUser?.trim() || 'root';
+		const sshHost = context.serverHostname?.trim();
+		const connectTimeoutSeconds = this.getDumpConnectTimeoutSeconds();
+		if (!sshHost) {
+			throw new Error('SSH host is not configured for environment server');
+		}
+
+		const args = [
+			'-P',
+			String(sshPort),
+			'-o',
+			'BatchMode=yes',
+			'-o',
+			`ConnectTimeout=${connectTimeoutSeconds}`,
+			'-o',
+			'LogLevel=ERROR',
+			'-o',
+			'StrictHostKeyChecking=no',
+			'-o',
+			'UserKnownHostsFile=/dev/null',
+		];
+		if (privateKeyPath) {
+			args.push('-i', privateKeyPath);
+		}
+		args.push(`${sshUser}@${sshHost}:${remotePath}`, localPath);
+
+		await this.runProcess('scp', args);
+	}
+
+	private async tryDatabaseDumpLocal(
+		dumpBin: string,
+		dumpHost: string,
+		dumpPort: string,
+		connectTimeoutSeconds: string,
+		databaseUser: string,
+		databasePassword: string,
+		databaseName: string,
+		destinationPath: string,
+		commandTrace?: (message: string) => Promise<void>,
+	) {
+		const args = [
+			'--single-transaction',
+			'--quick',
+			'--skip-lock-tables',
+			'--host',
+			dumpHost,
+			'--port',
+			dumpPort,
+			'--user',
+			databaseUser,
+			'--result-file',
+			destinationPath,
+			databaseName,
+		];
+
+		if (commandTrace) {
+			await commandTrace(
+				`local ${dumpBin} ${args
+					.map(value => this.shellQuote(value))
+					.join(' ')}`,
+			);
+		}
+
+		await new Promise<void>((resolvePromise, rejectPromise) => {
+			const timeoutSeconds = Math.max(
+				1,
+				Number.parseInt(connectTimeoutSeconds, 10) || 8,
+			);
+			const timeoutMs = timeoutSeconds * 1000;
+			const child = spawn(dumpBin, args, {
+				stdio: ['ignore', 'pipe', 'pipe'],
+				env: {
+					...process.env,
+					MYSQL_PWD: databasePassword,
+				},
+			});
+			let finished = false;
+			let didTimeout = false;
+			let stderr = '';
+			const timeoutHandle = setTimeout(() => {
+				if (finished) {
+					return;
+				}
+				didTimeout = true;
+				child.kill('SIGTERM');
+				setTimeout(() => {
+					if (!finished) {
+						child.kill('SIGKILL');
+					}
+				}, 1000).unref();
+			}, timeoutMs);
+
+			child.stderr.on('data', chunk => {
+				stderr += chunk.toString();
+			});
+
+			child.on('error', error => {
+				if (finished) {
+					return;
+				}
+				finished = true;
+				clearTimeout(timeoutHandle);
+				rejectPromise(error);
+			});
+
+			child.on('close', code => {
+				if (finished) {
+					return;
+				}
+				finished = true;
+				clearTimeout(timeoutHandle);
+				if (didTimeout) {
+					rejectPromise(
+						new Error(
+							`${dumpBin} timed out after ${timeoutSeconds}s${stderr ? `: ${stderr.trim()}` : ''}`,
+						),
+					);
+					return;
+				}
+				if (code === 0) {
+					resolvePromise();
+					return;
+				}
+				rejectPromise(
+					new Error(
+						`${dumpBin} exited with code ${code ?? 'unknown'}${stderr ? `: ${stderr.trim()}` : ''}`,
+					),
+				);
+			});
+		});
+	}
+
+	private async createDatabaseDumpViaSsh(
+		context: ProjectBackupContext,
+		destinationPath: string,
+		options: {
+			dumpBin: string;
+			dumpHost: string;
+			dumpPort: string;
+			databaseUser: string;
+			databasePassword: string;
+			databaseName: string;
+		},
+		commandTrace?: (message: string) => Promise<void>,
+	) {
+		await this.withSshKey(context, async keyFilePath => {
+			const remoteDumpPath = `/tmp/forge-db-backup-${randomUUID()}.sql`;
+			const dumpArgs = [
+				this.shellQuote(options.dumpBin),
+				'--single-transaction',
+				'--quick',
+				'--lock-tables=false',
+				'--host',
+				this.shellQuote(options.dumpHost),
+				'--port',
+				this.shellQuote(options.dumpPort),
+				'--user',
+				this.shellQuote(options.databaseUser),
+				'--result-file',
+				this.shellQuote(remoteDumpPath),
+				this.shellQuote(options.databaseName),
+			].join(' ');
+			const plainDumpCommand = [
+				`MYSQL_PWD=${this.shellQuote(options.databasePassword)}`,
+				dumpArgs,
+			].join(' ');
+			const sudoDumpCommand = [
+				'sudo -n env',
+				`MYSQL_PWD=${this.shellQuote(options.databasePassword)}`,
+				dumpArgs,
+			].join(' ');
+			const attempts = [
+				{
+					label: 'sudo',
+					command: sudoDumpCommand,
+				},
+				{ label: 'plain', command: plainDumpCommand },
+			];
+			const failures: string[] = [];
+
+			try {
+				for (const attempt of attempts) {
+					try {
+						if (commandTrace) {
+							await commandTrace(
+								`ssh (${attempt.label}) ${attempt.command.replace(/MYSQL_PWD='[^']*'/g, "MYSQL_PWD='***'")}`,
+							);
+						}
+						await this.runSshCommand(context, attempt.command, keyFilePath);
+						await this.scpFromRemote(
+							context,
+							remoteDumpPath,
+							destinationPath,
+							keyFilePath,
+						);
+						return;
+					} catch (error: unknown) {
+						const reason =
+							error instanceof Error ? error.message : 'unknown ssh dump error';
+						failures.push(`${attempt.label} => ${reason}`);
+					}
+				}
+
+				throw new Error(`remote dump command failed: ${failures.join(' | ')}`);
+			} finally {
+				await this.runSshCommand(
+					context,
+					`rm -f ${this.shellQuote(remoteDumpPath)}`,
+					keyFilePath,
+				).catch(() => undefined);
+			}
+		});
+	}
+
+	private async createDatabaseDumpViaWpCli(
+		context: ProjectBackupContext,
+		destinationPath: string,
+		pathCandidates: Array<string | null | undefined>,
+		commandTrace?: (message: string) => Promise<void>,
+	) {
+		const candidatePaths = this.expandWpCliPathCandidates(pathCandidates);
+
+		if (candidatePaths.length === 0) {
+			throw new Error('wp-cli export failed: no candidate paths provided');
+		}
+
+		const failures: string[] = [];
+
+		await this.withSshKey(context, async keyFilePath => {
+			for (const candidatePath of candidatePaths) {
+				const remoteDumpPath = `/tmp/forge-db-wpcli-${randomUUID()}.sql`;
+				const commands = [
+					{
+						label: 'sudo',
+						command: [
+							'if command -v wp >/dev/null 2>&1; then',
+							`sudo -n wp --allow-root --path=${this.shellQuote(candidatePath)} db export ${this.shellQuote(remoteDumpPath)} --add-drop-table --quiet;`,
+							"else echo 'wp-cli not found' 1>&2; exit 127; fi",
+						].join(' '),
+					},
+					{
+						label: 'plain',
+						command: [
+							'if command -v wp >/dev/null 2>&1; then',
+							`wp --allow-root --path=${this.shellQuote(candidatePath)} db export ${this.shellQuote(remoteDumpPath)} --add-drop-table --quiet;`,
+							"else echo 'wp-cli not found' 1>&2; exit 127; fi",
+						].join(' '),
+					},
+				];
+				let exported = false;
+
+				try {
+					for (const attempt of commands) {
+						try {
+							if (commandTrace) {
+								await commandTrace(
+									`ssh wp-cli (${attempt.label}) candidate=${candidatePath}`,
+								);
+							}
+							await this.runSshCommand(context, attempt.command, keyFilePath);
+							exported = true;
+							break;
+						} catch (error: unknown) {
+							const reason =
+								error instanceof Error
+									? error.message
+									: 'unknown wp-cli export error';
+							failures.push(`${candidatePath} [${attempt.label}] => ${reason}`);
+						}
+					}
+
+					if (!exported) {
+						continue;
+					}
+
+					await this.scpFromRemote(
+						context,
+						remoteDumpPath,
+						destinationPath,
+						keyFilePath,
+					);
+					return;
+				} catch (error: unknown) {
+					const reason =
+						error instanceof Error
+							? error.message
+							: 'unknown wp-cli export error';
+					failures.push(`${candidatePath} => ${reason}`);
+				} finally {
+					await this.runSshCommand(
+						context,
+						`rm -f ${this.shellQuote(remoteDumpPath)}`,
+						keyFilePath,
+					).catch(() => undefined);
+				}
+			}
+		});
+
+		throw new Error(`wp-cli export failed: ${failures.join(' | ')}`);
+	}
+
+	private expandWpCliPathCandidates(
+		pathCandidates: Array<string | null | undefined>,
+	): string[] {
+		const values = pathCandidates
+			.map(value => value?.trim() || '')
+			.filter(Boolean)
+			.filter(value => this.isEligibleRemoteWpPath(value))
+			.flatMap(value => {
+				if (/\/web\/?$/i.test(value)) {
+					const parentPath = dirname(value.replace(/\/+$/, ''));
+					if (parentPath && parentPath !== value) {
+						return [value, parentPath];
+					}
+				}
+				return [value];
+			})
+			.filter((value, index, array) => array.indexOf(value) === index);
+
+		return values;
+	}
+
+	private isEligibleRemoteWpPath(pathValue: string) {
+		const normalized = pathValue.trim();
+		if (!normalized.startsWith('/')) {
+			return false;
+		}
+		if (normalized === '/app' || normalized.startsWith('/app/')) {
+			return false;
+		}
+		const localRoots = [
+			this.localBackupRoot,
+			this.restoreRoot,
+			this.driveMirrorRoot,
+		]
+			.map(root => (root || '').trim())
+			.filter(Boolean);
+		return !localRoots.some(
+			root => normalized === root || normalized.startsWith(`${root}/`),
+		);
+	}
+
+	private resolveBackupTypeSelection(backupType?: string) {
+		const normalized = (backupType ?? 'full').trim().toLowerCase();
+		if (normalized === 'files') {
+			return {
+				backupType: 'files',
+				includeFiles: true,
+				includeDatabase: false,
+			} as const;
+		}
+		if (normalized === 'database') {
+			return {
+				backupType: 'database',
+				includeFiles: false,
+				includeDatabase: true,
+			} as const;
+		}
+		return {
+			backupType: 'full',
+			includeFiles: true,
+			includeDatabase: true,
+		} as const;
+	}
+
+	private async createDatabaseDump(
+		context: ProjectBackupContext,
+		destinationPath: string,
+		commandTrace?: (message: string) => Promise<void>,
+	) {
+		if (!context.environmentId) {
+			throw new Error(
+				'Database backup requires a selected environment with database credentials',
+			);
+		}
+
+		const dbConfigFromRemote = await this.resolveRemoteDatabaseConfigFromSource(
+			context,
+			[context.environmentPath, context.projectPath],
+			commandTrace,
+		);
+
+		const databaseName =
+			dbConfigFromRemote.databaseName ?? context.databaseName?.trim();
+		const databaseUser =
+			dbConfigFromRemote.databaseUser ?? context.databaseUser?.trim();
+		const databasePassword =
+			dbConfigFromRemote.databasePassword ?? context.databasePassword?.trim();
+
+		if (!databaseName || !databaseUser || !databasePassword) {
+			throw new Error(
+				`Database credentials are incomplete for environment ${context.environmentId}`,
+			);
+		}
+
+		await mkdir(dirname(destinationPath), { recursive: true });
+
+		const dumpBins = (
+			process.env.FORGE_BACKUP_DB_DUMP_BIN || 'mariadb-dump,mysqldump'
+		)
+			.split(',')
+			.map(value => value.trim())
+			.filter(Boolean);
+
+		if (dumpBins.length === 0) {
+			throw new Error('No database dump binary configured');
+		}
+
+		const resolvedHost =
+			process.env.FORGE_BACKUP_DB_HOST?.trim() ||
+			dbConfigFromRemote.databaseHost ||
+			'localhost';
+		const resolvedPort =
+			process.env.FORGE_BACKUP_DB_PORT?.trim() ||
+			dbConfigFromRemote.databasePort ||
+			'3306';
+
+		const failures: string[] = [];
+		for (const dumpBin of dumpBins) {
+			try {
+				await this.createDatabaseDumpViaSsh(
+					context,
+					destinationPath,
+					{
+						dumpBin,
+						dumpHost: resolvedHost,
+						dumpPort: resolvedPort,
+						databaseUser,
+						databasePassword,
+						databaseName,
+					},
+					commandTrace,
+				);
+
+				return {
+					databaseHost: resolvedHost,
+					databasePort: resolvedPort,
+					dumpBinary: dumpBin,
+					transport: 'ssh',
+				};
+			} catch (error: unknown) {
+				const reason =
+					error instanceof Error ? error.message : 'unknown ssh dump error';
+				failures.push(
+					`ssh:${dumpBin}@${resolvedHost}:${resolvedPort} => ${reason}`,
+				);
+			}
+		}
+
+		if (this.isLegacyDumpFallbackEnabled()) {
+			const legacyResult = await this.createDatabaseDumpLegacyFallback(
+				context,
+				destinationPath,
+				{
+					databaseName,
+					databaseUser,
+					databasePassword,
+					resolvedHost,
+					resolvedPort,
+					dumpBins,
+				},
+				commandTrace,
+			);
+			if (legacyResult) {
+				return legacyResult;
+			}
+		}
+
+		throw new Error(
+			`Database dump failed for environment ${context.environmentId}. Attempts: ${failures.join(' | ')}`,
+		);
+	}
+
+	private isLegacyDumpFallbackEnabled() {
+		return (
+			(process.env.FORGE_BACKUP_DB_LEGACY_FALLBACK ?? 'false').toLowerCase() ===
+			'true'
+		);
+	}
+
+	private async createDatabaseDumpLegacyFallback(
+		context: ProjectBackupContext,
+		destinationPath: string,
+		options: {
+			databaseName: string;
+			databaseUser: string;
+			databasePassword: string;
+			resolvedHost: string;
+			resolvedPort: string;
+			dumpBins: string[];
+		},
+		commandTrace?: (message: string) => Promise<void>,
+	) {
+		const connectTimeoutSeconds = String(this.getDumpConnectTimeoutSeconds());
+
+		for (const dumpBin of options.dumpBins) {
+			try {
+				await this.tryDatabaseDumpLocal(
+					dumpBin,
+					options.resolvedHost,
+					options.resolvedPort,
+					connectTimeoutSeconds,
+					options.databaseUser,
+					options.databasePassword,
+					options.databaseName,
+					destinationPath,
+					commandTrace,
+				);
+
+				return {
+					databaseHost: options.resolvedHost,
+					databasePort: options.resolvedPort,
+					dumpBinary: dumpBin,
+					transport: 'local',
+				};
+			} catch {
+				continue;
+			}
+		}
+
+		try {
+			await this.createDatabaseDumpViaWpCli(
+				context,
+				destinationPath,
+				[context.environmentPath, context.projectPath],
+				commandTrace,
+			);
+
+			return {
+				databaseHost: options.resolvedHost,
+				databasePort: options.resolvedPort,
+				dumpBinary: 'wp',
+				transport: 'ssh-wpcli',
+			};
+		} catch {
+			return null;
+		}
+	}
+
+	private async resolveRemoteDatabaseConfigFromSource(
+		context: ProjectBackupContext,
+		pathCandidates: Array<string | null | undefined>,
+		commandTrace?: (message: string) => Promise<void>,
+	) {
+		const emptyConfig = {
+			databaseHost: null,
+			databasePort: null,
+			databaseName: null,
+			databaseUser: null,
+			databasePassword: null,
+		};
+
+		if (!context.serverHostname?.trim()) {
+			return emptyConfig;
+		}
+
+		const candidates = this.expandWpCliPathCandidates(pathCandidates);
+		if (candidates.length === 0) {
+			return emptyConfig;
+		}
+
+		try {
+			return await this.withSshKey(context, async keyFilePath => {
+				for (const candidatePath of candidates) {
+					const source = await this.detectRemoteConfigSource(
+						context,
+						candidatePath,
+						keyFilePath,
+					);
+
+					if (!source) {
+						continue;
+					}
+
+					if (commandTrace) {
+						await commandTrace(
+							`ssh config source=${source} candidate=${candidatePath}`,
+						);
+					}
+
+					const config = await this.readDatabaseConfigFromRemotePath(
+						context,
+						candidatePath,
+						keyFilePath,
+					);
+
+					if (
+						config.databaseName &&
+						config.databaseUser &&
+						config.databasePassword
+					) {
+						return config;
+					}
+				}
+
+				return emptyConfig;
+			});
+		} catch {
+			return emptyConfig;
+		}
+	}
+
+	private async detectRemoteConfigSource(
+		context: ProjectBackupContext,
+		candidatePath: string,
+		keyFilePath: string,
+	) {
+		const command = [
+			`if [ -f ${this.shellQuote(`${candidatePath}/.env`)} ] || [ -f ${this.shellQuote(`${candidatePath}/.env.local`)} ] || [ -f ${this.shellQuote(`${dirname(candidatePath)}/.env`)} ]; then echo bedrock;`,
+			`elif [ -f ${this.shellQuote(`${candidatePath}/wp-config.php`)} ] || [ -f ${this.shellQuote(`${candidatePath}/web/wp-config.php`)} ] || [ -f ${this.shellQuote(`${dirname(candidatePath)}/web/wp-config.php`)} ]; then echo wp-config; fi`,
+		].join(' ');
+
+		try {
+			const output = await this.runSshCommandCapture(
+				context,
+				command,
+				keyFilePath,
+			);
+			const source = output.stdout.trim();
+			if (source === 'bedrock' || source === 'wp-config') {
+				return source;
+			}
+			return null;
+		} catch {
+			return null;
+		}
+	}
+
+	private parseHostPort(hostValue: string | null | undefined) {
+		const value = hostValue?.trim();
+		if (!value) {
+			return { host: null, port: null };
+		}
+
+		const bracketMatch = value.match(/^\[(.+)\]:(\d+)$/);
+		if (bracketMatch) {
+			return {
+				host: bracketMatch[1] || null,
+				port: bracketMatch[2] || null,
+			};
+		}
+
+		const hostPortMatch = value.match(/^([^:]+):(\d+)$/);
+		if (hostPortMatch) {
+			return {
+				host: hostPortMatch[1] || null,
+				port: hostPortMatch[2] || null,
+			};
+		}
+
+		return {
+			host: value,
+			port: null,
+		};
+	}
+
+	private async resolveDatabaseConfigFromPaths(
+		paths: Array<string | null | undefined>,
+	) {
+		const normalizedPaths = paths
+			.filter((value): value is string => Boolean(value && value.trim().length))
+			.map(value => resolve(value))
+			.filter((pathValue, index, array) => array.indexOf(pathValue) === index);
+
+		for (const pathValue of normalizedPaths) {
+			const config = await this.readDatabaseConfigFromPath(pathValue);
+			if (
+				config.databaseHost ||
+				config.databasePort ||
+				config.databaseName ||
+				config.databaseUser ||
+				config.databasePassword
+			) {
+				return config;
+			}
+		}
+
+		return {
+			databaseHost: null,
+			databasePort: null,
+			databaseName: null,
+			databaseUser: null,
+			databasePassword: null,
+		};
+	}
+
+	private async resolveDatabaseConfigFromRemotePaths(
+		context: ProjectBackupContext,
+		paths: Array<string | null | undefined>,
+	) {
+		if (!context.serverHostname?.trim()) {
+			return {
+				databaseHost: null,
+				databasePort: null,
+				databaseName: null,
+				databaseUser: null,
+				databasePassword: null,
+			};
+		}
+
+		try {
+			return await this.withSshKey(context, async keyFilePath => {
+				const normalizedPaths = paths
+					.filter((value): value is string =>
+						Boolean(value && value.trim().length),
+					)
+					.map(value => resolve(value))
+					.filter(
+						(pathValue, index, array) => array.indexOf(pathValue) === index,
+					);
+
+				for (const pathValue of normalizedPaths) {
+					const config = await this.readDatabaseConfigFromRemotePath(
+						context,
+						pathValue,
+						keyFilePath,
+					);
+					if (
+						config.databaseHost ||
+						config.databasePort ||
+						config.databaseName ||
+						config.databaseUser ||
+						config.databasePassword
+					) {
+						return config;
+					}
+				}
+
+				return {
+					databaseHost: null,
+					databasePort: null,
+					databaseName: null,
+					databaseUser: null,
+					databasePassword: null,
+				};
+			});
+		} catch {
+			return {
+				databaseHost: null,
+				databasePort: null,
+				databaseName: null,
+				databaseUser: null,
+				databasePassword: null,
+			};
+		}
+	}
+
+	private async readDatabaseConfigFromRemotePath(
+		context: ProjectBackupContext,
+		pathValue: string,
+		keyFilePath: string,
+	) {
+		const envCandidates = [
+			`${pathValue}/.env`,
+			`${pathValue}/.env.local`,
+			`${dirname(pathValue)}/.env`,
+		];
+		const wpConfigCandidates = [
+			`${pathValue}/wp-config.php`,
+			`${pathValue}/web/wp-config.php`,
+			`${dirname(pathValue)}/web/wp-config.php`,
+		];
+
+		let envValues: Record<string, string> = {};
+		for (const envPath of envCandidates) {
+			const content = await this.readRemoteFileIfExists(
+				context,
+				envPath,
+				keyFilePath,
+			);
+			if (!content) {
+				continue;
+			}
+			envValues = {
+				...envValues,
+				...this.parseDotEnv(content),
+			};
+		}
+
+		let wpConfigValues: Record<string, string> = {};
+		for (const wpConfigPath of wpConfigCandidates) {
+			const content = await this.readRemoteFileIfExists(
+				context,
+				wpConfigPath,
+				keyFilePath,
+			);
+			if (!content) {
+				continue;
+			}
+			wpConfigValues = {
+				...wpConfigValues,
+				...this.parseWpConfigDefines(content),
+			};
+		}
+
+		const hostRaw =
+			envValues.DB_HOST ||
+			wpConfigValues.DB_HOST ||
+			envValues.DATABASE_HOST ||
+			wpConfigValues.DATABASE_HOST ||
+			null;
+		const hostParts = this.parseHostPort(hostRaw);
+
+		return {
+			databaseHost: hostParts.host,
+			databasePort: hostParts.port,
+			databaseName:
+				envValues.DB_NAME ||
+				wpConfigValues.DB_NAME ||
+				envValues.DATABASE_NAME ||
+				wpConfigValues.DATABASE_NAME ||
+				null,
+			databaseUser:
+				envValues.DB_USER ||
+				wpConfigValues.DB_USER ||
+				envValues.DATABASE_USER ||
+				wpConfigValues.DATABASE_USER ||
+				null,
+			databasePassword:
+				envValues.DB_PASSWORD ||
+				wpConfigValues.DB_PASSWORD ||
+				envValues.DATABASE_PASSWORD ||
+				wpConfigValues.DATABASE_PASSWORD ||
+				null,
+		};
+	}
+
+	private async readRemoteFileIfExists(
+		context: ProjectBackupContext,
+		remotePath: string,
+		keyFilePath: string,
+	) {
+		const command = [
+			`if [ -f ${this.shellQuote(remotePath)} ]; then`,
+			`cat ${this.shellQuote(remotePath)};`,
+			'fi',
+		].join(' ');
+
+		try {
+			const captured = await this.runSshCommandCapture(
+				context,
+				command,
+				keyFilePath,
+			);
+			return captured.stdout.trim().length > 0 ? captured.stdout : null;
+		} catch {
+			return null;
+		}
+	}
+
+	private async readDatabaseConfigFromPath(pathValue: string) {
+		const envCandidates = [
+			join(pathValue, '.env'),
+			join(pathValue, '.env.local'),
+			join(dirname(pathValue), '.env'),
+		];
+		const wpConfigCandidates = [
+			join(pathValue, 'wp-config.php'),
+			join(pathValue, 'web', 'wp-config.php'),
+			join(dirname(pathValue), 'web', 'wp-config.php'),
+		];
+
+		let envValues: Record<string, string> = {};
+		for (const envPath of envCandidates) {
+			if (!(await this.pathExists(envPath))) {
+				continue;
+			}
+			const content = await readFile(envPath, 'utf-8');
+			envValues = {
+				...envValues,
+				...this.parseDotEnv(content),
+			};
+		}
+
+		let wpConfigValues: Record<string, string> = {};
+		for (const wpConfigPath of wpConfigCandidates) {
+			if (!(await this.pathExists(wpConfigPath))) {
+				continue;
+			}
+			const content = await readFile(wpConfigPath, 'utf-8');
+			wpConfigValues = {
+				...wpConfigValues,
+				...this.parseWpConfigDefines(content),
+			};
+		}
+
+		const hostRaw =
+			envValues.DB_HOST ||
+			wpConfigValues.DB_HOST ||
+			envValues.DATABASE_HOST ||
+			wpConfigValues.DATABASE_HOST ||
+			null;
+		const hostParts = this.parseHostPort(hostRaw);
+
+		return {
+			databaseHost: hostParts.host,
+			databasePort: hostParts.port,
+			databaseName:
+				envValues.DB_NAME ||
+				wpConfigValues.DB_NAME ||
+				envValues.DATABASE_NAME ||
+				wpConfigValues.DATABASE_NAME ||
+				null,
+			databaseUser:
+				envValues.DB_USER ||
+				wpConfigValues.DB_USER ||
+				envValues.DATABASE_USER ||
+				wpConfigValues.DATABASE_USER ||
+				null,
+			databasePassword:
+				envValues.DB_PASSWORD ||
+				wpConfigValues.DB_PASSWORD ||
+				envValues.DATABASE_PASSWORD ||
+				wpConfigValues.DATABASE_PASSWORD ||
+				null,
+		};
+	}
+
+	private parseDotEnv(content: string) {
+		const result: Record<string, string> = {};
+		const lines = content.split(/\r?\n/);
+		for (const line of lines) {
+			const trimmed = line.trim();
+			if (!trimmed || trimmed.startsWith('#')) {
+				continue;
+			}
+			const match = trimmed.match(
+				/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/,
+			);
+			if (!match) {
+				continue;
+			}
+			const key = match[1];
+			const rawValue = match[2] ?? '';
+			if (!key) {
+				continue;
+			}
+			result[key] = this.normalizeConfigValue(rawValue);
+		}
+		return result;
+	}
+
+	private parseWpConfigDefines(content: string) {
+		const result: Record<string, string> = {};
+		const defineRegex =
+			/define\(\s*['\"]([A-Za-z0-9_]+)['\"]\s*,\s*(['\"])((?:\\.|(?!\2).)*)\2\s*\)/g;
+
+		let match: RegExpExecArray | null = defineRegex.exec(content);
+		while (match) {
+			const key = match[1];
+			const rawValue = match[3] ?? '';
+			if (key) {
+				result[key] = rawValue
+					.replace(/\\'/g, "'")
+					.replace(/\\\"/g, '"')
+					.replace(/\\n/g, '\n');
+			}
+			match = defineRegex.exec(content);
+		}
+
+		return result;
+	}
+
+	private normalizeConfigValue(rawValue: string) {
+		const trimmed = rawValue.trim();
+		if (!trimmed) {
+			return '';
+		}
+
+		if (
+			(trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+			(trimmed.startsWith("'") && trimmed.endsWith("'"))
+		) {
+			return trimmed.slice(1, -1);
+		}
+
+		const commentStart = trimmed.indexOf(' #');
+		if (commentStart >= 0) {
+			return trimmed.slice(0, commentStart).trim();
+		}
+
+		return trimmed;
+	}
+
+	private getDumpConnectTimeoutSeconds() {
+		const raw = process.env.FORGE_BACKUP_DB_CONNECT_TIMEOUT?.trim();
+		const parsed = Number.parseInt(raw ?? '', 10);
+		if (!Number.isFinite(parsed) || parsed <= 0) {
+			return 8;
+		}
+		return parsed;
 	}
 
 	private async getProjectBackupContext(
@@ -506,6 +1693,15 @@ export class BackupsService {
 					environment: string;
 					wp_path: string;
 					gdrive_backups_folder_id: string | null;
+					database_name: string | null;
+					database_user: string | null;
+					database_password: string | null;
+					server_hostname: string | null;
+					ssh_user: string | null;
+					ssh_port: number | null;
+					ssh_key_path: string | null;
+					ssh_private_key: string | null;
+					ssh_password: string | null;
 			  }
 			| undefined;
 		if (typeof environmentId === 'number') {
@@ -515,10 +1711,20 @@ export class BackupsService {
 					environment: string;
 					wp_path: string;
 					gdrive_backups_folder_id: string | null;
+					database_name: string | null;
+					database_user: string | null;
+					database_password: string | null;
+					server_hostname: string | null;
+					ssh_user: string | null;
+					ssh_port: number | null;
+					ssh_key_path: string | null;
+					ssh_private_key: string | null;
+					ssh_password: string | null;
 				}>
 			>`
-				SELECT ps.id, ps.environment::text AS environment, ps.wp_path, ps.gdrive_backups_folder_id
+				SELECT ps.id, ps.environment::text AS environment, ps.wp_path, ps.gdrive_backups_folder_id, ps.database_name, ps.database_user, ps.database_password, s.hostname AS server_hostname, s.ssh_user, s.ssh_port, s.ssh_key_path, s.ssh_private_key, s.ssh_password
 				FROM project_servers ps
+				JOIN servers s ON s.id = ps.server_id
 				JOIN projects p ON p.id = ps.project_id
 				WHERE ps.id = ${environmentId} AND ps.project_id = ${projectId} AND p.owner_id = ${ownerId}
 				LIMIT 1
@@ -540,6 +1746,15 @@ export class BackupsService {
 			environmentPath: environment?.wp_path ?? null,
 			environmentDriveBackupsFolder:
 				environment?.gdrive_backups_folder_id ?? null,
+			databaseName: environment?.database_name ?? null,
+			databaseUser: environment?.database_user ?? null,
+			databasePassword: environment?.database_password ?? null,
+			serverHostname: environment?.server_hostname ?? null,
+			sshUser: environment?.ssh_user ?? null,
+			sshPort: environment?.ssh_port ?? null,
+			sshKeyPath: environment?.ssh_key_path ?? null,
+			sshPrivateKey: environment?.ssh_private_key ?? null,
+			sshPassword: environment?.ssh_password ?? null,
 		} satisfies ProjectBackupContext;
 	}
 
@@ -676,6 +1891,7 @@ export class BackupsService {
 		archivePath: string,
 		driveFolderPath: string,
 		createdAt: Date,
+		runtimeConfig: { remoteName: string; configPath: string },
 	) {
 		const year = `${createdAt.getUTCFullYear()}`;
 		const month = `${createdAt.getUTCMonth() + 1}`.padStart(2, '0');
@@ -686,33 +1902,21 @@ export class BackupsService {
 		const folderSegments = this.splitDrivePath(targetValue);
 		const driveFolderPathWithDate = [...folderSegments, year, month].join('/');
 		const remoteTarget = targetIsFolderId
-			? `${this.gdriveRcloneRemote},root_folder_id=${targetValue}:${relativeTargetPath}`
-			: `${this.gdriveRcloneRemote}:${driveFolderPathWithDate}/${basename(archivePath)}`;
-		const rcloneArgs = this.rcloneConfigPath
-			? [
-					'--config',
-					this.rcloneConfigPath,
-					'copyto',
-					archivePath,
-					remoteTarget,
-					'--stats',
-					'0',
-					'--transfers',
-					'1',
-					'--checkers',
-					'2',
-				]
-			: [
-					'copyto',
-					archivePath,
-					remoteTarget,
-					'--stats',
-					'0',
-					'--transfers',
-					'1',
-					'--checkers',
-					'2',
-				];
+			? `${runtimeConfig.remoteName},root_folder_id=${targetValue}:${relativeTargetPath}`
+			: `${runtimeConfig.remoteName}:${driveFolderPathWithDate}/${basename(archivePath)}`;
+		const rcloneArgs = [
+			'--config',
+			runtimeConfig.configPath,
+			'copyto',
+			archivePath,
+			remoteTarget,
+			'--stats',
+			'0',
+			'--transfers',
+			'1',
+			'--checkers',
+			'2',
+		];
 
 		await this.runProcess('rclone', rcloneArgs);
 
@@ -724,6 +1928,49 @@ export class BackupsService {
 				? `${targetValue}/${year}/${month}`
 				: driveFolderPathWithDate,
 		};
+	}
+
+	private async deleteDriveBackupArtifact(backup: {
+		drive_folder_id?: string | null;
+		storage_file_id?: string | null;
+		name?: string;
+	}) {
+		const driveFolderId = backup.drive_folder_id?.trim();
+		const storageFileId = backup.storage_file_id?.trim();
+
+		if (!driveFolderId || !storageFileId) {
+			return { deleted: false, reason: 'no-drive-artifact' as const };
+		}
+
+		const runtimeStatus =
+			await this.driveRuntimeConfigService.checkRemoteConfigured();
+		if (!runtimeStatus.configured) {
+			throw new Error(
+				`Cannot delete Drive artifact for backup ${backup.name ?? 'unknown'}: ${runtimeStatus.message}`,
+			);
+		}
+
+		const runtimeConfig = runtimeStatus.runtime;
+		const remoteTarget = this.isDriveFolderId(driveFolderId)
+			? `${runtimeConfig.remoteName},root_folder_id=${driveFolderId}:${storageFileId}`
+			: `${runtimeConfig.remoteName}:${this.normalizePathForDriveFile(driveFolderId)}/${storageFileId}`;
+
+		await this.runProcess('rclone', [
+			'--config',
+			runtimeConfig.configPath,
+			'deletefile',
+			remoteTarget,
+		]);
+
+		return {
+			deleted: true,
+			reason: 'deleted' as const,
+			remoteTarget,
+		};
+	}
+
+	private normalizePathForDriveFile(value: string) {
+		return value.trim().replace(/^\/+|\/+$/g, '');
 	}
 
 	private async resolveReadableArchivePath(
@@ -920,12 +2167,37 @@ export class BackupsService {
 		return this.normalizeBackup(backup);
 	}
 
-	async deleteBackup(backupId: number, force = false, ownerId?: number) {
+	async deleteBackup(
+		backupId: number,
+		force = false,
+		ownerId?: number,
+		deleteFile = true,
+	) {
 		const backup = await this.getBackup(backupId, ownerId);
 		if (!force && ['running', 'pending'].includes(backup.status)) {
 			throw new BadRequestException({
 				detail: 'Backup is currently running. Use force=true to delete anyway.',
 			});
+		}
+
+		if (deleteFile) {
+			if (backup.storage_type === 'google_drive') {
+				await this.deleteDriveBackupArtifact(backup);
+			}
+
+			if (
+				typeof backup.file_path === 'string' &&
+				backup.file_path.trim().length > 0
+			) {
+				const filePath = resolve(backup.file_path);
+				await rm(filePath, { force: true }).catch(error => {
+					const errno = error as NodeJS.ErrnoException;
+					if (errno?.code === 'ENOENT') {
+						return;
+					}
+					throw error;
+				});
+			}
 		}
 
 		await this.prisma.$executeRaw`
@@ -1068,8 +2340,13 @@ export class BackupsService {
 			payload?.storage_backends && payload.storage_backends.length > 0
 				? payload.storage_backends
 				: [backup.storage_type];
+		const backupSelection = this.resolveBackupTypeSelection(
+			payload?.backup_type ?? backup.backup_type,
+		);
 
 		let logs: string[] = [];
+		let backupWorkspacePath: string | null = null;
+		let fallbackSourcePath: string | null = null;
 		try {
 			this.emitBackupRealtimeEvent({
 				event: 'status',
@@ -1103,6 +2380,17 @@ export class BackupsService {
 					status: 'running',
 				},
 			);
+			await this.appendBackupLog(
+				backupId,
+				logs,
+				`Backup type ${backupSelection.backupType} resolved to files=${backupSelection.includeFiles} database=${backupSelection.includeDatabase}`,
+				{
+					project_id: context.projectId,
+					project_name: context.projectName,
+					project_slug: context.projectSlug,
+					status: 'running',
+				},
+			);
 
 			const now = new Date();
 			const year = `${now.getUTCFullYear()}`;
@@ -1124,21 +2412,100 @@ export class BackupsService {
 				`${projectSegment || 'project'}-${envSegment || 'project'}-${day}-${timestamp}.tar.gz`,
 			);
 
-			const source = await this.resolveBackupSource(
-				context,
-				backupId,
-				payload?.backup_type ?? backup.backup_type,
-			);
-			await this.appendBackupLog(backupId, logs, source.logMessage, {
-				project_id: context.projectId,
-				project_name: context.projectName,
-				project_slug: context.projectSlug,
-				status: 'running',
-			});
+			let archiveSourcePath: string;
+			let source: {
+				sourcePath: string;
+				cleanupPath: string | null;
+				logMessage: string;
+			} | null = null;
+
+			if (backupSelection.includeFiles) {
+				source = await this.resolveBackupSource(
+					context,
+					backupId,
+					backupSelection.backupType,
+				);
+				fallbackSourcePath = source.cleanupPath;
+				await this.appendBackupLog(backupId, logs, source.logMessage, {
+					project_id: context.projectId,
+					project_name: context.projectName,
+					project_slug: context.projectSlug,
+					status: 'running',
+				});
+			}
+
+			if (backupSelection.includeDatabase) {
+				backupWorkspacePath = join(
+					tmpdir(),
+					'forge-backup-workspaces',
+					`${backupId}-${randomUUID()}`,
+				);
+				await mkdir(backupWorkspacePath, { recursive: true });
+
+				const databaseDumpPath = join(
+					backupWorkspacePath,
+					'database',
+					'database.sql',
+				);
+				const dumpResult = await this.createDatabaseDump(
+					context,
+					databaseDumpPath,
+					async message => {
+						await this.appendBackupLog(
+							backupId,
+							logs,
+							`Command trace: ${message}`,
+							{
+								project_id: context.projectId,
+								project_name: context.projectName,
+								project_slug: context.projectSlug,
+								status: 'running',
+							},
+						);
+					},
+				);
+				await this.appendBackupLog(
+					backupId,
+					logs,
+					`Database dump captured at ${databaseDumpPath} using ${dumpResult.dumpBinary} (${dumpResult.databaseHost}:${dumpResult.databasePort})`,
+					{
+						project_id: context.projectId,
+						project_name: context.projectName,
+						project_slug: context.projectSlug,
+						status: 'running',
+					},
+				);
+
+				if (source) {
+					const workspaceFilesPath = join(backupWorkspacePath, 'files');
+					await cp(source.sourcePath, workspaceFilesPath, {
+						recursive: true,
+						force: true,
+					});
+					await this.appendBackupLog(
+						backupId,
+						logs,
+						`Files staged at ${workspaceFilesPath}`,
+						{
+							project_id: context.projectId,
+							project_name: context.projectName,
+							project_slug: context.projectSlug,
+							status: 'running',
+						},
+					);
+				}
+
+				archiveSourcePath = backupWorkspacePath;
+			} else if (source) {
+				archiveSourcePath = source.sourcePath;
+			} else {
+				throw new Error('Backup selection resolved to no content to archive');
+			}
+
 			await this.appendBackupLog(
 				backupId,
 				logs,
-				`Creating archive from ${source.sourcePath}`,
+				`Creating archive from ${archiveSourcePath}`,
 				{
 					project_id: context.projectId,
 					project_name: context.projectName,
@@ -1148,7 +2515,7 @@ export class BackupsService {
 			);
 
 			const archiveResult = await this.createTarArchive(
-				source.sourcePath,
+				archiveSourcePath,
 				archivePath,
 			);
 			await this.appendBackupLog(
@@ -1166,11 +2533,11 @@ export class BackupsService {
 			let driveFolderId: string | null = null;
 			let storageFileId: string | null = null;
 			if (storageBackends.includes('google_drive')) {
-				await this.assertConfiguredDriveRemote();
+				const driveRuntimeConfig = await this.assertConfiguredDriveRemote();
 				await this.appendBackupLog(
 					backupId,
 					logs,
-					`Verified Google Drive remote '${this.gdriveRcloneRemote}' is configured`,
+					`Verified Google Drive remote '${driveRuntimeConfig.remoteName}' is configured (source=${driveRuntimeConfig.remoteSource}, config=${driveRuntimeConfig.configPath})`,
 					{
 						project_id: context.projectId,
 						project_name: context.projectName,
@@ -1185,7 +2552,7 @@ export class BackupsService {
 				await this.appendBackupLog(
 					backupId,
 					logs,
-					`Uploading archive to Google Drive path ${driveFolderPath} using remote ${this.gdriveRcloneRemote}`,
+					`Uploading archive to Google Drive path ${driveFolderPath} using remote ${driveRuntimeConfig.remoteName}`,
 					{
 						project_id: context.projectId,
 						project_name: context.projectName,
@@ -1197,6 +2564,7 @@ export class BackupsService {
 					archivePath,
 					driveFolderPath,
 					now,
+					driveRuntimeConfig,
 				);
 				driveFolderId = uploaded.driveFolderId;
 				storageFileId = uploaded.storageFileId;
@@ -1213,11 +2581,11 @@ export class BackupsService {
 				);
 			}
 
-			if (source.cleanupPath) {
+			if (fallbackSourcePath) {
 				await this.appendBackupLog(
 					backupId,
 					logs,
-					`Fallback source retained at ${source.cleanupPath}`,
+					`Fallback source retained at ${fallbackSourcePath}`,
 					{
 						project_id: context.projectId,
 						project_name: context.projectName,
@@ -1286,6 +2654,12 @@ export class BackupsService {
 			throw new InternalServerErrorException({
 				detail: `Backup execution failed: ${detail}`,
 			});
+		} finally {
+			if (backupWorkspacePath) {
+				await rm(backupWorkspacePath, { recursive: true, force: true }).catch(
+					() => undefined,
+				);
+			}
 		}
 
 		return {
@@ -1294,7 +2668,7 @@ export class BackupsService {
 			backup_id: backupId,
 			project_id: backup.project_id,
 			environment_id: payload?.environment_id ?? null,
-			backup_type: payload?.backup_type ?? backup.backup_type,
+			backup_type: backupSelection.backupType,
 			storage_backends: storageBackends,
 			override_gdrive_folder_id: payload?.override_gdrive_folder_id ?? null,
 			message: `Backup execution completed for ${backup.name}`,
@@ -1451,7 +2825,7 @@ export class BackupsService {
 	}
 
 	async bulkDeleteBackups(
-		payload: { backup_ids: number[]; force?: boolean },
+		payload: { backup_ids: number[]; force?: boolean; delete_file?: boolean },
 		ownerId?: number,
 	) {
 		const resolvedOwnerId = this.resolveOwnerId(ownerId);
@@ -1466,9 +2840,17 @@ export class BackupsService {
 		}
 
 		const rows = await this.prisma.$queryRaw<
-			{ id: number; status: string; project_name: string | null }[]
+			{
+				id: number;
+				status: string;
+				project_name: string | null;
+				storage_type: string;
+				storage_path: string;
+				storage_file_id: string | null;
+				drive_folder_id: string | null;
+			}[]
 		>`
-			SELECT b.id, b.status, p.name AS project_name
+			SELECT b.id, b.status, p.name AS project_name, b.storage_type, b.storage_path, b.storage_file_id, b.drive_folder_id
 			FROM backups b
 			JOIN projects p ON p.id = b.project_id
 			WHERE b.id = ANY(${backupIds}) AND p.owner_id = ${resolvedOwnerId}
@@ -1497,6 +2879,29 @@ export class BackupsService {
 				continue;
 			}
 
+			const shouldDeleteFile = payload.delete_file ?? true;
+			if (shouldDeleteFile) {
+				if (backup.storage_type === 'google_drive') {
+					await this.deleteDriveBackupArtifact({
+						drive_folder_id: backup.drive_folder_id,
+						storage_file_id: backup.storage_file_id,
+						name: backup.project_name ?? `backup-${backup.id}`,
+					});
+				}
+
+				if (backup.storage_path?.trim()) {
+					await rm(resolve(backup.storage_path), { force: true }).catch(
+						error => {
+							const errno = error as NodeJS.ErrnoException;
+							if (errno?.code === 'ENOENT') {
+								return;
+							}
+							throw error;
+						},
+					);
+				}
+			}
+
 			await this.prisma.$executeRaw`
 				DELETE FROM backups
 				WHERE id = ${backupId}
@@ -1505,7 +2910,7 @@ export class BackupsService {
 			success.push({
 				backup_id: backupId,
 				project_name: backup.project_name,
-				file_deleted: true,
+				file_deleted: shouldDeleteFile,
 				status: 'deleted',
 			});
 		}

@@ -132,6 +132,20 @@ export class PluginPoliciesService {
 		};
 	}
 
+	private buildDefaultProjectPolicy(projectId: number) {
+		return {
+			id: 0,
+			project_id: projectId,
+			inherit_default: true,
+			name: 'Project Override',
+			allowed_plugins: [],
+			required_plugins: [],
+			blocked_plugins: [],
+			pinned_versions: {},
+			notes: null,
+		};
+	}
+
 	private async ensureProjectExists(projectId: number, ownerId?: number) {
 		const resolvedOwnerId = this.resolveOwnerId(ownerId);
 		const rows = await this.prisma.$queryRaw<{ id: number }[]>`
@@ -374,7 +388,7 @@ export class PluginPoliciesService {
 
 		const row = rows[0];
 		if (!row) {
-			throw new NotFoundException({ detail: 'Project policy not found' });
+			return this.buildDefaultProjectPolicy(projectId);
 		}
 
 		return this.normalizeProjectPolicy(row);

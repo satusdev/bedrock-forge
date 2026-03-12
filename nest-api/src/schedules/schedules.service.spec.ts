@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { SchedulesService } from './schedules.service';
 
 type MockPrisma = {
@@ -262,6 +262,7 @@ describe('SchedulesService', () => {
 			next_run_at: null,
 			project_id: 1,
 			environment_id: null,
+			celery_task_id: null,
 			created_at: new Date(),
 			updated_at: new Date(),
 		});
@@ -285,6 +286,84 @@ describe('SchedulesService', () => {
 		expect(prisma.backup_schedules.update).toHaveBeenCalled();
 	});
 
+	it('throws when claim token is invalid', async () => {
+		prisma.backup_schedules.findFirst.mockResolvedValueOnce({
+			id: 6,
+			name: 'Run me',
+			description: null,
+			frequency: 'daily',
+			cron_expression: null,
+			hour: 2,
+			minute: 0,
+			day_of_week: null,
+			day_of_month: null,
+			timezone: 'UTC',
+			backup_type: 'full',
+			storage_type: 'google_drive',
+			retention_count: 7,
+			retention_days: null,
+			status: 'active',
+			last_run_at: null,
+			next_run_at: null,
+			project_id: 1,
+			environment_id: null,
+			celery_task_id: 'schedule-lease-good',
+			created_at: new Date(),
+			updated_at: new Date(),
+		});
+
+		await expect(
+			service.runScheduleNow(6, undefined, 'schedule-lease-bad'),
+		).rejects.toBeInstanceOf(BadRequestException);
+	});
+
+	it('uses token-scoped updateMany for claimed schedule completion', async () => {
+		prisma.backup_schedules.findFirst.mockResolvedValueOnce({
+			id: 6,
+			name: 'Run me',
+			description: null,
+			frequency: 'daily',
+			cron_expression: null,
+			hour: 2,
+			minute: 0,
+			day_of_week: null,
+			day_of_month: null,
+			timezone: 'UTC',
+			backup_type: 'full',
+			storage_type: 'google_drive',
+			retention_count: 7,
+			retention_days: null,
+			status: 'active',
+			last_run_at: null,
+			next_run_at: null,
+			project_id: 1,
+			environment_id: null,
+			celery_task_id: 'schedule-lease-good',
+			created_at: new Date(),
+			updated_at: new Date(),
+		});
+		backupsService.createBackup.mockResolvedValueOnce({
+			task_id: 'task-1',
+			backup_id: 77,
+			status: 'pending',
+		});
+		backupsService.runBackup.mockResolvedValueOnce({
+			task_id: 'task-1',
+			status: 'accepted',
+		});
+		prisma.backup_schedules.updateMany.mockResolvedValueOnce({ count: 1 });
+
+		const result = await service.runScheduleNow(
+			6,
+			undefined,
+			'schedule-lease-good',
+		);
+
+		expect(result.status).toBe('accepted');
+		expect(prisma.backup_schedules.updateMany).toHaveBeenCalled();
+		expect(prisma.backup_schedules.update).not.toHaveBeenCalled();
+	});
+
 	it('claims due active schedules for runner execution', async () => {
 		prisma.backup_schedules.findMany.mockResolvedValueOnce([
 			{ id: 10, created_by_id: 2 },
@@ -292,7 +371,13 @@ describe('SchedulesService', () => {
 		prisma.backup_schedules.updateMany.mockResolvedValueOnce({ count: 1 });
 
 		const result = await service.claimDueSchedules(5);
-		expect(result).toEqual([{ id: 10, created_by_id: 2 }]);
+		expect(result).toEqual([
+			expect.objectContaining({
+				id: 10,
+				created_by_id: 2,
+				claim_token: expect.stringContaining('schedule-lease-'),
+			}),
+		]);
 		expect(prisma.backup_schedules.updateMany).toHaveBeenCalled();
 	});
 

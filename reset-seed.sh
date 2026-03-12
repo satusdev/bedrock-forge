@@ -7,6 +7,50 @@ ENV_FILE="${ENV_FILE:-${SCRIPT_DIR}/.env}"
 PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$(basename "$SCRIPT_DIR")}" 
 MIGRATION_STRATEGY="${MIGRATION_STRATEGY:-auto}"
 RUN_SEED="${RUN_SEED:-true}"
+WIPE_VOLUMES="${WIPE_VOLUMES:-true}"
+
+read_env_project_name() {
+  if [[ ! -f "${ENV_FILE}" ]]; then
+    return 1
+  fi
+  local value
+  value="$(grep -E '^COMPOSE_PROJECT_NAME=' "${ENV_FILE}" | tail -n1 | cut -d'=' -f2- | tr -d '"' | tr -d "'" | xargs || true)"
+  [[ -n "${value}" ]] || return 1
+  echo "${value}"
+}
+
+detect_existing_project_name() {
+  local containers=(forge-api forge-postgres forge-redis forge-dashboard forge-migrate)
+  for container in "${containers[@]}"; do
+    if docker ps -a --format '{{.Names}}' | grep -Fxq "${container}"; then
+      local project
+      project="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "${container}" 2>/dev/null || true)"
+      if [[ -n "${project}" && "${project}" != "<no value>" ]]; then
+        echo "${project}"
+        return 0
+      fi
+    fi
+  done
+  return 1
+}
+
+resolve_project_name() {
+  if [[ -n "${COMPOSE_PROJECT_NAME:-}" ]]; then
+    echo "${COMPOSE_PROJECT_NAME}"
+    return 0
+  fi
+  if detect_existing_project_name >/dev/null 2>&1; then
+    detect_existing_project_name
+    return 0
+  fi
+  if read_env_project_name >/dev/null 2>&1; then
+    read_env_project_name
+    return 0
+  fi
+  basename "${SCRIPT_DIR}"
+}
+
+PROJECT_NAME="$(resolve_project_name)"
 
 cleanup_stale_forge_containers() {
   local containers=(
@@ -87,9 +131,16 @@ echo "Using env file: ${ENV_FILE}"
 echo "Compose project: ${PROJECT_NAME}"
 echo "Migration strategy: ${MIGRATION_STRATEGY}"
 echo "Run seed: ${RUN_SEED}"
-echo "Resetting stack (containers + named volumes)"
+echo "Wipe volumes: ${WIPE_VOLUMES}"
 
-docker compose -p "${PROJECT_NAME}" --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" down -v --rmi all --remove-orphans
+if [[ "${WIPE_VOLUMES,,}" == "true" || "${WIPE_VOLUMES}" == "1" ]]; then
+  echo "Resetting stack (containers + named volumes)"
+  docker compose -p "${PROJECT_NAME}" --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" down -v --rmi all --remove-orphans
+else
+  echo "Resetting stack (containers only, preserving named volumes)"
+  docker compose -p "${PROJECT_NAME}" --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" down --remove-orphans
+fi
+
 cleanup_stale_forge_containers
 
 echo "Rebuilding and starting services"

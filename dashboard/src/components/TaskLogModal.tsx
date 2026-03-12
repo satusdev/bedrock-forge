@@ -21,6 +21,7 @@ export default function TaskLogModal({
 	isRunning = false,
 }: TaskLogModalProps) {
 	const logsEndRef = useRef<HTMLDivElement>(null);
+	const logsContainerRef = useRef<HTMLDivElement>(null);
 	const [wsConnected, setWsConnected] = useState(false);
 	const [realtimeBackup, setRealtimeBackup] = useState<{
 		status?: string;
@@ -123,8 +124,12 @@ export default function TaskLogModal({
 
 	// Auto-scroll to bottom
 	useEffect(() => {
+		if (logsContainerRef.current) {
+			logsContainerRef.current.scrollTop =
+				logsContainerRef.current.scrollHeight;
+		}
 		if (logsEndRef.current) {
-			logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+			logsEndRef.current.scrollIntoView({ block: 'end' });
 		}
 	}, [logs, isOpen]);
 
@@ -176,17 +181,20 @@ export default function TaskLogModal({
 
 				{/* Log Content */}
 				<div className='flex-1 overflow-hidden bg-gray-900 p-4 font-mono text-sm text-gray-300'>
-					<div className='h-full overflow-y-auto custom-scrollbar'>
+					<div
+						ref={logsContainerRef}
+						className='h-full overflow-x-auto overflow-y-auto custom-scrollbar'
+					>
 						{isLoading ? (
 							<div className='flex items-center justify-center h-full text-gray-500'>
 								<Loader2 className='w-6 h-6 animate-spin mr-2' />
 								Loading logs...
 							</div>
 						) : (
-							<pre className='whitespace-pre-wrap break-all'>
-								{logs}
+							<>
+								<pre className='whitespace-pre min-w-max'>{logs}</pre>
 								<div ref={logsEndRef} />
-							</pre>
+							</>
 						)}
 					</div>
 				</div>
