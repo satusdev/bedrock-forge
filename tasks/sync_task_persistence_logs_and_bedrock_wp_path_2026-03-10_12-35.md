@@ -38,7 +38,7 @@ WP-CLI path fallback for Bedrock roots (`public_html` vs `public_html/web`).
 ## Verification
 
 - ✅
-  `npm --prefix nest-api test -- src/sync/sync.service.spec.ts src/sync/sync.contract.spec.ts src/task-status/task-status.service.spec.ts src/backups/backups.service.spec.ts`
+  `npm --prefix api test -- src/sync/sync.service.spec.ts src/sync/sync.contract.spec.ts src/task-status/task-status.service.spec.ts src/backups/backups.service.spec.ts`
 - ✅ `npm --prefix dashboard run build`
 - ℹ️ `npm --prefix dashboard run lint` was not re-run in this cycle (previously
   blocked by missing ESLint config in dashboard workspace).

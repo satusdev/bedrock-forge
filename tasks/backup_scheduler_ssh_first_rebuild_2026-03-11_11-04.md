@@ -43,7 +43,7 @@ Selected implementation constraints:
 
 - Targeted backup unit tests for SSH-first and config precedence.
 - Targeted scheduler tests for lease claim collision and stale recovery.
-- Full backend test run: `npm --prefix nest-api test`.
+- Full backend test run: `npm --prefix api test`.
 - Backend lint/build checks if configured in workspace.
 
 ## Execution Log
@@ -69,8 +69,8 @@ Selected implementation constraints:
 ## Verification Results
 
 - PASS:
-  `npm --prefix nest-api test -- backups.service.spec.ts schedules.service.spec.ts schedules.runner.service.spec.ts`
-- PASS: `npm --prefix nest-api test`
+  `npm --prefix api test -- backups.service.spec.ts schedules.service.spec.ts schedules.runner.service.spec.ts`
+- PASS: `npm --prefix api test`
 - PASS: `npm --prefix dashboard run build`
 - FAIL: `npm --prefix dashboard run lint` (workspace has no ESLint config file
   in `dashboard/`, pre-existing tooling configuration issue)
@@ -90,14 +90,14 @@ Selected implementation constraints:
   `SchedulesService.runScheduleNow` so schedule state is only finalized by the
   current lease owner.
 - Added/updated tests for new race protections and claim semantics in:
-  - `nest-api/src/backups/backups.service.spec.ts`
-  - `nest-api/src/schedules/schedules.service.spec.ts`
+  - `api/src/backups/backups.service.spec.ts`
+  - `api/src/schedules/schedules.service.spec.ts`
 
 ## Verification Results (Hardening Pass)
 
 - PASS:
-  `npm --prefix nest-api test -- src/backups/backups.service.spec.ts src/schedules/schedules.service.spec.ts src/schedules/schedules.runner.service.spec.ts --runInBand`
-- PASS: `npm --prefix nest-api test`
+  `npm --prefix api test -- src/backups/backups.service.spec.ts src/schedules/schedules.service.spec.ts src/schedules/schedules.runner.service.spec.ts --runInBand`
+- PASS: `npm --prefix api test`
 - PASS: `npm --prefix dashboard run build`
 - FAIL: `npm --prefix dashboard run lint` (workspace has no ESLint config file
   in `dashboard/`, pre-existing tooling configuration issue)

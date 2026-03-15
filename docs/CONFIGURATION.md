@@ -8,15 +8,15 @@ and Redis.
 - `.env.local.example` → local baseline
 - `.env.production.example` → production baseline
 - `docker-compose.yml` → service wiring and profiles
-- `nest-api/prisma/schema.prisma` → database schema
+- `api/prisma/schema.prisma` → database schema
 
 ## Local configuration flow
 
 ```bash
 cp .env.local.example .env
 docker compose up -d
-docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:push"
-docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:seed"
+docker compose --profile seed run --rm --no-deps api sh -c "npm run prisma:push"
+docker compose --profile seed run --rm --no-deps api sh -c "npm run prisma:seed"
 ```
 
 ## Production configuration flow

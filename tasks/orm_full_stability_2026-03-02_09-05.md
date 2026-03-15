@@ -151,7 +151,7 @@ prioritizing correctness, deterministic behavior, and transactional integrity.
 - Verification:
   - `npm test -- src/projects/projects.service.spec.ts` (pass)
   - `npm run build` (pass)
-  - `grep -E "\$queryRaw|\$executeRaw" nest-api/src/projects/projects.service.ts`
-    (no matches)
+  - `grep -E "\$queryRaw|\$executeRaw" api/src/projects/projects.service.ts` (no
+    matches)
 - `ProjectsService` chunk H is complete; raw SQL migration hotspots listed in
   this plan are now fully migrated.
