@@ -10,12 +10,12 @@ This document defines high-level service boundaries for the backend.
 ## Service Layer
 
 - Each domain owns a service module:
-  - Backups → `nest-api/src/schedules` + `nest-api/src/sync`
-  - Monitoring/Status → `nest-api/src/status`
-  - Notifications/WebSocket → `nest-api/src/websocket`
-  - WordPress operations → `nest-api/src/wp`
-  - Billing/Subscriptions → `nest-api/src/subscriptions` + `nest-api/src/ssl`
-  - Identity/RBAC → `nest-api/src/users` + `nest-api/src/rbac`
+  - Backups → `api/src/schedules` + `api/src/sync`
+  - Monitoring/Status → `api/src/status`
+  - Notifications/WebSocket → `api/src/websocket`
+  - WordPress operations → `api/src/wp`
+  - Billing/Subscriptions → `api/src/subscriptions` + `api/src/ssl`
+  - Identity/RBAC → `api/src/users` + `api/src/rbac`
 
 ## Data Access
 
@@ -25,10 +25,10 @@ This document defines high-level service boundaries for the backend.
 ## Tasks
 
 - Long-running operations should use API-managed task status via
-  `nest-api/src/task-status`.
+  `api/src/task-status`.
 - Task state may be cached/transient, with Redis used where appropriate.
 
 ## Logging
 
-- Use NestJS `Logger`-based structured logs from the `nest-api` runtime.
+- Use NestJS `Logger`-based structured logs from the `api` runtime.
 - Record security-sensitive actions to audit logs.

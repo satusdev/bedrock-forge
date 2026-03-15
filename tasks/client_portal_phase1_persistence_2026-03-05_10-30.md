@@ -23,14 +23,14 @@ strict client JWT authorization validation.
 
 ## Proposed Changes (Before Execution)
 
-- `nest-api/src/client-portal/client-portal.service.ts`
+- `api/src/client-portal/client-portal.service.ts`
   - Add JWT verification and client context resolution.
   - Implement Prisma-backed list/detail/create/reply methods for portal
     resources.
-- `nest-api/src/client-portal/client-portal.service.spec.ts`
+- `api/src/client-portal/client-portal.service.spec.ts`
   - Replace no-dependency service construction with mocked Prisma +
     Config-backed tests.
-- `nest-api/src/client-portal/client-portal.module.ts`
+- `api/src/client-portal/client-portal.module.ts`
   - Import `PrismaModule` explicitly for module clarity.
 
 ## Acceptance Criteria
@@ -53,4 +53,4 @@ strict client JWT authorization validation.
 - 2026-03-05 10:43: Ran focused tests:
   - `npm run test -- src/client-portal/client-portal.service.spec.ts src/client-portal/client-portal.controller.spec.ts src/client-portal/client-portal.contract.spec.ts`
   - Result: 3 suites passed, 8 tests passed.
-- 2026-03-05 10:44: Ran `npm run build` in `nest-api` (passed).
+- 2026-03-05 10:44: Ran `npm run build` in `api` (passed).

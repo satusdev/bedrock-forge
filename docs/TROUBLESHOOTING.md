@@ -22,14 +22,14 @@ docker compose logs -f api
 ## Database/schema drift
 
 ```bash
-docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:push"
-docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:seed"
+docker compose --profile seed run --rm --no-deps api sh -c "npm run prisma:push"
+docker compose --profile seed run --rm --no-deps api sh -c "npm run prisma:seed"
 ```
 
 ## Tests failing in Nest API
 
 ```bash
-cd nest-api
+cd api
 npm test
 npm run test:cov
 ```

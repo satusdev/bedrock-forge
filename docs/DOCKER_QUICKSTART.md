@@ -86,14 +86,14 @@ docker compose up -d
 
 ```bash
 # Prisma schema sync
-docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:push"
+docker compose --profile seed run --rm --no-deps api sh -c "npm run prisma:push"
 ```
 
 ### 5. Seed Database (Optional)
 
 ```bash
 # Prisma seed
-docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:seed"
+docker compose --profile seed run --rm --no-deps api sh -c "npm run prisma:seed"
 
 # Clean reset + seed
 ./reset-seed.sh
@@ -125,7 +125,7 @@ directory, extracts a fresh copy, deletes the uploaded tar file, and preserves
 `.env` if it existed. `forge-deploy` automates the local archive creation and
 SSH upload before invoking `server-deploy` remotely.
 
-Seeding is Prisma-only via the `nest-api` tooling container.
+Seeding is Prisma-only via the `api` tooling container.
 
 ## ✅ Local Docker Test Flow
 
@@ -196,7 +196,7 @@ docker compose build --no-cache
 docker compose up -d
 
 # Optional: re-seed
-docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:seed"
+docker compose --profile seed run --rm --no-deps api sh -c "npm run prisma:seed"
 ```
 
 ### Production (backup required)
@@ -210,8 +210,8 @@ docker compose exec postgres psql -U ${POSTGRES_USER:-forge} -d postgres -c "DRO
 docker compose exec postgres psql -U ${POSTGRES_USER:-forge} -d postgres -c "CREATE DATABASE ${POSTGRES_DB:-forge};"
 
 # 3) Sync schema and re-seed
-docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:push"
-docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:seed"
+docker compose --profile seed run --rm --no-deps api sh -c "npm run prisma:push"
+docker compose --profile seed run --rm --no-deps api sh -c "npm run prisma:seed"
 ```
 
 ## 🐛 Troubleshooting

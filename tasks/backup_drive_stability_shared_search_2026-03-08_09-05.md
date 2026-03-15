@@ -53,11 +53,11 @@ across My Drive + Shared with me.
 ## Execution
 
 1. Added shared runtime resolver for Google Drive config:
-   - New `nest-api/src/drive-runtime/drive-runtime-config.service.ts`.
+   - New `api/src/drive-runtime/drive-runtime-config.service.ts`.
    - Resolves remote/config/base path with deterministic precedence.
    - Validates rclone config + remote section for both backup and gdrive flows.
 2. Wired shared module into backend domains:
-   - Added `nest-api/src/drive-runtime/drive-runtime.module.ts`.
+   - Added `api/src/drive-runtime/drive-runtime.module.ts`.
    - Imported into `backups.module.ts` and `gdrive.module.ts`.
 3. Hardened backup upload path:
    - `BackupsService` now uses shared runtime config for preflight + upload.
@@ -79,7 +79,7 @@ across My Drive + Shared with me.
 ## Verification Results
 
 - Backend targeted tests:
-  - `cd nest-api && npm test -- src/backups/backups.service.spec.ts src/gdrive/gdrive.service.spec.ts src/gdrive/gdrive.controller.spec.ts src/gdrive/gdrive.contract.spec.ts --runInBand`
+  - `cd api && npm test -- src/backups/backups.service.spec.ts src/gdrive/gdrive.service.spec.ts src/gdrive/gdrive.controller.spec.ts src/gdrive/gdrive.contract.spec.ts --runInBand`
     ✅
   - Result: 4 suites, 27 tests passed.
 - Frontend build:
@@ -103,22 +103,22 @@ across My Drive + Shared with me.
     - confirms old opaque rclone section error is now intercepted early.
 
 - Added unit tests:
-  - `nest-api/src/drive-runtime/drive-runtime-config.service.spec.ts`
+  - `api/src/drive-runtime/drive-runtime-config.service.spec.ts`
     - precedence (env > settings > default)
     - config missing, remote missing, remote present branches
-  - `nest-api/src/gdrive/gdrive.service.spec.ts`
+  - `api/src/gdrive/gdrive.service.spec.ts`
     - unavailable-remote response branch
     - base/shared dedupe branch
-  - `nest-api/src/backups/backups.service.spec.ts`
+  - `api/src/backups/backups.service.spec.ts`
     - google drive preflight failure branch (ensures upload not attempted)
 
 - Targeted backend tests (expanded):
-  - `cd nest-api && npm test -- src/drive-runtime/drive-runtime-config.service.spec.ts src/backups/backups.service.spec.ts src/gdrive/gdrive.service.spec.ts src/gdrive/gdrive.controller.spec.ts src/gdrive/gdrive.contract.spec.ts --runInBand`
+  - `cd api && npm test -- src/drive-runtime/drive-runtime-config.service.spec.ts src/backups/backups.service.spec.ts src/gdrive/gdrive.service.spec.ts src/gdrive/gdrive.controller.spec.ts src/gdrive/gdrive.contract.spec.ts --runInBand`
     ✅
   - Result: 5 suites, 35 tests passed.
 
 - Full backend suite:
-  - `cd nest-api && npm test -- --runInBand` ✅
+  - `cd api && npm test -- --runInBand` ✅
   - Result: 123 suites, 553 tests passed.
 
 - Frontend verification:

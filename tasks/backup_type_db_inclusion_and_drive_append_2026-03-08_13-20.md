@@ -27,6 +27,6 @@ existing folder.
 
 ## Verification
 
-- `npm --prefix nest-api test -- backups.service.spec.ts`
-- `npm --prefix nest-api test -- backups`
-- `npm --prefix nest-api test -- backups.service.spec.ts backups.controller.spec.ts backups.contract.spec.ts`
+- `npm --prefix api test -- backups.service.spec.ts`
+- `npm --prefix api test -- backups`
+- `npm --prefix api test -- backups.service.spec.ts backups.controller.spec.ts backups.contract.spec.ts`

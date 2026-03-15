@@ -23,7 +23,7 @@ Status: Passed
 
 ## Proposed Changes (Before Execution)
 
-- `nest-api/src/invoices/invoices.service.ts`
+- `api/src/invoices/invoices.service.ts`
   - Keep status transition only, add explicit no-dispatch metadata in send
     response.
 - `dashboard/src/components/ui/Textarea.tsx`
@@ -53,9 +53,8 @@ Status: Passed
   extracted config and use `cn` for class composition.
 - 2026-03-05 11:16: Updated `dashboard/src/pages/ClientPortal.tsx` to use shared
   `Input`/`Textarea` primitives for auth/ticket forms.
-- 2026-03-05 11:16: Updated `nest-api/src/invoices/invoices.service.ts` send
-  response to explicitly indicate no external dispatch
-  (`delivery_dispatched: false`).
+- 2026-03-05 11:16: Updated `api/src/invoices/invoices.service.ts` send response
+  to explicitly indicate no external dispatch (`delivery_dispatched: false`).
 - 2026-03-05 11:17: Ran dashboard verification:
   - `npm run type-check` (passed)
   - `npm run build` (passed)

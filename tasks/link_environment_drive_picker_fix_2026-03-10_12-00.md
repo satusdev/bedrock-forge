@@ -40,7 +40,7 @@ path/search/default behavior.
 
 ## Verification
 
-- `pnpm --dir nest-api test -- src/projects/projects.contract.spec.ts src/credentials/credentials.contract.spec.ts src/gdrive/gdrive.service.spec.ts src/gdrive/gdrive.controller.spec.ts src/gdrive/gdrive.contract.spec.ts --runInBand`
+- `pnpm --dir api test -- src/projects/projects.contract.spec.ts src/credentials/credentials.contract.spec.ts src/gdrive/gdrive.service.spec.ts src/gdrive/gdrive.controller.spec.ts src/gdrive/gdrive.contract.spec.ts --runInBand`
 - `pnpm --dir dashboard build`
 - `pnpm --dir dashboard lint`
 
@@ -88,7 +88,7 @@ path/search/default behavior.
 - Frontend lint:
   - `npm --prefix dashboard run lint` ❌ blocked (ESLint config missing in repo)
 - Backend targeted tests:
-  - `npm --prefix nest-api test -- src/projects/projects.contract.spec.ts src/credentials/credentials.contract.spec.ts src/gdrive/gdrive.service.spec.ts src/gdrive/gdrive.controller.spec.ts src/gdrive/gdrive.contract.spec.ts --runInBand`
+  - `npm --prefix api test -- src/projects/projects.contract.spec.ts src/credentials/credentials.contract.spec.ts src/gdrive/gdrive.service.spec.ts src/gdrive/gdrive.controller.spec.ts src/gdrive/gdrive.contract.spec.ts --runInBand`
     ✅
   - Result: 5 suites, 54 tests passed.
 

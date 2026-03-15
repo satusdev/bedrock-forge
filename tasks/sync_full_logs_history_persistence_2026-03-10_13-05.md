@@ -34,4 +34,4 @@ so users can review what happened after close/reopen.
 
 - ✅ `npm --prefix dashboard run build`
 - ✅
-  `npm --prefix nest-api test -- src/sync/sync.service.spec.ts src/task-status/task-status.service.spec.ts`
+  `npm --prefix api test -- src/sync/sync.service.spec.ts src/task-status/task-status.service.spec.ts`

@@ -20,10 +20,10 @@ while preserving existing API contracts.
 
 ## Proposed Changes (Before Execution)
 
-- `nest-api/src/invoices/invoices.service.ts`
+- `api/src/invoices/invoices.service.ts`
   - Add lifecycle guards for send/payment.
   - Add safe filename helper and richer metadata generation.
-- `nest-api/src/invoices/invoices.service.spec.ts`
+- `api/src/invoices/invoices.service.spec.ts`
   - Add/adjust tests for overpayment, draft-payment restriction, and send
     preconditions.
 
@@ -49,4 +49,4 @@ while preserving existing API contracts.
 - 2026-03-05 11:08: Ran focused invoice tests:
   - `npm run test -- src/invoices/invoices.service.spec.ts src/invoices/invoices.controller.spec.ts src/invoices/invoices.runner.service.spec.ts`
   - Result: 3 suites passed, 18 tests passed.
-- 2026-03-05 11:09: Ran `npm run build` in `nest-api` (passed).
+- 2026-03-05 11:09: Ran `npm run build` in `api` (passed).

@@ -73,12 +73,12 @@ Fix the backup execution pipeline where newly created STAGING backups remain
      backups exist.
    - Both backup views now treat `pending` as active for log polling.
 3. Fixed docs drift:
-   - Updated troubleshooting command from `docker compose logs -f nest-api` to
+   - Updated troubleshooting command from `docker compose logs -f api` to
      `docker compose logs -f api`.
 
 ## Verification Results
 
-- Backend: `cd nest-api && npm test -- --runInBand` ✅ PASSED
+- Backend: `cd api && npm test -- --runInBand` ✅ PASSED
 - Frontend build: `cd dashboard && npm run build` ✅ PASSED
 - Frontend lint: `cd dashboard && npm run lint` ❌ BLOCKED (repository currently
   has no ESLint config discoverable by ESLint in this path)
@@ -94,7 +94,7 @@ Fix the backup execution pipeline where newly created STAGING backups remain
 ## Follow-up Implementation (2026-03-07 11:41)
 
 - Implemented real Google Drive backup upload flow in
-  `nest-api/src/backups/backups.service.ts`:
+  `api/src/backups/backups.service.ts`:
   - Replaced local mirror-copy path with `rclone copyto` upload to configured
     remote.
   - Added `FORGE_BACKUP_GDRIVE_REMOTE` support (defaults to `gdrive`).
@@ -107,7 +107,7 @@ Fix the backup execution pipeline where newly created STAGING backups remain
     `error_message`.
 - Updated runtime image dependencies in `Dockerfile.nest` to include `rclone` in
   base and production stages.
-- Added/updated tests in `nest-api/src/backups/backups.service.spec.ts`:
+- Added/updated tests in `api/src/backups/backups.service.spec.ts`:
   - Relaxed setup-failure assertion for incremental log writes.
   - Added coverage for successful google-drive upload execution path.
 - Updated `docs/ENVIRONMENT_VARIABLES.md` with `FORGE_BACKUP_GDRIVE_REMOTE` and
@@ -115,7 +115,7 @@ Fix the backup execution pipeline where newly created STAGING backups remain
 
 ## Follow-up Verification Results
 
-- Backend: `cd nest-api && npm test -- --runInBand` ✅ PASSED (122/122 suites)
+- Backend: `cd api && npm test -- --runInBand` ✅ PASSED (122/122 suites)
 - Frontend build: `cd dashboard && npm run build` ✅ PASSED
 - Frontend lint: `cd dashboard && npm run lint` ❌ BLOCKED (ESLint config file
   missing in repository)
@@ -127,12 +127,12 @@ Status: IN_REVIEW
 - Root cause of repeated `Unexpected token 'n', "null" is not valid JSON` on
   backup trigger endpoint was strict JSON body parsing rejecting literal `null`
   payloads.
-- Implemented parser hardening in `nest-api/src/main.ts`:
+- Implemented parser hardening in `api/src/main.ts`:
   - Disabled Nest default body parser (`bodyParser: false`).
   - Registered explicit Express parsers with `json({ strict: false })` and
     `urlencoded(...)`.
 - Added regression contract coverage in
-  `nest-api/src/projects/projects.contract.spec.ts`:
+  `api/src/projects/projects.contract.spec.ts`:
   - New test posts literal JSON `null` to
     `POST /projects/:id/environments/:envId/backups` and asserts `202`.
   - Updated test app bootstrap to mirror production parser config.

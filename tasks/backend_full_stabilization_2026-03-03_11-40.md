@@ -7,7 +7,7 @@ behavior.
 
 ## Scope
 
-- Backend modules under `nest-api/src/**` that were changed in this branch.
+- Backend modules under `api/src/**` that were changed in this branch.
 - Preserve current mixed strictness behavior where already established.
 - Add/expand unit tests for high-risk runtime branches.
 - Run targeted tests and full backend suite.

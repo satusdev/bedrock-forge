@@ -14,8 +14,8 @@ docker compose up -d
 ## 2) Initialize database
 
 ```bash
-docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:push"
-docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:seed"
+docker compose --profile seed run --rm --no-deps api sh -c "npm run prisma:push"
+docker compose --profile seed run --rm --no-deps api sh -c "npm run prisma:seed"
 ```
 
 ## 3) Verify health
@@ -30,7 +30,7 @@ curl http://localhost:8000/api/v1/health
 ## Optional local backend development (without Docker runtime)
 
 ```bash
-cd nest-api
+cd api
 npm install
 npm run start:dev
 ```

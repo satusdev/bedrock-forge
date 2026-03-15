@@ -11,10 +11,15 @@
 		"update": "./scripts/compose-safe.sh update",
 		"migrate": "./scripts/compose-safe.sh migrate",
 		"seed": "./scripts/compose-safe.sh seed",
+		"seed:demo": "./scripts/compose-safe.sh seed-demo",
+		"logs": "./scripts/compose-safe.sh logs",
+		"logs:api": "./scripts/compose-safe.sh logs api",
+		"logs:web": "./scripts/compose-safe.sh logs web",
+		"restart": "./scripts/compose-safe.sh restart",
+		"ps": "./scripts/compose-safe.sh ps",
 		"reset": "WIPE_VOLUMES=true ./reset-seed.sh",
 		"reset:noseed": "WIPE_VOLUMES=false RUN_SEED=false ./reset-seed.sh",
 		"reset:migrate": "WIPE_VOLUMES=false MIGRATION_STRATEGY=auto RUN_SEED=false ./reset-seed.sh",
-		"seed:demo": "./scripts/compose-safe.sh seed-demo",
 		"smoke": "SEED_STRATEGY=prisma ./scripts/local-docker-smoke.sh"
 	}
 }

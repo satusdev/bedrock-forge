@@ -36,14 +36,14 @@ fallback for remote backup commands.
 
 ## Verification
 
-- `npm --prefix nest-api test -- src/task-status/task-status.service.spec.ts src/task-status/task-status.contract.spec.ts src/sync/sync.service.spec.ts src/sync/sync.contract.spec.ts src/backups/backups.service.spec.ts`
+- `npm --prefix api test -- src/task-status/task-status.service.spec.ts src/task-status/task-status.contract.spec.ts src/sync/sync.service.spec.ts src/sync/sync.contract.spec.ts src/backups/backups.service.spec.ts`
 - `npm --prefix dashboard run build`
 
 ## Completed Work
 
 - Added durable sync task persistence model and SQL migration:
-  - `nest-api/prisma/schema.prisma`
-  - `nest-api/prisma/migrations/0002_sync_task_statuses.sql`
+  - `api/prisma/schema.prisma`
+  - `api/prisma/migrations/0002_sync_task_statuses.sql`
 - Refactored `TaskStatusService` to async + DB-backed sync status
   load/upsert/prune.
 - Added sync command-trace logging (`CMD[...]` and `RESULT[...]`) during task
@@ -56,6 +56,6 @@ fallback for remote backup commands.
 ## Verification Results
 
 - ✅
-  `cd nest-api && npm test -- --runInBand src/task-status/task-status.service.spec.ts src/sync/sync.service.spec.ts src/sync/sync.controller.spec.ts src/sync/sync.contract.spec.ts`
-- ✅ `cd nest-api && npm run build`
+  `cd api && npm test -- --runInBand src/task-status/task-status.service.spec.ts src/sync/sync.service.spec.ts src/sync/sync.controller.spec.ts src/sync/sync.contract.spec.ts`
+- ✅ `cd api && npm run build`
 - ✅ `cd dashboard && npm run build`

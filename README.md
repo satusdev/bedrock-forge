@@ -91,8 +91,8 @@ cp .env.local.example .env
 docker compose up -d
 
 # Apply schema + seed
-docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:push"
-docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:seed"
+docker compose --profile seed run --rm --no-deps api sh -c "npm run prisma:push"
+docker compose --profile seed run --rm --no-deps api sh -c "npm run prisma:seed"
 ```
 
 #### 🧭 Legacy Python CLI (Archived)
@@ -104,7 +104,7 @@ Legacy `forge` Python CLI has been archived. Migration notes are documented in:
 For Nest API local development without Docker:
 
 ```bash
-cd nest-api
+cd api
 npm install
 npm run start:dev
 ```
@@ -113,7 +113,7 @@ npm run start:dev
 
 ```bash
 # API
-cd nest-api
+cd api
 npm install
 npm run start:dev
 
@@ -140,8 +140,8 @@ cp .env.local.example .env
 docker compose up -d
 
 # Run Prisma schema sync + seed
-docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:push"
-docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:seed"
+docker compose --profile seed run --rm --no-deps api sh -c "npm run prisma:push"
+docker compose --profile seed run --rm --no-deps api sh -c "npm run prisma:seed"
 
 # Access the application
 # Dashboard: http://localhost:3000
@@ -157,8 +157,8 @@ cp .env.production.example .env
 docker compose build && docker compose up -d
 
 # Run Prisma schema sync + seed
-docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:push"
-docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:seed"
+docker compose --profile seed run --rm --no-deps api sh -c "npm run prisma:push"
+docker compose --profile seed run --rm --no-deps api sh -c "npm run prisma:seed"
 ```
 
 ```bash
@@ -200,7 +200,7 @@ docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:
 Primary test workflow (Nest API):
 
 ```bash
-cd nest-api
+cd api
 npm test
 npm run test:cov
 ```
@@ -208,7 +208,7 @@ npm run test:cov
 Targeted module tests:
 
 ```bash
-cd nest-api
+cd api
 npm test -- projects.service.spec.ts import-projects.service.spec.ts backups.service.spec.ts
 ```
 
@@ -289,14 +289,14 @@ Legacy Python CLI/testing notes are archived in
 
 ```bash
 docker compose up -d
-docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:push"
-docker compose --profile seed run --rm --no-deps nest-api sh -c "npm run prisma:seed"
+docker compose --profile seed run --rm --no-deps api sh -c "npm run prisma:push"
+docker compose --profile seed run --rm --no-deps api sh -c "npm run prisma:seed"
 ```
 
 ### Testing
 
 ```bash
-cd nest-api
+cd api
 npm test
 npm run test:cov
 ```
@@ -337,7 +337,7 @@ npm run test:cov
 
 ```
 bedrock-forge/
-├── nest-api/                # NestJS API runtime
+├── api/                # NestJS API runtime
 ├── dashboard/               # React/Vite frontend
 ├── docs/                    # Nest-first documentation
 ├── docker-compose.yml       # Local + production orchestration
