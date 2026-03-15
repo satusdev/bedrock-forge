@@ -14,7 +14,7 @@ docker compose up -d
 ## Backend development
 
 ```bash
-cd nest-api
+cd api
 npm install
 npm run start:dev
 ```
@@ -30,7 +30,7 @@ npm run dev
 ## Quality checks
 
 ```bash
-cd nest-api
+cd api
 npm test
 npm run test:cov
 ```

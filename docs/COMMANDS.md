@@ -44,7 +44,7 @@ npm run reset
 
 ```bash
 # Run Nest tests
-cd nest-api
+cd api
 npm test
 
 # Coverage

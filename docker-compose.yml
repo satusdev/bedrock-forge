@@ -41,7 +41,7 @@ services:
       target: production
     container_name: forge-api
     ports:
-      - '8000:8000'
+      - '${API_PORT:-8000}:8000'
     env_file:
       - ./.env
     environment:
@@ -51,7 +51,7 @@ services:
       NODE_ENV: production
       PORT: 8000
       API_PREFIX: ${API_PREFIX:-api/v1}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://localhost:3000,http://localhost:${WEB_PORT:-3000}}
     depends_on:
       postgres:
         condition: service_healthy
@@ -88,8 +88,8 @@ services:
         condition: service_healthy
     restart: 'no'
 
-  # React Dashboard
-  dashboard:
+  # React Frontend
+  web:
     build:
       context: .
       dockerfile: Dockerfile.dashboard
@@ -97,18 +97,21 @@ services:
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
         VITE_WS_URL: ${VITE_WS_URL:-}
-    container_name: forge-dashboard
+    container_name: forge-web
     ports:
-      - '3000:3000'
+      - '${WEB_PORT:-3000}:3000'
+    depends_on:
+      api:
+        condition: service_healthy
     restart: unless-stopped
 
   # Prisma tooling container (runs on-demand for migrate/seed bridge)
-  nest-api:
+  prisma-tools:
     build:
       context: .
       dockerfile: Dockerfile.nest
       target: development
-    container_name: forge-nest-api
+    container_name: forge-prisma-tools
     profiles: ['seed']
     env_file:
       - ./.env
@@ -119,7 +122,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    restart: unless-stopped
+    restart: 'no'
 
 volumes:
   postgres_data:

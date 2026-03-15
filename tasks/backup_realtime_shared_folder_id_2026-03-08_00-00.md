@@ -54,10 +54,10 @@
 
 ## Verification Results
 
-- `nest-api`:
+- `api`:
   `npm test -- backups.service.spec.ts gdrive.service.spec.ts gdrive.controller.spec.ts gdrive.contract.spec.ts`
   ✅ (27/27)
-- `nest-api`: `npm test -- backups.runner.service.spec.ts` ✅ (5/5)
+- `api`: `npm test -- backups.runner.service.spec.ts` ✅ (5/5)
 - `dashboard`: `npm run build` ✅
 - `dashboard`: `npm run lint` ❌ blocked
   (`ESLint couldn't find a configuration file`)

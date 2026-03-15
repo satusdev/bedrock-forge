@@ -1,11 +1,11 @@
 # Testing Guide
 
-Primary backend testing is Jest in `nest-api`.
+Primary backend testing is Jest in `api`.
 
 ## Run tests
 
 ```bash
-cd nest-api
+cd api
 npm test
 npm run test:cov
 ```
@@ -13,7 +13,7 @@ npm run test:cov
 ## Targeted suites
 
 ```bash
-cd nest-api
+cd api
 npm test -- projects.service.spec.ts import-projects.service.spec.ts backups.service.spec.ts
 npm test -- packages.controller.spec.ts servers.controller.spec.ts
 ```

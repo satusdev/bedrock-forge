@@ -24,8 +24,8 @@ Environment.
 
 ## Verification
 
-- `npm --prefix nest-api test -- servers.service.spec.ts`
-- `npm --prefix nest-api test -- servers`
+- `npm --prefix api test -- servers.service.spec.ts`
+- `npm --prefix api test -- servers`
 
 ## Result
 
@@ -36,5 +36,5 @@ Environment.
 - `readEnv` no longer probes invalid `/web/web/.env` when target path already
   ends with `/web`.
 - Backend test suites passed:
-  - `npm --prefix nest-api test -- servers.service.spec.ts` (18/18)
-  - `npm --prefix nest-api test -- servers` (30/30)
+  - `npm --prefix api test -- servers.service.spec.ts` (18/18)
+  - `npm --prefix api test -- servers` (30/30)

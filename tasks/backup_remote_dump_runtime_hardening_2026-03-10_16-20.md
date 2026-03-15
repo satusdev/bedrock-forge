@@ -34,8 +34,8 @@ implicit localhost fallback attempts in SSH mode.
 
 ## Verification
 
-- `npm --prefix nest-api test -- src/backups/backups.service.spec.ts --runInBand`
-- `npm --prefix nest-api run build`
+- `npm --prefix api test -- src/backups/backups.service.spec.ts --runInBand`
+- `npm --prefix api run build`
 
 ## Result
 
@@ -49,7 +49,6 @@ implicit localhost fallback attempts in SSH mode.
 
 ## Verification Results
 
-- ✅
-  `npm --prefix nest-api test -- src/backups/backups.service.spec.ts --runInBand`
-- ✅ `npm --prefix nest-api test -- src/backups --runInBand`
-- ✅ `npm --prefix nest-api run build`
+- ✅ `npm --prefix api test -- src/backups/backups.service.spec.ts --runInBand`
+- ✅ `npm --prefix api test -- src/backups --runInBand`
+- ✅ `npm --prefix api run build`

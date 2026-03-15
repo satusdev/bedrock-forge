@@ -9,7 +9,7 @@ workflows.
 
 ## Architecture
 
-- `nest-api/`: Backend API (NestJS + Prisma + PostgreSQL + Redis URL support)
+- `api/`: Backend API (NestJS + Prisma + PostgreSQL + Redis URL support)
   - Modular feature domains under `src/`.
   - HTTP controllers map to `/api/v1/*` routes.
   - Background processing uses `@nestjs/schedule` interval runners (for
@@ -33,11 +33,41 @@ workflows.
   resources.
 - Linking a `staging`/`production` environment auto-provisions an uptime monitor
   keyed by project + URL, skipping duplicates.
+- Project and environment onboarding URLs are normalized before persistence so
+  monitor dedupe and domain tracking are deterministic.
 - Backups lifecycle: `pending -> running -> completed|failed`.
-- Database backup runtime is SSH-first: remote config source priority is `.env`
-  (Bedrock) -> `wp-config.php` -> saved environment credentials.
+- File sync tasks (`sync.pull_files`, `sync.push_files`) execute real `rsync`
+  commands over SSH and append command/result traces into task-status logs.
+- Backup runner observability exposes both pending-loop and maintenance-loop
+  snapshots (counts, failures, duration, and last error) via
+  `/api/v1/backups/maintenance/status`.
+- Backup execution is being isolated behind backup-specific repository/runtime
+  boundaries instead of keeping queueing, context loading, dump execution, file
+  staging, and persistence in one raw-SQL-heavy service path.
+- Database backup runtime is persisted-config-first: saved
+  `projects`/`project_servers`/`servers` data is the primary execution source,
+  while remote `.env` / `wp-config.php` discovery is fallback-only for missing
+  credentials.
+- File backups no longer treat metadata-only snapshots as a valid success path
+  for missing local files; remote environments must stage real files over SSH.
 - Project plugin policy reads are deterministic: when no project override row
   exists, API returns a default inherit-from-global payload instead of a 404.
+- WordPress site scans execute SSH + wp-cli at runtime and persist snapshots in
+  `wp_site_states` (versions, plugin/theme counts, update counts, and scan
+  errors).
+- Domains and invoices API operations are owner-aware when auth context is
+  present, reducing cross-tenant access risk while preserving admin/system
+  compatibility.
+- SSL and subscriptions API operations follow the same owner-aware behavior:
+  authenticated calls are owner-scoped, while missing auth context keeps
+  compatibility for admin/system automation flows.
+- Domain create flow validates linked `project_id` existence/ownership before
+  persistence when `project_id` is provided.
+- SSL certificate create flow validates linked `domain_id` access and blocks
+  domain/project mismatches.
+- Invoice create flow validates item-level `project_id` and `subscription_id`
+  links (existence, client ownership, and subscription-project consistency)
+  before writes.
 - Legacy local/wp-cli dump fallback is feature-flagged for compatibility via
   `FORGE_BACKUP_DB_LEGACY_FALLBACK`.
 - Schedules lifecycle uses runner lease claims (stored in
@@ -47,9 +77,9 @@ workflows.
 
 ## Folder Structure
 
-- `nest-api/src/<feature>/`: Controllers/services/repositories-style module
+- `api/src/<feature>/`: Controllers/services/repositories-style module
   boundaries.
-- `nest-api/src/drive-runtime/`: Shared runtime config resolver for rclone
+- `api/src/drive-runtime/`: Shared runtime config resolver for rclone
   remote/config/base-path precedence.
 - `dashboard/src/`: Pages, components, hooks, utilities.
 - `scripts/`: Local setup, diagnostics, deploy helpers.

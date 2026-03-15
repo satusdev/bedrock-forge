@@ -20,7 +20,7 @@ read_env_project_name() {
 }
 
 detect_existing_project_name() {
-	local containers=(forge-api forge-postgres forge-redis forge-dashboard forge-migrate)
+	local containers=(forge-api forge-postgres forge-redis forge-web forge-migrate)
 	for container in "${containers[@]}"; do
 		if docker ps -a --format '{{.Names}}' | grep -Fxq "${container}"; then
 			local project
@@ -58,7 +58,7 @@ compose() {
 }
 
 remove_named_containers() {
-	local containers=(forge-postgres forge-redis forge-api forge-dashboard forge-migrate forge-nest-api)
+	local containers=(forge-postgres forge-redis forge-api forge-web forge-migrate forge-prisma-tools forge-dashboard)
 	for container in "${containers[@]}"; do
 		if docker ps -a --format '{{.Names}}' | grep -Fxq "${container}"; then
 			echo "Removing container: ${container}"
@@ -69,7 +69,7 @@ remove_named_containers() {
 
 cmd="${1:-}"
 if [[ -z "${cmd}" ]]; then
-	echo "Usage: $0 <project|up|down|down-hard|update|migrate|seed|seed-demo>"
+	echo "Usage: $0 <project|up|down|down-hard|update|migrate|seed|seed-demo|logs|restart|ps>"
 	exit 1
 fi
 
@@ -79,7 +79,7 @@ case "${cmd}" in
 		;;
 	up)
 		echo "Compose project: ${PROJECT_NAME}"
-		compose up -d --build --wait
+		compose up -d --build --remove-orphans --wait
 		;;
 	down)
 		echo "Compose project: ${PROJECT_NAME}"
@@ -93,22 +93,35 @@ case "${cmd}" in
 		;;
 	migrate)
 		echo "Compose project: ${PROJECT_NAME}"
-		compose --profile seed run --rm --no-deps --build nest-api sh -c "npm run prisma:push"
+		compose --profile seed run --rm --no-deps --build prisma-tools sh -c "npm run prisma:push"
 		;;
 	seed)
 		echo "Compose project: ${PROJECT_NAME}"
-		compose --profile seed run --rm --no-deps --build nest-api sh -c "npm run prisma:seed"
+		compose --profile seed run --rm --no-deps --build prisma-tools sh -c "npm run prisma:seed"
 		;;
 	seed-demo)
 		echo "Compose project: ${PROJECT_NAME}"
-		compose --profile seed run --rm --no-deps --build -e SEED_DEMO_MODE=true nest-api sh -c "npm run prisma:seed"
+		compose --profile seed run --rm --no-deps --build -e SEED_DEMO_MODE=true prisma-tools sh -c "npm run prisma:seed"
 		;;
 	update)
 		echo "Compose project: ${PROJECT_NAME}"
 		echo "Applying schema updates"
-		compose --profile seed run --rm --no-deps --build nest-api sh -c "npm run prisma:push"
-		echo "Updating API + dashboard containers"
-		compose up -d --build api dashboard --wait
+		compose --profile seed run --rm --no-deps --build prisma-tools sh -c "npm run prisma:push"
+		echo "Updating API + web containers"
+		compose up -d --build --remove-orphans api web --wait
+		;;
+	logs)
+		# Usage: npm run logs [service]  e.g. npm run logs api
+		shift || true
+		compose logs -f --tail=100 "${@:-}"
+		;;
+	restart)
+		# Usage: npm run restart [service]
+		shift || true
+		compose restart "${@:-}"
+		;;
+	ps|status)
+		compose ps
 		;;
 	*)
 		echo "Unknown command: ${cmd}"
