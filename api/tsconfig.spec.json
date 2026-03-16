@@ -1,9 +1,0 @@
-{
-	"extends": "./tsconfig.json",
-	"compilerOptions": {
-		"types": ["jest", "node"],
-		"esModuleInterop": true,
-		"noEmit": true
-	},
-	"include": ["src/**/*.ts", "**/*.spec.ts"]
-}

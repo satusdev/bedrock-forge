@@ -1,100 +1,294 @@
-# PROJECT
+# Bedrock Forge 2.0
 
-## Overview
+## Architecture Overview
 
-Bedrock Forge is a Docker-first monorepo for WordPress infrastructure
-operations. It includes a NestJS API, a React/Vite dashboard, and supporting
-scripts/docs for deployment, backups, schedules, subscriptions, and operational
-workflows.
+Self-hosted WordPress management dashboard. Replaces ManageWP/MainWP. Deploy in
+one command.
 
-## Architecture
+**Core decisions:**
 
-- `api/`: Backend API (NestJS + Prisma + PostgreSQL + Redis URL support)
-  - Modular feature domains under `src/`.
-  - HTTP controllers map to `/api/v1/*` routes.
-  - Background processing uses `@nestjs/schedule` interval runners (for
-    schedules/backups).
-  - Google Drive runtime config is centralized in
-    `src/drive-runtime/drive-runtime-config.service.ts` and reused by backup and
-    gdrive modules.
-- `dashboard/`: Frontend (React + Vite + Tailwind + shadcn-style components)
-  - Server state fetched from API endpoints.
-  - Task and backup visibility through dashboard pages and shared modal
-    components.
-- `docs/`: Operational and development runbooks.
-- `tasks/`: Engineering execution logs and implementation plans.
-- Root Docker artifacts (`docker-compose.yml`, `Dockerfile.*`) define
-  local/prod-like runtime.
+- REST API (not GraphQL — overrides orchestrator default for this project)
+- TanStack Query v5 (not Apollo — consistent with REST)
+- Prisma 7 + strict Repository pattern (Prisma access only inside
+  `*.repository.ts` files)
+- BullMQ for every background operation (no `setInterval`, no inline remote
+  calls from controllers)
+- Global SSH connection pool via `ssh2` (max 15 concurrent per server). No
+  agent, no Go binary.
+- Zero `wp-cli`. Two tiny PHP scripts pushed on demand: `backup.php` +
+  `plugin-scan.php`
+- Zero `.env` sourcing. Credential extraction is regex-only via
+  `CredentialParserService`.
+- AES-256-GCM encryption for all credentials at rest
+- 3 Docker Compose services: `postgres`, `redis`, `forge` (API + Worker + static
+  web in one container)
 
-## Domain Model (high-level)
+---
 
-- Users/clients authenticate and manage projects.
-- Projects contain environments (`project_servers`) and backup/schedule
-  resources.
-- Linking a `staging`/`production` environment auto-provisions an uptime monitor
-  keyed by project + URL, skipping duplicates.
-- Project and environment onboarding URLs are normalized before persistence so
-  monitor dedupe and domain tracking are deterministic.
-- Backups lifecycle: `pending -> running -> completed|failed`.
-- File sync tasks (`sync.pull_files`, `sync.push_files`) execute real `rsync`
-  commands over SSH and append command/result traces into task-status logs.
-- Backup runner observability exposes both pending-loop and maintenance-loop
-  snapshots (counts, failures, duration, and last error) via
-  `/api/v1/backups/maintenance/status`.
-- Backup execution is being isolated behind backup-specific repository/runtime
-  boundaries instead of keeping queueing, context loading, dump execution, file
-  staging, and persistence in one raw-SQL-heavy service path.
-- Database backup runtime is persisted-config-first: saved
-  `projects`/`project_servers`/`servers` data is the primary execution source,
-  while remote `.env` / `wp-config.php` discovery is fallback-only for missing
-  credentials.
-- File backups no longer treat metadata-only snapshots as a valid success path
-  for missing local files; remote environments must stage real files over SSH.
-- Project plugin policy reads are deterministic: when no project override row
-  exists, API returns a default inherit-from-global payload instead of a 404.
-- WordPress site scans execute SSH + wp-cli at runtime and persist snapshots in
-  `wp_site_states` (versions, plugin/theme counts, update counts, and scan
-  errors).
-- Domains and invoices API operations are owner-aware when auth context is
-  present, reducing cross-tenant access risk while preserving admin/system
-  compatibility.
-- SSL and subscriptions API operations follow the same owner-aware behavior:
-  authenticated calls are owner-scoped, while missing auth context keeps
-  compatibility for admin/system automation flows.
-- Domain create flow validates linked `project_id` existence/ownership before
-  persistence when `project_id` is provided.
-- SSL certificate create flow validates linked `domain_id` access and blocks
-  domain/project mismatches.
-- Invoice create flow validates item-level `project_id` and `subscription_id`
-  links (existence, client ownership, and subscription-project consistency)
-  before writes.
-- Legacy local/wp-cli dump fallback is feature-flagged for compatibility via
-  `FORGE_BACKUP_DB_LEGACY_FALLBACK`.
-- Schedules lifecycle uses runner lease claims (stored in
-  `backup_schedules.celery_task_id`) before execution.
-- Operational entities include domains, SSL, invoices, subscriptions, and status
-  analytics.
+## Tech Stack
 
-## Folder Structure
+| Layer              | Technology                                       |
+| ------------------ | ------------------------------------------------ |
+| Runtime            | Node.js 22                                       |
+| Backend framework  | NestJS 11                                        |
+| ORM                | Prisma 7                                         |
+| Database           | PostgreSQL 16                                    |
+| Queue              | BullMQ + Redis 7                                 |
+| Remote execution   | ssh2 (connection pool)                           |
+| Frontend framework | React 19 + Vite 5                                |
+| UI components      | shadcn/ui + Tailwind CSS 4                       |
+| Server state       | TanStack Query v5                                |
+| Client state       | Zustand (UI/session only — never server data)    |
+| Forms              | React Hook Form + Zod                            |
+| Real-time          | NestJS WebSocket Gateway + Redis pub/sub adapter |
+| Workspace          | pnpm workspaces + Turborepo                      |
+| Containerization   | Docker Compose                                   |
 
-- `api/src/<feature>/`: Controllers/services/repositories-style module
-  boundaries.
-- `api/src/drive-runtime/`: Shared runtime config resolver for rclone
-  remote/config/base-path precedence.
-- `dashboard/src/`: Pages, components, hooks, utilities.
-- `scripts/`: Local setup, diagnostics, deploy helpers.
-- `logs/`: Deployment log artifacts.
+---
 
-## Conventions
+## Monorepo Structure
 
-- Prefer strict typing and explicit DTO validation in backend routes.
-- Keep business logic in services; keep controllers thin.
-- Background jobs should be idempotent and observable via status/log fields.
-- Use minimal, targeted changes; avoid unrelated refactors.
-- Validate changes with backend tests and frontend build/lint.
+```
+bedrock-forge/
+├── apps/
+│   ├── api/                    # NestJS 11 REST API + WebSocket gateway
+│   │   ├── src/
+│   │   │   ├── modules/
+│   │   │   │   ├── auth/
+│   │   │   │   ├── clients/
+│   │   │   │   ├── tags/
+│   │   │   │   ├── packages/
+│   │   │   │   ├── servers/
+│   │   │   │   ├── projects/
+│   │   │   │   ├── environments/
+│   │   │   │   ├── cyberpanel/
+│   │   │   │   ├── backups/
+│   │   │   │   ├── plugin-scans/
+│   │   │   │   ├── sync/
+│   │   │   │   ├── domains/
+│   │   │   │   ├── monitors/
+│   │   │   │   ├── settings/
+│   │   │   │   └── health/
+│   │   │   ├── gateways/       # WebSocket gateways
+│   │   │   ├── common/         # Guards, filters, interceptors, decorators
+│   │   │   ├── prisma/         # PrismaService
+│   │   │   └── main.ts
+│   │   └── package.json
+│   ├── web/                    # React 19 + Vite 5 dashboard
+│   │   ├── src/
+│   │   │   ├── features/       # Feature-scoped code
+│   │   │   │   ├── auth/
+│   │   │   │   ├── dashboard/
+│   │   │   │   ├── clients/
+│   │   │   │   ├── servers/
+│   │   │   │   ├── projects/
+│   │   │   │   ├── backups/
+│   │   │   │   ├── monitors/
+│   │   │   │   ├── domains/
+│   │   │   │   └── settings/
+│   │   │   ├── components/
+│   │   │   │   ├── ui/         # shadcn primitives (owned, not a package)
+│   │   │   │   └── layout/     # AppLayout, Sidebar, Header
+│   │   │   ├── hooks/          # Shared custom hooks
+│   │   │   ├── lib/            # api-client, websocket, utils, cn
+│   │   │   ├── store/          # Zustand stores (UI state only)
+│   │   │   └── styles/
+│   │   └── package.json
+│   └── worker/                 # NestJS standalone — BullMQ consumers only
+│       ├── src/
+│       │   ├── processors/
+│       │   │   ├── backup.processor.ts
+│       │   │   ├── plugin-scan.processor.ts
+│       │   │   ├── sync.processor.ts
+│       │   │   ├── monitor.processor.ts
+│       │   │   ├── domain-whois.processor.ts
+│       │   │   └── create-bedrock.processor.ts
+│       │   └── main.ts
+│       ├── scripts/
+│       │   ├── backup.php
+│       │   └── plugin-scan.php
+│       └── package.json
+├── packages/
+│   ├── shared/                 # @bedrock-forge/shared — types, queue defs, Zod schemas
+│   │   └── src/
+│   │       ├── queues.ts
+│   │       ├── roles.ts
+│   │       ├── types.ts
+│   │       └── index.ts
+│   └── remote-executor/        # @bedrock-forge/remote-executor — SSH pool + credential parser
+│       └── src/
+│           ├── ssh-pool.manager.ts
+│           ├── remote-executor.service.ts
+│           ├── credential-parser.service.ts
+│           └── index.ts
+├── prisma/
+│   ├── schema.prisma
+│   └── migrations/
+├── tasks/                      # Orchestrator task files
+├── PROJECT.md
+├── package.json
+├── pnpm-workspace.yaml
+├── turbo.json
+├── tsconfig.base.json
+├── .env.example
+├── .gitignore
+├── docker-compose.yml
+├── docker-compose.dev.yml
+├── Dockerfile
+└── entrypoint.sh
+```
 
-## Runtime Assumptions
+---
 
-- Primary local runtime via Docker Compose service `api` on port `8000`.
-- PostgreSQL and Redis containers are expected healthy before API startup.
-- Environment configuration is loaded from root `.env` via compose `env_file`.
+## Module Structure Convention
+
+Every backend module follows this exact structure:
+
+```
+src/modules/<feature>/
+├── <feature>.module.ts      # @Module() — imports, controllers, providers, exports
+├── <feature>.controller.ts  # HTTP handlers only. Validates input, calls service, returns DTO.
+├── <feature>.service.ts     # Business logic. Calls repository. Never touches Prisma directly.
+├── <feature>.repository.ts  # Prisma access ONLY. No business rules here.
+├── dto/
+│   ├── create-<feature>.dto.ts
+│   ├── update-<feature>.dto.ts
+│   └── query-<feature>.dto.ts
+├── models/
+│   └── <feature>.model.ts   # TypeScript interfaces for domain objects
+└── tests/
+    ├── <feature>.service.spec.ts
+    └── <feature>.repository.spec.ts
+```
+
+**Hard rules:**
+
+- Controllers never call repositories directly
+- Services never import or use `PrismaClient` or `PrismaService`
+- Repositories never contain conditional business logic
+- DTOs use `class-validator` decorators for validation
+- All controller methods are async, return typed responses
+
+---
+
+## Domain Model (23 Tables)
+
+### Identity & Access
+
+- `users` — platform users (admin, manager, client)
+- `roles` — exactly 3 roles: admin, manager, client
+- `user_roles` — many-to-many join
+- `refresh_tokens` — hashed JWT refresh tokens for rotation
+
+### Client Management
+
+- `clients` — managed clients / companies
+- `tags` — color-coded labels
+- `client_tags` — many-to-many: clients ↔ tags
+
+### Packages
+
+- `hosting_packages` — hosting tier definitions (price, storage, bandwidth,
+  max_sites)
+- `support_packages` — support tier definitions (price, response_hours)
+
+### Infrastructure
+
+- `servers` — managed servers (SSH credentials encrypted)
+- `projects` — WordPress projects (linked to client + packages)
+- `environments` — deployments of a project on a server (production/staging)
+- `cyberpanel_users` — saved auto-login credentials per environment
+
+### Operations
+
+- `backups` — backup records (status, file_path, size)
+- `plugin_scans` — plugin inventory snapshots (JSONB)
+- `domains` — domain names with WHOIS cache (JSONB)
+- `monitors` — uptime monitor config per environment
+- `monitor_results` — individual uptime check results (rolling history)
+- `wp_db_credentials` — encrypted DB\_\* credentials per environment
+
+### System
+
+- `execution_scripts` — versioned PHP scripts pushed to servers
+- `job_executions` — BullMQ job audit trail (status, progress, errors)
+- `app_settings` — key-value config store
+- `audit_logs` — user action audit trail (actor, action, resource)
+
+---
+
+## BullMQ Queue Registry
+
+| Queue          | Job Types           | Concurrency | Retries | Timeout |
+| -------------- | ------------------- | ----------- | ------- | ------- |
+| `backups`      | `create`, `restore` | 3/server    | 3       | 30min   |
+| `plugin-scans` | `run`               | 5           | 3       | 5min    |
+| `sync`         | `clone`, `push`     | 2/server    | 3       | 15min   |
+| `monitors`     | `check`             | 10          | 2       | 30s     |
+| `domains`      | `whois`             | 10          | 3       | 30s     |
+| `projects`     | `create-bedrock`    | 2/server    | 2       | 20min   |
+
+All queues: exponential backoff (base 1s), dead-letter queue (`<name>-dlq`),
+`removeOnComplete: 1000`, `removeOnFail: 5000`.
+
+---
+
+## Security Conventions
+
+- **Credential encryption:** AES-256-GCM via `EncryptionService`. Key from
+  `ENCRYPTION_KEY` env var. Never stored in DB.
+- **SSH keys:** Encrypted at rest. Decrypted in memory only during SSH
+  connection. Never returned in API responses.
+- **JWT:** 15min access token + 7d refresh token. Refresh tokens stored as
+  bcrypt hash. Rotation on every refresh.
+- **Validation:** `ValidationPipe` global with `whitelist: true`,
+  `forbidNonWhitelisted: true`, `transform: true`.
+- **Rate limiting:** 5 login attempts/15min (Redis-backed), 100 req/min general.
+- **No eval, no `require()`, no child_process shell:** Remote operations go
+  through `RemoteExecutorService` only.
+
+---
+
+## Docker Compose Services
+
+| Service    | Image               | Purpose                                           |
+| ---------- | ------------------- | ------------------------------------------------- |
+| `postgres` | postgres:16-alpine  | Primary database                                  |
+| `redis`    | redis:7-alpine      | BullMQ + WebSocket pub/sub + rate limiting        |
+| `forge`    | (multi-stage build) | NestJS API + NestJS Worker + static React web app |
+
+`forge` container entrypoint: runs `prisma migrate deploy`, then starts API
+(`apps/api`) and Worker (`apps/worker`) as parallel Node processes via
+`entrypoint.sh`.
+
+---
+
+## UI Board Description
+
+**Layout:** Fixed left sidebar (240px) + main content area. Sidebar collapses to
+icon-only on md breakpoint.
+
+**Sidebar navigation (8 items):**
+
+1. Dashboard
+2. Clients
+3. Servers
+4. Projects
+5. Backups
+6. Monitors
+7. Domains
+8. Settings
+
+**Dashboard home:** 4 big stat cards (active projects, recent backups, average
+uptime, server count) + quick action buttons + recent job activity feed (live
+via WebSocket).
+
+**Project detail:** Tabbed view — Environments | Backups | Plugins | Sync |
+Domains | CyberPanel.
+
+**Live updates:** Backup progress bars, toast notifications for job
+completion/failure, activity feed — all via WebSocket subscription with TanStack
+Query cache invalidation on completion.
+
+**Design:** shadcn/ui components, Tailwind CSS 4, dark mode via `.dark` class on
+`<html>`, HSL CSS variables, lucide-react icons. Mobile-first, responsive.
