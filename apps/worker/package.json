@@ -1,0 +1,28 @@
+{
+	"name": "@bedrock-forge/worker",
+	"version": "0.1.0",
+	"private": true,
+	"scripts": {
+		"build": "tsc -p tsconfig.json",
+		"start": "node dist/main.js",
+		"dev": "ts-node -r tsconfig-paths/register src/main.ts"
+	},
+	"dependencies": {
+		"@bedrock-forge/shared": "workspace:*",
+		"@bedrock-forge/remote-executor": "workspace:*",
+		"@nestjs/bullmq": "^11.0.0",
+		"@nestjs/common": "^11.0.0",
+		"@nestjs/config": "^4.0.0",
+		"@nestjs/core": "^11.0.0",
+		"@prisma/client": "^7.5.0",
+		"bullmq": "^5.0.0",
+		"reflect-metadata": "^0.2.0",
+		"rxjs": "^7.8.0"
+	},
+	"devDependencies": {
+		"@types/node": "^22.0.0",
+		"prisma": "^7.5.0",
+		"tsconfig-paths": "^4.2.0",
+		"typescript": "^5.7.0"
+	}
+}

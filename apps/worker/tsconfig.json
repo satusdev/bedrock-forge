@@ -1,0 +1,16 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"outDir": "./dist",
+		"rootDir": "./src",
+		"baseUrl": ".",
+		"paths": {
+			"@bedrock-forge/shared": ["../../packages/shared/src/index.ts"],
+			"@bedrock-forge/remote-executor": [
+				"../../packages/remote-executor/src/index.ts"
+			]
+		}
+	},
+	"include": ["src/**/*"],
+	"exclude": ["dist", "node_modules"]
+}
