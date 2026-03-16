@@ -1,0 +1,431 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// IDENTITY & ACCESS
+// ──────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id            BigInt    @id @default(autoincrement())
+  email         String    @unique
+  name          String
+  password_hash String
+  created_at    DateTime  @default(now()) @db.Timestamptz()
+  updated_at    DateTime  @updatedAt @db.Timestamptz()
+
+  user_roles     UserRole[]
+  refresh_tokens RefreshToken[]
+  audit_logs     AuditLog[]
+
+  @@map("users")
+}
+
+model Role {
+  id   BigInt @id @default(autoincrement())
+  name String @unique // admin | manager | client
+
+  user_roles UserRole[]
+
+  @@map("roles")
+}
+
+model UserRole {
+  user_id BigInt
+  role_id BigInt
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [role_id], references: [id], onDelete: Cascade)
+
+  @@id([user_id, role_id])
+  @@index([user_id])
+  @@index([role_id])
+  @@map("user_roles")
+}
+
+model RefreshToken {
+  id          BigInt    @id @default(autoincrement())
+  user_id     BigInt
+  token_hash  String    @unique
+  expires_at  DateTime  @db.Timestamptz()
+  revoked_at  DateTime? @db.Timestamptz()
+  created_at  DateTime  @default(now()) @db.Timestamptz()
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([expires_at])
+  @@map("refresh_tokens")
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// CLIENT MANAGEMENT
+// ──────────────────────────────────────────────────────────────────────────────
+
+model Client {
+  id         BigInt    @id @default(autoincrement())
+  name       String
+  email      String?
+  phone      String?
+  notes      String?
+  created_at DateTime  @default(now()) @db.Timestamptz()
+  updated_at DateTime  @updatedAt @db.Timestamptz()
+
+  client_tags ClientTag[]
+  projects    Project[]
+
+  @@map("clients")
+}
+
+model Tag {
+  id    BigInt @id @default(autoincrement())
+  name  String @unique
+  color String @default("#6366f1")
+
+  client_tags ClientTag[]
+
+  @@map("tags")
+}
+
+model ClientTag {
+  client_id BigInt
+  tag_id    BigInt
+
+  client Client @relation(fields: [client_id], references: [id], onDelete: Cascade)
+  tag    Tag    @relation(fields: [tag_id], references: [id], onDelete: Cascade)
+
+  @@id([client_id, tag_id])
+  @@index([client_id])
+  @@index([tag_id])
+  @@map("client_tags")
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// PACKAGES
+// ──────────────────────────────────────────────────────────────────────────────
+
+model HostingPackage {
+  id            BigInt   @id @default(autoincrement())
+  name          String
+  description   String?
+  price_monthly Decimal  @db.Decimal(10, 2)
+  storage_gb    Int
+  bandwidth_gb  Int
+  max_sites     Int
+  active        Boolean  @default(true)
+
+  projects Project[]
+
+  @@map("hosting_packages")
+}
+
+model SupportPackage {
+  id              BigInt   @id @default(autoincrement())
+  name            String
+  description     String?
+  price_monthly   Decimal  @db.Decimal(10, 2)
+  response_hours  Int
+  includes_updates Boolean @default(false)
+  active          Boolean  @default(true)
+
+  projects Project[]
+
+  @@map("support_packages")
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// INFRASTRUCTURE
+// ──────────────────────────────────────────────────────────────────────────────
+
+model Server {
+  id                      BigInt   @id @default(autoincrement())
+  name                    String
+  ip_address              String
+  ssh_port                Int      @default(22)
+  ssh_user                String   @default("root")
+  ssh_private_key_encrypted String // AES-256-GCM encrypted
+  provider                String?  // e.g. "hetzner", "digitalocean", "vultr"
+  status                  ServerStatus @default(unknown)
+  created_at              DateTime @default(now()) @db.Timestamptz()
+  updated_at              DateTime @updatedAt @db.Timestamptz()
+
+  environments   Environment[]
+  job_executions JobExecution[]
+
+  @@map("servers")
+}
+
+enum ServerStatus {
+  online
+  offline
+  unknown
+}
+
+model Project {
+  id                 BigInt   @id @default(autoincrement())
+  name               String
+  client_id          BigInt
+  hosting_package_id BigInt?
+  support_package_id BigInt?
+  status             ProjectStatus @default(active)
+  created_at         DateTime @default(now()) @db.Timestamptz()
+  updated_at         DateTime @updatedAt @db.Timestamptz()
+
+  client          Client          @relation(fields: [client_id], references: [id])
+  hosting_package HostingPackage? @relation(fields: [hosting_package_id], references: [id])
+  support_package SupportPackage? @relation(fields: [support_package_id], references: [id])
+  environments    Environment[]
+  domains         Domain[]
+
+  @@index([client_id])
+  @@index([hosting_package_id])
+  @@index([support_package_id])
+  @@map("projects")
+}
+
+enum ProjectStatus {
+  active
+  inactive
+  archived
+}
+
+model Environment {
+  id                BigInt          @id @default(autoincrement())
+  project_id        BigInt
+  server_id         BigInt
+  type              EnvironmentType @default(production)
+  url               String
+  root_path         String
+  cyberpanel_login  Json?           // Encrypted JSONB: { url, username, password_encrypted }
+  created_at        DateTime        @default(now()) @db.Timestamptz()
+  updated_at        DateTime        @updatedAt @db.Timestamptz()
+
+  project            Project           @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  server             Server            @relation(fields: [server_id], references: [id])
+  cyberpanel_users   CyberpanelUser[]
+  backups            Backup[]
+  plugin_scans       PluginScan[]
+  monitors           Monitor[]
+  wp_db_credentials  WpDbCredentials?
+  job_executions     JobExecution[]
+
+  @@index([project_id])
+  @@index([server_id])
+  @@map("environments")
+}
+
+enum EnvironmentType {
+  production
+  staging
+}
+
+model CyberpanelUser {
+  id                 BigInt   @id @default(autoincrement())
+  environment_id     BigInt
+  username           String
+  password_encrypted String   // AES-256-GCM encrypted
+  panel_url          String
+  created_at         DateTime @default(now()) @db.Timestamptz()
+
+  environment Environment @relation(fields: [environment_id], references: [id], onDelete: Cascade)
+
+  @@index([environment_id])
+  @@map("cyberpanel_users")
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// OPERATIONS
+// ──────────────────────────────────────────────────────────────────────────────
+
+model Backup {
+  id             BigInt       @id @default(autoincrement())
+  environment_id BigInt
+  type           BackupType
+  status         BackupStatus @default(pending)
+  file_path      String?
+  size_bytes     BigInt?
+  error_message  String?
+  started_at     DateTime?    @db.Timestamptz()
+  completed_at   DateTime?    @db.Timestamptz()
+  created_at     DateTime     @default(now()) @db.Timestamptz()
+
+  environment Environment @relation(fields: [environment_id], references: [id], onDelete: Cascade)
+
+  @@index([environment_id])
+  @@index([status])
+  @@map("backups")
+}
+
+enum BackupType {
+  full
+  db_only
+  files_only
+}
+
+enum BackupStatus {
+  pending
+  running
+  completed
+  failed
+}
+
+model PluginScan {
+  id             BigInt   @id @default(autoincrement())
+  environment_id BigInt
+  plugins        Json     // Array of { name, version, active, author, description }
+  scanned_at     DateTime @default(now()) @db.Timestamptz()
+  created_at     DateTime @default(now()) @db.Timestamptz()
+
+  environment Environment @relation(fields: [environment_id], references: [id], onDelete: Cascade)
+
+  @@index([environment_id])
+  @@index([scanned_at])
+  @@map("plugin_scans")
+}
+
+model Domain {
+  id              BigInt    @id @default(autoincrement())
+  project_id      BigInt
+  name            String
+  whois_json      Json?     // Raw WHOIS response parsed as JSON
+  expires_at      DateTime? @db.Timestamptz()
+  last_checked_at DateTime? @db.Timestamptz()
+  created_at      DateTime  @default(now()) @db.Timestamptz()
+
+  project Project @relation(fields: [project_id], references: [id], onDelete: Cascade)
+
+  @@index([project_id])
+  @@index([name])
+  @@map("domains")
+}
+
+model Monitor {
+  id               BigInt   @id @default(autoincrement())
+  environment_id   BigInt
+  enabled          Boolean  @default(true)
+  interval_seconds Int      @default(60)
+  uptime_pct       Decimal  @db.Decimal(5, 2) @default(100.00)
+  last_response_ms Int?
+  last_status      Int?     // HTTP status code
+  last_checked_at  DateTime? @db.Timestamptz()
+  created_at       DateTime @default(now()) @db.Timestamptz()
+
+  environment     Environment     @relation(fields: [environment_id], references: [id], onDelete: Cascade)
+  monitor_results MonitorResult[]
+
+  @@index([environment_id])
+  @@map("monitors")
+}
+
+model MonitorResult {
+  id          BigInt   @id @default(autoincrement())
+  monitor_id  BigInt
+  status_code Int
+  response_ms Int
+  is_up       Boolean
+  checked_at  DateTime @default(now()) @db.Timestamptz()
+
+  monitor Monitor @relation(fields: [monitor_id], references: [id], onDelete: Cascade)
+
+  @@index([monitor_id])
+  @@index([checked_at])
+  @@map("monitor_results")
+}
+
+model WpDbCredentials {
+  id                    BigInt   @id @default(autoincrement())
+  environment_id        BigInt   @unique
+  db_name_encrypted     String
+  db_user_encrypted     String
+  db_password_encrypted String
+  db_host_encrypted     String
+  created_at            DateTime @default(now()) @db.Timestamptz()
+  updated_at            DateTime @updatedAt @db.Timestamptz()
+
+  environment Environment @relation(fields: [environment_id], references: [id], onDelete: Cascade)
+
+  @@map("wp_db_credentials")
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// SYSTEM
+// ──────────────────────────────────────────────────────────────────────────────
+
+model ExecutionScript {
+  id           BigInt   @id @default(autoincrement())
+  name         String   @unique // 'backup.php' | 'plugin-scan.php'
+  version      String
+  content_hash String
+  content      String   // Full PHP script content
+  created_at   DateTime @default(now()) @db.Timestamptz()
+
+  @@map("execution_scripts")
+}
+
+model JobExecution {
+  id             BigInt           @id @default(autoincrement())
+  queue_name     String
+  bull_job_id    String
+  environment_id BigInt?
+  server_id      BigInt?
+  status         JobExecutionStatus @default(queued)
+  attempt_count  Int              @default(0)
+  progress       Int              @default(0) // 0-100
+  last_error     String?
+  payload        Json?            // Job input payload for debugging
+  started_at     DateTime?        @db.Timestamptz()
+  completed_at   DateTime?        @db.Timestamptz()
+  created_at     DateTime         @default(now()) @db.Timestamptz()
+
+  environment Environment? @relation(fields: [environment_id], references: [id])
+  server      Server?      @relation(fields: [server_id], references: [id])
+
+  @@index([environment_id])
+  @@index([server_id])
+  @@index([status])
+  @@index([created_at])
+  @@index([queue_name, status])
+  @@map("job_executions")
+}
+
+enum JobExecutionStatus {
+  queued
+  active
+  completed
+  failed
+  dead_letter
+}
+
+model AppSetting {
+  id         BigInt   @id @default(autoincrement())
+  key        String   @unique
+  value      String
+  updated_at DateTime @updatedAt @db.Timestamptz()
+
+  @@map("app_settings")
+}
+
+model AuditLog {
+  id            BigInt   @id @default(autoincrement())
+  user_id       BigInt?
+  action        String   // e.g. "backup.create", "server.delete", "auth.login"
+  resource_type String?  // e.g. "backup", "server", "project"
+  resource_id   BigInt?
+  metadata      Json?    // Additional context (IP, user agent, diff, etc.)
+  ip_address    String?
+  created_at    DateTime @default(now()) @db.Timestamptz()
+
+  user User? @relation(fields: [user_id], references: [id], onDelete: SetNull)
+
+  @@index([user_id])
+  @@index([action])
+  @@index([resource_type, resource_id])
+  @@index([created_at])
+  @@map("audit_logs")
+}

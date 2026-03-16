@@ -1,15 +1,11 @@
-# Bedrock Forge Docker Compose
-# Production deployment configuration
-
 services:
-  # PostgreSQL Database
   postgres:
     image: postgres:16-alpine
-    container_name: forge-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-forge}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
-      POSTGRES_DB: ${POSTGRES_DB:-forge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+      POSTGRES_DB: ${POSTGRES_DB:-bedrock_forge}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -17,13 +13,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    restart: unless-stopped
 
-  # Redis cache/queue
   redis:
     image: redis:7-alpine
-    container_name: forge-redis
-    command: redis-server --appendonly yes
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
     volumes:
       - redis_data:/data
     healthcheck:
@@ -31,103 +25,21 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    restart: unless-stopped
 
-  # NestJS API backend
-  api:
+  forge:
     build:
       context: .
-      dockerfile: Dockerfile.nest
-      target: production
-    container_name: forge-api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
     ports:
-      - '${API_PORT:-8000}:8000'
-    env_file:
-      - ./.env
-    environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-forge}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-forge}
-      REDIS_URL: redis://redis:6379/0
-      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY required}
-      NODE_ENV: production
-      PORT: 8000
-      API_PREFIX: ${API_PREFIX:-api/v1}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://localhost:3000,http://localhost:${WEB_PORT:-3000}}
+      - '3000:3000'
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-    healthcheck:
-      test:
-        [
-          'CMD-SHELL',
-          'wget -qO- http://localhost:8000/api/v1/health >/dev/null || exit 1',
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-
-  # One-off Prisma schema sync before API startup
-  migrate:
-    build:
-      context: .
-      dockerfile: Dockerfile.nest
-      target: development
-    container_name: forge-migrate
-    env_file:
-      - ./.env
-    environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-forge}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-forge}
-      NODE_ENV: development
-    command: ['sh', '-c', 'npm run prisma:push']
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: 'no'
-
-  # React Frontend
-  web:
-    build:
-      context: .
-      dockerfile: Dockerfile.dashboard
-      target: preview
-      args:
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
-        VITE_WS_URL: ${VITE_WS_URL:-}
-    container_name: forge-web
-    ports:
-      - '${WEB_PORT:-3000}:3000'
-    depends_on:
-      api:
-        condition: service_healthy
-    restart: unless-stopped
-
-  # Prisma tooling container (runs on-demand for migrate/seed bridge)
-  prisma-tools:
-    build:
-      context: .
-      dockerfile: Dockerfile.nest
-      target: development
-    container_name: forge-prisma-tools
-    profiles: ['seed']
-    env_file:
-      - ./.env
-    environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-forge}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-forge}
-      NODE_ENV: development
-    command: ['sh', '-c', 'sleep infinity']
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: 'no'
 
 volumes:
   postgres_data:
   redis_data:
-
-networks:
-  default:
-    name: forge-network
