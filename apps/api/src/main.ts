@@ -3,6 +3,12 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { AppModule } from './app.module';
 
+// Express JSON.stringify cannot handle BigInt (Prisma autoincrement IDs).
+// Convert BigInt → Number; IDs never exceed Number.MAX_SAFE_INTEGER here.
+(BigInt.prototype as unknown as { toJSON: () => number }).toJSON = function () {
+	return Number(this);
+};
+
 async function bootstrap() {
 	const logger = new Logger('Bootstrap');
 	const app = await NestFactory.create(AppModule, {
@@ -20,7 +26,8 @@ async function bootstrap() {
 	);
 
 	// Global API prefix — all routes under /api
-	app.setGlobalPrefix('api');
+	// Health is excluded so Docker/k8s/LB probes resolve at /health (no prefix)
+	app.setGlobalPrefix('api', { exclude: ['health'] });
 
 	// CORS — in production, restrict to your domain
 	app.enableCors({

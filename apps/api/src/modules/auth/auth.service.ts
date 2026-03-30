@@ -10,9 +10,10 @@ import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { AuthRepository } from './auth.repository';
 
-interface TokenPair {
+export interface TokenPair {
 	accessToken: string;
 	refreshToken: string;
+	user: { id: number; email: string; name: string; roles: string[] };
 }
 
 @Injectable()
@@ -31,9 +32,9 @@ export class AuthService {
 
 		const passwordHash = await bcrypt.hash(password, 12);
 		const user = await this.repo.createUser(email, name, passwordHash);
-		const roles = user.user_roles.map(ur => ur.role.name);
+		const roles = user.user_roles.map((ur: any) => ur.role.name);
 
-		return this.issueTokens(Number(user.id), user.email, roles);
+		return this.issueTokens(Number(user.id), user.email, user.name, roles);
 	}
 
 	async login(email: string, password: string): Promise<TokenPair> {
@@ -47,8 +48,8 @@ export class AuthService {
 			throw new UnauthorizedException('Invalid credentials');
 		}
 
-		const roles = user.user_roles.map(ur => ur.role.name);
-		return this.issueTokens(Number(user.id), user.email, roles);
+		const roles = user.user_roles.map((ur: any) => ur.role.name);
+		return this.issueTokens(Number(user.id), user.email, user.name, roles);
 	}
 
 	async refresh(refreshToken: string): Promise<TokenPair> {
@@ -67,8 +68,8 @@ export class AuthService {
 			throw new NotFoundException('User not found');
 		}
 
-		const roles = user.user_roles.map(ur => ur.role.name);
-		return this.issueTokens(Number(user.id), user.email, roles);
+		const roles = user.user_roles.map((ur: any) => ur.role.name);
+		return this.issueTokens(Number(user.id), user.email, user.name, roles);
 	}
 
 	async logout(refreshToken: string): Promise<void> {
@@ -86,13 +87,14 @@ export class AuthService {
 	private async issueTokens(
 		userId: number,
 		email: string,
+		name: string,
 		roles: string[],
 	): Promise<TokenPair> {
 		const payload = { sub: userId, email, roles };
 
 		const accessToken = this.jwtService.sign(payload, {
 			secret: this.config.get<string>('jwt.secret'),
-			expiresIn: this.config.get<string>('jwt.accessExpiresIn'),
+			expiresIn: this.config.get<string>('jwt.accessExpiresIn') as any,
 		});
 
 		const rawRefreshToken = crypto.randomBytes(64).toString('hex');
@@ -107,7 +109,11 @@ export class AuthService {
 			expiresAt,
 		);
 
-		return { accessToken, refreshToken: rawRefreshToken };
+		return {
+			accessToken,
+			refreshToken: rawRefreshToken,
+			user: { id: userId, email, name, roles },
+		};
 	}
 
 	private hashToken(token: string): string {
