@@ -65,7 +65,6 @@ bedrock-forge/
 │   │   │   │   ├── backups/
 │   │   │   │   ├── plugin-scans/
 │   │   │   │   ├── sync/
-│   │   │   │   ├── domains/
 │   │   │   │   ├── monitors/
 │   │   │   │   ├── settings/
 │   │   │   │   └── health/
@@ -84,7 +83,6 @@ bedrock-forge/
 │   │   │   │   ├── projects/
 │   │   │   │   ├── backups/
 │   │   │   │   ├── monitors/
-│   │   │   │   ├── domains/
 │   │   │   │   └── settings/
 │   │   │   ├── components/
 │   │   │   │   ├── ui/         # shadcn primitives (owned, not a package)
@@ -171,7 +169,7 @@ src/modules/<feature>/
 
 ---
 
-## Domain Model (23 Tables)
+## Domain Model (26 Tables)
 
 ### Identity & Access
 
@@ -214,19 +212,27 @@ src/modules/<feature>/
 - `job_executions` — BullMQ job audit trail (status, progress, errors)
 - `app_settings` — key-value config store
 - `audit_logs` — user action audit trail (actor, action, resource)
+- `backup_schedules` — cron-based backup scheduling per environment
+
+### Billing & Notifications
+
+- `invoices` — yearly invoices linked to a project (hosting + support cost)
+- `notification_channels` — Slack webhook channels (with event subscriptions)
+- `notification_logs` — delivery log per notification dispatch
 
 ---
 
 ## BullMQ Queue Registry
 
-| Queue          | Job Types           | Concurrency | Retries | Timeout |
-| -------------- | ------------------- | ----------- | ------- | ------- |
-| `backups`      | `create`, `restore` | 3/server    | 3       | 30min   |
-| `plugin-scans` | `run`               | 5           | 3       | 5min    |
-| `sync`         | `clone`, `push`     | 2/server    | 3       | 15min   |
-| `monitors`     | `check`             | 10          | 2       | 30s     |
-| `domains`      | `whois`             | 10          | 3       | 30s     |
-| `projects`     | `create-bedrock`    | 2/server    | 2       | 20min   |
+| Queue           | Job Types           | Concurrency | Retries | Timeout |
+| --------------- | ------------------- | ----------- | ------- | ------- |
+| `backups`       | `create`, `restore` | 3/server    | 3       | 30min   |
+| `plugin-scans`  | `run`               | 5           | 3       | 5min    |
+| `sync`          | `clone`, `push`     | 2/server    | 3       | 15min   |
+| `monitors`      | `check`             | 10          | 2       | 30s     |
+| `domains`       | `whois`             | 10          | 3       | 30s     |
+| `projects`      | `create-bedrock`    | 2/server    | 2       | 20min   |
+| `notifications` | `send`              | 20          | 3       | 30s     |
 
 All queues: exponential backoff (base 1s), dead-letter queue (`<name>-dlq`),
 `removeOnComplete: 1000`, `removeOnFail: 5000`.
@@ -268,7 +274,7 @@ All queues: exponential backoff (base 1s), dead-letter queue (`<name>-dlq`),
 **Layout:** Fixed left sidebar (240px) + main content area. Sidebar collapses to
 icon-only on md breakpoint.
 
-**Sidebar navigation (8 items):**
+**Sidebar navigation (11 items — role-gated):**
 
 1. Dashboard
 2. Clients
@@ -276,15 +282,18 @@ icon-only on md breakpoint.
 4. Projects
 5. Backups
 6. Monitors
-7. Domains
-8. Settings
+7. Settings
+8. Packages _(manager+)_
+9. Invoices _(manager+)_
+10. Users & Roles _(admin only)_
+11. Notifications _(admin only)_
 
 **Dashboard home:** 4 big stat cards (active projects, recent backups, average
 uptime, server count) + quick action buttons + recent job activity feed (live
 via WebSocket).
 
 **Project detail:** Tabbed view — Environments | Backups | Plugins | Sync |
-Domains | CyberPanel.
+Restore.
 
 **Live updates:** Backup progress bars, toast notifications for job
 completion/failure, activity feed — all via WebSocket subscription with TanStack
