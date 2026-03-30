@@ -7,3 +7,6 @@ prisma/migrations/
 *.log
 .DS_Store
 coverage/
+*.tsbuildinfo
+*.d.ts.map
+*.js.map
