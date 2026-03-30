@@ -6,6 +6,12 @@
  * Outputs JSON array of plugin info objects.
  */
 
+// PHP 7.1+ required (nullable return types, null coalescing operator, scalar type hints)
+if (PHP_VERSION_ID < 70100) {
+    fwrite(STDERR, "ERROR: PHP 7.1 or newer is required (this server runs PHP " . PHP_VERSION . ")\n");
+    exit(1);
+}
+
 $opts    = getopt('', ['docroot:']);
 $docroot = $opts['docroot'] ?? null;
 

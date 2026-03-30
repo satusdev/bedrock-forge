@@ -2,8 +2,8 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { PrismaService } from '../../prisma/prisma.service';
-import { QUEUES, JOB_TYPES } from '@bedrock-forge/shared';
-import { execSync } from 'child_process';
+import { QUEUES } from '@bedrock-forge/shared';
+import { execFileSync } from 'child_process';
 
 @Processor(QUEUES.DOMAINS)
 export class DomainWhoisProcessor extends WorkerHost {
@@ -42,7 +42,7 @@ export class DomainWhoisProcessor extends WorkerHost {
 
 	private runWhois(domain: string): string {
 		try {
-			return execSync(`whois ${domain}`, { timeout: 30_000 }).toString();
+			return execFileSync('whois', [domain], { timeout: 30_000 }).toString();
 		} catch {
 			return '';
 		}
