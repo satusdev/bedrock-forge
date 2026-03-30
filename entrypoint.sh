@@ -2,10 +2,7 @@
 set -e
 
 echo "[forge] Running database migrations…"
-node -e "
-  const { execSync } = require('child_process');
-  execSync('npx prisma migrate deploy', { stdio: 'inherit', env: process.env });
-"
+node_modules/.bin/prisma migrate deploy
 
 echo "[forge] Starting API server (port 3000)…"
 node apps/api/dist/main.js &

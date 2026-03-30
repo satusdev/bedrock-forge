@@ -30,14 +30,43 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: runtime
     restart: unless-stopped
     env_file: .env
+    tmpfs:
+      # In-memory staging for backup tar.gz files. Avoids overlayfs write
+      # throttling for large files. Size accommodates multiple concurrent
+      # backups — adjust downward if RAM is constrained.
+      - /tmp/forge-backups:size=2g,uid=1000,gid=1000
+    environment:
+      CORS_ORIGIN: http://localhost:8080
+      # Constructed from POSTGRES_* vars so it always matches the postgres service.
+      # This overrides whatever DATABASE_URL is set in .env, preventing drift.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-forge}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-bedrock_forge}
     ports:
       - '3000:3000'
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:3000/health']
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 45s
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web
+    restart: unless-stopped
+    ports:
+      - '8080:80'
+    depends_on:
+      forge:
         condition: service_healthy
 
 volumes:
