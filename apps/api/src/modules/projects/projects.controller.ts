@@ -15,9 +15,12 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { ROLES, PaginationQuery } from '@bedrock-forge/shared';
+import { ROLES } from '@bedrock-forge/shared';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto, UpdateProjectDto } from './dto/project.dto';
+import { ImportProjectDto } from './dto/import-project.dto';
+import { BulkImportProjectsDto } from './dto/bulk-import-projects.dto';
 
 @Controller('projects')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -25,7 +28,7 @@ import { CreateProjectDto, UpdateProjectDto } from './dto/project.dto';
 export class ProjectsController {
 	constructor(private readonly svc: ProjectsService) {}
 
-	@Get() findAll(@Query() q: PaginationQuery) {
+	@Get() findAll(@Query() q: PaginationQueryDto) {
 		return this.svc.findAll(q);
 	}
 	@Get(':id') findOne(@Param('id', ParseIntPipe) id: number) {
@@ -44,5 +47,15 @@ export class ProjectsController {
 		@Param('id', ParseIntPipe) id: number,
 	) {
 		return this.svc.remove(id);
+	}
+	@Post('import') @HttpCode(HttpStatus.CREATED) importFromServer(
+		@Body() dto: ImportProjectDto,
+	) {
+		return this.svc.importFromServer(dto);
+	}
+	@Post('import-bulk') @HttpCode(HttpStatus.CREATED) importBulk(
+		@Body() dto: BulkImportProjectsDto,
+	) {
+		return this.svc.importBulk(dto);
 	}
 }
