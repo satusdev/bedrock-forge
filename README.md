@@ -4,14 +4,53 @@ WordPress management platform built with NestJS, Prisma, BullMQ, and React 19.
 
 ## Quick Start
 
-**Prerequisites:** Docker + Docker Compose
+**Prerequisites:** Docker + Docker Compose + `curl` (for health checks)
 
 ```bash
-chmod +x install.sh
 ./install.sh
 ```
 
-Then open **http://localhost:3000**.
+This generates secrets, builds the image, starts all services, runs migrations,
+and seeds the database (roles, admin user, tags, packages, servers).
+
+Then open **http://localhost:3000** — admin credentials printed at the end.
+
+---
+
+## Docker Operations
+
+| Script         | npm alias            | What it does                                                                  |
+| -------------- | -------------------- | ----------------------------------------------------------------------------- |
+| `./install.sh` | `pnpm docker:setup`  | First-time setup: build → start → migrate → seed                              |
+| `./update.sh`  | `pnpm docker:update` | Rebuild forge image, rolling restart, auto-migrate (data preserved)           |
+| `./reset.sh`   | `pnpm docker:reset`  | **Destructive.** Wipe all volumes, regenerate secrets, rebuild, migrate, seed |
+
+### One-off commands
+
+```bash
+# Run seed against a live container (idempotent)
+pnpm docker:seed
+# or
+docker compose exec forge node prisma/seed.js
+
+# Open a shell inside the forge container
+pnpm docker:shell
+
+# Apply pending migrations without restarting
+pnpm docker:migrate
+
+# View service status
+pnpm docker:ps
+
+# Tail forge logs
+pnpm docker:logs
+
+# Tail all service logs
+pnpm docker:logs:all
+
+# Restart forge only (no rebuild)
+pnpm docker:restart
+```
 
 The installer generates secrets automatically and writes them to `.env`.
 
