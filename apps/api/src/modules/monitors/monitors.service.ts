@@ -1,45 +1,32 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { PrismaService } from '../../prisma/prisma.service';
+import { MonitorsRepository } from './monitors.repository';
 import { QUEUES, JOB_TYPES, DEFAULT_JOB_OPTIONS } from '@bedrock-forge/shared';
 import { CreateMonitorDto, UpdateMonitorDto } from './dto/monitor.dto';
 
 @Injectable()
 export class MonitorsService {
 	constructor(
-		private readonly prisma: PrismaService,
+		private readonly repo: MonitorsRepository,
 		@InjectQueue(QUEUES.MONITORS) private readonly queue: Queue,
 	) {}
 
 	findAll() {
-		return this.prisma.monitor.findMany({
-			orderBy: { name: 'asc' },
-			include: {
-				environment: { select: { id: true, name: true, domain: true } },
-			},
-		});
+		return this.repo.findAll();
 	}
 
 	async findOne(id: number) {
-		const m = await this.prisma.monitor.findUnique({
-			where: { id: BigInt(id) },
-			include: {
-				monitor_results: { orderBy: { checked_at: 'desc' }, take: 100 },
-			},
-		});
+		const m = await this.repo.findById(BigInt(id));
 		if (!m) throw new NotFoundException(`Monitor ${id} not found`);
 		return m;
 	}
 
 	async create(dto: CreateMonitorDto) {
-		const monitor = await this.prisma.monitor.create({
-			data: {
-				...dto,
-				environment_id: BigInt(dto.environment_id),
-				type: dto.type as never,
-				is_active: true,
-			},
+		const monitor = await this.repo.create({
+			environment_id: BigInt(dto.environment_id),
+			interval_seconds: dto.interval_seconds,
+			...(dto.enabled !== undefined && { enabled: dto.enabled }),
 		});
 		await this.registerRepeatable(monitor);
 		return monitor;
@@ -48,18 +35,20 @@ export class MonitorsService {
 	async update(id: number, dto: UpdateMonitorDto) {
 		const existing = await this.findOne(id);
 		await this.unregisterRepeatable(existing);
-		const monitor = await this.prisma.monitor.update({
-			where: { id: BigInt(id) },
-			data: { ...dto, type: dto.type as never },
+		const monitor = await this.repo.update(BigInt(id), {
+			...(dto.interval_seconds !== undefined && {
+				interval_seconds: dto.interval_seconds,
+			}),
+			...(dto.enabled !== undefined && { enabled: dto.enabled }),
 		});
-		if (monitor.is_active) await this.registerRepeatable(monitor);
+		if (monitor.enabled) await this.registerRepeatable(monitor);
 		return monitor;
 	}
 
 	async remove(id: number) {
 		const monitor = await this.findOne(id);
 		await this.unregisterRepeatable(monitor);
-		return this.prisma.monitor.delete({ where: { id: BigInt(id) } });
+		return this.repo.delete(BigInt(id));
 	}
 
 	async toggle(id: number, active: boolean) {
@@ -69,29 +58,16 @@ export class MonitorsService {
 		} else {
 			await this.unregisterRepeatable(monitor);
 		}
-		return this.prisma.monitor.update({
-			where: { id: BigInt(id) },
-			data: { is_active: active },
-		});
+		return this.repo.update(BigInt(id), { enabled: active });
 	}
 
 	private async registerRepeatable(monitor: {
 		id: bigint;
-		url: string;
-		type: string;
 		interval_seconds: number;
-		keyword?: string | null;
-		timeout_seconds?: number | null;
 	}) {
 		await this.queue.add(
 			JOB_TYPES.MONITOR_CHECK,
-			{
-				monitorId: Number(monitor.id),
-				url: monitor.url,
-				type: monitor.type,
-				keyword: monitor.keyword,
-				timeoutSeconds: monitor.timeout_seconds,
-			},
+			{ monitorId: Number(monitor.id) },
 			{
 				...DEFAULT_JOB_OPTIONS,
 				jobId: `monitor-${monitor.id}`,

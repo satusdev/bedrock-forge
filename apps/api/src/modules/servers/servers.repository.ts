@@ -13,29 +13,49 @@ export class ServersRepository {
 	private encryptServer(data: Partial<CreateServerDto>) {
 		const out: Record<string, unknown> = { ...data };
 		if (data.ssh_private_key)
-			out['ssh_private_key'] = this.enc.encrypt(data.ssh_private_key);
-		if (data.ssh_passphrase)
-			out['ssh_passphrase'] = this.enc.encrypt(data.ssh_passphrase);
+			out['ssh_private_key_encrypted'] = this.enc.encrypt(data.ssh_private_key);
+		delete out['ssh_private_key'];
+		if (data.ssh_user) out['ssh_user'] = data.ssh_user;
 		return out;
 	}
 
-	findAll() {
-		return this.prisma.server.findMany({
-			orderBy: { name: 'asc' },
-			select: {
-				id: true,
-				name: true,
-				ip_address: true,
-				ssh_port: true,
-				ssh_username: true,
-				panel_type: true,
-				panel_url: true,
-				status: true,
-				notes: true,
-				created_at: true,
-				updated_at: true,
-			},
-		});
+	async findAll(opts: { page?: number; limit?: number; search?: string } = {}) {
+		const page = Math.max(1, opts.page ?? 1);
+		const limit = Math.min(100, Math.max(1, opts.limit ?? 50));
+		const search = opts.search?.trim();
+
+		const where = search
+			? {
+					OR: [
+						{ name: { contains: search, mode: 'insensitive' as const } },
+						{ ip_address: { contains: search, mode: 'insensitive' as const } },
+						{ provider: { contains: search, mode: 'insensitive' as const } },
+					],
+				}
+			: undefined;
+
+		const [items, total] = await Promise.all([
+			this.prisma.server.findMany({
+				where,
+				orderBy: { name: 'asc' },
+				skip: (page - 1) * limit,
+				take: limit,
+				select: {
+					id: true,
+					name: true,
+					ip_address: true,
+					ssh_port: true,
+					ssh_user: true,
+					provider: true,
+					status: true,
+					created_at: true,
+					updated_at: true,
+				},
+			}),
+			this.prisma.server.count({ where }),
+		]);
+
+		return { items, total, page, limit };
 	}
 
 	findById(id: bigint) {
@@ -46,14 +66,11 @@ export class ServersRepository {
 				name: true,
 				ip_address: true,
 				ssh_port: true,
-				ssh_username: true,
-				panel_type: true,
-				panel_url: true,
+				ssh_user: true,
+				provider: true,
 				status: true,
-				notes: true,
 				created_at: true,
 				updated_at: true,
-				projects: true,
 			},
 		});
 	}
@@ -74,5 +91,23 @@ export class ServersRepository {
 
 	delete(id: bigint) {
 		return this.prisma.server.delete({ where: { id } });
+	}
+
+	/**
+	 * For a given server, return which root_paths already have an Environment record.
+	 * Used to mark projects as already-imported during scan.
+	 */
+	async findExistingEnvironmentPaths(
+		serverId: bigint,
+		paths: string[],
+	): Promise<{ root_path: string; project_id: bigint }[]> {
+		if (paths.length === 0) return [];
+		return this.prisma.environment.findMany({
+			where: {
+				server_id: serverId,
+				root_path: { in: paths },
+			},
+			select: { root_path: true, project_id: true },
+		});
 	}
 }

@@ -6,6 +6,7 @@ import {
 	Delete,
 	Param,
 	Body,
+	Query,
 	ParseIntPipe,
 	UseGuards,
 	HttpCode,
@@ -17,6 +18,8 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { ROLES } from '@bedrock-forge/shared';
 import { ServersService } from './servers.service';
 import { CreateServerDto, UpdateServerDto } from './dto/server.dto';
+import { DetectBedrockDto } from './dto/detect-bedrock.dto';
+import { ScanProjectsMultiDto } from './dto/scan-projects.dto';
 
 @Controller('servers')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -24,8 +27,16 @@ import { CreateServerDto, UpdateServerDto } from './dto/server.dto';
 export class ServersController {
 	constructor(private readonly svc: ServersService) {}
 
-	@Get() findAll() {
-		return this.svc.findAll();
+	@Get() findAll(
+		@Query('page') page?: string,
+		@Query('limit') limit?: string,
+		@Query('search') search?: string,
+	) {
+		return this.svc.findAll({
+			page: page ? parseInt(page, 10) : 1,
+			limit: limit ? parseInt(limit, 10) : 50,
+			search,
+		});
 	}
 	@Get(':id') findOne(@Param('id', ParseIntPipe) id: number) {
 		return this.svc.findOne(id);
@@ -48,5 +59,21 @@ export class ServersController {
 		@Param('id', ParseIntPipe) id: number,
 	) {
 		return this.svc.testConnection(id);
+	}
+	@Post(':id/detect-bedrock') detectBedrock(
+		@Param('id', ParseIntPipe) id: number,
+		@Body() dto: DetectBedrockDto,
+	) {
+		return this.svc.detectBedrock(id, dto.path);
+	}
+	@Post(':id/scan-projects') scanProjects(
+		@Param('id', ParseIntPipe) id: number,
+	) {
+		return this.svc.scanProjects(id);
+	}
+	@Post('scan-projects-multi') scanProjectsMulti(
+		@Body() dto: ScanProjectsMultiDto,
+	) {
+		return this.svc.scanProjectsMulti(dto);
 	}
 }

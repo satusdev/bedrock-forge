@@ -15,7 +15,8 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { ROLES, PaginationQuery } from '@bedrock-forge/shared';
+import { ROLES } from '@bedrock-forge/shared';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { ClientsService } from './clients.service';
 import { CreateClientDto, UpdateClientDto } from './dto/client.dto';
 
@@ -25,7 +26,7 @@ export class ClientsController {
 	constructor(private readonly svc: ClientsService) {}
 
 	@Get()
-	findAll(@Query() query: PaginationQuery) {
+	findAll(@Query() query: PaginationQueryDto) {
 		return this.svc.findAll(query);
 	}
 

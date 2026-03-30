@@ -1,7 +1,11 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+	Injectable,
+	NotFoundException,
+	BadRequestException,
+} from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { PrismaService } from '../../prisma/prisma.service';
+import { randomUUID } from 'crypto';
 import {
 	QUEUES,
 	JOB_TYPES,
@@ -9,68 +13,84 @@ import {
 	PaginationQuery,
 } from '@bedrock-forge/shared';
 import { EnqueueBackupDto, RestoreBackupDto } from './dto/backup.dto';
+import { BackupsRepository } from './backups.repository';
 
 @Injectable()
 export class BackupsService {
 	constructor(
-		private readonly prisma: PrismaService,
+		private readonly repo: BackupsRepository,
 		@InjectQueue(QUEUES.BACKUPS) private readonly backupsQueue: Queue,
 	) {}
 
 	findByEnvironment(envId: number, query: PaginationQuery) {
 		const page = query.page ?? 1;
 		const limit = query.limit ?? 20;
-		const skip = (page - 1) * limit;
-		return this.prisma
-			.$transaction([
-				this.prisma.backup.findMany({
-					where: { environment_id: BigInt(envId) },
-					skip,
-					take: limit,
-					orderBy: { created_at: 'desc' },
-				}),
-				this.prisma.backup.count({ where: { environment_id: BigInt(envId) } }),
-			])
-			.then(([items, total]) => ({ items, total, page, limit }));
+		return this.repo.findByEnvironmentPaginated(BigInt(envId), page, limit);
 	}
 
 	async findOne(id: number) {
-		const b = await this.prisma.backup.findUnique({
-			where: { id: BigInt(id) },
-		});
+		const b = await this.repo.findById(BigInt(id));
 		if (!b) throw new NotFoundException(`Backup ${id} not found`);
 		return b;
 	}
 
 	async enqueueCreate(dto: EnqueueBackupDto) {
-		const exec = await this.prisma.jobExecution.create({
-			data: {
-				environment_id: BigInt(dto.environmentId),
-				job_type: JOB_TYPES.BACKUP_CREATE,
-				status: 'pending',
-			},
+		const env = await this.repo.findEnvironment(BigInt(dto.environmentId));
+		if (!env) {
+			throw new NotFoundException(`Environment ${dto.environmentId} not found`);
+		}
+		if (!env.google_drive_folder_id) {
+			throw new BadRequestException(
+				`Environment ${dto.environmentId} has no Google Drive folder ID configured.`,
+			);
+		}
+
+		const bullJobId = randomUUID();
+		const exec = await this.repo.createJobExecution({
+			queue_name: QUEUES.BACKUPS,
+			bull_job_id: bullJobId,
+			environment_id: BigInt(dto.environmentId),
+			payload: { environmentId: dto.environmentId, type: dto.type } as Record<
+				string,
+				string | number
+			>,
+		});
+		// Create the Backup row immediately so the UI can show pending state.
+		// The worker updates this row to running → completed | failed.
+		const backup = await this.repo.create({
+			environment_id: BigInt(dto.environmentId),
+			job_execution_id: exec.id,
+			type: dto.type as 'full' | 'db_only' | 'files_only',
+			status: 'pending',
 		});
 		const job = await this.backupsQueue.add(
 			JOB_TYPES.BACKUP_CREATE,
 			{
 				environmentId: dto.environmentId,
 				type: dto.type,
-				label: dto.label,
 				jobExecutionId: Number(exec.id),
+				backupId: Number(backup.id),
 			},
-			{ ...DEFAULT_JOB_OPTIONS, jobId: `backup-create-${exec.id}` },
+			{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
 		);
-		return { jobExecutionId: exec.id, bullJobId: job.id };
+		return {
+			jobExecutionId: Number(exec.id),
+			bullJobId: job.id,
+			backupId: Number(backup.id),
+		};
 	}
 
 	async enqueueRestore(dto: RestoreBackupDto) {
 		const backup = await this.findOne(dto.backupId);
-		const exec = await this.prisma.jobExecution.create({
-			data: {
-				environment_id: backup.environment_id,
-				job_type: JOB_TYPES.BACKUP_RESTORE,
-				status: 'pending',
-			},
+		const bullJobId = randomUUID();
+		const exec = await this.repo.createJobExecution({
+			queue_name: QUEUES.BACKUPS,
+			bull_job_id: bullJobId,
+			environment_id: backup.environment_id,
+			payload: {
+				backupId: dto.backupId,
+				environmentId: Number(backup.environment_id),
+			} as Record<string, number>,
 		});
 		const job = await this.backupsQueue.add(
 			JOB_TYPES.BACKUP_RESTORE,
@@ -79,13 +99,33 @@ export class BackupsService {
 				environmentId: Number(backup.environment_id),
 				jobExecutionId: Number(exec.id),
 			},
-			{ ...DEFAULT_JOB_OPTIONS, jobId: `backup-restore-${exec.id}` },
+			{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
 		);
 		return { jobExecutionId: exec.id, bullJobId: job.id };
 	}
 
+	async findJobExecution(id: number) {
+		const exec = await this.repo.findJobExecutionById(BigInt(id));
+		if (!exec) throw new NotFoundException(`JobExecution ${id} not found`);
+		return exec;
+	}
+
+	async findJobExecutionLog(id: number) {
+		const exec = await this.repo.findJobExecutionLog(BigInt(id));
+		if (!exec) throw new NotFoundException(`JobExecution ${id} not found`);
+		return exec;
+	}
+
 	async remove(id: number) {
-		await this.findOne(id);
-		return this.prisma.backup.delete({ where: { id: BigInt(id) } });
+		const backup = await this.findOne(id);
+		// Enqueue async GDrive file deletion before removing the DB record
+		if (backup.file_path) {
+			await this.backupsQueue.add(
+				JOB_TYPES.BACKUP_DELETE_FILE,
+				{ filePath: backup.file_path },
+				{ ...DEFAULT_JOB_OPTIONS, attempts: 5 },
+			);
+		}
+		return this.repo.delete(BigInt(id));
 	}
 }

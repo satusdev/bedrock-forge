@@ -2,7 +2,6 @@ import {
 	IsString,
 	IsOptional,
 	IsEmail,
-	IsUrl,
 	MaxLength,
 	IsArray,
 	IsInt,
@@ -22,10 +21,6 @@ export class CreateClientDto {
 	@IsOptional()
 	@IsString()
 	phone?: string;
-
-	@IsOptional()
-	@IsUrl()
-	website?: string;
 
 	@IsOptional()
 	@IsString()

@@ -15,9 +15,9 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { ROLES, PaginationQuery } from '@bedrock-forge/shared';
+import { ROLES } from '@bedrock-forge/shared';
 import { DomainsService } from './domains.service';
-import { CreateDomainDto, UpdateDomainDto } from './dto/domain.dto';
+import { CreateDomainDto, UpdateDomainDto, DomainQueryDto } from './dto/domain.dto';
 
 @Controller('domains')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -25,7 +25,7 @@ import { CreateDomainDto, UpdateDomainDto } from './dto/domain.dto';
 export class DomainsController {
 	constructor(private readonly svc: DomainsService) {}
 
-	@Get() findAll(@Query() q: PaginationQuery) {
+	@Get() findAll(@Query() q: DomainQueryDto) {
 		return this.svc.findAll(q);
 	}
 	@Get(':id') findOne(@Param('id', ParseIntPipe) id: number) {
