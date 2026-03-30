@@ -11,15 +11,20 @@ export class EncryptionService {
 	private readonly keyBuffer: Buffer;
 
 	constructor(private readonly config: ConfigService) {
-		const key = config.get<string>('encryption.key');
-		if (!key || key.length < 32)
-			throw new Error('ENCRYPTION_KEY must be at least 32 characters');
-		this.keyBuffer = Buffer.from(key.slice(0, 32), 'utf8');
+		const hexKey = config.get<string>('encryption.key');
+		if (!hexKey || hexKey.length !== 64) {
+			throw new Error(
+				'ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes for AES-256)',
+			);
+		}
+		this.keyBuffer = Buffer.from(hexKey, 'hex');
 	}
 
 	encrypt(plain: string): string {
 		const iv = randomBytes(IV_LEN);
-		const cipher = createCipheriv(ALGO, this.keyBuffer, iv);
+		const cipher = createCipheriv(ALGO, this.keyBuffer, iv, {
+			authTagLength: TAG_LEN,
+		});
 		const enc = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
 		const tag = cipher.getAuthTag();
 		return Buffer.concat([iv, enc, tag]).toString('base64');
