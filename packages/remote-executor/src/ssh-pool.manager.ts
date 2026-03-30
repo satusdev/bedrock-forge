@@ -10,7 +10,7 @@ export interface SshServerConfig {
 
 interface PooledConnection {
 	client: Client;
-	serverId: number;
+	serverKey: string;
 	inUse: boolean;
 	createdAt: Date;
 	lastUsedAt: Date;
@@ -31,7 +31,7 @@ const CONNECTION_TIMEOUT_MS = 15_000;
  *   use BullMQ concurrency limits to avoid starvation
  */
 export class SshPoolManager extends EventEmitter {
-	private pools: Map<number, PooledConnection[]> = new Map();
+	private pools: Map<string, PooledConnection[]> = new Map();
 	private gcInterval: NodeJS.Timeout;
 
 	constructor() {
@@ -42,10 +42,10 @@ export class SshPoolManager extends EventEmitter {
 	}
 
 	async getConnection(
-		serverId: number,
+		serverKey: string,
 		config: SshServerConfig,
 	): Promise<Client> {
-		const pool = this.getPool(serverId);
+		const pool = this.getPool(serverKey);
 
 		// Try to find an idle existing connection
 		const idle = pool.find(c => !c.inUse);
@@ -57,7 +57,7 @@ export class SshPoolManager extends EventEmitter {
 
 		// If below max, create a new connection
 		if (pool.length < MAX_POOL_SIZE) {
-			const conn = await this.createConnection(serverId, config);
+			const conn = await this.createConnection(serverKey, config);
 			return conn;
 		}
 
@@ -66,13 +66,13 @@ export class SshPoolManager extends EventEmitter {
 			const timeout = setTimeout(() => {
 				reject(
 					new Error(
-						`SSH pool timeout for server ${serverId}: pool at capacity (${MAX_POOL_SIZE})`,
+						`SSH pool timeout for server ${serverKey}: pool at capacity (${MAX_POOL_SIZE})`,
 					),
 				);
 			}, 30_000);
 
 			const check = setInterval(() => {
-				const available = this.getPool(serverId).find(c => !c.inUse);
+				const available = this.getPool(serverKey).find(c => !c.inUse);
 				if (available) {
 					clearInterval(check);
 					clearTimeout(timeout);
@@ -84,8 +84,8 @@ export class SshPoolManager extends EventEmitter {
 		});
 	}
 
-	releaseConnection(serverId: number, client: Client): void {
-		const pool = this.getPool(serverId);
+	releaseConnection(serverKey: string, client: Client): void {
+		const pool = this.getPool(serverKey);
 		const entry = pool.find(c => c.client === client);
 		if (entry) {
 			entry.inUse = false;
@@ -93,8 +93,8 @@ export class SshPoolManager extends EventEmitter {
 		}
 	}
 
-	closeServer(serverId: number): void {
-		const pool = this.getPool(serverId);
+	closeServer(serverKey: string): void {
+		const pool = this.getPool(serverKey);
 		pool.forEach(c => {
 			try {
 				c.client.end();
@@ -102,30 +102,30 @@ export class SshPoolManager extends EventEmitter {
 				// ignore close errors
 			}
 		});
-		this.pools.delete(serverId);
+		this.pools.delete(serverKey);
 	}
 
 	destroy(): void {
 		clearInterval(this.gcInterval);
-		for (const serverId of this.pools.keys()) {
-			this.closeServer(serverId);
+		for (const serverKey of this.pools.keys()) {
+			this.closeServer(serverKey);
 		}
 	}
 
-	private getPool(serverId: number): PooledConnection[] {
-		if (!this.pools.has(serverId)) {
-			this.pools.set(serverId, []);
+	private getPool(serverKey: string): PooledConnection[] {
+		if (!this.pools.has(serverKey)) {
+			this.pools.set(serverKey, []);
 		}
-		return this.pools.get(serverId)!;
+		return this.pools.get(serverKey)!;
 	}
 
 	private createConnection(
-		serverId: number,
+		serverKey: string,
 		config: SshServerConfig,
 	): Promise<Client> {
 		return new Promise((resolve, reject) => {
 			const client = new Client();
-			const pool = this.getPool(serverId);
+			const pool = this.getPool(serverKey);
 
 			const connectConfig: ConnectConfig = {
 				host: config.host,
@@ -133,6 +133,10 @@ export class SshPoolManager extends EventEmitter {
 				username: config.username,
 				privateKey: config.privateKey,
 				readyTimeout: CONNECTION_TIMEOUT_MS,
+				// Send a keepalive packet every 10 s so firewalls / NAT tables don't
+				// silently drop the TCP connection during long SFTP transfers.
+				keepaliveInterval: 10_000,
+				keepaliveCountMax: 3,
 				// Never trust host keys automatically in prod — in real usage, store
 				// and verify the host's fingerprint. Left as hostVerifier:undefined
 				// here to defer to ssh2's default (accepts all) — document this risk.
@@ -141,7 +145,7 @@ export class SshPoolManager extends EventEmitter {
 			client.on('ready', () => {
 				const entry: PooledConnection = {
 					client,
-					serverId,
+					serverKey,
 					inUse: true,
 					createdAt: new Date(),
 					lastUsedAt: new Date(),
@@ -153,7 +157,7 @@ export class SshPoolManager extends EventEmitter {
 			client.on('error', err => {
 				reject(
 					new Error(
-						`SSH connection failed for server ${serverId}: ${err.message}`,
+						`SSH connection failed for server ${serverKey}: ${err.message}`,
 					),
 				);
 			});
@@ -170,7 +174,7 @@ export class SshPoolManager extends EventEmitter {
 
 	private gc(): void {
 		const now = Date.now();
-		for (const [serverId, pool] of this.pools.entries()) {
+		for (const [serverKey, pool] of this.pools.entries()) {
 			const active = pool.filter(c => {
 				if (c.inUse) return true;
 				if (now - c.lastUsedAt.getTime() > IDLE_TIMEOUT_MS) {
@@ -184,9 +188,9 @@ export class SshPoolManager extends EventEmitter {
 				return true;
 			});
 			if (active.length === 0) {
-				this.pools.delete(serverId);
+				this.pools.delete(serverKey);
 			} else {
-				this.pools.set(serverId, active);
+				this.pools.set(serverKey, active);
 			}
 		}
 	}
