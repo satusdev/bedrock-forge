@@ -10,7 +10,8 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { ROLES, PaginationQuery } from '@bedrock-forge/shared';
+import { ROLES } from '@bedrock-forge/shared';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { PluginScansService } from './plugin-scans.service';
 
 @Controller('plugin-scans')
@@ -22,7 +23,7 @@ export class PluginScansController {
 	@Get('environment/:envId')
 	findByEnv(
 		@Param('envId', ParseIntPipe) envId: number,
-		@Query() q: PaginationQuery,
+		@Query() q: PaginationQueryDto,
 	) {
 		return this.svc.findByEnvironment(envId, q);
 	}
