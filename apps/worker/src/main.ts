@@ -3,6 +3,11 @@ import { NestFactory } from '@nestjs/core';
 import { WorkerModule } from './worker.module';
 import { Logger } from '@nestjs/common';
 
+// Prisma returns BigInt IDs; ensure they serialize properly in any JSON context.
+(BigInt.prototype as unknown as { toJSON: () => number }).toJSON = function () {
+	return Number(this);
+};
+
 async function bootstrap() {
 	const app = await NestFactory.createApplicationContext(WorkerModule);
 	app.enableShutdownHooks();

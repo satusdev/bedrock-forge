@@ -3,7 +3,6 @@ import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import * as https from 'https';
 import * as http from 'http';
-import * as tls from 'tls';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QUEUES } from '@bedrock-forge/shared';
 
@@ -16,52 +15,38 @@ export class MonitorProcessor extends WorkerHost {
 	}
 
 	async process(job: Job) {
-		const { monitorId, url, type, keyword, timeoutSeconds } = job.data;
-		const timeout = (timeoutSeconds ?? 30) * 1000;
+		const { monitorId } = job.data;
+		const timeout = 30_000;
 		const checkedAt = new Date();
 		let statusCode: number | null = null;
 		let responseTimeMs: number | null = null;
 		let isUp = false;
-		let errorMessage: string | null = null;
-		let sslExpiresAt: Date | null = null;
-
-		const start = Date.now();
-
-		try {
-			if (type === 'ssl') {
-				const result = await this.checkSsl(url, timeout);
-				isUp = result.valid;
-				sslExpiresAt = result.expiresAt;
-				responseTimeMs = Date.now() - start;
-			} else {
-				const result = await this.checkHttp(url, timeout);
-				statusCode = result.statusCode;
-				responseTimeMs = Date.now() - start;
-				isUp = result.statusCode >= 200 && result.statusCode < 400;
-
-				if (type === 'keyword' && keyword) {
-					isUp = isUp && result.body.includes(keyword);
-				}
-			}
-		} catch (err: unknown) {
-			isUp = false;
-			errorMessage = err instanceof Error ? err.message : String(err);
-			responseTimeMs = Date.now() - start;
-		}
 
 		const monitor = await this.prisma.monitor.findUnique({
 			where: { id: BigInt(monitorId) },
+			include: { environment: { select: { url: true } } },
 		});
 		if (!monitor) return;
+
+		const url = monitor.environment.url;
+		const start = Date.now();
+
+		try {
+			const result = await this.checkHttp(url, timeout);
+			statusCode = result.statusCode;
+			responseTimeMs = Date.now() - start;
+			isUp = result.statusCode >= 200 && result.statusCode < 400;
+		} catch {
+			isUp = false;
+			responseTimeMs = Date.now() - start;
+		}
 
 		await this.prisma.monitorResult.create({
 			data: {
 				monitor_id: BigInt(monitorId),
 				is_up: isUp,
-				status_code: statusCode,
-				response_time_ms: responseTimeMs,
-				error_message: errorMessage,
-				ssl_expires_at: sslExpiresAt,
+				status_code: statusCode ?? 0,
+				response_ms: responseTimeMs ?? 0,
 				checked_at: checkedAt,
 			},
 		});
@@ -85,8 +70,9 @@ export class MonitorProcessor extends WorkerHost {
 			where: { id: BigInt(monitorId) },
 			data: {
 				last_checked_at: checkedAt,
-				last_is_up: isUp,
-				uptime_percentage: uptime,
+				last_status: statusCode,
+				last_response_ms: responseTimeMs,
+				uptime_pct: uptime,
 			},
 		});
 	}
@@ -111,36 +97,6 @@ export class MonitorProcessor extends WorkerHost {
 			req.on('timeout', () => {
 				req.destroy();
 				reject(new Error('Request timed out'));
-			});
-		});
-	}
-
-	private checkSsl(
-		url: string,
-		timeout: number,
-	): Promise<{ valid: boolean; expiresAt: Date }> {
-		return new Promise((resolve, reject) => {
-			const parsed = new URL(url);
-			const socket = tls.connect(
-				{
-					host: parsed.hostname,
-					port: 443,
-					rejectUnauthorized: false,
-					timeout,
-				},
-				() => {
-					const cert = socket.getPeerCertificate();
-					socket.destroy();
-					if (!cert?.valid_to)
-						return resolve({ valid: false, expiresAt: new Date() });
-					const expiresAt = new Date(cert.valid_to);
-					resolve({ valid: expiresAt > new Date(), expiresAt });
-				},
-			);
-			socket.on('error', reject);
-			socket.on('timeout', () => {
-				socket.destroy();
-				reject(new Error('SSL check timed out'));
 			});
 		});
 	}

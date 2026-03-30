@@ -2,9 +2,9 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { PrismaService } from '../../prisma/prisma.service';
-import { EncryptionService } from '../../encryption/encryption.service';
+import { SshKeyService } from '../../services/ssh-key.service';
 import { createRemoteExecutor } from '@bedrock-forge/remote-executor';
-import { QUEUES, JOB_TYPES } from '@bedrock-forge/shared';
+import { QUEUES } from '@bedrock-forge/shared';
 
 /**
  * CreateBedrockProcessor
@@ -21,7 +21,7 @@ export class CreateBedrockProcessor extends WorkerHost {
 
 	constructor(
 		private readonly prisma: PrismaService,
-		private readonly enc: EncryptionService,
+		private readonly sshKey: SshKeyService,
 	) {
 		super();
 	}
@@ -31,40 +31,34 @@ export class CreateBedrockProcessor extends WorkerHost {
 
 		await this.prisma.jobExecution.update({
 			where: { id: BigInt(jobExecutionId) },
-			data: { status: 'running', started_at: new Date() },
+			data: { status: 'active', started_at: new Date() },
 		});
 
 		try {
 			const env = await this.prisma.environment.findUniqueOrThrow({
 				where: { id: BigInt(environmentId) },
-				include: { project: { include: { server: true } } },
+				include: { server: true },
 			});
 
-			const server = env.project.server;
+			const server = env.server;
 			const executor = createRemoteExecutor({
-				serverId: Number(server.id),
 				host: server.ip_address,
 				port: server.ssh_port,
-				username: server.ssh_username,
-				privateKey: this.enc.decrypt(server.ssh_private_key),
-				passphrase: server.ssh_passphrase
-					? this.enc.decrypt(server.ssh_passphrase)
-					: undefined,
+				username: server.ssh_user,
+				privateKey: await this.sshKey.resolvePrivateKey(server),
 			});
 
 			await job.updateProgress(5);
 
 			// Verify/install composer
-			const composerCheck = await executor.execute(
+			await executor.execute(
 				"command -v composer || php -r \"copy('https://getcomposer.org/installer', '/tmp/composer-setup.php');\" && php /tmp/composer-setup.php --install-dir=/usr/local/bin --filename=composer",
 			);
 			await job.updateProgress(20);
 
 			// Create project
-			const parentDir = env.docroot.split('/').slice(0, -1).join('/');
-			const projectDir = env.docroot.split('/').pop();
 			await executor.execute(
-				`composer create-project roots/bedrock ${env.docroot} --no-interaction`,
+				`composer create-project roots/bedrock ${env.root_path} --no-interaction`,
 			);
 			await job.updateProgress(70);
 
@@ -80,14 +74,14 @@ DB_USER=wordpress
 DB_PASSWORD=change_me
 DB_HOST=localhost
 WP_ENV=${env.type}
-WP_HOME=https://${env.domain}
+WP_HOME=${env.url}
 WP_SITEURL=\${WP_HOME}/wp
 AUTH_KEY='${salts.stdout.slice(0, 64)}'
 SECURE_AUTH_KEY='${salts.stdout.slice(64, 128)}'
 `.trim();
 
 			await executor.pushFile({
-				remotePath: `${env.docroot}/.env`,
+				remotePath: `${env.root_path}/.env`,
 				content: Buffer.from(envContent),
 			});
 			await job.updateProgress(100);
@@ -98,7 +92,7 @@ SECURE_AUTH_KEY='${salts.stdout.slice(64, 128)}'
 			});
 
 			this.logger.log(
-				`Bedrock created at ${env.docroot} on server ${server.name}`,
+				`Bedrock created at ${env.root_path} on server ${server.name}`,
 			);
 		} catch (err: unknown) {
 			const msg = err instanceof Error ? err.message : String(err);
@@ -107,7 +101,7 @@ SECURE_AUTH_KEY='${salts.stdout.slice(64, 128)}'
 				where: { id: BigInt(jobExecutionId) },
 				data: {
 					status: 'failed',
-					error_message: msg,
+					last_error: msg,
 					completed_at: new Date(),
 				},
 			});
