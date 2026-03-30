@@ -6,7 +6,13 @@ import { resolve } from 'path';
 export default defineConfig({
 	plugins: [react(), tailwindcss()],
 	resolve: {
-		alias: { '@': resolve(__dirname, 'src') },
+		alias: {
+			'@': resolve(__dirname, 'src'),
+			'@bedrock-forge/shared': resolve(
+				__dirname,
+				'../../packages/shared/src/index.ts',
+			),
+		},
 	},
 	server: {
 		port: 5173,
