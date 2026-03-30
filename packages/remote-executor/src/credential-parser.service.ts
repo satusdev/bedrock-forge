@@ -3,30 +3,34 @@ import { WpDbCredentials } from '@bedrock-forge/shared';
 /**
  * CredentialParserService
  *
- * Extracts WordPress DB credentials from raw wp-config.php content using
- * regex only. NEVER sources, evals, requires, or spawns any file.
+ * Extracts WordPress DB credentials from raw wp-config.php or .env content
+ * using regex only. NEVER sources, evals, requires, or spawns any file.
  *
- * Handles all real-world wp-config.php patterns:
+ * Handles all real-world patterns:
  * - define('DB_NAME', 'mydb');
  * - define( "DB_NAME", "mydb" );
  * - define('DB_PASSWORD', 'p@$$w0rd!123');
- * - .env style: DB_NAME=mydb
+ * - .env style: DB_NAME=mydb / DB_NAME='mydb' / DB_NAME="mydb"
+ * - export DB_NAME=mydb (shell-sourced .env)
+ * - DATABASE_URL=mysql://user:pass@host:port/dbname
+ * - Missing or commented-out DB_HOST (defaults to localhost)
  * - Constants defined in any order
  * - Whitespace variations
- * - Values containing special characters (colons, slashes, etc.)
+ * - Values containing special characters
  */
 export class CredentialParserService {
 	/**
 	 * Parse wp-config.php file content and extract DB credentials.
-	 * Returns null if any required credential is missing.
+	 * Returns null if DB_NAME, DB_USER or DB_PASSWORD cannot be found.
+	 * DB_HOST defaults to 'localhost' when absent.
 	 */
 	parseWpConfig(content: string): WpDbCredentials | null {
 		const dbName = this.extractDefine(content, 'DB_NAME');
 		const dbUser = this.extractDefine(content, 'DB_USER');
 		const dbPassword = this.extractDefine(content, 'DB_PASSWORD');
-		const dbHost = this.extractDefine(content, 'DB_HOST');
+		const dbHost = this.extractDefine(content, 'DB_HOST') ?? 'localhost';
 
-		if (!dbName || !dbUser || !dbPassword || !dbHost) {
+		if (!dbName || !dbUser || !dbPassword) {
 			return null;
 		}
 
@@ -35,19 +39,42 @@ export class CredentialParserService {
 
 	/**
 	 * Parse .env file content and extract DB credentials.
-	 * Returns null if any required credential is missing.
+	 *
+	 * Strategy:
+	 * 1. Try individual DB_NAME / DB_USER / DB_PASSWORD / DB_HOST vars.
+	 * 2. If DB_NAME is still missing, fall back to DATABASE_URL parsing.
+	 * 3. DB_HOST defaults to 'localhost' when absent or commented out.
+	 *
+	 * Returns null if the minimum set (dbName + dbUser + dbPassword) cannot
+	 * be determined.
 	 */
 	parseEnvFile(content: string): WpDbCredentials | null {
-		const dbName = this.extractEnv(content, 'DB_NAME');
-		const dbUser = this.extractEnv(content, 'DB_USER');
-		const dbPassword = this.extractEnv(content, 'DB_PASSWORD');
-		const dbHost = this.extractEnv(content, 'DB_HOST');
+		let dbName = this.extractEnv(content, 'DB_NAME');
+		let dbUser = this.extractEnv(content, 'DB_USER');
+		let dbPassword = this.extractEnv(content, 'DB_PASSWORD');
+		let dbHost = this.extractEnv(content, 'DB_HOST');
 
-		if (!dbName || !dbUser || !dbPassword || !dbHost) {
+		// Fallback: parse DATABASE_URL when individual vars are incomplete
+		if (!dbName) {
+			const fromUrl = this.parseDatabaseUrl(content);
+			if (fromUrl) {
+				dbName = dbName ?? fromUrl.dbName;
+				dbUser = dbUser ?? fromUrl.dbUser;
+				dbPassword = dbPassword ?? fromUrl.dbPassword;
+				dbHost = dbHost ?? fromUrl.dbHost;
+			}
+		}
+
+		if (!dbName || !dbUser || !dbPassword) {
 			return null;
 		}
 
-		return { dbName, dbUser, dbPassword, dbHost };
+		return {
+			dbName,
+			dbUser,
+			dbPassword,
+			dbHost: dbHost ?? 'localhost',
+		};
 	}
 
 	/**
@@ -98,34 +125,80 @@ export class CredentialParserService {
 	}
 
 	/**
-	 * Extract a KEY=value or KEY="value" or KEY='value' line from .env content.
+	 * Extract a KEY=value line from .env content.
 	 *
 	 * Handles:
 	 *   DB_NAME=mydb
 	 *   DB_NAME="mydb"
 	 *   DB_NAME='mydb'
-	 *   DB_PASSWORD="p@$$w0rd!#123"
+	 *   export DB_NAME=mydb
+	 *   export DB_NAME="mydb"
+	 *   DB_PASSWORD="it's-complex"  (single quote inside double-quoted value)
+	 *   DB_PASSWORD='say"hello"'    (double quote inside single-quoted value)
 	 *   Lines with # comments after value
+	 *
+	 * Uses separate single/double-quote patterns to avoid cross-quote
+	 * truncation (a shared [^'"] class stops at either quote type).
 	 */
 	private extractEnv(content: string, key: string): string | null {
-		// Quoted value
-		const quotedPattern = new RegExp(
-			`^${key}\\s*=\\s*['"]((?:[^'"\\\\]|\\\\.)*)['"]`,
-			'im',
-		);
-		const quotedMatch = content.match(quotedPattern);
-		if (quotedMatch?.[1] !== undefined) {
-			return this.unescape(quotedMatch[1]);
+		// Optional `export ` prefix (common in shell-sourced .env files)
+		const prefix = `(?:export\\s+)?${key}\\s*=\\s*`;
+
+		// 1. Single-quoted value — stops only at unescaped single quote
+		const singlePattern = new RegExp(`^${prefix}'((?:[^'\\\\]|\\\\.)*)'`, 'im');
+		const singleMatch = content.match(singlePattern);
+		if (singleMatch?.[1] !== undefined) {
+			return this.unescape(singleMatch[1]);
 		}
 
-		// Unquoted value (ends at whitespace or # comment)
-		const unquotedPattern = new RegExp(`^${key}\\s*=\\s*([^\\s#'"]+)`, 'im');
+		// 2. Double-quoted value — stops only at unescaped double quote
+		const doublePattern = new RegExp(`^${prefix}"((?:[^"\\\\]|\\\\.)*)"`, 'im');
+		const doubleMatch = content.match(doublePattern);
+		if (doubleMatch?.[1] !== undefined) {
+			return this.unescape(doubleMatch[1]);
+		}
+
+		// 3. Unquoted value (ends at whitespace or # comment)
+		const unquotedPattern = new RegExp(`^${prefix}([^\\s#'"]+)`, 'im');
 		const unquotedMatch = content.match(unquotedPattern);
 		if (unquotedMatch?.[1] !== undefined) {
 			return unquotedMatch[1].trim();
 		}
 
 		return null;
+	}
+
+	/**
+	 * Parse DATABASE_URL from .env content.
+	 *
+	 * Supports:
+	 *   DATABASE_URL=mysql://user:pass@host/dbname
+	 *   DATABASE_URL=mysql://user:pass@host:3306/dbname
+	 *   DATABASE_URL='mysql://user:p%40ss@host/dbname'
+	 *   DATABASE_URL="mysql://user:pass@host/dbname"
+	 *
+	 * URL-decodes user/password components to handle encoded special chars.
+	 * Returns null when DATABASE_URL is absent, commented out, or malformed.
+	 */
+	private parseDatabaseUrl(content: string): WpDbCredentials | null {
+		const raw = this.extractEnv(content, 'DATABASE_URL');
+		if (!raw) return null;
+
+		try {
+			const url = new URL(raw);
+			const dbName = url.pathname.replace(/^\//, '');
+			const dbUser = decodeURIComponent(url.username);
+			const dbPassword = decodeURIComponent(url.password);
+			const dbHost = url.port
+				? `${url.hostname}:${url.port}`
+				: url.hostname || 'localhost';
+
+			if (!dbName || !dbUser) return null;
+
+			return { dbName, dbUser, dbPassword, dbHost };
+		} catch {
+			return null;
+		}
 	}
 
 	/**

@@ -7,6 +7,7 @@ export const QUEUES = {
 	MONITORS: 'monitors',
 	DOMAINS: 'domains',
 	PROJECTS: 'projects',
+	NOTIFICATIONS: 'notifications',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
@@ -19,6 +20,7 @@ export const DLQ = {
 	MONITORS: 'monitors-dlq',
 	DOMAINS: 'domains-dlq',
 	PROJECTS: 'projects-dlq',
+	NOTIFICATIONS: 'notifications-dlq',
 } as const;
 
 // ─── Job Types ────────────────────────────────────────────────────────────────
@@ -27,6 +29,8 @@ export const JOB_TYPES = {
 	// Backups
 	BACKUP_CREATE: 'backup:create',
 	BACKUP_RESTORE: 'backup:restore',
+	BACKUP_SCHEDULED: 'backup:scheduled',
+	BACKUP_DELETE_FILE: 'backup:delete-file',
 
 	// Plugin scans
 	PLUGIN_SCAN_RUN: 'plugin-scan:run',
@@ -43,6 +47,9 @@ export const JOB_TYPES = {
 
 	// Projects
 	PROJECT_CREATE_BEDROCK: 'project:create-bedrock',
+
+	// Notifications
+	NOTIFICATION_SEND: 'notification:send',
 } as const;
 
 export type JobType = (typeof JOB_TYPES)[keyof typeof JOB_TYPES];
@@ -68,6 +75,7 @@ export const WS_EVENTS = {
 	JOB_PROGRESS: 'job:progress',
 	JOB_COMPLETED: 'job:completed',
 	JOB_FAILED: 'job:failed',
+	JOB_LOG: 'job:log',
 	MONITOR_RESULT: 'monitor:result',
 } as const;
 

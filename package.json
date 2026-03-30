@@ -12,18 +12,39 @@
 		"db:generate": "prisma generate --schema=prisma/schema.prisma",
 		"db:migrate": "prisma migrate dev --schema=prisma/schema.prisma",
 		"db:deploy": "prisma migrate deploy --schema=prisma/schema.prisma",
+		"db:seed": "prisma db seed --schema=prisma/schema.prisma",
 		"db:studio": "prisma studio --schema=prisma/schema.prisma",
+		"docker:setup": "./install.sh",
+		"docker:update": "./update.sh",
+		"docker:reset": "./reset.sh",
 		"docker:up": "docker compose up -d",
 		"docker:down": "docker compose down",
+		"docker:restart": "docker compose restart forge",
+		"docker:build": "docker compose build",
+		"docker:ps": "docker compose ps",
 		"docker:logs": "docker compose logs -f forge",
-		"docker:build": "docker compose build"
+		"docker:logs:all": "docker compose logs -f",
+		"docker:shell": "docker compose exec forge sh",
+		"docker:seed": "docker compose exec forge node prisma/seed.js",
+		"docker:migrate": "docker compose exec forge npx prisma migrate deploy --schema=prisma/schema.prisma"
+	},
+	"prisma": {
+		"seed": "ts-node --compiler-options '{\"module\":\"commonjs\"}' prisma/seed.ts"
+	},
+	"dependencies": {
+		"dotenv": "^16.4.7",
+		"bcryptjs": "^2.4.3",
+		"@prisma/adapter-pg": "^7.5.0",
+		"pg": "^8.13.0",
+		"prisma": "^7.5.0"
 	},
 	"devDependencies": {
 		"turbo": "^2.3.3",
 		"prettier": "^3.4.2",
 		"typescript": "^5.7.2",
 		"@types/node": "^22.10.7",
-		"prisma": "^7.5.0"
+		"ts-node": "^10.9.2",
+		"@types/bcryptjs": "^2.4.6"
 	},
 	"engines": {
 		"node": ">=22.0.0",
