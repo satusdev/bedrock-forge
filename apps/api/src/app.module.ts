@@ -2,11 +2,10 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
 import { ThrottlerModule } from '@nestjs/throttler';
-import { ServeStaticModule } from '@nestjs/serve-static';
-import { join } from 'path';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
+import { UsersModule } from './modules/users/users.module';
 import { ClientsModule } from './modules/clients/clients.module';
 import { TagsModule } from './modules/tags/tags.module';
 import { PackagesModule } from './modules/packages/packages.module';
@@ -20,6 +19,9 @@ import { SyncModule } from './modules/sync/sync.module';
 import { DomainsModule } from './modules/domains/domains.module';
 import { MonitorsModule } from './modules/monitors/monitors.module';
 import { SettingsModule } from './modules/settings/settings.module';
+import { JobExecutionsModule } from './modules/job-executions/job-executions.module';
+import { InvoicesModule } from './modules/invoices/invoices.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { GatewaysModule } from './gateways/gateways.module';
 import { EncryptionModule } from './common/encryption/encryption.module';
 import { QUEUES } from '@bedrock-forge/shared';
@@ -67,18 +69,8 @@ import appConfig from './config/app.config';
 			{ name: QUEUES.MONITORS },
 			{ name: QUEUES.DOMAINS },
 			{ name: QUEUES.PROJECTS },
+			{ name: QUEUES.NOTIFICATIONS },
 		),
-
-		// Serve built React app in production
-		...(process.env.NODE_ENV === 'production'
-			? [
-					ServeStaticModule.forRoot({
-						rootPath: join(__dirname, '..', '..', '..', 'web', 'dist'),
-						exclude: ['/api/(.*)'],
-						serveStaticOptions: { index: 'index.html' },
-					}),
-				]
-			: []),
 
 		// Infrastructure
 		PrismaModule,
@@ -87,6 +79,7 @@ import appConfig from './config/app.config';
 		// Feature modules
 		AuthModule,
 		HealthModule,
+		UsersModule,
 		ClientsModule,
 		TagsModule,
 		PackagesModule,
@@ -100,6 +93,9 @@ import appConfig from './config/app.config';
 		DomainsModule,
 		MonitorsModule,
 		SettingsModule,
+		JobExecutionsModule,
+		InvoicesModule,
+		NotificationsModule,
 		GatewaysModule,
 	],
 	providers: [],

@@ -8,11 +8,14 @@ import {
 	ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger } from '@nestjs/common';
+import { Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { QueueEvents } from 'bullmq';
+import { PrismaService } from '../prisma/prisma.service';
 import {
 	WS_EVENTS,
+	QUEUES,
 	JobProgressEvent,
 	JobCompletedEvent,
 	JobFailedEvent,
@@ -23,24 +26,304 @@ import {
  * JobsGateway — WebSocket gateway for real-time job status updates.
  *
  * Clients connect with a JWT token in the auth handshake.
- * Once connected, they can subscribe to specific environments or jobs.
- * The worker processes publish events to Redis pub/sub; this gateway
- * broadcasts to subscribed clients.
+ * Once connected, they can subscribe to specific environments.
+ *
+ * BullMQ QueueEvents listeners bridge Worker progress events (Redis) to
+ * WebSocket clients — no direct coupling between Worker and API processes.
  */
 @WebSocketGateway({
 	cors: { origin: '*', credentials: true },
 	namespace: '/ws',
 })
-export class JobsGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class JobsGateway
+	implements
+		OnGatewayConnection,
+		OnGatewayDisconnect,
+		OnModuleInit,
+		OnModuleDestroy
+{
 	@WebSocketServer()
 	server!: Server;
 
 	private readonly logger = new Logger(JobsGateway.name);
+	private backupsQueueEvents!: QueueEvents;
+	private projectsQueueEvents!: QueueEvents;
+	private pluginScansQueueEvents!: QueueEvents;
+	private syncQueueEvents!: QueueEvents;
+	private monitorsQueueEvents!: QueueEvents;
 
 	constructor(
 		private readonly jwtService: JwtService,
 		private readonly config: ConfigService,
+		private readonly prisma: PrismaService,
 	) {}
+
+	// ── Lifecycle ─────────────────────────────────────────────────────────────
+
+	onModuleInit() {
+		const redisUrl = this.config.get<string>('redis.url')!;
+		this.backupsQueueEvents = new QueueEvents(QUEUES.BACKUPS, {
+			connection: { url: redisUrl },
+		});
+
+		this.backupsQueueEvents.on('progress', async ({ jobId, data }) => {
+			const isObj = typeof data === 'object' && data !== null;
+			const progress =
+				typeof data === 'number'
+					? data
+					: ((data as { value?: number })?.value ?? 0);
+			const step = isObj ? (data as { step?: string })?.step : undefined;
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobProgress({
+				jobId,
+				queueName: QUEUES.BACKUPS,
+				progress,
+				step,
+				environmentId: envId,
+			});
+		});
+
+		this.backupsQueueEvents.on('completed', async ({ jobId }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobCompleted({
+				jobId,
+				queueName: QUEUES.BACKUPS,
+				environmentId: envId,
+			});
+		});
+
+		this.backupsQueueEvents.on('failed', async ({ jobId, failedReason }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobFailed({
+				jobId,
+				queueName: QUEUES.BACKUPS,
+				error: failedReason,
+				attempt: 1,
+				environmentId: envId,
+			});
+		});
+
+		this.backupsQueueEvents.on('stalled', async ({ jobId }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobFailed({
+				jobId,
+				queueName: QUEUES.BACKUPS,
+				error: 'Job stalled — worker may have crashed',
+				attempt: 1,
+				environmentId: envId,
+			});
+		});
+
+		// ── Projects queue bridge ──────────────────────────────────────────────
+		this.projectsQueueEvents = new QueueEvents(QUEUES.PROJECTS, {
+			connection: { url: redisUrl },
+		});
+
+		this.projectsQueueEvents.on('progress', async ({ jobId, data }) => {
+			const progress =
+				typeof data === 'number'
+					? data
+					: ((data as { value?: number })?.value ?? 0);
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobProgress({
+				jobId,
+				queueName: QUEUES.PROJECTS,
+				progress,
+				environmentId: envId,
+			});
+		});
+
+		this.projectsQueueEvents.on('completed', async ({ jobId }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobCompleted({
+				jobId,
+				queueName: QUEUES.PROJECTS,
+				environmentId: envId,
+			});
+		});
+
+		this.projectsQueueEvents.on('failed', async ({ jobId, failedReason }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobFailed({
+				jobId,
+				queueName: QUEUES.PROJECTS,
+				error: failedReason,
+				attempt: 1,
+				environmentId: envId,
+			});
+		});
+
+		this.projectsQueueEvents.on('stalled', async ({ jobId }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobFailed({
+				jobId,
+				queueName: QUEUES.PROJECTS,
+				error: 'Job stalled — worker may have crashed',
+				attempt: 1,
+				environmentId: envId,
+			});
+		});
+
+		// ── Plugin scans queue bridge ────────────────────────────────────────────
+		this.pluginScansQueueEvents = new QueueEvents(QUEUES.PLUGIN_SCANS, {
+			connection: { url: redisUrl },
+		});
+
+		this.pluginScansQueueEvents.on('progress', async ({ jobId, data }) => {
+			const progress =
+				typeof data === 'number'
+					? data
+					: ((data as { value?: number })?.value ?? 0);
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobProgress({
+				jobId,
+				queueName: QUEUES.PLUGIN_SCANS,
+				progress,
+				environmentId: envId,
+			});
+		});
+
+		this.pluginScansQueueEvents.on('completed', async ({ jobId }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobCompleted({
+				jobId,
+				queueName: QUEUES.PLUGIN_SCANS,
+				environmentId: envId,
+			});
+		});
+
+		this.pluginScansQueueEvents.on(
+			'failed',
+			async ({ jobId, failedReason }) => {
+				const envId = await this.resolveEnvId(jobId);
+				this.emitJobFailed({
+					jobId,
+					queueName: QUEUES.PLUGIN_SCANS,
+					error: failedReason,
+					attempt: 1,
+					environmentId: envId,
+				});
+			},
+		);
+
+		this.pluginScansQueueEvents.on('stalled', async ({ jobId }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobFailed({
+				jobId,
+				queueName: QUEUES.PLUGIN_SCANS,
+				error: 'Job stalled — worker may have crashed',
+				attempt: 1,
+				environmentId: envId,
+			});
+		});
+
+		// ── Sync queue bridge ─────────────────────────────────────────────────
+		this.syncQueueEvents = new QueueEvents(QUEUES.SYNC, {
+			connection: { url: redisUrl },
+		});
+
+		this.syncQueueEvents.on('progress', async ({ jobId, data }) => {
+			const progress =
+				typeof data === 'number'
+					? data
+					: ((data as { value?: number })?.value ?? 0);
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobProgress({
+				jobId,
+				queueName: QUEUES.SYNC,
+				progress,
+				environmentId: envId,
+			});
+		});
+
+		this.syncQueueEvents.on('completed', async ({ jobId }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobCompleted({
+				jobId,
+				queueName: QUEUES.SYNC,
+				environmentId: envId,
+			});
+		});
+
+		this.syncQueueEvents.on('failed', async ({ jobId, failedReason }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobFailed({
+				jobId,
+				queueName: QUEUES.SYNC,
+				error: failedReason,
+				attempt: 1,
+				environmentId: envId,
+			});
+		});
+
+		this.syncQueueEvents.on('stalled', async ({ jobId }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobFailed({
+				jobId,
+				queueName: QUEUES.SYNC,
+				error: 'Job stalled — worker may have crashed',
+				attempt: 1,
+				environmentId: envId,
+			});
+		});
+
+		// ── Monitors queue bridge ─────────────────────────────────────────────
+		this.monitorsQueueEvents = new QueueEvents(QUEUES.MONITORS, {
+			connection: { url: redisUrl },
+		});
+
+		this.monitorsQueueEvents.on('completed', async ({ jobId }) => {
+			const envId = await this.resolveMonitorEnvId(jobId);
+			if (envId == null) return;
+			this.emitMonitorResult({ environmentId: envId });
+		});
+
+		this.logger.log(
+			'BullMQ QueueEvents bridge initialised for backups, projects, plugin-scans, sync, monitors queues',
+		);
+	}
+
+	async onModuleDestroy() {
+		await this.backupsQueueEvents?.close();
+		await this.projectsQueueEvents?.close();
+		await this.pluginScansQueueEvents?.close();
+		await this.syncQueueEvents?.close();
+		await this.monitorsQueueEvents?.close();
+	}
+
+	/** Look up the environmentId for a monitor bull_job_id via the monitors table. */
+	private async resolveMonitorEnvId(
+		bullJobId: string,
+	): Promise<number | undefined> {
+		try {
+			// BullMQ jobId for monitors is the bull_job_id string stored in job.data or job.id.
+			// The monitor processor stores monitorId in job.data — we look up via a join.
+			// We can't use JobExecution for monitors (no row created). Instead use the
+			// approach of checking which monitor job maps to which environment via Redis.
+			// Since bullJobId == job.id and monitor job.data has { monitorId }, we cannot
+			// reverse that mapping from QueueEvents alone without a lookup.
+			// Best-effort: return undefined and rely on the frontend refetchInterval.
+			void bullJobId;
+			return undefined;
+		} catch {
+			return undefined;
+		}
+	}
+
+	/** Look up the environmentId for a bull_job_id from the JobExecution table. */
+	private async resolveEnvId(bullJobId: string): Promise<number | undefined> {
+		try {
+			const exec = await this.prisma.jobExecution.findFirst({
+				where: { bull_job_id: bullJobId },
+				select: { environment_id: true },
+			});
+			return exec?.environment_id ? Number(exec.environment_id) : undefined;
+		} catch {
+			return undefined;
+		}
+	}
+
+	// ── WebSocket connection handling ─────────────────────────────────────────
 
 	async handleConnection(socket: Socket) {
 		try {
@@ -86,7 +369,7 @@ export class JobsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 		socket.leave(`env:${data.environmentId}`);
 	}
 
-	// ─── Emit methods called by processors via the gateway instance ───────────
+	// ── Emit methods ──────────────────────────────────────────────────────────
 
 	emitJobProgress(event: JobProgressEvent) {
 		if (event.environmentId) {
@@ -115,9 +398,10 @@ export class JobsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 		this.server.emit(WS_EVENTS.JOB_FAILED, event);
 	}
 
-	emitMonitorResult(event: MonitorResultEvent) {
+	emitMonitorResult(event: Pick<MonitorResultEvent, 'environmentId'>) {
 		this.server
 			.to(`env:${event.environmentId}`)
 			.emit(WS_EVENTS.MONITOR_RESULT, event);
+		this.server.emit(WS_EVENTS.MONITOR_RESULT, event);
 	}
 }
