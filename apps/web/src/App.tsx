@@ -6,10 +6,15 @@ import { DashboardPage } from '@/pages/DashboardPage';
 import { ClientsPage } from '@/pages/ClientsPage';
 import { ServersPage } from '@/pages/ServersPage';
 import { ProjectsPage } from '@/pages/ProjectsPage';
+import { ProjectDetailPage } from '@/pages/ProjectDetailPage';
 import { BackupsPage } from '@/pages/BackupsPage';
 import { MonitorsPage } from '@/pages/MonitorsPage';
-import { DomainsPage } from '@/pages/DomainsPage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { ActivityPage } from '@/pages/ActivityPage';
+import { UsersPage } from '@/pages/UsersPage';
+import { PackagesPage } from '@/pages/PackagesPage';
+import { InvoicesPage } from '@/pages/InvoicesPage';
+import { NotificationsPage } from '@/pages/NotificationsPage';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
 	const token = useAuthStore(s => s.accessToken);
@@ -34,10 +39,15 @@ export default function App() {
 					<Route path='clients' element={<ClientsPage />} />
 					<Route path='servers' element={<ServersPage />} />
 					<Route path='projects' element={<ProjectsPage />} />
+					<Route path='projects/:id' element={<ProjectDetailPage />} />
 					<Route path='backups' element={<BackupsPage />} />
 					<Route path='monitors' element={<MonitorsPage />} />
-					<Route path='domains' element={<DomainsPage />} />
-					<Route path='settings' element={<SettingsPage />} />
+					<Route path='activity' element={<ActivityPage />} />
+					<Route path='settings' element={<SettingsPage />} />{' '}
+					<Route path='users' element={<UsersPage />} />
+					<Route path='packages' element={<PackagesPage />} />
+					<Route path='invoices' element={<InvoicesPage />} />
+					<Route path='notifications' element={<NotificationsPage />} />{' '}
 				</Route>
 			</Routes>
 		</BrowserRouter>

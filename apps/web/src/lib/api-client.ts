@@ -12,15 +12,15 @@ async function refreshTokens() {
 		const res = await fetch(`${BASE}/auth/refresh`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ refresh_token: refreshToken }),
+			body: JSON.stringify({ refreshToken }),
 		});
 		if (!res.ok) {
 			logout();
 			return null;
 		}
 		const data = await res.json();
-		setTokens(data.access_token, data.refresh_token);
-		return data.access_token as string;
+		setTokens(data.accessToken, data.refreshToken);
+		return data.accessToken as string;
 	} catch {
 		logout();
 		return null;

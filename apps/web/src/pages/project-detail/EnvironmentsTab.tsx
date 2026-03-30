@@ -1,0 +1,1149 @@
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import {
+	Plus,
+	Pencil,
+	Trash2,
+	ExternalLink,
+	Server,
+	FolderOpen,
+	Globe,
+	HardDrive,
+	Activity,
+	ScanLine,
+	MonitorSmartphone,
+	Database,
+	Eye,
+	EyeOff,
+	Copy,
+	Shield,
+	ChevronDown,
+	ChevronUp,
+	Loader2,
+	FolderSync,
+	CheckCircle2,
+	CircleDashed,
+} from 'lucide-react';
+import { api } from '@/lib/api-client';
+import { toast } from '@/hooks/use-toast';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { AlertDialog } from '@/components/ui/alert-dialog';
+import {
+	Dialog,
+	DialogContent,
+	DialogHeader,
+	DialogTitle,
+	DialogFooter,
+} from '@/components/ui/dialog';
+import {
+	Card,
+	CardContent,
+	CardHeader,
+	CardTitle,
+	CardDescription,
+} from '@/components/ui/card';
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from '@/components/ui/select';
+import { Skeleton } from '@/components/ui/skeleton';
+
+interface ServerOption {
+	id: number;
+	name: string;
+	ip_address: string;
+	status: 'online' | 'offline' | 'unknown';
+}
+
+interface DbCredentials {
+	dbName: string;
+	dbUser: string;
+	dbPassword: string;
+	dbHost: string;
+}
+
+interface Environment {
+	id: number;
+	project_id: number;
+	type: string;
+	url: string;
+	root_path: string;
+	backup_path: string | null;
+	google_drive_folder_id: string | null;
+	server: {
+		id: number;
+		name: string;
+		ip_address: string;
+		status: 'online' | 'offline' | 'unknown';
+	};
+}
+
+const envSchema = z.object({
+	type: z.enum(['production', 'staging', 'development']),
+	server_id: z.coerce
+		.number({ invalid_type_error: 'Server is required' })
+		.positive(),
+	url: z.string().url('Must be a valid URL'),
+	root_path: z.string().min(1, 'Root path is required').max(500),
+	backup_path: z.string().max(500).optional().or(z.literal('')),
+	google_drive_folder_id: z.string().max(500).optional().or(z.literal('')),
+});
+type EnvForm = z.infer<typeof envSchema>;
+
+const ENV_TYPES = [
+	{ value: 'production', label: 'Production' },
+	{ value: 'staging', label: 'Staging' },
+	{ value: 'development', label: 'Development' },
+] as const;
+type EnvTypeValue = (typeof ENV_TYPES)[number]['value'];
+
+const SERVER_STATUS_VARIANT: Record<
+	string,
+	'success' | 'destructive' | 'secondary'
+> = {
+	online: 'success',
+	offline: 'destructive',
+	unknown: 'secondary',
+};
+
+function EnvironmentFormDialog({
+	open,
+	onOpenChange,
+	projectId,
+	initial,
+	servers,
+	onSuccess,
+}: {
+	open: boolean;
+	onOpenChange: (o: boolean) => void;
+	projectId: number;
+	initial?: Environment;
+	servers: ServerOption[];
+	onSuccess: () => void;
+}) {
+	const {
+		register,
+		handleSubmit,
+		setValue,
+		reset,
+		formState: { errors, isSubmitting },
+	} = useForm<EnvForm>({
+		resolver: zodResolver(envSchema),
+		defaultValues: {
+			type: (initial?.type as EnvTypeValue) ?? 'production',
+			server_id: initial?.server.id ?? undefined,
+			url: initial?.url ?? '',
+			root_path: initial?.root_path ?? '',
+			backup_path: initial?.backup_path ?? '',
+			google_drive_folder_id: initial?.google_drive_folder_id ?? '',
+		},
+	});
+
+	async function onSubmit(data: EnvForm) {
+		try {
+			const payload: Record<string, unknown> = {
+				type: data.type,
+				server_id: data.server_id,
+				url: data.url,
+				root_path: data.root_path,
+				backup_path: data.backup_path || null,
+				google_drive_folder_id: data.google_drive_folder_id || null,
+			};
+			if (initial) {
+				await api.put(
+					`/projects/${projectId}/environments/${initial.id}`,
+					payload,
+				);
+				toast({ title: 'Environment updated' });
+			} else {
+				await api.post(`/projects/${projectId}/environments`, payload);
+				toast({ title: 'Environment created' });
+			}
+			reset();
+			onSuccess();
+			onOpenChange(false);
+		} catch {
+			toast({ title: 'Save failed', variant: 'destructive' });
+		}
+	}
+
+	return (
+		<Dialog open={open} onOpenChange={onOpenChange}>
+			<DialogContent className='sm:max-w-lg'>
+				<DialogHeader>
+					<DialogTitle>
+						{initial ? 'Edit Environment' : 'Add Environment'}
+					</DialogTitle>
+				</DialogHeader>
+				<form onSubmit={handleSubmit(onSubmit)} className='space-y-4'>
+					<div className='grid grid-cols-2 gap-3'>
+						<div className='space-y-1'>
+							<Label htmlFor='env-type'>Type *</Label>
+							<Select
+								defaultValue={initial?.type ?? 'production'}
+								onValueChange={v => setValue('type', v as EnvTypeValue)}
+							>
+								<SelectTrigger id='env-type'>
+									<SelectValue placeholder='Select type…' />
+								</SelectTrigger>
+								<SelectContent>
+									{ENV_TYPES.map(t => (
+										<SelectItem key={t.value} value={t.value}>
+											{t.label}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+							{errors.type && (
+								<p className='text-xs text-destructive'>
+									{errors.type.message}
+								</p>
+							)}
+						</div>
+						<div className='space-y-1'>
+							<Label>Server *</Label>
+							<Select
+								defaultValue={initial?.server.id?.toString()}
+								onValueChange={v => setValue('server_id', Number(v))}
+							>
+								<SelectTrigger>
+									<SelectValue placeholder='Select server…' />
+								</SelectTrigger>
+								<SelectContent>
+									{servers.map(s => (
+										<SelectItem key={s.id} value={s.id.toString()}>
+											{s.name} ({s.ip_address})
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+							{errors.server_id && (
+								<p className='text-xs text-destructive'>
+									{errors.server_id.message}
+								</p>
+							)}
+						</div>
+					</div>
+
+					<div className='space-y-1'>
+						<Label htmlFor='env-url'>Site URL *</Label>
+						<Input
+							id='env-url'
+							{...register('url')}
+							placeholder='https://example.com'
+						/>
+						{errors.url && (
+							<p className='text-xs text-destructive'>{errors.url.message}</p>
+						)}
+					</div>
+
+					<div className='space-y-1'>
+						<Label htmlFor='env-root'>Root Path *</Label>
+						<Input
+							id='env-root'
+							{...register('root_path')}
+							placeholder='/home/user/public_html'
+						/>
+						{errors.root_path && (
+							<p className='text-xs text-destructive'>
+								{errors.root_path.message}
+							</p>
+						)}
+					</div>
+
+					<div className='space-y-1'>
+						<Label htmlFor='env-backup'>
+							Backup Path{' '}
+							<span className='text-muted-foreground font-normal text-xs'>
+								(optional)
+							</span>
+						</Label>
+						<Input
+							id='env-backup'
+							{...register('backup_path')}
+							placeholder='/home/user/backups'
+						/>
+						<p className='text-xs text-muted-foreground'>
+							Persistent directory on the server for backup files
+						</p>
+						{errors.backup_path && (
+							<p className='text-xs text-destructive'>
+								{errors.backup_path.message}
+							</p>
+						)}
+					</div>
+
+					<div className='space-y-1'>
+						<Label htmlFor='env-gdrive'>
+							Google Drive Folder ID{' '}
+							<span className='text-muted-foreground font-normal text-xs'>
+								(optional)
+							</span>
+						</Label>
+						<Input
+							id='env-gdrive'
+							{...register('google_drive_folder_id')}
+							placeholder='1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms'
+						/>
+						<p className='text-xs text-muted-foreground'>
+							Backups for this environment are uploaded to this Google Drive
+							folder
+						</p>
+						{errors.google_drive_folder_id && (
+							<p className='text-xs text-destructive'>
+								{errors.google_drive_folder_id.message}
+							</p>
+						)}
+					</div>
+
+					<DialogFooter>
+						<Button
+							type='button'
+							variant='outline'
+							onClick={() => onOpenChange(false)}
+						>
+							Cancel
+						</Button>
+						<Button type='submit' disabled={isSubmitting}>
+							{isSubmitting ? 'Saving…' : initial ? 'Update' : 'Create'}
+						</Button>
+					</DialogFooter>
+				</form>
+			</DialogContent>
+		</Dialog>
+	);
+}
+
+const dbCredsSchema = z.object({
+	dbName: z.string().min(1, 'Required').max(100),
+	dbUser: z.string().min(1, 'Required').max(100),
+	dbPassword: z.string().min(1, 'Required').max(200),
+	dbHost: z.string().min(1, 'Required').max(255),
+});
+type DbCredsForm = z.infer<typeof dbCredsSchema>;
+
+function DbCredentialsSection({
+	projectId,
+	envId,
+}: {
+	projectId: number;
+	envId: number;
+}) {
+	const qc = useQueryClient();
+	const [open, setOpen] = useState(false);
+	const [editing, setEditing] = useState(false);
+	const [showPass, setShowPass] = useState(false);
+
+	const { data: creds, isLoading } = useQuery<DbCredentials | null>({
+		queryKey: ['db-credentials', envId],
+		queryFn: () =>
+			api
+				.get<DbCredentials | null>(
+					`/projects/${projectId}/environments/${envId}/db-credentials`,
+				)
+				.catch(() => null),
+		enabled: open,
+	});
+
+	const {
+		register,
+		handleSubmit,
+		reset: resetForm,
+		formState: { errors, isSubmitting },
+	} = useForm<DbCredsForm>({
+		resolver: zodResolver(dbCredsSchema),
+		defaultValues: {
+			dbName: creds?.dbName ?? '',
+			dbUser: creds?.dbUser ?? '',
+			dbPassword: creds?.dbPassword ?? '',
+			dbHost: creds?.dbHost ?? 'localhost',
+		},
+		values: creds
+			? {
+					dbName: creds.dbName,
+					dbUser: creds.dbUser,
+					dbPassword: creds.dbPassword,
+					dbHost: creds.dbHost,
+				}
+			: undefined,
+	});
+
+	async function saveCreds(data: DbCredsForm) {
+		try {
+			await api.put(
+				`/projects/${projectId}/environments/${envId}/db-credentials`,
+				data,
+			);
+			qc.invalidateQueries({ queryKey: ['db-credentials', envId] });
+			toast({ title: 'DB credentials saved' });
+			setEditing(false);
+		} catch {
+			toast({ title: 'Save failed', variant: 'destructive' });
+		}
+	}
+
+	function copyToClipboard(text: string, label: string) {
+		navigator.clipboard
+			.writeText(text)
+			.then(() => toast({ title: `${label} copied` }))
+			.catch(() => {});
+	}
+
+	return (
+		<div className='border rounded-md overflow-hidden'>
+			<button
+				type='button'
+				className='w-full flex items-center justify-between px-3 py-2 text-xs font-medium bg-muted/50 hover:bg-muted transition-colors'
+				onClick={() => setOpen(o => !o)}
+			>
+				<span className='flex items-center gap-1.5'>
+					<Database className='h-3.5 w-3.5 text-muted-foreground' />
+					DB Credentials
+				</span>
+				{open ? (
+					<ChevronUp className='h-3.5 w-3.5 text-muted-foreground' />
+				) : (
+					<ChevronDown className='h-3.5 w-3.5 text-muted-foreground' />
+				)}
+			</button>
+
+			{open && (
+				<div className='px-3 py-2.5 space-y-2 text-xs'>
+					{isLoading ? (
+						<div className='space-y-1.5'>
+							<Skeleton className='h-4 w-full' />
+							<Skeleton className='h-4 w-3/4' />
+						</div>
+					) : !creds && !editing ? (
+						<div className='text-center py-1 space-y-2'>
+							<p className='text-muted-foreground'>No credentials stored</p>
+							<Button
+								size='sm'
+								variant='outline'
+								className='h-6 text-xs'
+								onClick={() => setEditing(true)}
+							>
+								Add credentials
+							</Button>
+						</div>
+					) : editing ? (
+						<form onSubmit={handleSubmit(saveCreds)} className='space-y-2'>
+							<div className='grid grid-cols-2 gap-2'>
+								<div className='space-y-1'>
+									<Label className='text-xs'>DB Name</Label>
+									<Input
+										{...register('dbName')}
+										placeholder='wordpress_db'
+										className='h-7 text-xs'
+									/>
+									{errors.dbName && (
+										<p className='text-destructive text-xs'>
+											{errors.dbName.message}
+										</p>
+									)}
+								</div>
+								<div className='space-y-1'>
+									<Label className='text-xs'>Host</Label>
+									<Input
+										{...register('dbHost')}
+										placeholder='localhost'
+										className='h-7 text-xs'
+									/>
+									{errors.dbHost && (
+										<p className='text-destructive text-xs'>
+											{errors.dbHost.message}
+										</p>
+									)}
+								</div>
+							</div>
+							<div className='grid grid-cols-2 gap-2'>
+								<div className='space-y-1'>
+									<Label className='text-xs'>Username</Label>
+									<Input
+										{...register('dbUser')}
+										placeholder='db_user'
+										className='h-7 text-xs'
+									/>
+									{errors.dbUser && (
+										<p className='text-destructive text-xs'>
+											{errors.dbUser.message}
+										</p>
+									)}
+								</div>
+								<div className='space-y-1'>
+									<Label className='text-xs'>Password</Label>
+									<Input
+										type='password'
+										{...register('dbPassword')}
+										placeholder='••••••••'
+										className='h-7 text-xs'
+									/>
+									{errors.dbPassword && (
+										<p className='text-destructive text-xs'>
+											{errors.dbPassword.message}
+										</p>
+									)}
+								</div>
+							</div>
+							<div className='flex gap-2 pt-1'>
+								<Button
+									type='submit'
+									size='sm'
+									className='h-6 text-xs flex-1'
+									disabled={isSubmitting}
+								>
+									{isSubmitting ? 'Saving…' : 'Save'}
+								</Button>
+								<Button
+									type='button'
+									size='sm'
+									variant='outline'
+									className='h-6 text-xs'
+									onClick={() => {
+										setEditing(false);
+										resetForm();
+									}}
+								>
+									Cancel
+								</Button>
+							</div>
+						</form>
+					) : (
+						<div className='space-y-1.5'>
+							<div className='flex items-center justify-between'>
+								<span className='text-muted-foreground'>Database</span>
+								<div className='flex items-center gap-1'>
+									<span className='font-mono'>{creds!.dbName}</span>
+									<button
+										type='button'
+										onClick={() => copyToClipboard(creds!.dbName, 'DB name')}
+										className='text-muted-foreground hover:text-foreground'
+									>
+										<Copy className='h-3 w-3' />
+									</button>
+								</div>
+							</div>
+							<div className='flex items-center justify-between'>
+								<span className='text-muted-foreground'>Host</span>
+								<div className='flex items-center gap-1'>
+									<span className='font-mono'>{creds!.dbHost}</span>
+									<button
+										type='button'
+										onClick={() => copyToClipboard(creds!.dbHost, 'Host')}
+										className='text-muted-foreground hover:text-foreground'
+									>
+										<Copy className='h-3 w-3' />
+									</button>
+								</div>
+							</div>
+							<div className='flex items-center justify-between'>
+								<span className='text-muted-foreground'>Username</span>
+								<div className='flex items-center gap-1'>
+									<span className='font-mono'>{creds!.dbUser}</span>
+									<button
+										type='button'
+										onClick={() => copyToClipboard(creds!.dbUser, 'Username')}
+										className='text-muted-foreground hover:text-foreground'
+									>
+										<Copy className='h-3 w-3' />
+									</button>
+								</div>
+							</div>
+							<div className='flex items-center justify-between'>
+								<span className='text-muted-foreground'>Password</span>
+								<div className='flex items-center gap-1'>
+									<span className='font-mono'>
+										{showPass ? creds!.dbPassword : '••••••••'}
+									</span>
+									<button
+										type='button'
+										onClick={() => setShowPass(v => !v)}
+										className='text-muted-foreground hover:text-foreground'
+									>
+										{showPass ? (
+											<EyeOff className='h-3 w-3' />
+										) : (
+											<Eye className='h-3 w-3' />
+										)}
+									</button>
+									<button
+										type='button'
+										onClick={() =>
+											copyToClipboard(creds!.dbPassword, 'Password')
+										}
+										className='text-muted-foreground hover:text-foreground'
+									>
+										<Copy className='h-3 w-3' />
+									</button>
+								</div>
+							</div>
+							<Button
+								size='sm'
+								variant='outline'
+								className='h-6 text-xs w-full mt-1'
+								onClick={() => setEditing(true)}
+							>
+								Edit credentials
+							</Button>
+						</div>
+					)}
+				</div>
+			)}
+		</div>
+	);
+}
+
+function EnvironmentCard({
+	env,
+	projectId,
+	onEdit,
+	onDelete,
+}: {
+	env: Environment;
+	projectId: number;
+	onEdit: (e: Environment) => void;
+	onDelete: (e: Environment) => void;
+}) {
+	const qc = useQueryClient();
+
+	function triggerBackup() {
+		api
+			.post('/backups/create', { environmentId: env.id, type: 'full' })
+			.then(() => toast({ title: 'Backup started' }))
+			.catch(() =>
+				toast({ title: 'Failed to start backup', variant: 'destructive' }),
+			);
+	}
+
+	function triggerScan() {
+		api
+			.post(`/plugin-scans/environment/${env.id}/scan`, {})
+			.then(() => toast({ title: 'Plugin scan queued' }))
+			.catch(() =>
+				toast({ title: 'Failed to start scan', variant: 'destructive' }),
+			);
+	}
+
+	return (
+		<Card className='flex flex-col'>
+			<CardHeader className='pb-3'>
+				<div className='flex items-start justify-between gap-2'>
+					<div className='flex items-center gap-2 flex-wrap'>
+						<Badge variant='outline' className='text-xs font-mono capitalize'>
+							{env.type}
+						</Badge>
+						<Badge
+							variant={SERVER_STATUS_VARIANT[env.server.status] ?? 'secondary'}
+							className='text-xs'
+						>
+							{env.server.status}
+						</Badge>
+					</div>
+					<div className='flex items-center gap-1 shrink-0'>
+						<Button
+							variant='ghost'
+							size='icon'
+							className='h-7 w-7'
+							onClick={() => onEdit(env)}
+							title='Edit environment'
+						>
+							<Pencil className='h-3.5 w-3.5' />
+						</Button>
+						<Button
+							variant='ghost'
+							size='icon'
+							className='h-7 w-7 text-destructive hover:text-destructive'
+							onClick={() => onDelete(env)}
+							title='Delete environment'
+						>
+							<Trash2 className='h-3.5 w-3.5' />
+						</Button>
+					</div>
+				</div>
+			</CardHeader>
+			<CardContent className='flex flex-col gap-2.5 flex-1'>
+				<div className='flex items-start gap-2 text-sm'>
+					<Server className='h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground' />
+					<div>
+						<p className='font-medium leading-none'>{env.server.name}</p>
+						<p className='text-xs text-muted-foreground mt-0.5'>
+							{env.server.ip_address}
+						</p>
+					</div>
+				</div>
+
+				<div className='flex items-center gap-2 text-sm'>
+					<Globe className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
+					<a
+						href={env.url}
+						target='_blank'
+						rel='noopener noreferrer'
+						className='text-primary hover:underline truncate flex items-center gap-1'
+					>
+						{env.url}
+						<ExternalLink className='h-3 w-3 shrink-0' />
+					</a>
+				</div>
+
+				<div className='flex items-center gap-2 text-sm'>
+					<FolderOpen className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
+					<code className='text-xs bg-muted px-1.5 py-0.5 rounded truncate max-w-full'>
+						{env.root_path}
+					</code>
+				</div>
+
+				{env.backup_path && (
+					<div className='flex items-center gap-2 text-sm'>
+						<HardDrive className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
+						<code className='text-xs bg-muted px-1.5 py-0.5 rounded truncate max-w-full'>
+							{env.backup_path}
+						</code>
+					</div>
+				)}
+
+				<DbCredentialsSection projectId={projectId} envId={env.id} />
+
+				<div className='flex items-center gap-1.5 pt-2 mt-auto border-t'>
+					<Button
+						variant='secondary'
+						size='sm'
+						className='flex-1 text-xs h-7'
+						onClick={triggerBackup}
+						title='Create a full backup of this environment'
+					>
+						<HardDrive className='h-3 w-3 mr-1' />
+						Backup
+					</Button>
+					<Button
+						variant='secondary'
+						size='sm'
+						className='flex-1 text-xs h-7'
+						onClick={triggerScan}
+						title='Scan WordPress plugins'
+					>
+						<ScanLine className='h-3 w-3 mr-1' />
+						Scan
+					</Button>
+				</div>
+			</CardContent>
+		</Card>
+	);
+}
+
+// ── Scanned site shape from POST /projects/:id/environments/scan-server ───────
+
+interface ScannedSite {
+	path: string;
+	name: string;
+	isBedrock: boolean;
+	isWordPress: boolean;
+	siteUrl?: string;
+	alreadyInThisProject: boolean;
+	serverId: number;
+	serverName: string;
+	hasDbCredentials?: boolean;
+	dbCredentials?: {
+		dbName: string;
+		dbUser: string;
+		dbPassword: string;
+		dbHost: string;
+	};
+}
+
+// ── Add Environment Wizard ─────────────────────────────────────────────────────
+
+function AddEnvironmentWizard({
+	open,
+	onOpenChange,
+	projectId,
+	servers,
+	onSuccess,
+}: {
+	open: boolean;
+	onOpenChange: (o: boolean) => void;
+	projectId: number;
+	servers: ServerOption[];
+	onSuccess: () => void;
+}) {
+	const [step, setStep] = useState<1 | 2>(1);
+	const [selectedServerId, setSelectedServerId] = useState<number | null>(null);
+	const [sites, setSites] = useState<ScannedSite[]>([]);
+	const [selectedSite, setSelectedSite] = useState<ScannedSite | null>(null);
+	const [envType, setEnvType] = useState<EnvTypeValue>('production');
+	const [customUrl, setCustomUrl] = useState('');
+	const [isCreating, setIsCreating] = useState(false);
+
+	const scanMutation = useMutation({
+		mutationFn: (serverId: number) =>
+			api.post<ScannedSite[]>(
+				`/projects/${projectId}/environments/scan-server`,
+				{ server_id: serverId },
+			),
+		onSuccess: data => {
+			setSites(Array.isArray(data) ? data : []);
+			setStep(2);
+		},
+		onError: () => toast({ title: 'Scan failed', variant: 'destructive' }),
+	});
+
+	function reset() {
+		setStep(1);
+		setSelectedServerId(null);
+		setSites([]);
+		setSelectedSite(null);
+		setEnvType('production');
+		setCustomUrl('');
+	}
+
+	function handleClose(o: boolean) {
+		if (!o) reset();
+		onOpenChange(o);
+	}
+
+	async function handleCreate() {
+		if (!selectedSite || !selectedServerId) return;
+		const url = customUrl.trim() || selectedSite.siteUrl || '';
+		if (!url) {
+			toast({ title: 'Site URL is required', variant: 'destructive' });
+			return;
+		}
+		setIsCreating(true);
+		try {
+			await api.post(`/projects/${projectId}/environments`, {
+				type: envType,
+				server_id: selectedServerId,
+				url,
+				root_path: selectedSite.path,
+				...(selectedSite.dbCredentials
+					? { db_credentials: selectedSite.dbCredentials }
+					: {}),
+			});
+			toast({ title: 'Environment created' });
+			onSuccess();
+			handleClose(false);
+		} catch {
+			toast({ title: 'Create failed', variant: 'destructive' });
+		} finally {
+			setIsCreating(false);
+		}
+	}
+
+	return (
+		<Dialog open={open} onOpenChange={handleClose}>
+			<DialogContent className='sm:max-w-lg'>
+				<DialogHeader>
+					<DialogTitle>Add Environment</DialogTitle>
+				</DialogHeader>
+
+				{step === 1 ? (
+					<div className='space-y-4'>
+						<p className='text-sm text-muted-foreground'>
+							Select a server to scan for WordPress installations.
+						</p>
+						<div className='space-y-1'>
+							<Label>Server</Label>
+							<Select
+								value={selectedServerId?.toString()}
+								onValueChange={v => setSelectedServerId(Number(v))}
+							>
+								<SelectTrigger>
+									<SelectValue placeholder='Select server…' />
+								</SelectTrigger>
+								<SelectContent>
+									{servers.map(s => (
+										<SelectItem key={s.id} value={s.id.toString()}>
+											{s.name}{' '}
+											<span className='text-muted-foreground text-xs'>
+												({s.ip_address})
+											</span>
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						</div>
+						<DialogFooter>
+							<Button
+								type='button'
+								variant='outline'
+								onClick={() => handleClose(false)}
+							>
+								Cancel
+							</Button>
+							<Button
+								disabled={!selectedServerId || scanMutation.isPending}
+								onClick={() =>
+									selectedServerId && scanMutation.mutate(selectedServerId)
+								}
+							>
+								{scanMutation.isPending ? (
+									<>
+										<Loader2 className='h-4 w-4 mr-1.5 animate-spin' />
+										Scanning…
+									</>
+								) : (
+									<>
+										<ScanLine className='h-4 w-4 mr-1.5' />
+										Scan Server
+									</>
+								)}
+							</Button>
+						</DialogFooter>
+					</div>
+				) : (
+					<div className='space-y-4'>
+						<p className='text-sm text-muted-foreground'>
+							{sites.length === 0
+								? 'No WordPress sites found on this server.'
+								: `Found ${sites.length} site${sites.length !== 1 ? 's' : ''}. Select one to add as an environment.`}
+						</p>
+
+						{sites.length > 0 && (
+							<div className='border rounded-lg divide-y max-h-64 overflow-y-auto'>
+								{sites.map(site => (
+									<button
+										key={site.path}
+										type='button'
+										disabled={site.alreadyInThisProject}
+										onClick={() => {
+											setSelectedSite(site);
+											setCustomUrl(site.siteUrl ?? '');
+										}}
+										className={[
+											'w-full text-left px-3 py-2.5 transition-colors flex items-start gap-2',
+											site.alreadyInThisProject
+												? 'opacity-50 cursor-not-allowed'
+												: 'hover:bg-muted/50 cursor-pointer',
+											selectedSite?.path === site.path &&
+											!site.alreadyInThisProject
+												? 'bg-primary/10'
+												: '',
+										].join(' ')}
+									>
+										<div className='mt-0.5 shrink-0'>
+											{site.alreadyInThisProject ? (
+												<CheckCircle2 className='h-4 w-4 text-green-500' />
+											) : selectedSite?.path === site.path ? (
+												<CheckCircle2 className='h-4 w-4 text-primary' />
+											) : (
+												<CircleDashed className='h-4 w-4 text-muted-foreground' />
+											)}
+										</div>
+										<div className='min-w-0'>
+											<p className='font-medium text-sm truncate'>
+												{site.name}
+											</p>
+											<p className='text-xs text-muted-foreground font-mono truncate'>
+												{site.path}
+											</p>
+											{site.siteUrl && (
+												<p className='text-xs text-muted-foreground truncate'>
+													{site.siteUrl}
+												</p>
+											)}
+											{site.alreadyInThisProject && (
+												<p className='text-xs text-green-600 dark:text-green-400'>
+													Already in this project
+												</p>
+											)}
+										</div>
+									</button>
+								))}
+							</div>
+						)}
+
+						{selectedSite && (
+							<div className='space-y-3 border-t pt-3'>
+								<div className='grid grid-cols-2 gap-3'>
+									<div className='space-y-1'>
+										<Label>Environment Type *</Label>
+										<Select
+											value={envType}
+											onValueChange={v => setEnvType(v as EnvTypeValue)}
+										>
+											<SelectTrigger>
+												<SelectValue placeholder='Select type…' />
+											</SelectTrigger>
+											<SelectContent>
+												{ENV_TYPES.map(t => (
+													<SelectItem key={t.value} value={t.value}>
+														{t.label}
+													</SelectItem>
+												))}
+											</SelectContent>
+										</Select>
+									</div>
+									<div className='space-y-1'>
+										<Label>Site URL *</Label>
+										<Input
+											value={customUrl}
+											onChange={e => setCustomUrl(e.target.value)}
+											placeholder='https://example.com'
+										/>
+									</div>
+								</div>
+							</div>
+						)}
+
+						<DialogFooter>
+							<Button
+								type='button'
+								variant='outline'
+								onClick={() => setStep(1)}
+							>
+								Back
+							</Button>
+							<Button
+								disabled={!selectedSite || !envType || isCreating}
+								onClick={handleCreate}
+							>
+								{isCreating ? (
+									<>
+										<Loader2 className='h-4 w-4 mr-1.5 animate-spin' />
+										Creating…
+									</>
+								) : (
+									'Create Environment'
+								)}
+							</Button>
+						</DialogFooter>
+					</div>
+				)}
+			</DialogContent>
+		</Dialog>
+	);
+}
+
+export function EnvironmentsTab({ projectId }: { projectId: number }) {
+	const qc = useQueryClient();
+	const [createOpen, setCreateOpen] = useState(false);
+	const [editTarget, setEditTarget] = useState<Environment | null>(null);
+	const [deleteTarget, setDeleteTarget] = useState<Environment | null>(null);
+
+	const { data: environments = [], isLoading } = useQuery({
+		queryKey: ['environments', projectId],
+		queryFn: () =>
+			api.get<Environment[]>(`/projects/${projectId}/environments`),
+	});
+
+	const { data: serversData } = useQuery({
+		queryKey: ['servers-list'],
+		queryFn: () =>
+			api
+				.get<{ items: ServerOption[] }>('/servers?limit=100')
+				.then(r => r.items),
+	});
+	const servers = serversData ?? [];
+
+	const deleteMutation = useMutation({
+		mutationFn: (id: number) =>
+			api.delete(`/projects/${projectId}/environments/${id}`),
+		onSuccess: () => {
+			qc.invalidateQueries({ queryKey: ['environments', projectId] });
+			qc.invalidateQueries({ queryKey: ['project', projectId] });
+			setDeleteTarget(null);
+			toast({ title: 'Environment deleted' });
+		},
+		onError: () => toast({ title: 'Delete failed', variant: 'destructive' }),
+	});
+
+	function invalidate() {
+		qc.invalidateQueries({ queryKey: ['environments', projectId] });
+		qc.invalidateQueries({ queryKey: ['project', projectId] });
+	}
+
+	if (isLoading) {
+		return (
+			<div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4'>
+				{[1, 2].map(i => (
+					<Skeleton key={i} className='h-56 rounded-lg' />
+				))}
+			</div>
+		);
+	}
+
+	return (
+		<div className='space-y-4'>
+			<div className='flex items-center justify-between'>
+				<p className='text-sm text-muted-foreground'>
+					{environments.length} environment
+					{environments.length !== 1 ? 's' : ''} configured
+				</p>
+				<Button size='sm' onClick={() => setCreateOpen(true)}>
+					<Plus className='h-4 w-4 mr-1.5' />
+					Add Environment
+				</Button>
+			</div>
+
+			{environments.length === 0 ? (
+				<div className='border rounded-lg p-12 text-center'>
+					<MonitorSmartphone className='h-10 w-10 mx-auto text-muted-foreground/40 mb-3' />
+					<p className='font-medium text-muted-foreground'>
+						No environments yet
+					</p>
+					<p className='text-sm text-muted-foreground mt-1'>
+						Add a production or staging environment to get started
+					</p>
+					<Button
+						className='mt-4'
+						size='sm'
+						onClick={() => setCreateOpen(true)}
+					>
+						<Plus className='h-4 w-4 mr-1.5' />
+						Add First Environment
+					</Button>
+				</div>
+			) : (
+				<div className='grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4'>
+					{environments.map(env => (
+						<EnvironmentCard
+							key={env.id}
+							env={env}
+							projectId={projectId}
+							onEdit={setEditTarget}
+							onDelete={setDeleteTarget}
+						/>
+					))}
+				</div>
+			)}
+
+			<AddEnvironmentWizard
+				open={createOpen}
+				onOpenChange={setCreateOpen}
+				projectId={projectId}
+				servers={servers}
+				onSuccess={invalidate}
+			/>
+
+			{editTarget && (
+				<EnvironmentFormDialog
+					key={editTarget.id}
+					open
+					onOpenChange={o => !o && setEditTarget(null)}
+					projectId={projectId}
+					initial={editTarget}
+					servers={servers}
+					onSuccess={invalidate}
+				/>
+			)}
+
+			<AlertDialog
+				open={!!deleteTarget}
+				onOpenChange={o => !o && setDeleteTarget(null)}
+				title='Delete Environment'
+				description={`Delete the "${deleteTarget?.type}" environment at ${deleteTarget?.url}? All associated backups, plugin scans, and monitor data will be permanently removed.`}
+				confirmLabel='Delete'
+				onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+				isPending={deleteMutation.isPending}
+			/>
+		</div>
+	);
+}
