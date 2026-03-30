@@ -5,7 +5,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+  // Connection URL is configured via prisma.config.ts (Prisma 7)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -79,6 +79,7 @@ model Client {
 
   client_tags ClientTag[]
   projects    Project[]
+  invoices    Invoice[]
 
   @@map("clients")
 }
@@ -121,6 +122,7 @@ model HostingPackage {
   active        Boolean  @default(true)
 
   projects Project[]
+  invoices Invoice[]
 
   @@map("hosting_packages")
 }
@@ -135,6 +137,7 @@ model SupportPackage {
   active          Boolean  @default(true)
 
   projects Project[]
+  invoices Invoice[]
 
   @@map("support_packages")
 }
@@ -152,6 +155,7 @@ model Server {
   ssh_private_key_encrypted String // AES-256-GCM encrypted
   provider                String?  // e.g. "hetzner", "digitalocean", "vultr"
   status                  ServerStatus @default(unknown)
+  cyberpanel_login        Json?    // Encrypted JSON: { url, username, password }
   created_at              DateTime @default(now()) @db.Timestamptz()
   updated_at              DateTime @updatedAt @db.Timestamptz()
 
@@ -182,6 +186,7 @@ model Project {
   support_package SupportPackage? @relation(fields: [support_package_id], references: [id])
   environments    Environment[]
   domains         Domain[]
+  invoices        Invoice[]
 
   @@index([client_id])
   @@index([hosting_package_id])
@@ -196,70 +201,77 @@ enum ProjectStatus {
 }
 
 model Environment {
-  id                BigInt          @id @default(autoincrement())
+  id                BigInt   @id @default(autoincrement())
   project_id        BigInt
   server_id         BigInt
-  type              EnvironmentType @default(production)
+  type              String   @default("production") // Free-text: production, staging, development, etc.
   url               String
   root_path         String
-  cyberpanel_login  Json?           // Encrypted JSONB: { url, username, password_encrypted }
-  created_at        DateTime        @default(now()) @db.Timestamptz()
-  updated_at        DateTime        @updatedAt @db.Timestamptz()
+  backup_path       String?  // Persistent remote path for backup storage (e.g. /home/user/backups)
+  google_drive_folder_id String? // Optional Google Drive folder ID for backup storage override
+  created_at        DateTime @default(now()) @db.Timestamptz()
+  updated_at        DateTime @updatedAt @db.Timestamptz()
 
   project            Project           @relation(fields: [project_id], references: [id], onDelete: Cascade)
   server             Server            @relation(fields: [server_id], references: [id])
-  cyberpanel_users   CyberpanelUser[]
   backups            Backup[]
   plugin_scans       PluginScan[]
   monitors           Monitor[]
   wp_db_credentials  WpDbCredentials?
   job_executions     JobExecution[]
+  backup_schedule    BackupSchedule?
 
   @@index([project_id])
   @@index([server_id])
   @@map("environments")
 }
 
-enum EnvironmentType {
-  production
-  staging
-}
-
-model CyberpanelUser {
-  id                 BigInt   @id @default(autoincrement())
-  environment_id     BigInt
-  username           String
-  password_encrypted String   // AES-256-GCM encrypted
-  panel_url          String
-  created_at         DateTime @default(now()) @db.Timestamptz()
-
-  environment Environment @relation(fields: [environment_id], references: [id], onDelete: Cascade)
-
-  @@index([environment_id])
-  @@map("cyberpanel_users")
-}
+// EnvironmentType enum removed — type is now a free-text String field on Environment
 
 // ──────────────────────────────────────────────────────────────────────────────
 // OPERATIONS
 // ──────────────────────────────────────────────────────────────────────────────
 
 model Backup {
-  id             BigInt       @id @default(autoincrement())
-  environment_id BigInt
-  type           BackupType
-  status         BackupStatus @default(pending)
-  file_path      String?
-  size_bytes     BigInt?
-  error_message  String?
-  started_at     DateTime?    @db.Timestamptz()
-  completed_at   DateTime?    @db.Timestamptz()
-  created_at     DateTime     @default(now()) @db.Timestamptz()
+  id               BigInt       @id @default(autoincrement())
+  environment_id   BigInt
+  job_execution_id BigInt?
+  type             BackupType
+  status           BackupStatus @default(pending)
+  file_path        String?
+  size_bytes       BigInt?
+  error_message    String?
+  started_at       DateTime?    @db.Timestamptz()
+  completed_at     DateTime?    @db.Timestamptz()
+  created_at       DateTime     @default(now()) @db.Timestamptz()
+
+  environment   Environment  @relation(fields: [environment_id], references: [id], onDelete: Cascade)
+  jobExecution  JobExecution? @relation(fields: [job_execution_id], references: [id], onDelete: SetNull)
+
+  @@index([environment_id])
+  @@index([job_execution_id])
+  @@index([status])
+  @@map("backups")
+}
+
+model BackupSchedule {
+  id             BigInt     @id @default(autoincrement())
+  environment_id BigInt     @unique
+  type           BackupType @default(full)
+  frequency      String     // 'daily' | 'weekly' | 'monthly'
+  hour           Int        @default(3)
+  minute         Int        @default(0)
+  day_of_week    Int?       // 0=Sun..6=Sat (weekly only)
+  day_of_month   Int?       // 1-28 (monthly only)
+  enabled        Boolean    @default(true)
+  last_run_at    DateTime?  @db.Timestamptz()
+  created_at     DateTime   @default(now()) @db.Timestamptz()
+  updated_at     DateTime   @updatedAt @db.Timestamptz()
 
   environment Environment @relation(fields: [environment_id], references: [id], onDelete: Cascade)
 
-  @@index([environment_id])
-  @@index([status])
-  @@map("backups")
+  @@index([enabled])
+  @@map("backup_schedules")
 }
 
 enum BackupType {
@@ -309,7 +321,7 @@ model Monitor {
   id               BigInt   @id @default(autoincrement())
   environment_id   BigInt
   enabled          Boolean  @default(true)
-  interval_seconds Int      @default(60)
+  interval_seconds Int      @default(600)
   uptime_pct       Decimal  @db.Decimal(5, 2) @default(100.00)
   last_response_ms Int?
   last_status      Int?     // HTTP status code
@@ -379,12 +391,14 @@ model JobExecution {
   progress       Int              @default(0) // 0-100
   last_error     String?
   payload        Json?            // Job input payload for debugging
+  execution_log  Json?            // Array of ExecutionLogEntry — timestamped per-command trace
   started_at     DateTime?        @db.Timestamptz()
   completed_at   DateTime?        @db.Timestamptz()
   created_at     DateTime         @default(now()) @db.Timestamptz()
 
   environment Environment? @relation(fields: [environment_id], references: [id])
   server      Server?      @relation(fields: [server_id], references: [id])
+  backups     Backup[]
 
   @@index([environment_id])
   @@index([server_id])
@@ -409,6 +423,89 @@ model AppSetting {
   updated_at DateTime @updatedAt @db.Timestamptz()
 
   @@map("app_settings")
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// BILLING
+// ──────────────────────────────────────────────────────────────────────────────
+
+enum InvoiceStatus {
+  draft
+  sent
+  paid
+  overdue
+  cancelled
+}
+
+model Invoice {
+  id                       BigInt        @id @default(autoincrement())
+  invoice_number           String        @unique // e.g. INV-2026-001
+  project_id               BigInt
+  client_id                BigInt
+  hosting_package_id       BigInt?
+  support_package_id       BigInt?
+  hosting_package_snapshot String?       // Package name at time of generation
+  support_package_snapshot String?       // Package name at time of generation
+  hosting_amount           Decimal       @default(0) @db.Decimal(10, 2)
+  support_amount           Decimal       @default(0) @db.Decimal(10, 2)
+  total_amount             Decimal       @db.Decimal(10, 2)
+  status                   InvoiceStatus @default(draft)
+  period_start             DateTime      @db.Timestamptz()
+  period_end               DateTime      @db.Timestamptz()
+  due_date                 DateTime      @db.Timestamptz()
+  paid_at                  DateTime?     @db.Timestamptz()
+  notes                    String?
+  created_at               DateTime      @default(now()) @db.Timestamptz()
+  updated_at               DateTime      @updatedAt @db.Timestamptz()
+
+  project         Project        @relation(fields: [project_id], references: [id])
+  client          Client         @relation(fields: [client_id], references: [id])
+  hosting_package HostingPackage? @relation(fields: [hosting_package_id], references: [id])
+  support_package SupportPackage? @relation(fields: [support_package_id], references: [id])
+
+  @@index([project_id])
+  @@index([client_id])
+  @@index([status])
+  @@index([period_start, period_end])
+  @@map("invoices")
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// NOTIFICATIONS
+// ──────────────────────────────────────────────────────────────────────────────
+
+model NotificationChannel {
+  id                    BigInt   @id @default(autoincrement())
+  name                  String
+  type                  String   @default("slack") // extensible
+  slack_bot_token_enc   String?  // AES-256-GCM encrypted bot token
+  slack_channel_id      String?
+  events                String[] // Array of NotificationEventType strings
+  active                Boolean  @default(true)
+  created_at            DateTime @default(now()) @db.Timestamptz()
+  updated_at            DateTime @updatedAt @db.Timestamptz()
+
+  notification_logs NotificationLog[]
+
+  @@map("notification_channels")
+}
+
+model NotificationLog {
+  id          BigInt   @id @default(autoincrement())
+  channel_id  BigInt
+  event_type  String
+  payload     Json
+  status      String   // 'sent' | 'failed'
+  error       String?
+  created_at  DateTime @default(now()) @db.Timestamptz()
+
+  channel NotificationChannel @relation(fields: [channel_id], references: [id], onDelete: Cascade)
+
+  @@index([channel_id])
+  @@index([event_type])
+  @@index([status])
+  @@index([created_at])
+  @@map("notification_logs")
 }
 
 model AuditLog {
