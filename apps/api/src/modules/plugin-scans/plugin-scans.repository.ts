@@ -25,6 +25,7 @@ export class PluginScansRepository {
 	createJobExecution(data: {
 		environment_id: bigint;
 		queue_name: string;
+		job_type?: string;
 		bull_job_id: string;
 	}) {
 		return this.prisma.jobExecution.create({ data });

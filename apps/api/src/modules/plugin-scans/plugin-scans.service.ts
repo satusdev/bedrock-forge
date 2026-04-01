@@ -26,6 +26,7 @@ export class PluginScansService {
 		const exec = await this.repo.createJobExecution({
 			environment_id: BigInt(environmentId),
 			queue_name: QUEUES.PLUGIN_SCANS,
+			job_type: JOB_TYPES.PLUGIN_SCAN_RUN,
 			bull_job_id: bullJobId,
 		});
 		const job = await this.queue.add(

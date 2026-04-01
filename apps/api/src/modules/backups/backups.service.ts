@@ -48,6 +48,7 @@ export class BackupsService {
 		const bullJobId = randomUUID();
 		const exec = await this.repo.createJobExecution({
 			queue_name: QUEUES.BACKUPS,
+			job_type: JOB_TYPES.BACKUP_CREATE,
 			bull_job_id: bullJobId,
 			environment_id: BigInt(dto.environmentId),
 			payload: { environmentId: dto.environmentId, type: dto.type } as Record<
@@ -85,6 +86,7 @@ export class BackupsService {
 		const bullJobId = randomUUID();
 		const exec = await this.repo.createJobExecution({
 			queue_name: QUEUES.BACKUPS,
+			job_type: JOB_TYPES.BACKUP_RESTORE,
 			bull_job_id: bullJobId,
 			environment_id: backup.environment_id,
 			payload: {
