@@ -3,8 +3,10 @@ import { PrismaService } from '../../prisma/prisma.service';
 
 export interface JobExecutionFilter {
 	queue_name?: string;
+	job_type?: string;
 	status?: string;
 	environment_id?: number;
+	environment_ids?: number[];
 	date_from?: Date;
 	date_to?: Date;
 }
@@ -49,9 +51,15 @@ export class JobExecutionsRepository {
 		const where: Record<string, unknown> = {};
 
 		if (filter.queue_name) where.queue_name = filter.queue_name;
+		if (filter.job_type) where.job_type = filter.job_type;
 		if (filter.status) where.status = filter.status;
-		if (filter.environment_id)
+		if (filter.environment_ids && filter.environment_ids.length > 0) {
+			where.environment_id = {
+				in: filter.environment_ids.map(id => BigInt(id)),
+			};
+		} else if (filter.environment_id) {
 			where.environment_id = BigInt(filter.environment_id);
+		}
 		if (filter.date_from || filter.date_to) {
 			where.created_at = {
 				...(filter.date_from ? { gte: filter.date_from } : {}),
