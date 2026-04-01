@@ -1,6 +1,14 @@
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { RotateCcw, HardDrive, CheckCircle2, ChevronDown } from 'lucide-react';
+import {
+	RotateCcw,
+	HardDrive,
+	CheckCircle2,
+	ChevronDown,
+	XCircle,
+	Clock,
+	Loader2,
+} from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
@@ -15,7 +23,10 @@ import {
 	SelectValue,
 } from '@/components/ui/select';
 import { useWebSocketEvent, useSubscribeEnvironment } from '@/lib/websocket';
-import { ExecutionLogPanel } from '@/components/ui/execution-log-panel';
+import {
+	ExecutionLogPanel,
+	ExpandLogButton,
+} from '@/components/ui/execution-log-panel';
 
 interface Environment {
 	id: number;
@@ -31,6 +42,113 @@ interface Backup {
 	size_bytes: number | null;
 	created_at: string;
 	completed_at: string | null;
+}
+
+interface RestoreJobRow {
+	id: number;
+	status: string;
+	progress: number | null;
+	last_error: string | null;
+	started_at: string | null;
+	completed_at: string | null;
+	created_at: string;
+}
+
+interface RestoreHistoryPage {
+	data: RestoreJobRow[];
+	total: number;
+}
+
+function restoreDuration(
+	started?: string | null,
+	completed?: string | null,
+): string {
+	if (!started) return '\u2014';
+	const diff =
+		(completed ? new Date(completed).getTime() : Date.now()) -
+		new Date(started).getTime();
+	if (diff < 1000) return `${diff}ms`;
+	if (diff < 60_000) return `${(diff / 1000).toFixed(1)}s`;
+	const mins = Math.floor(diff / 60_000);
+	const secs = Math.floor((diff % 60_000) / 1000);
+	return `${mins}m ${secs}s`;
+}
+
+function RestoreStatusIcon({ status }: { status: string }) {
+	if (status === 'completed')
+		return (
+			<CheckCircle2 className='h-3.5 w-3.5 text-green-600 dark:text-green-400' />
+		);
+	if (status === 'failed')
+		return <XCircle className='h-3.5 w-3.5 text-destructive' />;
+	if (status === 'active')
+		return <Loader2 className='h-3.5 w-3.5 text-blue-500 animate-spin' />;
+	return <Clock className='h-3.5 w-3.5 text-muted-foreground' />;
+}
+
+function RestoreHistoryRow({ row }: { row: RestoreJobRow }) {
+	const [expanded, setExpanded] = useState(false);
+	const isActive = row.status === 'active' || row.status === 'pending';
+
+	return (
+		<>
+			<tr className='border-b last:border-0 hover:bg-muted/30 transition-colors'>
+				<td className='py-2.5 pl-4 pr-2 whitespace-nowrap'>
+					<div className='flex items-center gap-1.5 text-xs font-medium capitalize'>
+						<RestoreStatusIcon status={row.status} />
+						{row.status}
+					</div>
+				</td>
+				<td className='py-2.5 px-2 text-xs text-muted-foreground whitespace-nowrap'>
+					{row.started_at
+						? new Date(row.started_at).toLocaleString([], {
+								dateStyle: 'short',
+								timeStyle: 'short',
+							})
+						: new Date(row.created_at).toLocaleString([], {
+								dateStyle: 'short',
+								timeStyle: 'short',
+							})}
+				</td>
+				<td className='py-2.5 px-2 text-xs text-muted-foreground whitespace-nowrap'>
+					{restoreDuration(row.started_at, row.completed_at)}
+				</td>
+				<td className='py-2.5 px-2 text-xs'>
+					{row.status === 'active' && row.progress != null ? (
+						<div className='flex items-center gap-2'>
+							<div className='w-16 bg-muted rounded-full h-1.5'>
+								<div
+									className='bg-primary h-1.5 rounded-full'
+									style={{ width: `${row.progress}%` }}
+								/>
+							</div>
+							<span className='text-muted-foreground'>{row.progress}%</span>
+						</div>
+					) : row.status === 'failed' && row.last_error ? (
+						<span
+							className='text-destructive truncate max-w-[200px] block'
+							title={row.last_error}
+						>
+							{row.last_error}
+						</span>
+					) : null}
+				</td>
+				<td className='py-2.5 pr-4 pl-2 text-right whitespace-nowrap'>
+					<ExpandLogButton
+						expanded={expanded}
+						onToggle={() => setExpanded(v => !v)}
+					/>
+				</td>
+			</tr>
+			{expanded && (
+				<tr className='bg-muted/20 border-b last:border-0'>
+					<td colSpan={5} className='px-4 pb-4 pt-2'>
+						<ExecutionLogPanel jobExecutionId={row.id} isActive={isActive} />
+					</td>
+				</tr>
+			)}
+		</>
+	);
 }
 
 const BACKUP_TYPE_LABELS: Record<string, string> = {
@@ -61,6 +179,17 @@ export function RestoreTab({
 	const [jobExecutionId, setJobExecutionId] = useState<number | null>(null);
 	const restoreJobIdRef = useRef<string | null>(null);
 	const restoreEnvIdRef = useRef<number | null>(null);
+
+	const { data: restoreHistory } = useQuery({
+		queryKey: ['restore-history', selectedEnvId],
+		queryFn: () =>
+			api.get<RestoreHistoryPage>(
+				`/job-executions?queue_name=backups&job_type=backup%3Arestore&environment_ids=${selectedEnvId}&limit=20`,
+			),
+		enabled: !!selectedEnvId,
+		staleTime: 15_000,
+		refetchInterval: 30_000,
+	});
 
 	useSubscribeEnvironment(selectedEnvId);
 
@@ -327,6 +456,46 @@ export function RestoreTab({
 				}
 				isPending={restoreMutation.isPending}
 			/>
+
+			{/* Restore History */}
+			{selectedEnvId && (
+				<div className='space-y-3 pt-2'>
+					<h4 className='text-sm font-semibold'>Restore History</h4>
+
+					{!restoreHistory || restoreHistory.data.length === 0 ? (
+						<div className='border rounded-lg text-center py-8 text-muted-foreground text-sm'>
+							No restore jobs yet for this environment.
+						</div>
+					) : (
+						<div className='border rounded-lg overflow-hidden'>
+							<table className='w-full text-sm'>
+								<thead className='border-b bg-muted/40'>
+									<tr>
+										<th className='text-left px-4 py-2.5 text-xs font-medium text-muted-foreground'>
+											Status
+										</th>
+										<th className='text-left px-2 py-2.5 text-xs font-medium text-muted-foreground'>
+											Started
+										</th>
+										<th className='text-left px-2 py-2.5 text-xs font-medium text-muted-foreground'>
+											Duration
+										</th>
+										<th className='text-left px-2 py-2.5 text-xs font-medium text-muted-foreground'>
+											Details
+										</th>
+										<th className='py-2.5 pr-4 pl-2 w-16' />
+									</tr>
+								</thead>
+								<tbody>
+									{restoreHistory.data.map(row => (
+										<RestoreHistoryRow key={row.id} row={row} />
+									))}
+								</tbody>
+							</table>
+						</div>
+					)}
+				</div>
+			)}
 		</div>
 	);
 }

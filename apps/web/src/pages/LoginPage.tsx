@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Eye, EyeOff, Loader2, Zap } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { useAuthStore } from '@/store/auth.store';
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,10 @@ const schema = z.object({
 });
 type FormData = z.infer<typeof schema>;
 
+const DEV_EMAIL = import.meta.env.VITE_DEV_EMAIL as string | undefined;
+const DEV_PASSWORD = import.meta.env.VITE_DEV_PASSWORD as string | undefined;
+const hasDevCredentials = Boolean(DEV_EMAIL && DEV_PASSWORD);
+
 export function LoginPage() {
 	const navigate = useNavigate();
 	const { setTokens, setUser } = useAuthStore();
@@ -32,8 +36,14 @@ export function LoginPage() {
 	const {
 		register,
 		handleSubmit,
+		setValue,
 		formState: { errors, isSubmitting },
 	} = useForm<FormData>({ resolver: zodResolver(schema) });
+
+	const fillDevCredentials = () => {
+		setValue('email', DEV_EMAIL!);
+		setValue('password', DEV_PASSWORD!);
+	};
 
 	const onSubmit = async (data: FormData) => {
 		setError('');
@@ -74,6 +84,16 @@ export function LoginPage() {
 					</CardHeader>
 
 					<CardContent>
+						{hasDevCredentials && (
+							<button
+								type='button'
+								onClick={fillDevCredentials}
+								className='mb-4 w-full flex items-center justify-center gap-2 rounded-md border border-dashed border-amber-400 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 hover:bg-amber-100 transition-colors dark:border-amber-500 dark:bg-amber-950/30 dark:text-amber-400 dark:hover:bg-amber-950/50'
+							>
+								<Zap className='h-3.5 w-3.5' />
+								Fill seed credentials
+							</button>
+						)}
 						<form onSubmit={handleSubmit(onSubmit)} className='space-y-4'>
 							<div className='space-y-1.5'>
 								<Label htmlFor='email'>Email</Label>
