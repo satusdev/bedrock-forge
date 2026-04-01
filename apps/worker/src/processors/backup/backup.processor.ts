@@ -1,6 +1,6 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { Processor, WorkerHost, InjectQueue } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
-import { Job } from 'bullmq';
+import { Job, Queue } from 'bullmq';
 import { mkdir, rm, readFile, stat } from 'fs/promises';
 import { StepTracker } from '../../services/step-tracker';
 import { join } from 'path';
@@ -58,6 +58,7 @@ export class BackupProcessor extends WorkerHost {
 		private readonly config: ConfigService,
 		private readonly sshKey: SshKeyService,
 		private readonly encryption: EncryptionService,
+		@InjectQueue(QUEUES.BACKUPS) private readonly backupsQueue: Queue,
 	) {
 		super();
 	}
@@ -706,6 +707,33 @@ export class BackupProcessor extends WorkerHost {
 		this.logger.log(
 			`[${job.id}] Scheduled backup triggered: scheduleId=${scheduleId} env=${environmentId} type=${type}`,
 		);
+
+		// Guard: if the schedule was deleted from the DB, self-clean the orphaned repeatable job
+		const scheduleRecord = await this.prisma.backupSchedule.findUnique({
+			where: { id: BigInt(scheduleId) },
+		});
+		if (!scheduleRecord) {
+			this.logger.warn(
+				`[${job.id}] Schedule ${scheduleId} no longer exists in DB — removing orphaned repeatable job and skipping`,
+			);
+			try {
+				const repeatableJobs = await this.backupsQueue.getRepeatableJobs();
+				const orphanKey = `backup-schedule-${scheduleId}`;
+				for (const rj of repeatableJobs) {
+					if (rj.id === orphanKey) {
+						await this.backupsQueue.removeRepeatableByKey(rj.key);
+						this.logger.log(
+							`[${job.id}] Removed orphaned repeatable job: ${rj.key}`,
+						);
+					}
+				}
+			} catch (cleanupErr) {
+				this.logger.warn(
+					`[${job.id}] Could not remove orphaned repeatable job: ${cleanupErr}`,
+				);
+			}
+			return;
+		}
 
 		// Create the Backup and JobExecution rows, then delegate to handleCreate
 		const bullJobId = job.id ?? String(scheduleId);

@@ -36,6 +36,26 @@ if ($restore) {
         exit(1);
     }
 
+    // ── Wipe the existing docroot before extracting ────────────────────────
+    // tar -xzf is additive: files present on disk but absent from the archive
+    // are left untouched, which causes stale plugins/themes to survive a
+    // restore, and can create duplicated directories (e.g. public_html/public_html/)
+    // when an older backup had a different path structure.
+    // Deleting the docroot first guarantees the result is an exact mirror of
+    // the backup.  We only delete AFTER confirming the archive file exists
+    // (validated above), so a missing/corrupt archive never nukes the live site.
+    if (is_dir($docroot)) {
+        $rmOut  = [];
+        $rmCode = 0;
+        exec('rm -rf ' . escapeshellarg($docroot) . ' 2>&1', $rmOut, $rmCode);
+        if ($rmCode !== 0) {
+            fwrite(STDERR, "WARNING: could not clean docroot before restore (exit {$rmCode}): " . implode("\n", $rmOut) . "\n");
+            // Non-fatal: proceed with extraction; stale files may remain.
+        } else {
+            fwrite(STDERR, "Cleaned docroot before restore: {$docroot}\n");
+        }
+    }
+
     // Extract to the PARENT of docroot.
     // Archives are created with: tar -C dirname(docroot) basename(docroot)
     // so every file inside is stored as  basename/path/to/file.php
