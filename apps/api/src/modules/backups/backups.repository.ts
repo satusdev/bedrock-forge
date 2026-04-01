@@ -90,6 +90,7 @@ export class BackupsRepository {
 
 	createJobExecution(data: {
 		queue_name: string;
+		job_type?: string;
 		bull_job_id: string;
 		environment_id: bigint;
 		payload?: Prisma.InputJsonObject;
