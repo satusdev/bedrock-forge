@@ -384,6 +384,7 @@ model JobExecution {
   id             BigInt           @id @default(autoincrement())
   queue_name     String
   bull_job_id    String
+  job_type       String?          // e.g. backup:create, backup:restore, sync:clone
   environment_id BigInt?
   server_id      BigInt?
   status         JobExecutionStatus @default(queued)
