@@ -63,7 +63,14 @@ export class StepTracker {
 		this.entries.push(full);
 
 		const logLine = `[${this.jobId}] [${full.level.toUpperCase()}] ${full.step}${full.detail ? ` — ${full.detail}` : ''}`;
-		if (full.level === 'error') this.logger.error(logLine);
+		// For error-level commands also emit stderr to the NestJS console so
+		// the failure reason is visible without opening the UI log panel.
+		const stderrSuffix =
+			full.level === 'error' && full.stderr ? `\n  stderr: ${full.stderr}` : '';
+		const exitSuffix =
+			full.level === 'error' && full.exitCode !== undefined ? ` (exit ${full.exitCode})` : '';
+
+		if (full.level === 'error') this.logger.error(logLine + exitSuffix + stderrSuffix);
 		else if (full.level === 'warn') this.logger.warn(logLine);
 		else this.logger.log(logLine);
 
