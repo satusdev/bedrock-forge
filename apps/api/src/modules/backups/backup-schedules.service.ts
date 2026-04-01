@@ -117,10 +117,10 @@ export class BackupSchedulesService {
 	private async removeRepeatableJob(scheduleId: number) {
 		const jobId = this.repeatableJobId(scheduleId);
 		try {
-			// Get all repeatable jobs and remove any matching this jobId
+			// BullMQ v5: the custom jobId is in rj.id, NOT embedded in rj.key
 			const repeatableJobs = await this.backupsQueue.getRepeatableJobs();
 			for (const rj of repeatableJobs) {
-				if (rj.key.includes(jobId)) {
+				if (rj.id === jobId) {
 					await this.backupsQueue.removeRepeatableByKey(rj.key);
 					this.logger.log(`Removed repeatable job key: ${rj.key}`);
 				}
