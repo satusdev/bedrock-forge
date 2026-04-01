@@ -16,20 +16,24 @@ export class SyncService {
 	async enqueueClone(dto: SyncCloneDto) {
 		// Validate target environment has a Google Drive folder configured.
 		// Sync overwrites the target DB; a safety backup to GDrive is mandatory.
-		const targetEnv = await this.repo.findEnvironmentById(
-			dto.targetEnvironmentId,
-		);
-		if (!targetEnv.google_drive_folder_id) {
-			throw new BadRequestException(
-				'Target environment has no Google Drive folder configured. ' +
-					'A safety backup is required before sync. ' +
-					'Set a Google Drive folder on the target environment first.',
+		// skipSafetyBackup bypasses this check — the user explicitly accepts the risk.
+		if (!dto.skipSafetyBackup) {
+			const targetEnv = await this.repo.findEnvironmentById(
+				dto.targetEnvironmentId,
 			);
+			if (!targetEnv.google_drive_folder_id) {
+				throw new BadRequestException(
+					'Target environment has no Google Drive folder configured. ' +
+						'A safety backup is required before sync. ' +
+						'Set a Google Drive folder on the target environment first.',
+				);
+			}
 		}
 
 		const bullJobId = randomUUID();
 		const exec = await this.repo.createJobExecution({
 			queue_name: QUEUES.SYNC,
+			job_type: JOB_TYPES.SYNC_CLONE,
 			bull_job_id: bullJobId,
 			environment_id: BigInt(dto.targetEnvironmentId),
 		});
@@ -45,6 +49,7 @@ export class SyncService {
 		const bullJobId = randomUUID();
 		const exec = await this.repo.createJobExecution({
 			queue_name: QUEUES.SYNC,
+			job_type: JOB_TYPES.SYNC_PUSH,
 			bull_job_id: bullJobId,
 			environment_id: BigInt(dto.environmentId),
 		});
