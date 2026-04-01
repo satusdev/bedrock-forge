@@ -25,6 +25,8 @@ export class CredentialParserService {
 	 * DB_HOST defaults to 'localhost' when absent.
 	 */
 	parseWpConfig(content: string): WpDbCredentials | null {
+		// Normalise Windows line endings so anchors behave correctly
+		content = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 		const dbName = this.extractDefine(content, 'DB_NAME');
 		const dbUser = this.extractDefine(content, 'DB_USER');
 		const dbPassword = this.extractDefine(content, 'DB_PASSWORD');
@@ -49,6 +51,8 @@ export class CredentialParserService {
 	 * be determined.
 	 */
 	parseEnvFile(content: string): WpDbCredentials | null {
+		// Normalise Windows line endings (common on hosting-panel-generated .env files)
+		content = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 		let dbName = this.extractEnv(content, 'DB_NAME');
 		let dbUser = this.extractEnv(content, 'DB_USER');
 		let dbPassword = this.extractEnv(content, 'DB_PASSWORD');
