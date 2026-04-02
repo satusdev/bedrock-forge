@@ -11,6 +11,7 @@ import { MonitorProcessorModule } from './processors/monitor/monitor-processor.m
 import { DomainWhoisProcessorModule } from './processors/domain-whois/domain-whois-processor.module';
 import { CreateBedrockProcessorModule } from './processors/create-bedrock/create-bedrock-processor.module';
 import { NotificationProcessorModule } from './processors/notification/notification-processor.module';
+import { ReportProcessorModule } from './processors/report/report-processor.module';
 import { SshKeyModule } from './services/ssh-key.module';
 import workerConfig from './config/worker.config';
 
@@ -37,6 +38,7 @@ import workerConfig from './config/worker.config';
 			{ name: QUEUES.DOMAINS },
 			{ name: QUEUES.PROJECTS },
 			{ name: QUEUES.NOTIFICATIONS },
+			{ name: QUEUES.REPORTS },
 		),
 
 		PrismaModule,
@@ -50,6 +52,7 @@ import workerConfig from './config/worker.config';
 		DomainWhoisProcessorModule,
 		CreateBedrockProcessorModule,
 		NotificationProcessorModule,
+		ReportProcessorModule,
 	],
 })
 export class WorkerModule {}
