@@ -43,6 +43,7 @@ import {
 	DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ImportFromServerDialog } from './projects/ImportFromServerDialog';
+import { CreateBedrockDialog } from './projects/CreateBedrockDialog';
 
 interface Client {
 	id: number;
@@ -436,17 +437,21 @@ export function ProjectsPage() {
 	const [page, setPage] = useState(1);
 	const [search, setSearch] = useState('');
 	const [searchInput, setSearchInput] = useState('');
+	const [clientFilter, setClientFilter] = useState('');
 	const [createOpen, setCreateOpen] = useState(false);
 	const [importOpen, setImportOpen] = useState(false);
+	const [bedrockOpen, setBedrockOpen] = useState(false);
 	const [editTarget, setEditTarget] = useState<Project | null>(null);
 	const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
 
 	const { data, isLoading } = useQuery({
-		queryKey: ['projects', page, search],
-		queryFn: () =>
-			api.get<{ items: Project[]; total: number }>(
-				`/projects?page=${page}&limit=20${search ? `&search=${encodeURIComponent(search)}` : ''}`,
-			),
+		queryKey: ['projects', page, search, clientFilter],
+		queryFn: () => {
+			const qs = new URLSearchParams({ page: String(page), limit: '20' });
+			if (search) qs.set('search', search);
+			if (clientFilter) qs.set('client_id', clientFilter);
+			return api.get<{ items: Project[]; total: number }>(`/projects?${qs}`);
+		},
 	});
 
 	const { data: clients = [] } = useQuery({
@@ -494,6 +499,14 @@ export function ProjectsPage() {
 					<ServerIcon className='h-4 w-4 mr-1.5' />
 					Import from Server
 				</Button>
+				<Button
+					variant='default'
+					size='sm'
+					onClick={() => setBedrockOpen(true)}
+				>
+					<Layers className='h-4 w-4 mr-1.5' />
+					Create Bedrock
+				</Button>
 			</PageHeader>
 
 			<SearchBar
@@ -512,6 +525,41 @@ export function ProjectsPage() {
 				totalCount={data?.total ?? 0}
 				totalLabel='total projects'
 			/>
+
+			{/* Client filter */}
+			<div className='flex gap-3 flex-wrap items-center'>
+				<Select
+					value={clientFilter || 'all'}
+					onValueChange={v => {
+						setClientFilter(v === 'all' ? '' : v);
+						setPage(1);
+					}}
+				>
+					<SelectTrigger className='w-44'>
+						<SelectValue placeholder='All Clients' />
+					</SelectTrigger>
+					<SelectContent>
+						<SelectItem value='all'>All Clients</SelectItem>
+						{clients.map(c => (
+							<SelectItem key={c.id} value={String(c.id)}>
+								{c.name}
+							</SelectItem>
+						))}
+					</SelectContent>
+				</Select>
+				{clientFilter && (
+					<Button
+						variant='ghost'
+						size='sm'
+						onClick={() => {
+							setClientFilter('');
+							setPage(1);
+						}}
+					>
+						Clear filter
+					</Button>
+				)}
+			</div>
 
 			{isLoading ? (
 				<div className='grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4'>
@@ -588,6 +636,11 @@ export function ProjectsPage() {
 				open={importOpen}
 				onOpenChange={setImportOpen}
 				clients={clients}
+				onSuccess={invalidate}
+			/>
+			<CreateBedrockDialog
+				open={bedrockOpen}
+				onOpenChange={setBedrockOpen}
 				onSuccess={invalidate}
 			/>
 		</div>
