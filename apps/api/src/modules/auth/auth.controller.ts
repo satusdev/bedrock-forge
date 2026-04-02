@@ -10,7 +10,7 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
-import { LoginDto, RegisterDto, RefreshTokenDto } from './dto/auth.dto';
+import { LoginDto, RefreshTokenDto } from './dto/auth.dto';
 import {
 	CurrentUser,
 	AuthenticatedUser,
@@ -19,12 +19,6 @@ import {
 @Controller('auth')
 export class AuthController {
 	constructor(private readonly authService: AuthService) {}
-
-	@Post('register')
-	@Throttle({ default: { ttl: 60_000, limit: 5 } })
-	async register(@Body() dto: RegisterDto): Promise<any> {
-		return this.authService.register(dto.email, dto.name, dto.password);
-	}
 
 	@Post('login')
 	@HttpCode(HttpStatus.OK)
