@@ -120,15 +120,18 @@ export class JobsGateway
 		});
 
 		this.projectsQueueEvents.on('progress', async ({ jobId, data }) => {
+			const isObj = typeof data === 'object' && data !== null;
 			const progress =
 				typeof data === 'number'
 					? data
 					: ((data as { value?: number })?.value ?? 0);
+			const step = isObj ? (data as { step?: string })?.step : undefined;
 			const envId = await this.resolveEnvId(jobId);
 			this.emitJobProgress({
 				jobId,
 				queueName: QUEUES.PROJECTS,
 				progress,
+				step,
 				environmentId: envId,
 			});
 		});
@@ -341,7 +344,8 @@ export class JobsGateway
 			});
 
 			socket.data.userId = payload.sub;
-			socket.data.roles = payload.roles;
+			socket.data.roles = payload.roles; // All authenticated sockets join a shared room for events not scoped to an environment
+			socket.join('global:jobs');
 			this.logger.debug(`Client connected: ${socket.id} (user ${payload.sub})`);
 		} catch (err) {
 			this.logger.warn(`Unauthorized WebSocket connection from ${socket.id}`);
@@ -354,10 +358,15 @@ export class JobsGateway
 	}
 
 	@SubscribeMessage('subscribe:environment')
-	subscribeToEnvironment(
+	async subscribeToEnvironment(
 		@MessageBody() data: { environmentId: number },
 		@ConnectedSocket() socket: Socket,
 	) {
+		const env = await this.prisma.environment.findUnique({
+			where: { id: BigInt(data.environmentId) },
+			select: { id: true },
+		});
+		if (!env) return;
 		socket.join(`env:${data.environmentId}`);
 	}
 
@@ -372,36 +381,29 @@ export class JobsGateway
 	// ── Emit methods ──────────────────────────────────────────────────────────
 
 	emitJobProgress(event: JobProgressEvent) {
-		if (event.environmentId) {
-			this.server
-				.to(`env:${event.environmentId}`)
-				.emit(WS_EVENTS.JOB_PROGRESS, event);
-		}
-		this.server.emit(WS_EVENTS.JOB_PROGRESS, event);
+		const room = event.environmentId
+			? `env:${event.environmentId}`
+			: 'global:jobs';
+		this.server.to(room).emit(WS_EVENTS.JOB_PROGRESS, event);
 	}
 
 	emitJobCompleted(event: JobCompletedEvent) {
-		if (event.environmentId) {
-			this.server
-				.to(`env:${event.environmentId}`)
-				.emit(WS_EVENTS.JOB_COMPLETED, event);
-		}
-		this.server.emit(WS_EVENTS.JOB_COMPLETED, event);
+		const room = event.environmentId
+			? `env:${event.environmentId}`
+			: 'global:jobs';
+		this.server.to(room).emit(WS_EVENTS.JOB_COMPLETED, event);
 	}
 
 	emitJobFailed(event: JobFailedEvent) {
-		if (event.environmentId) {
-			this.server
-				.to(`env:${event.environmentId}`)
-				.emit(WS_EVENTS.JOB_FAILED, event);
-		}
-		this.server.emit(WS_EVENTS.JOB_FAILED, event);
+		const room = event.environmentId
+			? `env:${event.environmentId}`
+			: 'global:jobs';
+		this.server.to(room).emit(WS_EVENTS.JOB_FAILED, event);
 	}
 
 	emitMonitorResult(event: Pick<MonitorResultEvent, 'environmentId'>) {
 		this.server
 			.to(`env:${event.environmentId}`)
 			.emit(WS_EVENTS.MONITOR_RESULT, event);
-		this.server.emit(WS_EVENTS.MONITOR_RESULT, event);
 	}
 }
