@@ -56,6 +56,13 @@ export class BackupsController {
 		return this.svc.findJobExecutionLog(id);
 	}
 
+	/** Cancel an actively running job execution. */
+	@Post('execution/:id/cancel')
+	@HttpCode(HttpStatus.OK)
+	cancelJobExecution(@Param('id', ParseIntPipe) id: number) {
+		return this.svc.cancelJobExecution(id);
+	}
+
 	@Get(':id')
 	findOne(@Param('id', ParseIntPipe) id: number) {
 		return this.svc.findOne(id);
@@ -93,9 +100,11 @@ export class BackupsController {
 		const folderId = gdrivePath.slice(0, slashIdx);
 		const remoteFilename = gdrivePath.slice(slashIdx + 1);
 
+		// Sanitize filename: strip any chars that could break the header value
+		const safeFilename = remoteFilename.replace(/["|\\\r\n]/g, '_');
 		res.setHeader(
 			'Content-Disposition',
-			`attachment; filename="${remoteFilename}"`,
+			`attachment; filename="${safeFilename}"`,
 		);
 		res.setHeader('Content-Type', 'application/octet-stream');
 

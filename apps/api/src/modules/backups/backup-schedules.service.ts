@@ -36,6 +36,8 @@ export class BackupSchedulesService {
 			day_of_week: dto.day_of_week ?? null,
 			day_of_month: dto.day_of_month ?? null,
 			enabled: dto.enabled,
+			retention_count: dto.retention_count ?? null,
+			retention_days: dto.retention_days ?? null,
 		});
 
 		// Sync the BullMQ repeatable job

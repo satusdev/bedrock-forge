@@ -118,6 +118,30 @@ export class BackupsService {
 		return exec;
 	}
 
+	async cancelJobExecution(id: number) {
+		const exec = await this.repo.findJobExecutionById(BigInt(id));
+		if (!exec) throw new NotFoundException(`JobExecution ${id} not found`);
+		if (exec.status !== 'active') {
+			throw new BadRequestException(
+				`Job execution ${id} is not active (status: ${exec.status})`,
+			);
+		}
+
+		// Write a cancellation token into Redis — the worker checks this in
+		// its progress callback and kills the rclone child process when found.
+		const client = await this.backupsQueue.client;
+		await client.set(`forge:cancel:${exec.bull_job_id}`, '1', 'EX', 3600);
+
+		// Optimistically mark as failed; the worker will finalise the log entry.
+		await this.repo.updateJobExecution(BigInt(id), {
+			status: 'failed',
+			last_error: 'Cancelled by user',
+			completed_at: new Date(),
+		});
+
+		return { cancelled: true };
+	}
+
 	async remove(id: number) {
 		const backup = await this.findOne(id);
 		// Enqueue async GDrive file deletion before removing the DB record

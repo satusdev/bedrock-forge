@@ -41,4 +41,18 @@ export class UpsertBackupScheduleDto {
 
 	@IsBoolean()
 	enabled: boolean = true;
+
+	/** Keep last N completed scheduled backups — null / omit means unlimited */
+	@IsOptional()
+	@IsInt()
+	@Min(1)
+	@Max(1000)
+	retention_count?: number | null;
+
+	/** Auto-delete scheduled backups older than N days — null / omit means never */
+	@IsOptional()
+	@IsInt()
+	@Min(1)
+	@Max(365)
+	retention_days?: number | null;
 }
