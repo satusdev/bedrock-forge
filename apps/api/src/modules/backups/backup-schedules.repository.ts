@@ -9,6 +9,8 @@ export interface UpsertScheduleData {
 	day_of_week?: number | null;
 	day_of_month?: number | null;
 	enabled: boolean;
+	retention_count?: number | null;
+	retention_days?: number | null;
 }
 
 @Injectable()

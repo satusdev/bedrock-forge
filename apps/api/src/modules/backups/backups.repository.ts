@@ -102,6 +102,10 @@ export class BackupsRepository {
 		return this.prisma.jobExecution.findUnique({ where: { id } });
 	}
 
+	updateJobExecution(id: bigint, data: UpdateJobExecutionData) {
+		return this.prisma.jobExecution.update({ where: { id }, data });
+	}
+
 	findJobExecutionLog(id: bigint) {
 		return this.prisma.jobExecution.findUnique({
 			where: { id },
