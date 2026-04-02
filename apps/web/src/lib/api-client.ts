@@ -1,4 +1,5 @@
 import { useAuthStore } from '@/store/auth.store';
+import { updateSocketToken } from './websocket';
 
 const BASE = '/api';
 
@@ -20,6 +21,7 @@ async function refreshTokens() {
 		}
 		const data = await res.json();
 		setTokens(data.accessToken, data.refreshToken);
+		updateSocketToken(data.accessToken as string);
 		return data.accessToken as string;
 	} catch {
 		logout();
@@ -68,4 +70,6 @@ export const api = {
 	put: <T>(path: string, body: unknown) =>
 		apiFetch<T>(path, { method: 'PUT', body: JSON.stringify(body) }),
 	delete: <T>(path: string) => apiFetch<T>(path, { method: 'DELETE' }),
+	patch: <T>(path: string, body: unknown) =>
+		apiFetch<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
 };

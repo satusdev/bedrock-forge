@@ -21,6 +21,13 @@ export function destroySocket() {
 	_socket = null;
 }
 
+/** Update the socket's auth token so it is used on the next reconnection. */
+export function updateSocketToken(token: string) {
+	if (_socket) {
+		(_socket.auth as { token: string }).token = token;
+	}
+}
+
 type EventHandler = (data: unknown) => void;
 
 export function useWebSocketEvent(event: string, handler: EventHandler) {
