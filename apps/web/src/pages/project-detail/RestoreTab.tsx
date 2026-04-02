@@ -86,7 +86,15 @@ function RestoreStatusIcon({ status }: { status: string }) {
 	return <Clock className='h-3.5 w-3.5 text-muted-foreground' />;
 }
 
-function RestoreHistoryRow({ row }: { row: RestoreJobRow }) {
+function RestoreHistoryRow({
+	row,
+	onCancel,
+	isCancelling,
+}: {
+	row: RestoreJobRow;
+	onCancel?: (id: number) => void;
+	isCancelling?: boolean;
+}) {
 	const [expanded, setExpanded] = useState(false);
 	const isActive = row.status === 'active' || row.status === 'pending';
 
@@ -133,11 +141,23 @@ function RestoreHistoryRow({ row }: { row: RestoreJobRow }) {
 						</span>
 					) : null}
 				</td>
-				<td className='py-2.5 pr-4 pl-2 text-right whitespace-nowrap'>
+				<td className='py-2.5 pr-4 pl-2 text-right whitespace-nowrap flex items-center gap-2'>
 					<ExpandLogButton
 						expanded={expanded}
 						onToggle={() => setExpanded(v => !v)}
 					/>
+					{/* Cancel button for active jobs */}
+					{row.status === 'active' && (
+						<Button
+							variant='ghost'
+							size='icon'
+							disabled={isCancelling}
+							onClick={() => onCancel?.(row.id)}
+							title='Cancel restore job'
+						>
+							<XCircle className='h-4 w-4 text-destructive' />
+						</Button>
+					)}
 				</td>
 			</tr>
 			{expanded && (
@@ -282,6 +302,24 @@ export function RestoreTab({
 			toast({ title: 'Restore failed to start', variant: 'destructive' }),
 	});
 
+	const cancelMutation = useMutation({
+		mutationFn: (execId: number) =>
+			api.post<{ cancelled: boolean }>(
+				`/backups/execution/${execId}/cancel`,
+				{},
+			),
+		onSuccess: () => {
+			setJobProgress(null);
+			setJobExecutionId(null);
+			restoreJobIdRef.current = null;
+			restoreEnvIdRef.current = null;
+			qc.invalidateQueries({ queryKey: ['restore-history', selectedEnvId] });
+			toast({ title: 'Restore job cancelled' });
+		},
+		onError: () =>
+			toast({ title: 'Could not cancel restore', variant: 'destructive' }),
+	});
+
 	if (environments.length === 0) {
 		return (
 			<div className='text-center py-12 text-muted-foreground'>
@@ -330,9 +368,23 @@ export function RestoreTab({
 			{/* Active restore progress + live log */}
 			{isRestoring && (
 				<div className='border rounded-lg p-4 space-y-2 bg-card'>
-					<div className='flex items-center gap-2 text-sm font-medium'>
-						<RotateCcw className='h-4 w-4 animate-spin text-primary' />
-						Restore in progress…
+					<div className='flex items-center justify-between gap-2'>
+						<div className='flex items-center gap-2 text-sm font-medium'>
+							<RotateCcw className='h-4 w-4 animate-spin text-primary' />
+							Restore in progress…
+						</div>
+						<Button
+							variant='outline'
+							size='sm'
+							className='h-7 text-xs gap-1.5 text-destructive border-destructive/40 hover:bg-destructive/10'
+							disabled={cancelMutation.isPending || !jobExecutionId}
+							onClick={() =>
+								jobExecutionId && cancelMutation.mutate(jobExecutionId)
+							}
+						>
+							<XCircle className='h-3.5 w-3.5' />
+							{cancelMutation.isPending ? 'Stopping…' : 'Stop'}
+						</Button>
 					</div>
 					<div className='h-2 rounded-full bg-muted overflow-hidden'>
 						<div
@@ -488,7 +540,12 @@ export function RestoreTab({
 								</thead>
 								<tbody>
 									{restoreHistory.data.map(row => (
-										<RestoreHistoryRow key={row.id} row={row} />
+										<RestoreHistoryRow
+											key={row.id}
+											row={row}
+											onCancel={cancelMutation.mutate}
+											isCancelling={cancelMutation.isPending}
+										/>
 									))}
 								</tbody>
 							</table>
