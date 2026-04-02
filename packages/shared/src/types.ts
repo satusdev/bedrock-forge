@@ -51,6 +51,8 @@ export interface BackupSchedule {
 	enabled: boolean;
 	last_run_at: string | null;
 	next_run_at: string | null;
+	retention_count: number | null;
+	retention_days: number | null;
 	created_at: string;
 	updated_at: string;
 }
@@ -60,6 +62,26 @@ export const PluginScanRunPayloadSchema = z.object({
 	jobExecutionId: z.number().int().positive(),
 });
 export type PluginScanRunPayload = z.infer<typeof PluginScanRunPayloadSchema>;
+
+export const PluginManagePayloadSchema = z.object({
+	environmentId: z.number().int().positive(),
+	jobExecutionId: z.number().int().positive(),
+	action: z.enum([
+		'add',
+		'remove',
+		'update',
+		'update-all',
+		'change-constraint',
+		'read',
+	]),
+	/** wpackagist-plugin/slug — required for add/remove/update/change-constraint, omit for update-all/read */
+	slug: z.string().optional(),
+	/** Version constraint e.g. "^1.5" — only relevant for add */
+	version: z.string().optional(),
+	/** New version constraint — only for change-constraint action */
+	constraint: z.string().optional(),
+});
+export type PluginManagePayload = z.infer<typeof PluginManagePayloadSchema>;
 
 export const SyncClonePayloadSchema = z.object({
 	sourceEnvironmentId: z.number().int().positive(),
@@ -94,6 +116,19 @@ export type DomainWhoisPayload = z.infer<typeof DomainWhoisPayloadSchema>;
 export const CreateBedrockPayloadSchema = z.object({
 	environmentId: z.number().int().positive(),
 	jobExecutionId: z.number().int().positive(),
+	/** Present when CyberPanel provisioning is required */
+	cyberpanel: z
+		.object({
+			domain: z.string(),
+			dbName: z.string(),
+			dbUser: z.string(),
+			dbPassword: z.string(),
+			phpVersion: z.string().default('8.3'),
+			adminEmail: z.string().optional(),
+		})
+		.optional(),
+	/** If set, clone this environment's DB + files instead of fresh Bedrock install */
+	sourceEnvironmentId: z.number().int().positive().optional(),
 });
 export type CreateBedrockPayload = z.infer<typeof CreateBedrockPayloadSchema>;
 
@@ -150,7 +185,7 @@ export interface JobLogEvent {
 // ─── Plugin Scan Types ────────────────────────────────────────────────────────
 
 /**
- * Matches the exact JSON output of apps/worker/scripts/plugin-scan.php.
+ * Matches the JSON output of apps/worker/scripts/plugin-scan.php.
  * `active` is intentionally absent — the PHP script cannot determine
  * activation status without WordPress DB access.
  */
@@ -163,6 +198,18 @@ export interface PluginInfo {
 	author: string | null;
 	plugin_uri: string | null;
 	description: string | null;
+	/** True when the plugin entry exists in composer.json (Bedrock only) */
+	managed_by_composer: boolean;
+	/** Composer version constraint from composer.json e.g. "^1.5.0" */
+	composer_constraint: string | null;
+	/** True for must-use plugins (mu-plugins) — auto-loaded, cannot be managed via composer */
+	is_mu_plugin?: boolean;
+}
+
+/** Top-level output from plugin-scan.php (new format) */
+export interface PluginScanOutput {
+	is_bedrock: boolean;
+	plugins: PluginInfo[];
 }
 
 // ─── WP DB Credentials ───────────────────────────────────────────────────────
@@ -188,6 +235,7 @@ export const NOTIFICATION_EVENTS = {
 	billing: ['invoice.created', 'invoice.overdue'],
 	users: ['user.registered', 'user.login'],
 	servers: ['server.created', 'server.deleted'],
+	reports: ['report.weekly'],
 } as const;
 
 export type NotificationEventType =
@@ -203,7 +251,8 @@ export type NotificationEventType =
 	| 'user.registered'
 	| 'user.login'
 	| 'server.created'
-	| 'server.deleted';
+	| 'server.deleted'
+	| 'report.weekly';
 
 export const ALL_NOTIFICATION_EVENTS: NotificationEventType[] = [
 	'backup.completed',
@@ -219,6 +268,7 @@ export const ALL_NOTIFICATION_EVENTS: NotificationEventType[] = [
 	'user.login',
 	'server.created',
 	'server.deleted',
+	'report.weekly',
 ];
 
 // ─── Notification Send Job Payload ────────────────────────────────────────────
