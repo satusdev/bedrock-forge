@@ -57,14 +57,16 @@ export class MonitorProcessor extends WorkerHost {
 			where: { monitor_id: BigInt(monitorId), checked_at: { lt: cutoff } },
 		});
 
-		// Update monitor uptime %
-		const recentResults = await this.prisma.monitorResult.findMany({
-			where: { monitor_id: BigInt(monitorId) },
-			select: { is_up: true },
-		});
-		const upCount = recentResults.filter(r => r.is_up).length;
-		const uptime =
-			recentResults.length > 0 ? (upCount / recentResults.length) * 100 : 100;
+		// Update monitor uptime % — use aggregate COUNT queries instead of fetching all rows
+		const [totalCount, upCount] = await Promise.all([
+			this.prisma.monitorResult.count({
+				where: { monitor_id: BigInt(monitorId) },
+			}),
+			this.prisma.monitorResult.count({
+				where: { monitor_id: BigInt(monitorId), is_up: true },
+			}),
+		]);
+		const uptime = totalCount > 0 ? (upCount / totalCount) * 100 : 100;
 
 		await this.prisma.monitor.update({
 			where: { id: BigInt(monitorId) },
