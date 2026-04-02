@@ -30,4 +30,18 @@ export class PluginScansRepository {
 	}) {
 		return this.prisma.jobExecution.create({ data });
 	}
+
+	findJobExecution(execId: bigint) {
+		return this.prisma.jobExecution.findUnique({
+			where: { id: execId },
+			select: {
+				id: true,
+				status: true,
+				progress: true,
+				execution_log: true,
+				completed_at: true,
+				last_error: true,
+			},
+		});
+	}
 }
