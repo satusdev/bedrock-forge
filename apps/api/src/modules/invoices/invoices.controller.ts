@@ -17,6 +17,7 @@ import { InvoicesService } from './invoices.service';
 import {
 	GenerateInvoiceDto,
 	GenerateBulkInvoiceDto,
+	GenerateClientInvoiceDto,
 	UpdateInvoiceDto,
 	QueryInvoicesDto,
 } from './dto/invoice.dto';
@@ -48,6 +49,11 @@ export class InvoicesController {
 	@Post('generate-bulk')
 	generateBulk(@Body() dto: GenerateBulkInvoiceDto) {
 		return this.invoicesService.generateBulk(dto);
+	}
+
+	@Post('generate-client')
+	generateForClient(@Body() dto: GenerateClientInvoiceDto) {
+		return this.invoicesService.generateForClient(dto);
 	}
 
 	@Put(':id')

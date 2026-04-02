@@ -6,6 +6,8 @@ import {
 	IsString,
 	IsEnum,
 	IsDateString,
+	IsArray,
+	ArrayMinSize,
 	Min,
 	Max,
 } from 'class-validator';
@@ -26,6 +28,25 @@ export class GenerateInvoiceDto {
 }
 
 export class GenerateBulkInvoiceDto {
+	@IsInt()
+	@Min(2020)
+	@Max(2100)
+	year!: number;
+}
+
+export class GenerateClientInvoiceDto {
+	@IsInt()
+	@IsPositive()
+	clientId!: number;
+
+	/** If omitted, all active projects of the client with a package are targeted. */
+	@IsOptional()
+	@IsArray()
+	@ArrayMinSize(1)
+	@IsInt({ each: true })
+	@IsPositive({ each: true })
+	projectIds?: number[];
+
 	@IsInt()
 	@Min(2020)
 	@Max(2100)
