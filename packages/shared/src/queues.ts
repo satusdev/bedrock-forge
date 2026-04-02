@@ -8,6 +8,7 @@ export const QUEUES = {
 	DOMAINS: 'domains',
 	PROJECTS: 'projects',
 	NOTIFICATIONS: 'notifications',
+	REPORTS: 'reports',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
@@ -21,6 +22,7 @@ export const DLQ = {
 	DOMAINS: 'domains-dlq',
 	PROJECTS: 'projects-dlq',
 	NOTIFICATIONS: 'notifications-dlq',
+	REPORTS: 'reports-dlq',
 } as const;
 
 // ─── Job Types ────────────────────────────────────────────────────────────────
@@ -34,6 +36,7 @@ export const JOB_TYPES = {
 
 	// Plugin scans
 	PLUGIN_SCAN_RUN: 'plugin-scan:run',
+	PLUGIN_MANAGE: 'plugin:manage',
 
 	// Sync
 	SYNC_CLONE: 'sync:clone',
@@ -50,6 +53,9 @@ export const JOB_TYPES = {
 
 	// Notifications
 	NOTIFICATION_SEND: 'notification:send',
+
+	// Reports
+	REPORT_GENERATE: 'report:generate',
 } as const;
 
 export type JobType = (typeof JOB_TYPES)[keyof typeof JOB_TYPES];
