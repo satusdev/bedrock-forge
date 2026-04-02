@@ -9,7 +9,7 @@ import { RcloneService } from '../../services/rclone.service';
 import { SshKeyService } from '../../services/ssh-key.service';
 import { EncryptionService } from '../../encryption/encryption.service';
 import { createRemoteExecutor } from '@bedrock-forge/remote-executor';
-import { QUEUES, JOB_TYPES } from '@bedrock-forge/shared';
+import { QUEUES, JOB_TYPES, DEFAULT_JOB_OPTIONS } from '@bedrock-forge/shared';
 import { ConfigService } from '@nestjs/config';
 
 const STAGING_DIR = '/tmp/forge-backups';
@@ -517,6 +517,7 @@ export class BackupProcessor extends WorkerHost {
 			// Zero local temp files — rclone stdout is piped directly into SFTP.
 			const totalBytes = backup.size_bytes ? Number(backup.size_bytes) : 0;
 			let lastLoggedMb = 0;
+			let lastCancelCheckMb = 0;
 
 			await tracker.track({
 				step: 'Streaming archive from Google Drive to server',
@@ -541,6 +542,18 @@ export class BackupProcessor extends WorkerHost {
 				45 * 60 * 1000,
 				async bytesTransferred => {
 					const mb = Math.floor(bytesTransferred / (1024 * 1024));
+
+					// Check for user cancellation every ~10 MB — responsive but
+					// avoids a Redis round-trip on every SFTP chunk event.
+					if (mb >= lastCancelCheckMb + 10) {
+						lastCancelCheckMb = mb;
+						const redis = await this.backupsQueue.client;
+						if (await redis.get(`forge:cancel:${job.id}`)) {
+							rcloneChild.kill('SIGTERM');
+							throw new Error('Cancelled by user');
+						}
+					}
+
 					if (mb >= lastLoggedMb + 50) {
 						lastLoggedMb = mb;
 						const totalMb =
@@ -608,6 +621,14 @@ export class BackupProcessor extends WorkerHost {
 			});
 
 			// ── Step D: Execute restore script ──────────────────────────────────
+			// Final cancellation gate before the irreversible restore script runs.
+			{
+				const redis = await this.backupsQueue.client;
+				if (await redis.get(`forge:cancel:${job.id}`)) {
+					throw new Error('Cancelled by user');
+				}
+			}
+
 			const restoreCmd = `php ${remoteScript} --restore --file=${remoteBackupPath} --docroot=${env.root_path}${storedCredsArgs ? ' ' + storedCredsArgs : ''}`;
 			const maskedCmd = restoreCmd.replace(
 				/--db-pass='[^']*'/,
@@ -804,6 +825,90 @@ export class BackupProcessor extends WorkerHost {
 			// handleCreate already marks backup + jobExecution as failed
 			throw err;
 		}
+
+		// Run retention cleanup after a successful scheduled backup (non-fatal)
+		await this.cleanupRetention(
+			environmentId,
+			backupId,
+			scheduleRecord.retention_count ?? null,
+			scheduleRecord.retention_days ?? null,
+		).catch(err =>
+			this.logger.warn(
+				`[${job.id}] Retention cleanup failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+			),
+		);
+	}
+
+	// ── Retention cleanup ─────────────────────────────────────────────────────
+
+	/**
+	 * After a successful scheduled backup, prune older scheduled backups that
+	 * exceed the environment's retention policy. Only scheduled backups
+	 * (job_type = 'backup:scheduled') are considered — manual backups are never
+	 * auto-deleted. Runs non-fatally: failures are logged but do not fail the job.
+	 */
+	private async cleanupRetention(
+		environmentId: number,
+		justCreatedBackupId: number,
+		retentionCount: number | null,
+		retentionDays: number | null,
+	): Promise<void> {
+		if (!retentionCount && !retentionDays) return;
+
+		// Fetch all completed scheduled backups for this environment,
+		// ordered newest-first, excluding the backup just created.
+		const scheduledBackups = await this.prisma.backup.findMany({
+			where: {
+				environment_id: BigInt(environmentId),
+				status: 'completed',
+				id: { not: BigInt(justCreatedBackupId) },
+				jobExecution: {
+					job_type: JOB_TYPES.BACKUP_SCHEDULED,
+				},
+			},
+			orderBy: { created_at: 'desc' },
+			select: { id: true, file_path: true, created_at: true },
+		});
+
+		const toDelete = new Set<bigint>();
+
+		// Count limit: justCreated counts as 1. Keep (retentionCount - 1) from
+		// the sorted list and mark the remainder for deletion.
+		if (retentionCount && scheduledBackups.length >= retentionCount) {
+			for (const b of scheduledBackups.slice(retentionCount - 1)) {
+				toDelete.add(b.id);
+			}
+		}
+
+		// Age limit: mark anything older than retentionDays for deletion.
+		if (retentionDays) {
+			const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+			for (const b of scheduledBackups) {
+				if (b.created_at < cutoff) toDelete.add(b.id);
+			}
+		}
+
+		if (toDelete.size === 0) return;
+
+		this.logger.log(
+			`[env ${environmentId}] Retention cleanup: removing ${toDelete.size} stale scheduled backup(s)`,
+		);
+
+		// Enqueue GDrive file deletion before removing DB rows (fire-and-forget)
+		for (const id of toDelete) {
+			const b = scheduledBackups.find(sb => sb.id === id);
+			if (b?.file_path) {
+				await this.backupsQueue.add(
+					JOB_TYPES.BACKUP_DELETE_FILE,
+					{ filePath: b.file_path },
+					{ ...DEFAULT_JOB_OPTIONS, attempts: 5 },
+				);
+			}
+		}
+
+		await this.prisma.backup.deleteMany({
+			where: { id: { in: [...toDelete] } },
+		});
 	}
 
 	// ── Delete file ───────────────────────────────────────────────────────────
