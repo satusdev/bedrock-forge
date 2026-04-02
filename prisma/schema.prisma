@@ -181,7 +181,7 @@ model Project {
   created_at         DateTime @default(now()) @db.Timestamptz()
   updated_at         DateTime @updatedAt @db.Timestamptz()
 
-  client          Client          @relation(fields: [client_id], references: [id])
+  client          Client          @relation(fields: [client_id], references: [id], onDelete: Restrict)
   hosting_package HostingPackage? @relation(fields: [hosting_package_id], references: [id])
   support_package SupportPackage? @relation(fields: [support_package_id], references: [id])
   environments    Environment[]
@@ -223,6 +223,7 @@ model Environment {
 
   @@index([project_id])
   @@index([server_id])
+  @@unique([server_id, root_path])
   @@map("environments")
 }
 
@@ -265,6 +266,8 @@ model BackupSchedule {
   day_of_month   Int?       // 1-28 (monthly only)
   enabled        Boolean    @default(true)
   last_run_at    DateTime?  @db.Timestamptz()
+  retention_count Int?       // Keep last N completed scheduled backups — null = unlimited
+  retention_days  Int?       // Delete scheduled backups older than N days — null = never
   created_at     DateTime   @default(now()) @db.Timestamptz()
   updated_at     DateTime   @updatedAt @db.Timestamptz()
 
@@ -290,7 +293,7 @@ enum BackupStatus {
 model PluginScan {
   id             BigInt   @id @default(autoincrement())
   environment_id BigInt
-  plugins        Json     // Array of { name, version, active, author, description }
+  plugins        Json     // Object { is_bedrock: boolean, plugins: Plugin[] } or legacy array of Plugin objects
   scanned_at     DateTime @default(now()) @db.Timestamptz()
   created_at     DateTime @default(now()) @db.Timestamptz()
 
@@ -314,6 +317,7 @@ model Domain {
 
   @@index([project_id])
   @@index([name])
+  @@unique([project_id, name])
   @@map("domains")
 }
 
