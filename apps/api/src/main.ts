@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 
 // Express JSON.stringify cannot handle BigInt (Prisma autoincrement IDs).
@@ -29,11 +30,17 @@ async function bootstrap() {
 	// Health is excluded so Docker/k8s/LB probes resolve at /health (no prefix)
 	app.setGlobalPrefix('api', { exclude: ['health'] });
 
+	// Security headers
+	app.use(helmet());
+
 	// CORS — in production, restrict to your domain
 	app.enableCors({
 		origin: process.env.CORS_ORIGIN ?? '*',
 		credentials: true,
 	});
+
+	// Graceful shutdown — lets Prisma/BullMQ finish in-flight work on SIGTERM
+	app.enableShutdownHooks();
 
 	const port = parseInt(process.env.API_PORT ?? '3000', 10);
 	await app.listen(port);

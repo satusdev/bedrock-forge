@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
 import { ThrottlerModule } from '@nestjs/throttler';
+import { ScheduleModule } from '@nestjs/schedule';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
@@ -22,8 +24,11 @@ import { SettingsModule } from './modules/settings/settings.module';
 import { JobExecutionsModule } from './modules/job-executions/job-executions.module';
 import { InvoicesModule } from './modules/invoices/invoices.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { ReportsModule } from './modules/reports/reports.module';
+import { MaintenanceModule } from './modules/maintenance/maintenance.module';
 import { GatewaysModule } from './gateways/gateways.module';
 import { EncryptionModule } from './common/encryption/encryption.module';
+import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 import { QUEUES } from '@bedrock-forge/shared';
 import appConfig from './config/app.config';
 
@@ -39,11 +44,13 @@ import appConfig from './config/app.config';
 		// Redis-backed rate limiting
 		ThrottlerModule.forRootAsync({
 			inject: [ConfigService],
-			useFactory: (config: ConfigService) => ({
+			useFactory: () => ({
 				throttlers: [{ ttl: 60_000, limit: 100 }],
-				storage: undefined, // uses memory by default; swap to Redis adapter for prod cluster
 			}),
 		}),
+
+		// Nightly cleanup cron jobs
+		ScheduleModule.forRoot(),
 
 		// BullMQ queues
 		BullModule.forRootAsync({
@@ -70,6 +77,7 @@ import appConfig from './config/app.config';
 			{ name: QUEUES.DOMAINS },
 			{ name: QUEUES.PROJECTS },
 			{ name: QUEUES.NOTIFICATIONS },
+			{ name: QUEUES.REPORTS },
 		),
 
 		// Infrastructure
@@ -96,8 +104,13 @@ import appConfig from './config/app.config';
 		JobExecutionsModule,
 		InvoicesModule,
 		NotificationsModule,
+		ReportsModule,
+		MaintenanceModule,
 		GatewaysModule,
 	],
-	providers: [],
+	providers: [
+		// Global audit trail — logs all non-GET requests to audit_logs
+		{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
+	],
 })
 export class AppModule {}
