@@ -18,9 +18,14 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { ROLES } from '@bedrock-forge/shared';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { ProjectsService } from './projects.service';
-import { CreateProjectDto, UpdateProjectDto } from './dto/project.dto';
+import {
+	CreateProjectDto,
+	UpdateProjectDto,
+	QueryProjectsDto,
+} from './dto/project.dto';
 import { ImportProjectDto } from './dto/import-project.dto';
 import { BulkImportProjectsDto } from './dto/bulk-import-projects.dto';
+import { CreateProjectFullDto } from './dto/create-project-full.dto';
 
 @Controller('projects')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -28,7 +33,7 @@ import { BulkImportProjectsDto } from './dto/bulk-import-projects.dto';
 export class ProjectsController {
 	constructor(private readonly svc: ProjectsService) {}
 
-	@Get() findAll(@Query() q: PaginationQueryDto) {
+	@Get() findAll(@Query() q: QueryProjectsDto) {
 		return this.svc.findAll(q);
 	}
 	@Get(':id') findOne(@Param('id', ParseIntPipe) id: number) {
@@ -57,5 +62,12 @@ export class ProjectsController {
 		@Body() dto: BulkImportProjectsDto,
 	) {
 		return this.svc.importBulk(dto);
+	}
+
+	/** Provision a full Bedrock project via CyberPanel + SSH */
+	@Post('create-full')
+	@HttpCode(HttpStatus.ACCEPTED)
+	createFull(@Body() dto: CreateProjectFullDto) {
+		return this.svc.createFull(dto);
 	}
 }
