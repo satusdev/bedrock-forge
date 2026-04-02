@@ -36,4 +36,19 @@ export class SyncRepository {
 	}) {
 		return this.prisma.jobExecution.create({ data });
 	}
+
+	findJobExecutionById(id: bigint) {
+		return this.prisma.jobExecution.findUnique({ where: { id } });
+	}
+
+	updateJobExecution(
+		id: bigint,
+		data: {
+			status?: 'queued' | 'active' | 'completed' | 'failed' | 'dead_letter';
+			last_error?: string;
+			completed_at?: Date;
+		},
+	) {
+		return this.prisma.jobExecution.update({ where: { id }, data });
+	}
 }

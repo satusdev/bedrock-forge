@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+	BadRequestException,
+	Injectable,
+	NotFoundException,
+} from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { randomUUID } from 'crypto';
@@ -51,7 +55,7 @@ export class SyncService {
 			queue_name: QUEUES.SYNC,
 			job_type: JOB_TYPES.SYNC_PUSH,
 			bull_job_id: bullJobId,
-			environment_id: BigInt(dto.environmentId),
+			environment_id: BigInt(dto.targetEnvironmentId),
 		});
 		const job = await this.queue.add(
 			JOB_TYPES.SYNC_PUSH,
@@ -59,5 +63,26 @@ export class SyncService {
 			{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
 		);
 		return { jobExecutionId: Number(exec.id), jobId: job.id };
+	}
+
+	async cancelJobExecution(id: number) {
+		const exec = await this.repo.findJobExecutionById(BigInt(id));
+		if (!exec) throw new NotFoundException(`JobExecution ${id} not found`);
+		if (exec.status !== 'active') {
+			throw new BadRequestException(
+				`Job execution ${id} is not active (status: ${exec.status})`,
+			);
+		}
+
+		const client = await this.queue.client;
+		await client.set(`forge:cancel:${exec.bull_job_id}`, '1', 'EX', 3600);
+
+		await this.repo.updateJobExecution(BigInt(id), {
+			status: 'failed',
+			last_error: 'Cancelled by user',
+			completed_at: new Date(),
+		});
+
+		return { cancelled: true };
 	}
 }

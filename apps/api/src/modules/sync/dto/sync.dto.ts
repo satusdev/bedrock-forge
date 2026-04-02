@@ -13,6 +13,8 @@ export class SyncCloneDto {
 }
 
 export class SyncPushDto {
-	@IsInt() @IsPositive() environmentId!: number;
+	@IsInt() @IsPositive() sourceEnvironmentId!: number;
+	@IsInt() @IsPositive() targetEnvironmentId!: number;
 	@IsIn(['database', 'files', 'both']) scope!: string;
+	@IsOptional() @IsBoolean() skipSafetyBackup?: boolean;
 }
