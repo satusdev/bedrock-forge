@@ -10,6 +10,7 @@ import {
 	Clock,
 	Calendar,
 	Pencil,
+	XCircle,
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
@@ -102,6 +103,9 @@ export function BackupsTab({
 		Record<string, { progress: number; step?: string }>
 	>({});
 	const [expandedLogId, setExpandedLogId] = useState<number | null>(null);
+	const [activeJobExecutionId, setActiveJobExecutionId] = useState<
+		number | null
+	>(null);
 	const backupJobIdRef = useRef<string | null>(null);
 	const backupEnvIdRef = useRef<number | null>(null);
 
@@ -115,6 +119,8 @@ export function BackupsTab({
 		day_of_week: 0,
 		day_of_month: 1,
 		enabled: true,
+		retention_count: null as number | null,
+		retention_days: null as number | null,
 	});
 
 	useEffect(() => {
@@ -167,6 +173,7 @@ export function BackupsTab({
 			return;
 		backupJobIdRef.current = null;
 		backupEnvIdRef.current = null;
+		setActiveJobExecutionId(null);
 		qc.invalidateQueries({ queryKey: ['backups', selectedEnvId] });
 		setRunningJobs({});
 	});
@@ -182,6 +189,7 @@ export function BackupsTab({
 			return;
 		backupJobIdRef.current = null;
 		backupEnvIdRef.current = null;
+		setActiveJobExecutionId(null);
 		setRunningJobs({});
 		qc.invalidateQueries({ queryKey: ['backups', selectedEnvId] });
 		toast({
@@ -203,6 +211,7 @@ export function BackupsTab({
 		onSuccess: data => {
 			backupJobIdRef.current = data?.bullJobId ?? null;
 			backupEnvIdRef.current = selectedEnvId;
+			setActiveJobExecutionId(data?.jobExecutionId ?? null);
 			toast({ title: 'Backup queued' });
 			qc.invalidateQueries({ queryKey: ['backups', selectedEnvId] });
 		},
@@ -219,10 +228,29 @@ export function BackupsTab({
 		onSuccess: data => {
 			backupJobIdRef.current = data?.bullJobId ?? null;
 			backupEnvIdRef.current = selectedEnvId;
+			setActiveJobExecutionId(data?.jobExecutionId ?? null);
 			toast({ title: 'Restore queued' });
 			setRestoreTarget(null);
 		},
 		onError: () => toast({ title: 'Restore failed', variant: 'destructive' }),
+	});
+
+	const cancelBackupMutation = useMutation({
+		mutationFn: (execId: number) =>
+			api.post<{ cancelled: boolean }>(
+				`/backups/execution/${execId}/cancel`,
+				{},
+			),
+		onSuccess: () => {
+			setActiveJobExecutionId(null);
+			setRunningJobs({});
+			backupJobIdRef.current = null;
+			backupEnvIdRef.current = null;
+			qc.invalidateQueries({ queryKey: ['backups', selectedEnvId] });
+			toast({ title: 'Backup job cancelled' });
+		},
+		onError: () =>
+			toast({ title: 'Could not cancel job', variant: 'destructive' }),
 	});
 
 	const deleteMutation = useMutation({
@@ -247,6 +275,8 @@ export function BackupsTab({
 		day_of_month: number | null;
 		enabled: boolean;
 		last_run_at: string | null;
+		retention_count: number | null;
+		retention_days: number | null;
 	}
 
 	const { data: scheduleData, isLoading: scheduleLoading } = useQuery({
@@ -285,17 +315,31 @@ export function BackupsTab({
 	});
 
 	function openScheduleForm(existing?: BackupSchedule | null) {
-		if (existing) {
-			setScheduleForm({
-				type: existing.type,
-				frequency: existing.frequency as typeof scheduleForm.frequency,
-				hour: existing.hour,
-				minute: existing.minute,
-				day_of_week: existing.day_of_week ?? 0,
-				day_of_month: existing.day_of_month ?? 1,
-				enabled: existing.enabled,
-			});
-		}
+		setScheduleForm(
+			existing
+				? {
+						type: existing.type,
+						frequency: existing.frequency as typeof scheduleForm.frequency,
+						hour: existing.hour,
+						minute: existing.minute,
+						day_of_week: existing.day_of_week ?? 0,
+						day_of_month: existing.day_of_month ?? 1,
+						enabled: existing.enabled,
+						retention_count: existing.retention_count ?? null,
+						retention_days: existing.retention_days ?? null,
+					}
+				: {
+						type: 'full' as const,
+						frequency: 'daily' as const,
+						hour: 3,
+						minute: 0,
+						day_of_week: 0,
+						day_of_month: 1,
+						enabled: true,
+						retention_count: null,
+						retention_days: null,
+					},
+		);
 		setScheduleFormOpen(true);
 	}
 
@@ -384,8 +428,27 @@ export function BackupsTab({
 
 			{runningCount > 0 && (
 				<div className='border rounded-lg p-4 space-y-3 bg-muted/30'>
-					{Object.entries(runningJobs).map(([jobId, { progress, step }]) => (
+					<div className='flex items-center justify-between'>
+						<span className='text-xs text-muted-foreground font-medium'>
+							Job running…
+						</span>
+						<Button
+							variant='outline'
+							size='sm'
+							className='h-7 text-xs gap-1.5 text-destructive border-destructive/40 hover:bg-destructive/10'
+							disabled={cancelBackupMutation.isPending || !activeJobExecutionId}
+							onClick={() =>
+								activeJobExecutionId &&
+								cancelBackupMutation.mutate(activeJobExecutionId)
+							}
+						>
+							<XCircle className='h-3.5 w-3.5' />
+							{cancelBackupMutation.isPending ? 'Stopping…' : 'Stop'}
+						</Button>
+					</div>{' '}
+					{Object.entries(runningJobs).map(([jobId, { step, progress }]) => (
 						<div key={jobId}>
+							{' '}
 							<div className='flex justify-between items-center text-xs mb-1.5'>
 								<span className='text-muted-foreground'>
 									{step ?? 'Processing…'}
@@ -603,7 +666,22 @@ export function BackupsTab({
 										Last ran{' '}
 										{new Date(scheduleData.last_run_at).toLocaleString()}
 									</span>
-								)}
+								)}{' '}
+								{(scheduleData.retention_count ||
+									scheduleData.retention_days) && (
+									<span className='text-xs text-muted-foreground'>
+										Retention:
+										{scheduleData.retention_count
+											? ` keep last ${scheduleData.retention_count}`
+											: ''}
+										{scheduleData.retention_count && scheduleData.retention_days
+											? ' ·'
+											: ''}
+										{scheduleData.retention_days
+											? ` delete after ${scheduleData.retention_days}d`
+											: ''}
+									</span>
+								)}{' '}
 								<Button
 									size='sm'
 									variant='ghost'
@@ -791,6 +869,73 @@ export function BackupsTab({
 									>
 										{scheduleForm.enabled ? 'Enabled' : 'Disabled'}
 									</Label>
+								</div>
+
+								{/* Retention policy */}
+								<div className='border-t pt-4 space-y-3'>
+									<p className='text-xs font-medium text-muted-foreground uppercase tracking-wide'>
+										Retention Policy
+									</p>
+									<div className='grid grid-cols-2 gap-3'>
+										<div className='space-y-1.5'>
+											<Label className='text-xs'>Keep last N backups</Label>
+											<Input
+												type='number'
+												min={1}
+												max={1000}
+												placeholder='Unlimited'
+												className='h-8 text-xs'
+												value={
+													scheduleForm.retention_count === null
+														? ''
+														: String(scheduleForm.retention_count)
+												}
+												onChange={e =>
+													setScheduleForm(f => ({
+														...f,
+														retention_count: e.target.value
+															? Math.max(
+																	1,
+																	Math.min(1000, Number(e.target.value)),
+																)
+															: null,
+													}))
+												}
+											/>
+											<p className='text-xs text-muted-foreground'>
+												Leave empty for unlimited
+											</p>
+										</div>
+										<div className='space-y-1.5'>
+											<Label className='text-xs'>Delete after N days</Label>
+											<Input
+												type='number'
+												min={1}
+												max={365}
+												placeholder='Never'
+												className='h-8 text-xs'
+												value={
+													scheduleForm.retention_days === null
+														? ''
+														: String(scheduleForm.retention_days)
+												}
+												onChange={e =>
+													setScheduleForm(f => ({
+														...f,
+														retention_days: e.target.value
+															? Math.max(
+																	1,
+																	Math.min(365, Number(e.target.value)),
+																)
+															: null,
+													}))
+												}
+											/>
+											<p className='text-xs text-muted-foreground'>
+												Leave empty to keep forever
+											</p>
+										</div>
+									</div>
 								</div>
 
 								<div className='flex gap-2'>
