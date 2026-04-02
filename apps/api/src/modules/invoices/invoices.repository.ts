@@ -1,6 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 
+const PROJECT_WITH_PACKAGES_INCLUDE = {
+	hosting_package: true,
+	support_package: true,
+	client: true,
+} as const;
+
 const INVOICE_INCLUDE = {
 	include: {
 		project: { select: { id: true, name: true } },
@@ -57,21 +63,34 @@ export class InvoicesRepository {
 		});
 	}
 
-	async getNextInvoiceNumber(year: number): Promise<string> {
+	/**
+	 * Atomically allocate the next invoice number and create the invoice record.
+	 * Runs inside a single serializable transaction so concurrent calls cannot
+	 * read the same sequence value and produce duplicate invoice numbers.
+	 */
+	createSerialized(
+		data: Omit<
+			Parameters<typeof this.prisma.invoice.create>[0]['data'],
+			'invoice_number'
+		>,
+		year: number,
+	) {
 		const prefix = `INV-${year}-`;
-		const lastInvoice = await this.prisma.invoice.findFirst({
-			where: { invoice_number: { startsWith: prefix } },
-			orderBy: { invoice_number: 'desc' },
-		});
-
-		let nextSeq = 1;
-		if (lastInvoice) {
-			const parts = lastInvoice.invoice_number.split('-');
-			const seq = parseInt(parts[2] ?? '0', 10);
-			nextSeq = seq + 1;
-		}
-
-		return `${prefix}${String(nextSeq).padStart(3, '0')}`;
+		return this.prisma.$transaction(
+			async tx => {
+				const count = await tx.invoice.count({
+					where: { invoice_number: { startsWith: prefix } },
+				});
+				const invoiceNumber = `${prefix}${String(count + 1).padStart(3, '0')}`;
+				return tx.invoice.create({
+					data: { invoice_number: invoiceNumber, ...data } as Parameters<
+						typeof tx.invoice.create
+					>[0]['data'],
+					...INVOICE_INCLUDE,
+				});
+			},
+			{ isolationLevel: 'Serializable' },
+		);
 	}
 
 	async existsForProjectAndYear(
@@ -88,6 +107,35 @@ export class InvoicesRepository {
 			},
 		});
 		return count > 0;
+	}
+
+	// ─── Project helpers (used by InvoicesService — avoids cross-module Prisma access) ─────────
+
+	findProjectWithPackages(projectId: number) {
+		return this.prisma.project.findUnique({
+			where: { id: BigInt(projectId) },
+			include: PROJECT_WITH_PACKAGES_INCLUDE,
+		});
+	}
+
+	/**
+	 * Returns active projects that have at least one package assigned.
+	 * Optionally filters to a specific client and/or a subset of project IDs.
+	 */
+	findActiveProjectsWithPackages(clientId?: number, projectIds?: number[]) {
+		const where: Record<string, unknown> = {
+			status: 'active',
+			OR: [
+				{ hosting_package_id: { not: null } },
+				{ support_package_id: { not: null } },
+			],
+		};
+		if (clientId) where.client_id = BigInt(clientId);
+		if (projectIds?.length) where.id = { in: projectIds.map(id => BigInt(id)) };
+		return this.prisma.project.findMany({
+			where,
+			include: PROJECT_WITH_PACKAGES_INCLUDE,
+		});
 	}
 
 	create(data: Parameters<typeof this.prisma.invoice.create>[0]['data']) {

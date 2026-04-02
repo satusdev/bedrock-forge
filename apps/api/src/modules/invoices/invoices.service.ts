@@ -9,16 +9,15 @@ import { NotificationsService } from '../notifications/notifications.service';
 import {
 	GenerateInvoiceDto,
 	GenerateBulkInvoiceDto,
+	GenerateClientInvoiceDto,
 	UpdateInvoiceDto,
 	QueryInvoicesDto,
 } from './dto/invoice.dto';
-import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
 export class InvoicesService {
 	constructor(
 		private readonly repo: InvoicesRepository,
-		private readonly prisma: PrismaService,
 		private readonly notifications: NotificationsService,
 	) {}
 
@@ -51,14 +50,7 @@ export class InvoicesService {
 	}
 
 	async generate(dto: GenerateInvoiceDto) {
-		const project = await this.prisma.project.findUnique({
-			where: { id: BigInt(dto.projectId) },
-			include: {
-				hosting_package: true,
-				support_package: true,
-				client: true,
-			},
-		});
+		const project = await this.repo.findProjectWithPackages(dto.projectId);
 
 		if (!project)
 			throw new NotFoundException(`Project #${dto.projectId} not found`);
@@ -87,27 +79,28 @@ export class InvoicesService {
 			: 0;
 		const totalAmount = hostingAmount + supportAmount;
 
-		const invoiceNumber = await this.repo.getNextInvoiceNumber(dto.year);
 		const periodStart = new Date(`${dto.year}-01-01T00:00:00Z`);
 		const periodEnd = new Date(`${dto.year}-12-31T23:59:59Z`);
 		const dueDate = new Date(`${dto.year}-01-31T23:59:59Z`);
 
-		const inv = await this.repo.create({
-			invoice_number: invoiceNumber,
-			project_id: BigInt(dto.projectId),
-			client_id: project.client_id,
-			hosting_package_id: project.hosting_package_id ?? undefined,
-			support_package_id: project.support_package_id ?? undefined,
-			hosting_package_snapshot: project.hosting_package?.name ?? null,
-			support_package_snapshot: project.support_package?.name ?? null,
-			hosting_amount: hostingAmount,
-			support_amount: supportAmount,
-			total_amount: totalAmount,
-			period_start: periodStart,
-			period_end: periodEnd,
-			due_date: dueDate,
-			status: 'draft',
-		});
+		const inv = await this.repo.createSerialized(
+			{
+				project_id: BigInt(dto.projectId),
+				client_id: project.client_id,
+				hosting_package_id: project.hosting_package_id ?? undefined,
+				support_package_id: project.support_package_id ?? undefined,
+				hosting_package_snapshot: project.hosting_package?.name ?? null,
+				support_package_snapshot: project.support_package?.name ?? null,
+				hosting_amount: hostingAmount,
+				support_amount: supportAmount,
+				total_amount: totalAmount,
+				period_start: periodStart,
+				period_end: periodEnd,
+				due_date: dueDate,
+				status: 'draft',
+			},
+			dto.year,
+		);
 
 		this.notifications.dispatch('invoice.created', {
 			invoiceNumber: inv.invoice_number,
@@ -121,20 +114,7 @@ export class InvoicesService {
 	}
 
 	async generateBulk(dto: GenerateBulkInvoiceDto) {
-		const projects = await this.prisma.project.findMany({
-			where: {
-				status: 'active',
-				OR: [
-					{ hosting_package_id: { not: null } },
-					{ support_package_id: { not: null } },
-				],
-			},
-			include: {
-				hosting_package: true,
-				support_package: true,
-				client: true,
-			},
-		});
+		const projects = await this.repo.findActiveProjectsWithPackages();
 
 		const results: {
 			projectId: number;
@@ -163,27 +143,116 @@ export class InvoicesService {
 				: 0;
 			const totalAmount = hostingAmount + supportAmount;
 
-			const invoiceNumber = await this.repo.getNextInvoiceNumber(dto.year);
 			const periodStart = new Date(`${dto.year}-01-01T00:00:00Z`);
 			const periodEnd = new Date(`${dto.year}-12-31T23:59:59Z`);
 			const dueDate = new Date(`${dto.year}-01-31T23:59:59Z`);
 
-			const inv = await this.repo.create({
-				invoice_number: invoiceNumber,
-				project_id: project.id,
-				client_id: project.client_id,
-				hosting_package_id: project.hosting_package_id ?? undefined,
-				support_package_id: project.support_package_id ?? undefined,
-				hosting_package_snapshot: project.hosting_package?.name ?? null,
-				support_package_snapshot: project.support_package?.name ?? null,
-				hosting_amount: hostingAmount,
-				support_amount: supportAmount,
-				total_amount: totalAmount,
-				period_start: periodStart,
-				period_end: periodEnd,
-				due_date: dueDate,
-				status: 'draft',
+			const inv = await this.repo.createSerialized(
+				{
+					project_id: project.id,
+					client_id: project.client_id,
+					hosting_package_id: project.hosting_package_id ?? undefined,
+					support_package_id: project.support_package_id ?? undefined,
+					hosting_package_snapshot: project.hosting_package?.name ?? null,
+					support_package_snapshot: project.support_package?.name ?? null,
+					hosting_amount: hostingAmount,
+					support_amount: supportAmount,
+					total_amount: totalAmount,
+					period_start: periodStart,
+					period_end: periodEnd,
+					due_date: dueDate,
+					status: 'draft',
+				},
+				dto.year,
+			);
+
+			this.notifications.dispatch('invoice.created', {
+				invoiceNumber: inv.invoice_number,
+				projectName: project.name,
+				clientName: project.client.name,
+				totalAmount,
+				year: dto.year,
 			});
+
+			results.push({
+				projectId: Number(project.id),
+				invoiceNumber: inv.invoice_number,
+			});
+		}
+
+		return results;
+	}
+
+	/**
+	 * Generate invoices scoped to a single client.
+	 * If projectIds is provided, only those projects are targeted.
+	 * If omitted, all active projects of the client with at least one package are invoiced.
+	 */
+	async generateForClient(
+		dto: GenerateClientInvoiceDto,
+	): Promise<
+		{ projectId: number; invoiceNumber?: string; skipped?: string }[]
+	> {
+		const projects = await this.repo.findActiveProjectsWithPackages(
+			dto.clientId,
+			dto.projectIds,
+		);
+
+		if (!projects.length) {
+			throw new NotFoundException(
+				`No invoiceable projects found for client #${dto.clientId}`,
+			);
+		}
+
+		const results: {
+			projectId: number;
+			invoiceNumber?: string;
+			skipped?: string;
+		}[] = [];
+
+		for (const project of projects) {
+			const alreadyExists = await this.repo.existsForProjectAndYear(
+				Number(project.id),
+				dto.year,
+			);
+			if (alreadyExists) {
+				results.push({
+					projectId: Number(project.id),
+					skipped: 'already_exists',
+				});
+				continue;
+			}
+
+			const hostingAmount = project.hosting_package
+				? Number(project.hosting_package.price_monthly) * 12
+				: 0;
+			const supportAmount = project.support_package
+				? Number(project.support_package.price_monthly) * 12
+				: 0;
+			const totalAmount = hostingAmount + supportAmount;
+
+			const periodStart = new Date(`${dto.year}-01-01T00:00:00Z`);
+			const periodEnd = new Date(`${dto.year}-12-31T23:59:59Z`);
+			const dueDate = new Date(`${dto.year}-01-31T23:59:59Z`);
+
+			const inv = await this.repo.createSerialized(
+				{
+					project_id: project.id,
+					client_id: project.client_id,
+					hosting_package_id: project.hosting_package_id ?? undefined,
+					support_package_id: project.support_package_id ?? undefined,
+					hosting_package_snapshot: project.hosting_package?.name ?? null,
+					support_package_snapshot: project.support_package?.name ?? null,
+					hosting_amount: hostingAmount,
+					support_amount: supportAmount,
+					total_amount: totalAmount,
+					period_start: periodStart,
+					period_end: periodEnd,
+					due_date: dueDate,
+					status: 'draft',
+				},
+				dto.year,
+			);
 
 			this.notifications.dispatch('invoice.created', {
 				invoiceNumber: inv.invoice_number,
