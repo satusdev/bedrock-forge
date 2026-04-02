@@ -36,4 +36,71 @@ export class PluginScansService {
 		);
 		return { jobExecutionId: Number(exec.id), bullJobId: job.id };
 	}
+
+	async enqueuePluginManage(
+		environmentId: number,
+		action: 'add' | 'remove' | 'update' | 'update-all',
+		slug?: string,
+		version?: string,
+	) {
+		const bullJobId = randomUUID();
+		const exec = await this.repo.createJobExecution({
+			environment_id: BigInt(environmentId),
+			queue_name: QUEUES.PLUGIN_SCANS,
+			job_type: JOB_TYPES.PLUGIN_MANAGE,
+			bull_job_id: bullJobId,
+		});
+		const job = await this.queue.add(
+			JOB_TYPES.PLUGIN_MANAGE,
+			{ environmentId, jobExecutionId: Number(exec.id), action, slug, version },
+			{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
+		);
+		return { jobExecutionId: Number(exec.id), bullJobId: job.id };
+	}
+
+	async enqueueConstraintChange(
+		environmentId: number,
+		slug: string,
+		constraint: string,
+	) {
+		const bullJobId = randomUUID();
+		const exec = await this.repo.createJobExecution({
+			environment_id: BigInt(environmentId),
+			queue_name: QUEUES.PLUGIN_SCANS,
+			job_type: JOB_TYPES.PLUGIN_MANAGE,
+			bull_job_id: bullJobId,
+		});
+		const job = await this.queue.add(
+			JOB_TYPES.PLUGIN_MANAGE,
+			{
+				environmentId,
+				jobExecutionId: Number(exec.id),
+				action: 'change-constraint',
+				slug,
+				constraint,
+			},
+			{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
+		);
+		return { jobExecutionId: Number(exec.id), bullJobId: job.id };
+	}
+
+	async enqueueComposerRead(environmentId: number) {
+		const bullJobId = randomUUID();
+		const exec = await this.repo.createJobExecution({
+			environment_id: BigInt(environmentId),
+			queue_name: QUEUES.PLUGIN_SCANS,
+			job_type: JOB_TYPES.PLUGIN_MANAGE,
+			bull_job_id: bullJobId,
+		});
+		const job = await this.queue.add(
+			JOB_TYPES.PLUGIN_MANAGE,
+			{ environmentId, jobExecutionId: Number(exec.id), action: 'read' },
+			{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
+		);
+		return { jobExecutionId: Number(exec.id), bullJobId: job.id };
+	}
+
+	async findExecution(execId: number) {
+		return this.repo.findJobExecution(BigInt(execId));
+	}
 }
