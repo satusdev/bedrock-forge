@@ -3,7 +3,15 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Pencil, Trash2, MoreHorizontal, Plug, KeyRound } from 'lucide-react';
+import {
+	Pencil,
+	Trash2,
+	MoreHorizontal,
+	Plug,
+	ExternalLink,
+	ChevronDown,
+	ChevronUp,
+} from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
@@ -50,8 +58,18 @@ const serverSchema = z.object({
 	ssh_user: z.string().min(1, 'SSH user is required').default('root'),
 	ssh_private_key: z.string().optional(),
 	provider: z.string().optional().or(z.literal('')),
+	// Panel credentials (CyberPanel / control panel)
+	panel_url: z.string().optional().or(z.literal('')),
+	panel_username: z.string().optional().or(z.literal('')),
+	panel_password: z.string().optional(),
 });
 type ServerForm = z.infer<typeof serverSchema>;
+
+interface PanelCredentials {
+	url?: string;
+	username: string;
+	password?: string;
+}
 
 const STATUS_VARIANT: Record<string, 'success' | 'destructive' | 'secondary'> =
 	{
@@ -71,6 +89,8 @@ function ServerFormDialog({
 	initial?: Server;
 	onSuccess: () => void;
 }) {
+	const [panelExpanded, setPanelExpanded] = useState(false);
+
 	const {
 		register,
 		handleSubmit,
@@ -85,6 +105,35 @@ function ServerFormDialog({
 			ssh_user: initial?.ssh_user ?? 'root',
 			provider: initial?.provider ?? '',
 			ssh_private_key: '',
+			panel_url: '',
+			panel_username: '',
+			panel_password: '',
+		},
+	});
+
+	// Pre-load existing panel credentials when editing
+	useQuery({
+		queryKey: ['server-cyberpanel', initial?.id],
+		enabled: !!initial?.id,
+		queryFn: async () => {
+			try {
+				const data = await api.get<PanelCredentials>(
+					`/servers/${initial!.id}/cyberpanel/credentials`,
+				);
+				if (data) {
+					// Patch the form fields without resetting others
+					reset(prev => ({
+						...prev,
+						panel_url: data.url ?? '',
+						panel_username: data.username ?? '',
+						panel_password: '',
+					}));
+					if (data.url || data.username) setPanelExpanded(true);
+				}
+			} catch {
+				// No credentials stored yet — that's fine
+			}
+			return null;
 		},
 	});
 
@@ -100,12 +149,39 @@ function ServerFormDialog({
 			if (data.ssh_private_key) {
 				payload.ssh_private_key = data.ssh_private_key;
 			}
+			let serverId: number;
 			if (initial) {
 				await api.put(`/servers/${initial.id}`, payload);
+				serverId = initial.id;
 				toast({ title: 'Server updated' });
 			} else {
-				await api.post('/servers', payload);
+				const created = await api.post<{ id: number }>('/servers', payload);
+				serverId = created.id;
 				toast({ title: 'Server created' });
+			}
+			// Save panel credentials if any credential fields are filled
+			const hasPanelCreds =
+				(data.panel_url && data.panel_url.trim()) ||
+				(data.panel_username && data.panel_username.trim()) ||
+				(data.panel_password && data.panel_password.trim());
+			if (hasPanelCreds) {
+				const panelPayload: Record<string, string> = {};
+				if (data.panel_url) panelPayload.url = data.panel_url.trim();
+				if (data.panel_username)
+					panelPayload.username = data.panel_username.trim();
+				if (data.panel_password)
+					panelPayload.password = data.panel_password.trim();
+				try {
+					await api.put(
+						`/servers/${serverId}/cyberpanel/credentials`,
+						panelPayload,
+					);
+				} catch {
+					toast({
+						title: 'Panel credentials could not be saved',
+						variant: 'destructive',
+					});
+				}
 			}
 			reset();
 			onSuccess();
@@ -207,7 +283,67 @@ function ServerFormDialog({
 							Leave blank to use the global SSH key configured in Settings.
 						</p>
 					</div>
-
+					{/* Panel Credentials (collapsible) */}
+					<div className='border rounded-lg'>
+						<button
+							type='button'
+							className='flex items-center justify-between w-full px-3 py-2.5 text-sm font-medium text-left hover:bg-muted/40 transition-colors rounded-lg'
+							onClick={() => setPanelExpanded(v => !v)}
+						>
+							<span>
+								Panel Credentials{' '}
+								<span className='font-normal text-muted-foreground'>
+									(CyberPanel, etc.)
+								</span>
+							</span>
+							{panelExpanded ? (
+								<ChevronUp className='h-4 w-4 text-muted-foreground' />
+							) : (
+								<ChevronDown className='h-4 w-4 text-muted-foreground' />
+							)}
+						</button>
+						{panelExpanded && (
+							<div className='px-3 pb-3 space-y-3 border-t pt-3'>
+								<div className='space-y-1'>
+									<Label htmlFor='s-panel-url'>Panel URL</Label>
+									<Input
+										id='s-panel-url'
+										{...register('panel_url')}
+										placeholder='https://cp.example.com:8090'
+										className='font-mono'
+									/>
+								</div>
+								<div className='grid grid-cols-2 gap-3'>
+									<div className='space-y-1'>
+										<Label htmlFor='s-panel-user'>Username</Label>
+										<Input
+											id='s-panel-user'
+											{...register('panel_username')}
+											placeholder='admin'
+											autoComplete='off'
+										/>
+									</div>
+									<div className='space-y-1'>
+										<Label htmlFor='s-panel-pass'>
+											Password
+											{initial && (
+												<span className='ml-1 text-xs text-muted-foreground font-normal'>
+													(leave blank to keep)
+												</span>
+											)}
+										</Label>
+										<Input
+											id='s-panel-pass'
+											type='password'
+											{...register('panel_password')}
+											placeholder='••••••••'
+											autoComplete='new-password'
+										/>
+									</div>
+								</div>
+							</div>
+						)}
+					</div>
 					<DialogFooter>
 						<Button
 							type='button'
@@ -226,124 +362,11 @@ function ServerFormDialog({
 	);
 }
 
-
-// ─── CyberPanel Credentials Dialog ──────────────────────────────────────────
-
-interface CpCredentials {
-	username: string;
-	password: string;
-	url?: string;
-}
-
-function CyberPanelCredentialsDialog({
-	serverId,
-	onOpenChange,
-}: {
-	serverId: number;
-	onOpenChange: (o: boolean) => void;
-}) {
-	const qc = useQueryClient();
-	const [username, setUsername] = useState('');
-	const [password, setPassword] = useState('');
-	const [url, setUrl] = useState('');
-	const [saving, setSaving] = useState(false);
-
-	const { isLoading } = useQuery({
-		queryKey: ['server-cyberpanel', serverId],
-		queryFn: async () => {
-			const data = await api.get<CpCredentials>(`/servers/${serverId}/cyberpanel/credentials`);
-			if (data) {
-				setUsername(data.username ?? '');
-				setUrl(data.url ?? '');
-			}
-			return data;
-		},
-	});
-
-	async function handleSave() {
-		if (!username || !password) {
-			toast({ title: 'Username and password are required', variant: 'destructive' });
-			return;
-		}
-		try {
-			setSaving(true);
-			await api.put(`/servers/${serverId}/cyberpanel/credentials`, {
-				username,
-				password,
-				...(url && { url }),
-			});
-			qc.invalidateQueries({ queryKey: ['server-cyberpanel', serverId] });
-			toast({ title: 'CyberPanel credentials saved' });
-			onOpenChange(false);
-		} catch {
-			toast({ title: 'Save failed', variant: 'destructive' });
-		} finally {
-			setSaving(false);
-		}
-	}
-
-	return (
-		<Dialog open onOpenChange={onOpenChange}>
-			<DialogContent className='sm:max-w-md'>
-				<DialogHeader>
-					<DialogTitle>CyberPanel Credentials</DialogTitle>
-				</DialogHeader>
-				{isLoading ? (
-					<p className='text-sm text-muted-foreground py-4'>Loading…</p>
-				) : (
-					<div className='space-y-4 py-2'>
-						<div className='space-y-1'>
-							<Label htmlFor='cp-url'>CyberPanel URL</Label>
-							<Input
-								id='cp-url'
-								value={url}
-								onChange={e => setUrl(e.target.value)}
-								placeholder='https://cp.example.com:8090'
-								className='font-mono'
-							/>
-						</div>
-						<div className='space-y-1'>
-							<Label htmlFor='cp-user'>Username *</Label>
-							<Input
-								id='cp-user'
-								value={username}
-								onChange={e => setUsername(e.target.value)}
-								placeholder='admin'
-								autoComplete='off'
-							/>
-						</div>
-						<div className='space-y-1'>
-							<Label htmlFor='cp-pass'>Password *</Label>
-							<Input
-								id='cp-pass'
-								type='password'
-								value={password}
-								onChange={e => setPassword(e.target.value)}
-								placeholder='leave blank to keep current'
-								autoComplete='new-password'
-							/>
-						</div>
-					</div>
-				)}
-				<DialogFooter>
-					<Button variant='outline' onClick={() => onOpenChange(false)}>
-						Cancel
-					</Button>
-					<Button onClick={handleSave} disabled={saving || isLoading}>
-						{saving ? 'Saving…' : 'Save'}
-					</Button>
-				</DialogFooter>
-			</DialogContent>
-		</Dialog>
-	);
-}
-
 export function ServersPage() {
 	const qc = useQueryClient();
 	const [createOpen, setCreateOpen] = useState(false);
 	const [editTarget, setEditTarget] = useState<Server | null>(null);
 	const [deleteTarget, setDeleteTarget] = useState<Server | null>(null);
-	const [cpTarget, setCpTarget] = useState<Server | null>(null);
 	const [page, setPage] = useState(1);
 	const [search, setSearch] = useState('');
 	const [searchInput, setSearchInput] = useState('');
@@ -381,6 +404,36 @@ export function ServersPage() {
 
 	function invalidate() {
 		qc.invalidateQueries({ queryKey: ['servers'] });
+	}
+
+	async function handleOpenPanel(id: number) {
+		try {
+			const creds = await api.get<PanelCredentials>(
+				`/servers/${id}/cyberpanel/credentials`,
+			);
+			if (creds?.url) window.open(creds.url, '_blank', 'noopener,noreferrer');
+			if (creds?.password) {
+				try {
+					await navigator.clipboard.writeText(creds.password);
+				} catch {
+					/* clipboard not available */
+				}
+			}
+			toast({
+				title: creds?.url
+					? `Opening panel for server #${id}`
+					: `No panel URL configured`,
+				description: creds?.password
+					? 'Password copied to clipboard'
+					: undefined,
+			});
+		} catch {
+			toast({
+				title: 'No panel credentials configured',
+				description: 'Add them via Edit server → Panel Credentials',
+				variant: 'destructive',
+			});
+		}
 	}
 
 	const columns: Column<Server>[] = [
@@ -464,9 +517,9 @@ export function ServersPage() {
 								<Plug className='h-4 w-4 mr-2' />
 								Test Connection
 							</DropdownMenuItem>
-							<DropdownMenuItem onClick={() => setCpTarget(s)}>
-								<KeyRound className='h-4 w-4 mr-2' />
-								CyberPanel Credentials
+							<DropdownMenuItem onClick={() => handleOpenPanel(s.id)}>
+								<ExternalLink className='h-4 w-4 mr-2' />
+								Open Panel
 							</DropdownMenuItem>
 							<DropdownMenuItem onClick={() => setEditTarget(s)}>
 								<Pencil className='h-4 w-4 mr-2' />
