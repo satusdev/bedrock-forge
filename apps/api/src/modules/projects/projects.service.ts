@@ -1,16 +1,23 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { randomBytes } from 'crypto';
 import {
 	QUEUES,
 	JOB_TYPES,
 	DEFAULT_JOB_OPTIONS,
 	PaginationQuery,
 } from '@bedrock-forge/shared';
+import { PrismaService } from '../../prisma/prisma.service';
 import { ProjectsRepository } from './projects.repository';
-import { CreateProjectDto, UpdateProjectDto } from './dto/project.dto';
+import {
+	CreateProjectDto,
+	UpdateProjectDto,
+	QueryProjectsDto,
+} from './dto/project.dto';
 import { ImportProjectDto } from './dto/import-project.dto';
 import { BulkImportProjectsDto } from './dto/bulk-import-projects.dto';
+import { CreateProjectFullDto } from './dto/create-project-full.dto';
 import { DomainsService } from '../domains/domains.service';
 import { MonitorsService } from '../monitors/monitors.service';
 
@@ -20,12 +27,13 @@ export class ProjectsService {
 
 	constructor(
 		private readonly repo: ProjectsRepository,
+		private readonly prisma: PrismaService,
 		@InjectQueue(QUEUES.PROJECTS) private readonly projectsQueue: Queue,
 		private readonly domainsService: DomainsService,
 		private readonly monitorsService: MonitorsService,
 	) {}
 
-	findAll(query: PaginationQuery) {
+	findAll(query: QueryProjectsDto) {
 		return this.repo.findAllPaginated(query);
 	}
 
@@ -146,25 +154,37 @@ export class ProjectsService {
 				enabled: true,
 			});
 		} catch (err) {
-			this.logger.warn(`[import] Failed to create monitor for env ${environmentId}: ${err}`);
+			this.logger.warn(
+				`[import] Failed to create monitor for env ${environmentId}: ${err}`,
+			);
 		}
 
 		// Primary domain from environment URL
 		try {
 			const hostname = new URL(url).hostname;
 			if (hostname) {
-				await this.domainsService.create({ name: hostname, project_id: projectId });
+				await this.domainsService.create({
+					name: hostname,
+					project_id: projectId,
+				});
 			}
 		} catch (err) {
-			this.logger.warn(`[import] Failed to create domain for env ${environmentId}: ${err}`);
+			this.logger.warn(
+				`[import] Failed to create domain for env ${environmentId}: ${err}`,
+			);
 		}
 
 		// Main domain (root of the subdomain), if present and different
 		if (mainDomain) {
 			try {
-				await this.domainsService.create({ name: mainDomain, project_id: projectId });
+				await this.domainsService.create({
+					name: mainDomain,
+					project_id: projectId,
+				});
 			} catch (err) {
-				this.logger.warn(`[import] Failed to create main domain ${mainDomain}: ${err}`);
+				this.logger.warn(
+					`[import] Failed to create main domain ${mainDomain}: ${err}`,
+				);
 			}
 		}
 	}
@@ -175,5 +195,93 @@ export class ProjectsService {
 			{ environmentId, jobExecutionId: Number(jobExecutionId) },
 			DEFAULT_JOB_OPTIONS,
 		);
+	}
+
+	/**
+	 * Provision a full Bedrock WordPress project end-to-end:
+	 * 1. Create Project + Environment records in DB
+	 * 2. Generate random DB credentials
+	 * 3. Enqueue a PROJECT_CREATE_BEDROCK job with CyberPanel config
+	 *    The worker handles: CyberPanel website/DB creation, Bedrock install,
+	 *    DB credential storage, monitor + domain auto-creation.
+	 */
+	async createFull(dto: CreateProjectFullDto) {
+		const { name, client_id, server_id, domain, admin_email } = dto;
+		const phpVersion = dto.php_version ?? '8.3';
+		const envType = dto.env_type ?? 'production';
+		const rootPath = `/home/${domain}/public_html`;
+		const siteUrl = `https://${domain}`;
+
+		// Generate random DB credentials (worker will create them in CyberPanel)
+		const dbSuffix = randomBytes(4).toString('hex');
+		const dbName = `wp_${dbSuffix}`;
+		const dbUser = `u_${dbSuffix}`;
+		const dbPassword = randomBytes(16).toString('base64url');
+
+		// Create Project + Environment in a transaction
+		const { project, environment, jobExecution } =
+			await this.prisma.$transaction(async tx => {
+				const project = await tx.project.create({
+					data: {
+						name,
+						client_id: BigInt(client_id),
+						...(dto.hosting_package_id && {
+							hosting_package_id: BigInt(dto.hosting_package_id),
+						}),
+					},
+				});
+				const environment = await tx.environment.create({
+					data: {
+						project_id: project.id,
+						server_id: BigInt(server_id),
+						type: envType,
+						url: siteUrl,
+						root_path: rootPath,
+					},
+				});
+				const jobExecution = await tx.jobExecution.create({
+					data: {
+						queue_name: QUEUES.PROJECTS,
+						bull_job_id: '0', // placeholder — updated by worker
+						job_type: JOB_TYPES.PROJECT_CREATE_BEDROCK,
+						environment_id: environment.id,
+						server_id: BigInt(server_id),
+						status: 'queued',
+					},
+				});
+				return { project, environment, jobExecution };
+			});
+
+		// Enqueue the provisioning job
+		const job = await this.projectsQueue.add(
+			JOB_TYPES.PROJECT_CREATE_BEDROCK,
+			{
+				environmentId: Number(environment.id),
+				jobExecutionId: Number(jobExecution.id),
+				cyberpanel: {
+					domain,
+					dbName,
+					dbUser,
+					dbPassword,
+					phpVersion,
+					adminEmail: admin_email,
+				},
+				sourceEnvironmentId: dto.source_environment_id,
+			},
+			{ ...DEFAULT_JOB_OPTIONS, attempts: 1 },
+		);
+
+		// Back-fill the bull_job_id now that we have it
+		await this.prisma.jobExecution.update({
+			where: { id: jobExecution.id },
+			data: { bull_job_id: String(job.id) },
+		});
+
+		return {
+			project: { id: Number(project.id), name: project.name },
+			environment: { id: Number(environment.id), url: siteUrl },
+			jobExecutionId: Number(jobExecution.id),
+			jobId: String(job.id),
+		};
 	}
 }

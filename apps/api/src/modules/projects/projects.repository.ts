@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EncryptionService } from '../../common/encryption/encryption.service';
 import { PaginationQuery } from '@bedrock-forge/shared';
+import type { QueryProjectsDto } from './dto/project.dto';
 
 interface CreateProjectData {
 	name: string;
@@ -87,13 +88,14 @@ export class ProjectsRepository {
 		private readonly enc: EncryptionService,
 	) {}
 
-	async findAllPaginated(query: PaginationQuery) {
+	async findAllPaginated(query: QueryProjectsDto) {
 		const page = query.page ?? 1;
 		const limit = query.limit ?? 20;
 		const skip = (page - 1) * limit;
-		const where = query.search
-			? { name: { contains: query.search, mode: 'insensitive' as const } }
-			: {};
+		const where: Record<string, unknown> = {};
+		if (query.search)
+			where.name = { contains: query.search, mode: 'insensitive' as const };
+		if (query.client_id) where.client_id = BigInt(query.client_id);
 
 		const [items, total] = await this.prisma.$transaction([
 			this.prisma.project.findMany({
