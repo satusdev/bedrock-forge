@@ -1,3 +1,4 @@
+import React from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
 
 export interface Column<T> {
@@ -19,6 +20,10 @@ interface DataTableProps<T> {
 	renderActions?: (row: T) => React.ReactNode;
 	/** Extra header cell for the actions column */
 	actionsHeader?: string;
+	/** Render a full-width detail row below a given data row. Return null to hide. */
+	renderExpandedRow?: (row: T) => React.ReactNode;
+	/** Key of the currently expanded row (matches rowKey output) */
+	expandedRowKey?: string | number | null;
 }
 
 export function DataTable<T>({
@@ -31,6 +36,8 @@ export function DataTable<T>({
 	skeletonRows = 5,
 	renderActions,
 	actionsHeader,
+	renderExpandedRow,
+	expandedRowKey,
 }: DataTableProps<T>) {
 	const colCount = columns.length + (renderActions ? 1 : 0);
 
@@ -68,27 +75,35 @@ export function DataTable<T>({
 								</tr>
 							))
 						: data.map(row => (
-								<tr
-									key={rowKey(row)}
-									className={`hover:bg-muted/20 ${onRowClick ? 'cursor-pointer' : ''}`}
-									onClick={onRowClick ? () => onRowClick(row) : undefined}
-								>
-									{columns.map((col, ci) => (
-										<td key={ci} className={col.className ?? 'px-4 py-3'}>
-											{col.render(row)}
-										</td>
-									))}
-									{renderActions && (
-										<td
-											className='px-2 py-3'
-											onClick={
-												onRowClick ? e => e.stopPropagation() : undefined
-											}
-										>
-											{renderActions(row)}
-										</td>
+								<React.Fragment key={rowKey(row)}>
+									<tr
+										className={`hover:bg-muted/20 ${onRowClick ? 'cursor-pointer' : ''}`}
+										onClick={onRowClick ? () => onRowClick(row) : undefined}
+									>
+										{columns.map((col, ci) => (
+											<td key={ci} className={col.className ?? 'px-4 py-3'}>
+												{col.render(row)}
+											</td>
+										))}
+										{renderActions && (
+											<td
+												className='px-2 py-3'
+												onClick={
+													onRowClick ? e => e.stopPropagation() : undefined
+												}
+											>
+												{renderActions(row)}
+											</td>
+										)}
+									</tr>
+									{renderExpandedRow && expandedRowKey === rowKey(row) && (
+										<tr>
+											<td colSpan={colCount} className='px-0 py-0 border-t-0'>
+												{renderExpandedRow(row)}
+											</td>
+										</tr>
 									)}
-								</tr>
+								</React.Fragment>
 							))}
 				</tbody>
 			</table>
