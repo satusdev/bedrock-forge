@@ -65,8 +65,16 @@ bedrock-forge/
 │   │   │   │   ├── backups/
 │   │   │   │   ├── plugin-scans/
 │   │   │   │   ├── sync/
+│   │   │   │   ├── domains/
 │   │   │   │   ├── monitors/
 │   │   │   │   ├── settings/
+│   │   │   │   ├── users/
+│   │   │   │   ├── invoices/
+│   │   │   │   ├── notifications/
+│   │   │   │   ├── reports/
+│   │   │   │   ├── job-executions/
+│   │   │   │   ├── maintenance/
+│   │   │   │   ├── audit-logs/
 │   │   │   │   └── health/
 │   │   │   ├── gateways/       # WebSocket gateways
 │   │   │   ├── common/         # Guards, filters, interceptors, decorators
@@ -95,12 +103,25 @@ bedrock-forge/
 │   └── worker/                 # NestJS standalone — BullMQ consumers only
 │       ├── src/
 │       │   ├── processors/
-│       │   │   ├── backup.processor.ts
-│       │   │   ├── plugin-scan.processor.ts
-│       │   │   ├── sync.processor.ts
-│       │   │   ├── monitor.processor.ts
-│       │   │   ├── domain-whois.processor.ts
-│       │   │   └── create-bedrock.processor.ts
+│       │   │   ├── backup/
+│       │   │   │   └── backup.processor.ts
+│       │   │   ├── plugin-scan/
+│       │   │   │   └── plugin-scan.processor.ts
+│       │   │   ├── sync/
+│       │   │   │   └── sync.processor.ts
+│       │   │   ├── monitor/
+│       │   │   │   └── monitor.processor.ts
+│       │   │   ├── domain-whois/
+│       │   │   │   └── domain-whois.processor.ts
+│       │   │   ├── create-bedrock/
+│       │   │   │   └── create-bedrock.processor.ts
+│       │   │   ├── notification/
+│       │   │   │   └── notification.processor.ts
+│       │   │   └── report/
+│       │   │       └── report.processor.ts
+│       │   ├── utils/
+│       │   │   ├── cyberpanel-http.ts  # CyberPanel REST API + escapeMysql
+│       │   │   └── processor-utils.ts  # shellQuote, flipProtocol
 │       │   └── main.ts
 │       ├── scripts/
 │       │   ├── backup.php
@@ -224,15 +245,16 @@ src/modules/<feature>/
 
 ## BullMQ Queue Registry
 
-| Queue           | Job Types           | Concurrency | Retries | Timeout |
-| --------------- | ------------------- | ----------- | ------- | ------- |
-| `backups`       | `create`, `restore` | 3/server    | 3       | 30min   |
-| `plugin-scans`  | `run`               | 5           | 3       | 5min    |
-| `sync`          | `clone`, `push`     | 2/server    | 3       | 15min   |
-| `monitors`      | `check`             | 10          | 2       | 30s     |
-| `domains`       | `whois`             | 10          | 3       | 30s     |
-| `projects`      | `create-bedrock`    | 2/server    | 2       | 20min   |
-| `notifications` | `send`              | 20          | 3       | 30s     |
+| Queue           | Job Types                     | Concurrency | Retries | Timeout |
+| --------------- | ----------------------------- | ----------- | ------- | ------- |
+| `backups`       | `create`, `restore`           | 3/server    | 3       | 30min   |
+| `plugin-scans`  | `run`                         | 5           | 3       | 5min    |
+| `sync`          | `clone`, `push`               | 2/server    | 3       | 15min   |
+| `monitors`      | `check`                       | 10          | 2       | 30s     |
+| `domains`       | `whois`                       | 10          | 3       | 30s     |
+| `projects`      | `create-bedrock`             | 2/server    | 2       | 20min   |
+| `notifications` | `send`                        | 20          | 3       | 30s     |
+| `reports`       | `weekly-report`               | 1           | 3       | 5min    |
 
 All queues: exponential backoff (base 1s), dead-letter queue (`<name>-dlq`),
 `removeOnComplete: 1000`, `removeOnFail: 5000`.
@@ -274,19 +296,21 @@ All queues: exponential backoff (base 1s), dead-letter queue (`<name>-dlq`),
 **Layout:** Fixed left sidebar (240px) + main content area. Sidebar collapses to
 icon-only on md breakpoint.
 
-**Sidebar navigation (11 items — role-gated):**
+**Sidebar navigation (13 items — role-gated):**
 
 1. Dashboard
 2. Clients
 3. Servers
 4. Projects
 5. Backups
-6. Monitors
-7. Settings
-8. Packages _(manager+)_
-9. Invoices _(manager+)_
-10. Users & Roles _(admin only)_
-11. Notifications _(admin only)_
+6. Domains
+7. Monitors
+8. Activity _(job execution feed)_
+9. Settings
+10. Packages _(manager+)_
+11. Invoices _(manager+)_
+12. Users & Roles _(admin only)_
+13. Notifications _(admin only)_
 
 **Dashboard home:** 4 big stat cards (active projects, recent backups, average
 uptime, server count) + quick action buttons + recent job activity feed (live
