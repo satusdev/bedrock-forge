@@ -80,6 +80,13 @@ export class AuthRepository {
 		});
 	}
 
+	async updatePassword(userId: bigint, passwordHash: string) {
+		return this.prisma.user.update({
+			where: { id: userId },
+			data: { password_hash: passwordHash },
+		});
+	}
+
 	async ensureDefaultRolesExist() {
 		const roles = ['admin', 'manager', 'client'];
 		for (const name of roles) {

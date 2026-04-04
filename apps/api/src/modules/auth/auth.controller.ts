@@ -1,6 +1,7 @@
 import {
 	Controller,
 	Post,
+	Put,
 	Body,
 	HttpCode,
 	HttpStatus,
@@ -11,6 +12,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { LoginDto, RefreshTokenDto } from './dto/auth.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import {
 	CurrentUser,
 	AuthenticatedUser,
@@ -44,6 +46,20 @@ export class AuthController {
 	@HttpCode(HttpStatus.NO_CONTENT)
 	async logoutAll(@CurrentUser() user: AuthenticatedUser) {
 		await this.authService.logoutAll(user.id);
+	}
+
+	@Put('change-password')
+	@UseGuards(AuthGuard('jwt'))
+	@HttpCode(HttpStatus.NO_CONTENT)
+	async changePassword(
+		@CurrentUser() user: AuthenticatedUser,
+		@Body() dto: ChangePasswordDto,
+	) {
+		await this.authService.changePassword(
+			user.id,
+			dto.current_password,
+			dto.new_password,
+		);
 	}
 
 	@Get('me')
