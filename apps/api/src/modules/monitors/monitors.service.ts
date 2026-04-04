@@ -5,6 +5,11 @@ import { MonitorsRepository } from './monitors.repository';
 import { QUEUES, JOB_TYPES, DEFAULT_JOB_OPTIONS } from '@bedrock-forge/shared';
 import { CreateMonitorDto, UpdateMonitorDto } from './dto/monitor.dto';
 
+export interface PaginationQuery {
+	page?: number;
+	limit?: number;
+}
+
 @Injectable()
 export class MonitorsService {
 	constructor(
@@ -49,6 +54,28 @@ export class MonitorsService {
 		const monitor = await this.findOne(id);
 		await this.unregisterRepeatable(monitor);
 		return this.repo.delete(BigInt(id));
+	}
+
+	async findLogs(id: number, query: PaginationQuery) {
+		const page = Math.max(1, query.page ?? 1);
+		const limit = Math.min(100, Math.max(1, query.limit ?? 50));
+		const skip = (page - 1) * limit;
+		const [items, total] = await Promise.all([
+			this.repo.findLogs(BigInt(id), { skip, take: limit }),
+			this.repo.countLogs(BigInt(id)),
+		]);
+		return { items, total, page, limit };
+	}
+
+	async findResults(id: number, query: PaginationQuery) {
+		const page = Math.max(1, query.page ?? 1);
+		const limit = Math.min(200, Math.max(1, query.limit ?? 100));
+		const skip = (page - 1) * limit;
+		const [items, total] = await Promise.all([
+			this.repo.findResults(BigInt(id), { skip, take: limit }),
+			this.repo.countResults(BigInt(id)),
+		]);
+		return { items, total, page, limit };
 	}
 
 	async toggle(id: number, active: boolean) {

@@ -6,6 +6,7 @@ import {
 	Delete,
 	Param,
 	Body,
+	Query,
 	ParseIntPipe,
 	UseGuards,
 	HttpCode,
@@ -29,6 +30,26 @@ export class MonitorsController {
 	}
 	@Get(':id') findOne(@Param('id', ParseIntPipe) id: number) {
 		return this.svc.findOne(id);
+	}
+	@Get(':id/logs') findLogs(
+		@Param('id', ParseIntPipe) id: number,
+		@Query('page') page?: string,
+		@Query('limit') limit?: string,
+	) {
+		return this.svc.findLogs(id, {
+			page: page ? parseInt(page, 10) : undefined,
+			limit: limit ? parseInt(limit, 10) : undefined,
+		});
+	}
+	@Get(':id/results') findResults(
+		@Param('id', ParseIntPipe) id: number,
+		@Query('page') page?: string,
+		@Query('limit') limit?: string,
+	) {
+		return this.svc.findResults(id, {
+			page: page ? parseInt(page, 10) : undefined,
+			limit: limit ? parseInt(limit, 10) : undefined,
+		});
 	}
 	@Post() create(@Body() dto: CreateMonitorDto) {
 		return this.svc.create(dto);
