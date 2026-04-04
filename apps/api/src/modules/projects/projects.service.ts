@@ -212,11 +212,13 @@ export class ProjectsService {
 		const rootPath = `/home/${domain}/public_html`;
 		const siteUrl = `https://${domain}`;
 
-		// Generate random DB credentials (worker will create them in CyberPanel)
+		// Use user-provided DB credentials, or auto-generate random ones
 		const dbSuffix = randomBytes(4).toString('hex');
-		const dbName = `wp_${dbSuffix}`;
-		const dbUser = `u_${dbSuffix}`;
-		const dbPassword = randomBytes(16).toString('base64url');
+		const dbName = dto.db_name?.trim() || `wp_${dbSuffix}`;
+		const dbUser = dto.db_user?.trim() || `u_${dbSuffix}`;
+		const dbPassword =
+			dto.db_password?.trim() || randomBytes(16).toString('base64url');
+		const dbHost = dto.db_host?.trim() || 'localhost';
 
 		// Create Project + Environment in a transaction
 		const { project, environment, jobExecution } =
@@ -263,6 +265,7 @@ export class ProjectsService {
 					dbName,
 					dbUser,
 					dbPassword,
+					dbHost,
 					phpVersion,
 					adminEmail: admin_email,
 				},
