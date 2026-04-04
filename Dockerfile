@@ -39,10 +39,10 @@ RUN pnpm prune --prod
 
 # ─── Stage 3: runtime (API + Worker) ────────────────────────────────────────
 FROM node:22-alpine AS runtime
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
 
-# Install rclone for Google Drive backup uploads and create config dir
-RUN apk add --no-cache rclone && \
+# Install rclone for Google Drive backup uploads; whois for domain WHOIS lookups
+RUN apk add --no-cache rclone whois && \
     mkdir -p /home/node/.config/rclone && \
     chown -R node:node /home/node/.config
 

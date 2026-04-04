@@ -68,7 +68,10 @@ services:
     depends_on:
       forge:
         condition: service_healthy
-
-volumes:
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO /dev/null http://localhost/ || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 3
   postgres_data:
   redis_data:
