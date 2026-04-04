@@ -25,7 +25,7 @@ export class MaintenanceService {
 		const days90 = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1_000);
 		const days180 = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1_000);
 
-		const [rt, nl, al, je] = await Promise.all([
+		const results = await Promise.allSettled([
 			// Expired or revoked refresh tokens
 			this.prisma.refreshToken.deleteMany({
 				where: {
@@ -49,10 +49,21 @@ export class MaintenanceService {
 			}),
 		]);
 
-		this.logger.log(
-			`Maintenance complete — deleted: ${rt.count} refresh tokens, ` +
-				`${nl.count} notification logs, ${al.count} audit logs, ` +
-				`${je.count} job executions`,
-		);
+		const labels = [
+			'refresh tokens',
+			'notification logs',
+			'audit logs',
+			'job executions',
+		];
+		results.forEach((r, i) => {
+			if (r.status === 'fulfilled') {
+				this.logger.log(`Maintenance: deleted ${r.value.count} ${labels[i]}`);
+			} else {
+				this.logger.error(
+					`Maintenance: failed to clean ${labels[i]}`,
+					r.reason,
+				);
+			}
+		});
 	}
 }
