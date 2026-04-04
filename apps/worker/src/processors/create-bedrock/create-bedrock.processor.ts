@@ -8,16 +8,7 @@ import { EncryptionService } from '../../encryption/encryption.service';
 import { createRemoteExecutor } from '@bedrock-forge/remote-executor';
 import { QUEUES, JOB_TYPES, CreateBedrockPayload } from '@bedrock-forge/shared';
 import { callCpApi, CpCreds, escapeMysql } from '../../utils/cyberpanel-http';
-
-// Shell helpers (same as sync.processor.ts)
-function shellQuote(v: string): string {
-	return "'" + v.replace(/'/g, "'\\''") + "'";
-}
-function flipProtocol(url: string): string | null {
-	if (url.startsWith('https://')) return 'http://' + url.slice(8);
-	if (url.startsWith('http://')) return 'https://' + url.slice(7);
-	return null;
-}
+import { shellQuote, flipProtocol } from '../../utils/processor-utils';
 
 @Processor(QUEUES.PROJECTS)
 export class CreateBedrockProcessor extends WorkerHost {
@@ -325,7 +316,7 @@ export class CreateBedrockProcessor extends WorkerHost {
 				const dbName = cyberpanel?.dbName ?? 'wordpress';
 				const dbUser = cyberpanel?.dbUser ?? 'wordpress';
 				const dbPassword = cyberpanel?.dbPassword ?? '';
-				const dbHost = 'localhost';
+				const dbHost = cyberpanel?.dbHost ?? 'localhost';
 
 				// Install Composer if missing
 				const composerCheck = await executor.execute(

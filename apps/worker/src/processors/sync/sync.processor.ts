@@ -15,36 +15,10 @@ import {
 	CredentialParserService,
 } from '@bedrock-forge/remote-executor';
 import { QUEUES, JOB_TYPES } from '@bedrock-forge/shared';
+import { escapeMysql } from '../../utils/cyberpanel-http';
+import { shellQuote, flipProtocol } from '../../utils/processor-utils';
 
 const STAGING_DIR = '/tmp/forge-sync';
-
-/**
- * Wrap a string in single quotes for safe shell embedding.
- * Single quotes inside the value are escaped as: ' -> '\''
- */
-function shellQuote(value: string): string {
-	return "'" + value.replace(/'/g, "'\\''") + "'";
-}
-
-/** Escape a string value for safe interpolation into a MySQL string literal. */
-function escapeMysql(str: string): string {
-	return str
-		.replace(/\\/g, '\\\\')
-		.replace(/'/g, "\\'")
-		.replace(/\0/g, '\\0')
-		.replace(/\n/g, '\\n')
-		.replace(/\r/g, '\\r');
-}
-
-/**
- * Flip http↔https on a URL string.
- * Returns null if the URL doesn't start with http:// or https://.
- */
-function flipProtocol(url: string): string | null {
-	if (url.startsWith('https://')) return 'http://' + url.slice(8);
-	if (url.startsWith('http://')) return 'https://' + url.slice(7);
-	return null;
-}
 
 type Creds = {
 	dbHost: string;
