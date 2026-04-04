@@ -1,9 +1,16 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Pencil, Trash2, MoreHorizontal, Tag } from 'lucide-react';
+import {
+	Pencil,
+	Trash2,
+	MoreHorizontal,
+	Tag,
+	ExternalLink,
+} from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
@@ -214,6 +221,7 @@ function ClientFormDialog({
 
 export function ClientsPage() {
 	const qc = useQueryClient();
+	const navigate = useNavigate();
 	const [page, setPage] = useState(1);
 	const [search, setSearch] = useState('');
 	const [searchInput, setSearchInput] = useState('');
@@ -327,6 +335,12 @@ export function ClientsPage() {
 							</Button>
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align='end'>
+							<DropdownMenuItem
+								onClick={() => navigate(`/clients/${client.id}`)}
+							>
+								<ExternalLink className='h-4 w-4 mr-2' />
+								View Details
+							</DropdownMenuItem>
 							<DropdownMenuItem onClick={() => setEditTarget(client)}>
 								<Pencil className='h-4 w-4 mr-2' />
 								Edit
