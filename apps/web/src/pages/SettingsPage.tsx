@@ -41,6 +41,18 @@ const newSettingSchema = z.object({
 });
 type NewSettingForm = z.infer<typeof newSettingSchema>;
 
+const changePasswordSchema = z
+	.object({
+		current_password: z.string().min(1, 'Current password is required'),
+		new_password: z.string().min(8, 'At least 8 characters'),
+		confirm_password: z.string(),
+	})
+	.refine(d => d.new_password === d.confirm_password, {
+		message: 'Passwords do not match',
+		path: ['confirm_password'],
+	});
+type ChangePasswordForm = z.infer<typeof changePasswordSchema>;
+
 interface GdriveStatus {
 	configured: boolean;
 }
@@ -255,10 +267,99 @@ export function SettingsPage() {
 		}
 	}
 
+	// ── Change Password ──────────────────────────────────────────────────────
+	const {
+		register: regPwd,
+		handleSubmit: handlePwd,
+		reset: resetPwd,
+		formState: { errors: pwdErrors },
+	} = useForm<ChangePasswordForm>({
+		resolver: zodResolver(changePasswordSchema),
+	});
+
+	const changePasswordMutation = useMutation({
+		mutationFn: (d: { current_password: string; new_password: string }) =>
+			api.put('/auth/change-password', d),
+		onSuccess: () => {
+			resetPwd();
+			toast({ title: 'Password changed successfully' });
+		},
+		onError: (e: any) =>
+			toast({
+				title: 'Failed to change password',
+				description: e?.message,
+				variant: 'destructive',
+			}),
+	});
+
+	function onChangePassword(data: ChangePasswordForm) {
+		changePasswordMutation.mutate({
+			current_password: data.current_password,
+			new_password: data.new_password,
+		});
+	}
+
+	const changePasswordCard = (
+		<div className='border rounded-lg p-4 bg-card space-y-4'>
+			<h2 className='font-semibold flex items-center gap-2'>
+				<Key className='h-4 w-4' />
+				Change Password
+			</h2>
+			<form onSubmit={handlePwd(onChangePassword)} className='space-y-3'>
+				<div className='space-y-1.5'>
+					<Label htmlFor='cp-current'>Current Password</Label>
+					<Input
+						id='cp-current'
+						type='password'
+						{...regPwd('current_password')}
+						autoComplete='current-password'
+					/>
+					{pwdErrors.current_password && (
+						<p className='text-xs text-destructive'>
+							{pwdErrors.current_password.message}
+						</p>
+					)}
+				</div>
+				<div className='space-y-1.5'>
+					<Label htmlFor='cp-new'>New Password</Label>
+					<Input
+						id='cp-new'
+						type='password'
+						{...regPwd('new_password')}
+						autoComplete='new-password'
+					/>
+					{pwdErrors.new_password && (
+						<p className='text-xs text-destructive'>
+							{pwdErrors.new_password.message}
+						</p>
+					)}
+				</div>
+				<div className='space-y-1.5'>
+					<Label htmlFor='cp-confirm'>Confirm New Password</Label>
+					<Input
+						id='cp-confirm'
+						type='password'
+						{...regPwd('confirm_password')}
+						autoComplete='new-password'
+					/>
+					{pwdErrors.confirm_password && (
+						<p className='text-xs text-destructive'>
+							{pwdErrors.confirm_password.message}
+						</p>
+					)}
+				</div>
+				<Button type='submit' disabled={changePasswordMutation.isPending}>
+					{changePasswordMutation.isPending ? 'Saving…' : 'Change Password'}
+				</Button>
+			</form>
+		</div>
+	);
+
 	if (role !== 'admin') {
 		return (
-			<div className='text-muted-foreground'>
-				Access restricted to administrators.
+			<div className='space-y-6 max-w-2xl'>
+				<h1 className='text-2xl font-bold'>Settings</h1>
+				{changePasswordCard}
 			</div>
 		);
 	}
@@ -268,6 +369,8 @@ export function SettingsPage() {
 	return (
 		<div className='space-y-6 max-w-2xl'>
 			<h1 className='text-2xl font-bold'>Settings</h1>
+
+			{changePasswordCard}
 
 			{/* Global SSH Key */}
 			<div className='border rounded-lg p-4 bg-card space-y-4'>
