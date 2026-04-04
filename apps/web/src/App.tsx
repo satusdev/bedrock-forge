@@ -14,6 +14,11 @@ const DashboardPage = lazy(() =>
 const ClientsPage = lazy(() =>
 	import('@/pages/ClientsPage').then(m => ({ default: m.ClientsPage })),
 );
+const ClientDetailPage = lazy(() =>
+	import('@/pages/ClientDetailPage').then(m => ({
+		default: m.ClientDetailPage,
+	})),
+);
 const ServersPage = lazy(() =>
 	import('@/pages/ServersPage').then(m => ({ default: m.ServersPage })),
 );
@@ -28,8 +33,16 @@ const ProjectDetailPage = lazy(() =>
 const BackupsPage = lazy(() =>
 	import('@/pages/BackupsPage').then(m => ({ default: m.BackupsPage })),
 );
+const DomainsPage = lazy(() =>
+	import('@/pages/DomainsPage').then(m => ({ default: m.DomainsPage })),
+);
 const MonitorsPage = lazy(() =>
 	import('@/pages/MonitorsPage').then(m => ({ default: m.MonitorsPage })),
+);
+const MonitorDetailPage = lazy(() =>
+	import('@/pages/MonitorDetailPage').then(m => ({
+		default: m.MonitorDetailPage,
+	})),
 );
 const SettingsPage = lazy(() =>
 	import('@/pages/SettingsPage').then(m => ({ default: m.SettingsPage })),
@@ -50,6 +63,9 @@ const NotificationsPage = lazy(() =>
 	import('@/pages/NotificationsPage').then(m => ({
 		default: m.NotificationsPage,
 	})),
+);
+const AuditLogsPage = lazy(() =>
+	import('@/pages/AuditLogsPage').then(m => ({ default: m.AuditLogsPage })),
 );
 
 import React, { Component } from 'react';
@@ -94,6 +110,16 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 	);
 }
 
+function ManagerRoute({ children }: { children: React.ReactNode }) {
+	const user = useAuthStore(s => s.user);
+	if (!user) return <Navigate to='/login' replace />;
+	return user.roles.includes('admin') || user.roles.includes('manager') ? (
+		<>{children}</>
+	) : (
+		<Navigate to='/dashboard' replace />
+	);
+}
+
 export default function App() {
 	// Disconnect WebSocket when the user logs out
 	useEffect(() => {
@@ -127,11 +153,13 @@ export default function App() {
 							<Route index element={<Navigate to='/dashboard' replace />} />
 							<Route path='dashboard' element={<DashboardPage />} />
 							<Route path='clients' element={<ClientsPage />} />
+							<Route path='clients/:id' element={<ClientDetailPage />} />
 							<Route path='servers' element={<ServersPage />} />
 							<Route path='projects' element={<ProjectsPage />} />
 							<Route path='projects/:id' element={<ProjectDetailPage />} />
 							<Route path='backups' element={<BackupsPage />} />
 							<Route path='monitors' element={<MonitorsPage />} />
+							<Route path='monitors/:id' element={<MonitorDetailPage />} />
 							<Route path='activity' element={<ActivityPage />} />
 							<Route path='settings' element={<SettingsPage />} />{' '}
 							<Route
@@ -142,11 +170,38 @@ export default function App() {
 									</AdminRoute>
 								}
 							/>
-							<Route path='packages' element={<PackagesPage />} />
-							<Route path='invoices' element={<InvoicesPage />} />
+							<Route
+								path='packages'
+								element={
+									<ManagerRoute>
+										<PackagesPage />
+									</ManagerRoute>
+								}
+							/>
+							<Route
+								path='invoices'
+								element={
+									<ManagerRoute>
+										<InvoicesPage />
+									</ManagerRoute>
+								}
+							/>
 							<Route
 								path='notifications'
-								element={<NotificationsPage />}
+								element={
+									<AdminRoute>
+										<NotificationsPage />
+									</AdminRoute>
+								}
+							/>
+							<Route path='domains' element={<DomainsPage />} />
+							<Route
+								path='audit-logs'
+								element={
+									<AdminRoute>
+										<AuditLogsPage />
+									</AdminRoute>
+								}
 							/>{' '}
 							<Route path='*' element={<Navigate to='/dashboard' replace />} />
 						</Route>

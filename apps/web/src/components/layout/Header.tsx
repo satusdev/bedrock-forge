@@ -1,8 +1,10 @@
+import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { PanelLeftClose, PanelLeft, Menu } from 'lucide-react';
+import { PanelLeftClose, PanelLeft, Menu, Search } from 'lucide-react';
 import { useAuthStore } from '@/store/auth.store';
 import { useUiStore } from '@/store/ui.store';
 import { api } from '@/lib/api-client';
+import { getSocket } from '@/lib/websocket';
 import { Button } from '@/components/ui/button';
 import {
 	Sheet,
@@ -22,7 +24,60 @@ const ROUTE_LABELS: Record<string, string> = {
 	monitors: 'Monitors',
 	domains: 'Domains',
 	settings: 'Settings',
+	users: 'Users & Roles',
+	'audit-logs': 'Audit Logs',
+	packages: 'Packages',
+	invoices: 'Invoices',
+	activity: 'Activity',
+	notifications: 'Notifications',
 };
+
+type WsStatus = 'connected' | 'reconnecting' | 'disconnected';
+
+function WsStatusDot() {
+	const [status, setStatus] = useState<WsStatus>('disconnected');
+
+	useEffect(() => {
+		const socket = getSocket();
+		if (socket.connected) setStatus('connected');
+
+		const onConnect = () => setStatus('connected');
+		const onDisconnect = () => setStatus('disconnected');
+		const onReconnecting = () => setStatus('reconnecting');
+
+		socket.on('connect', onConnect);
+		socket.on('disconnect', onDisconnect);
+		socket.on('reconnect_attempt', onReconnecting);
+
+		return () => {
+			socket.off('connect', onConnect);
+			socket.off('disconnect', onDisconnect);
+			socket.off('reconnect_attempt', onReconnecting);
+		};
+	}, []);
+
+	const dotClass =
+		status === 'connected'
+			? 'bg-green-500'
+			: status === 'reconnecting'
+				? 'bg-amber-400 animate-pulse'
+				: 'bg-red-500';
+
+	const label =
+		status === 'connected'
+			? 'WebSocket connected'
+			: status === 'reconnecting'
+				? 'WebSocket reconnecting…'
+				: 'WebSocket disconnected';
+
+	return (
+		<span
+			title={label}
+			aria-label={label}
+			className={`h-2 w-2 rounded-full shrink-0 ${dotClass}`}
+		/>
+	);
+}
 
 function Breadcrumb() {
 	const location = useLocation();
@@ -48,7 +103,7 @@ function Breadcrumb() {
 	);
 }
 
-export function Header() {
+export function Header({ onOpenSearch }: { onOpenSearch?: () => void }) {
 	const { user, logout } = useAuthStore();
 	const { sidebarCollapsed, toggleSidebar } = useUiStore();
 
@@ -100,6 +155,19 @@ export function Header() {
 			</div>
 
 			<div className='flex items-center gap-3'>
+				<WsStatusDot />
+				{onOpenSearch && (
+					<Button
+						variant='outline'
+						size='sm'
+						onClick={onOpenSearch}
+						className='hidden md:flex items-center gap-2 text-muted-foreground text-xs h-8 px-3 w-48 justify-start'
+					>
+						<Search className='h-3.5 w-3.5' />
+						<span>Search…</span>
+						<kbd className='ml-auto font-mono text-xs'>⌘K</kbd>
+					</Button>
+				)}
 				<span className='text-sm text-muted-foreground hidden sm:block'>
 					{user?.email}
 				</span>
