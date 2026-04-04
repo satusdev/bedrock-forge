@@ -3,6 +3,7 @@ import {
 	UnauthorizedException,
 	ConflictException,
 	NotFoundException,
+	BadRequestException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -81,6 +82,30 @@ export class AuthService {
 	}
 
 	async logoutAll(userId: number): Promise<void> {
+		await this.repo.revokeAllUserRefreshTokens(BigInt(userId));
+	}
+
+	async changePassword(
+		userId: number,
+		currentPassword: string,
+		newPassword: string,
+	): Promise<void> {
+		if (currentPassword === newPassword) {
+			throw new BadRequestException(
+				'New password must differ from current password',
+			);
+		}
+		const user = await this.repo.findUserById(userId);
+		if (!user) throw new NotFoundException('User not found');
+
+		const valid = await bcrypt.compare(currentPassword, user.password_hash);
+		if (!valid) {
+			throw new UnauthorizedException('Current password is incorrect');
+		}
+
+		const newHash = await bcrypt.hash(newPassword, 12);
+		await this.repo.updatePassword(BigInt(userId), newHash);
+		// Revoke all sessions so other devices must re-authenticate
 		await this.repo.revokeAllUserRefreshTokens(BigInt(userId));
 	}
 
