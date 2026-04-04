@@ -64,4 +64,30 @@ export class CreateProjectFullDto {
 	@IsInt()
 	@IsPositive()
 	source_environment_id?: number;
+
+	// ── User-provided DB credentials (optional — auto-generated if omitted) ──
+
+	/** Database name — auto-generated as wp_<hex> if not provided */
+	@IsOptional()
+	@IsString()
+	@MaxLength(64)
+	db_name?: string;
+
+	/** Database username — auto-generated as u_<hex> if not provided */
+	@IsOptional()
+	@IsString()
+	@MaxLength(64)
+	db_user?: string;
+
+	/** Database password — auto-generated if not provided */
+	@IsOptional()
+	@IsString()
+	@MaxLength(255)
+	db_password?: string;
+
+	/** Database host — defaults to localhost */
+	@IsOptional()
+	@IsString()
+	@MaxLength(255)
+	db_host?: string;
 }
