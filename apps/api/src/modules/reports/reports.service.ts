@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { PrismaService } from '../../prisma/prisma.service';
+import { SettingsService } from '../settings/settings.service';
 import { QUEUES, JOB_TYPES } from '@bedrock-forge/shared';
 import {
 	UpdateReportScheduleDto,
@@ -16,16 +16,14 @@ export class ReportsService implements OnModuleInit {
 	private readonly logger = new Logger(ReportsService.name);
 
 	constructor(
-		private readonly prisma: PrismaService,
+		private readonly settings: SettingsService,
 		@InjectQueue(QUEUES.REPORTS) private readonly reportsQueue: Queue,
 	) {}
 
 	async onModuleInit() {
 		// Re-register repeatable job if schedule was previously configured
 		try {
-			const stored = await this.prisma.appSetting.findUnique({
-				where: { key: SCHEDULE_KEY },
-			});
+			const stored = await this.settings.get(SCHEDULE_KEY);
 			if (stored) {
 				const config = JSON.parse(stored.value) as ReportScheduleConfig;
 				if (config.enabled) {
@@ -41,9 +39,7 @@ export class ReportsService implements OnModuleInit {
 	}
 
 	async getConfig(): Promise<ReportScheduleConfig | null> {
-		const s = await this.prisma.appSetting.findUnique({
-			where: { key: SCHEDULE_KEY },
-		});
+		const s = await this.settings.get(SCHEDULE_KEY);
 		return s ? (JSON.parse(s.value) as ReportScheduleConfig) : null;
 	}
 
@@ -58,11 +54,7 @@ export class ReportsService implements OnModuleInit {
 		};
 
 		// Persist to AppSetting
-		await this.prisma.appSetting.upsert({
-			where: { key: SCHEDULE_KEY },
-			update: { value: JSON.stringify(config) },
-			create: { key: SCHEDULE_KEY, value: JSON.stringify(config) },
-		});
+		await this.settings.set(SCHEDULE_KEY, JSON.stringify(config));
 
 		// Remove existing repeatable job(s) for this report
 		await this.removeRepeatableJob();
