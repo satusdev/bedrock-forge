@@ -23,6 +23,7 @@ export class DomainsRepository {
 					skip: (page - 1) * limit,
 					take: limit,
 					orderBy: { name: 'asc' },
+					include: { project: { select: { id: true, name: true } } },
 				}),
 				this.prisma.domain.count({ where }),
 			])
@@ -30,7 +31,10 @@ export class DomainsRepository {
 	}
 
 	findById(id: bigint) {
-		return this.prisma.domain.findUnique({ where: { id } });
+		return this.prisma.domain.findUnique({
+			where: { id },
+			include: { project: { select: { id: true, name: true } } },
+		});
 	}
 
 	create(data: { name: string; project_id: bigint }) {

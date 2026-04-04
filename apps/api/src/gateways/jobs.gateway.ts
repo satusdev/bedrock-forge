@@ -294,20 +294,20 @@ export class JobsGateway
 		await this.monitorsQueueEvents?.close();
 	}
 
-	/** Look up the environmentId for a monitor bull_job_id via the monitors table. */
+	/** Look up the environmentId for a monitor check job via matching JobExecution rows.
+	 * The monitor processor creates a JobExecution row at the start of each check
+	 * with queue_name='monitors' and bull_job_id=job.id — we use that to reverse-map.
+	 */
 	private async resolveMonitorEnvId(
 		bullJobId: string,
 	): Promise<number | undefined> {
 		try {
-			// BullMQ jobId for monitors is the bull_job_id string stored in job.data or job.id.
-			// The monitor processor stores monitorId in job.data — we look up via a join.
-			// We can't use JobExecution for monitors (no row created). Instead use the
-			// approach of checking which monitor job maps to which environment via Redis.
-			// Since bullJobId == job.id and monitor job.data has { monitorId }, we cannot
-			// reverse that mapping from QueueEvents alone without a lookup.
-			// Best-effort: return undefined and rely on the frontend refetchInterval.
-			void bullJobId;
-			return undefined;
+			const exec = await this.prisma.jobExecution.findFirst({
+				where: { bull_job_id: bullJobId, queue_name: 'monitors' },
+				select: { environment_id: true },
+				orderBy: { created_at: 'desc' },
+			});
+			return exec?.environment_id ? Number(exec.environment_id) : undefined;
 		} catch {
 			return undefined;
 		}

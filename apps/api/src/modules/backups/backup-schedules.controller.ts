@@ -11,10 +11,14 @@ import {
 	UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { ROLES } from '@bedrock-forge/shared';
 import { BackupSchedulesService } from './backup-schedules.service';
 import { UpsertBackupScheduleDto } from './dto/backup-schedule.dto';
 
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), RolesGuard)
+@Roles(ROLES.MANAGER)
 @Controller('environments/:envId/backup-schedule')
 export class BackupSchedulesController {
 	constructor(private readonly service: BackupSchedulesService) {}
