@@ -16,6 +16,7 @@ import {
 	Server,
 	FolderKanban,
 	HardDrive,
+	Globe,
 	Activity,
 	ClipboardList,
 	Settings,
@@ -25,6 +26,7 @@ import {
 	Package,
 	FileText,
 	Bell,
+	ClipboardCheck,
 } from 'lucide-react';
 
 const navItems = [
@@ -33,12 +35,19 @@ const navItems = [
 	{ to: '/servers', label: 'Servers', icon: Server },
 	{ to: '/projects', label: 'Projects', icon: FolderKanban },
 	{ to: '/backups', label: 'Backups', icon: HardDrive },
+	{ to: '/domains', label: 'Domains', icon: Globe },
 	{ to: '/monitors', label: 'Monitors', icon: Activity },
 	{ to: '/activity', label: 'Activity', icon: ClipboardList },
 	{ to: '/packages', label: 'Packages', icon: Package, minRole: 'manager' },
 	{ to: '/invoices', label: 'Invoices', icon: FileText, minRole: 'manager' },
 	{ to: '/settings', label: 'Settings', icon: Settings },
 	{ to: '/users', label: 'Users & Roles', icon: Shield, minRole: 'admin' },
+	{
+		to: '/audit-logs',
+		label: 'Audit Logs',
+		icon: ClipboardCheck,
+		minRole: 'admin',
+	},
 	{
 		to: '/notifications',
 		label: 'Notifications',

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useWebSocketEvent } from '@/lib/websocket';
 import { WS_EVENTS } from '@bedrock-forge/shared';
@@ -238,6 +239,7 @@ function EditMonitorDialog({
 
 export function MonitorsPage() {
 	const qc = useQueryClient();
+	const navigate = useNavigate();
 	const [createOpen, setCreateOpen] = useState(false);
 	const [deleteTarget, setDeleteTarget] = useState<Monitor | null>(null);
 	const [editTarget, setEditTarget] = useState<Monitor | null>(null);
@@ -301,7 +303,11 @@ export function MonitorsPage() {
 		{
 			header: 'Status',
 			render: m => (
-				<div className='flex items-center gap-2'>
+				<button
+					type='button'
+					className='flex items-center gap-2 text-left w-full'
+					onClick={() => navigate(`/monitors/${m.id}`)}
+				>
 					<StatusDot status={m.last_status} />
 					<span
 						className={`text-xs font-medium ${
@@ -314,20 +320,19 @@ export function MonitorsPage() {
 					>
 						{m.last_status ?? 'pending'}
 					</span>
-				</div>
+				</button>
 			),
 		},
 		{
 			header: 'URL',
 			render: m => (
-				<a
-					href={m.environment.url}
-					target='_blank'
-					rel='noopener noreferrer'
-					className='font-mono text-xs text-primary underline truncate max-w-[200px] block'
+				<button
+					type='button'
+					className='font-mono text-xs text-primary underline truncate max-w-[200px] block text-left'
+					onClick={() => navigate(`/monitors/${m.id}`)}
 				>
 					{m.environment.url}
-				</a>
+				</button>
 			),
 		},
 		{
