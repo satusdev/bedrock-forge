@@ -1,8 +1,8 @@
 import { Module } from '@nestjs/common';
-import { APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR, APP_FILTER } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
-import { ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { ScheduleModule } from '@nestjs/schedule';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -26,9 +26,12 @@ import { InvoicesModule } from './modules/invoices/invoices.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { MaintenanceModule } from './modules/maintenance/maintenance.module';
+import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { GatewaysModule } from './gateways/gateways.module';
 import { EncryptionModule } from './common/encryption/encryption.module';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
+import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { QUEUES } from '@bedrock-forge/shared';
 import appConfig from './config/app.config';
 
@@ -106,9 +109,15 @@ import appConfig from './config/app.config';
 		NotificationsModule,
 		ReportsModule,
 		MaintenanceModule,
+		AuditLogsModule,
+		DashboardModule,
 		GatewaysModule,
 	],
 	providers: [
+		// Global rate limiting — 100 req/min per IP (ThrottlerModule configured above)
+		{ provide: APP_GUARD, useClass: ThrottlerGuard },
+		// Global exception handler — normalises all errors to { statusCode, timestamp, path, message }
+		{ provide: APP_FILTER, useClass: HttpExceptionFilter },
 		// Global audit trail — logs all non-GET requests to audit_logs
 		{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
 	],
