@@ -1,9 +1,11 @@
 import {
 	Injectable,
+	Logger,
 	NotFoundException,
 	ConflictException,
 	BadRequestException,
 } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { InvoicesRepository } from './invoices.repository';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
@@ -16,6 +18,8 @@ import {
 
 @Injectable()
 export class InvoicesService {
+	private readonly logger = new Logger(InvoicesService.name);
+
 	constructor(
 		private readonly repo: InvoicesRepository,
 		private readonly notifications: NotificationsService,
@@ -305,6 +309,35 @@ export class InvoicesService {
 		}
 
 		await this.repo.remove(Number(inv.id));
+	}
+
+	/**
+	 * Daily cron: mark unpaid invoices whose due_date has passed as 'overdue'
+	 * and dispatch a Slack/notification for each.
+	 */
+	@Cron(CronExpression.EVERY_DAY_AT_9AM)
+	async checkOverdueInvoices(): Promise<void> {
+		const now = new Date();
+		const overdueList = await this.repo.findOverdue(now);
+
+		if (overdueList.length === 0) return;
+
+		for (const inv of overdueList) {
+			try {
+				await this.repo.update(Number(inv.id), { status: 'overdue' });
+				this.notifications.dispatch('invoice.overdue', {
+					invoiceNumber: inv.invoice_number,
+					clientName: inv.client.name,
+					totalAmount: Number(inv.total_amount),
+				});
+			} catch (err) {
+				this.logger.error(
+					`Failed to mark invoice #${inv.id} as overdue: ${err}`,
+				);
+			}
+		}
+
+		this.logger.log(`Marked ${overdueList.length} invoice(s) as overdue`);
 	}
 
 	private serialise(inv: Record<string, unknown>) {
