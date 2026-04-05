@@ -24,7 +24,7 @@ docker compose up -d --no-deps forge web
 # ── Wait for API to be healthy ───────────────────────────────────────────────
 echo "Waiting for Forge to be ready…"
 RETRIES=30
-until curl -sf http://localhost:3000/health > /dev/null 2>&1; do
+until curl -sf http://localhost:3001/health > /dev/null 2>&1; do
   RETRIES=$((RETRIES - 1))
   if [ "$RETRIES" -le 0 ]; then
     echo "ERROR: Forge did not become healthy in time."
