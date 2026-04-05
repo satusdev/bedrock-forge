@@ -11,6 +11,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { ROLES } from '@bedrock-forge/shared';
 import { AuditLogsService } from './audit-logs.service';
+import { QueryAuditLogDto } from './dto/query-audit-log.dto';
 
 @Controller('audit-logs')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -23,25 +24,17 @@ export class AuditLogsController {
 	 * Admin-only: full audit trail of all user-initiated mutations.
 	 */
 	@Get()
-	list(
-		@Query('page') page?: string,
-		@Query('limit') limit?: string,
-		@Query('user_id') user_id?: string,
-		@Query('action') action?: string,
-		@Query('resource_type') resource_type?: string,
-		@Query('date_from') date_from?: string,
-		@Query('date_to') date_to?: string,
-	) {
+	list(@Query() query: QueryAuditLogDto) {
 		return this.svc.list(
 			{
-				user_id: user_id ? Number(user_id) : undefined,
-				action: action || undefined,
-				resource_type: resource_type || undefined,
-				date_from: date_from ? new Date(date_from) : undefined,
-				date_to: date_to ? new Date(date_to) : undefined,
+				user_id: query.user_id,
+				action: query.action,
+				resource_type: query.resource_type,
+				date_from: query.date_from ? new Date(query.date_from) : undefined,
+				date_to: query.date_to ? new Date(query.date_to) : undefined,
 			},
-			Number(page ?? 1),
-			Math.min(Number(limit ?? 25), 100),
+			query.page,
+			query.limit,
 		);
 	}
 
