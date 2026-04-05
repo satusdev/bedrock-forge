@@ -7,13 +7,15 @@ import * as http from 'http';
 import { PrismaService } from '../../prisma/prisma.service';
 import { JOB_TYPES, QUEUES } from '@bedrock-forge/shared';
 
-@Processor(QUEUES.MONITORS)
+// concurrency=3: HTTP pings are I/O-bound and fast — 3 concurrent is safe.
+@Processor(QUEUES.MONITORS, { concurrency: 3 })
 export class MonitorProcessor extends WorkerHost {
 	private readonly logger = new Logger(MonitorProcessor.name);
 
 	constructor(
 		private readonly prisma: PrismaService,
-		@InjectQueue(QUEUES.NOTIFICATIONS) private readonly notificationsQueue: Queue,
+		@InjectQueue(QUEUES.NOTIFICATIONS)
+		private readonly notificationsQueue: Queue,
 	) {
 		super();
 	}
@@ -134,7 +136,10 @@ export class MonitorProcessor extends WorkerHost {
 					);
 					await this.prisma.monitorLog.update({
 						where: { id: openDownLog.id },
-						data: { resolved_at: resolvedAt, duration_seconds: durationSeconds },
+						data: {
+							resolved_at: resolvedAt,
+							duration_seconds: durationSeconds,
+						},
 					});
 				}
 			} else {
@@ -176,9 +181,7 @@ export class MonitorProcessor extends WorkerHost {
 			where: { id: execution.id },
 			data: {
 				status: isUp ? 'completed' : 'failed',
-				last_error: isUp
-					? null
-					: `HTTP ${statusCode ?? 0} — site unreachable`,
+				last_error: isUp ? null : `HTTP ${statusCode ?? 0} — site unreachable`,
 				progress: 100,
 				completed_at: new Date(),
 			},

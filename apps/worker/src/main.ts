@@ -8,6 +8,15 @@ import { Logger } from '@nestjs/common';
 	return Number(this);
 };
 
+process.on('unhandledRejection', (reason: unknown) => {
+	console.error('[Worker] Unhandled promise rejection:', reason);
+});
+
+process.on('uncaughtException', (err: Error) => {
+	console.error('[Worker] Uncaught exception:', err);
+	process.exit(1);
+});
+
 async function bootstrap() {
 	const app = await NestFactory.createApplicationContext(WorkerModule);
 	app.enableShutdownHooks();

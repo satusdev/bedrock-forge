@@ -10,7 +10,8 @@ import { QUEUES, JOB_TYPES, CreateBedrockPayload } from '@bedrock-forge/shared';
 import { callCpApi, CpCreds, escapeMysql } from '../../utils/cyberpanel-http';
 import { shellQuote, flipProtocol } from '../../utils/processor-utils';
 
-@Processor(QUEUES.PROJECTS)
+// concurrency=1: Bedrock provisioning runs composer, git clone, SSH commands.
+@Processor(QUEUES.PROJECTS, { concurrency: 1 })
 export class CreateBedrockProcessor extends WorkerHost {
 	private readonly logger = new Logger(CreateBedrockProcessor.name);
 

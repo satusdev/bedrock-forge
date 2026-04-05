@@ -8,7 +8,8 @@ import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
 
-@Processor(QUEUES.DOMAINS)
+// concurrency=2: whois lookups spawn child processes — cap to avoid fork storms.
+@Processor(QUEUES.DOMAINS, { concurrency: 2 })
 export class DomainWhoisProcessor extends WorkerHost {
 	private readonly logger = new Logger(DomainWhoisProcessor.name);
 

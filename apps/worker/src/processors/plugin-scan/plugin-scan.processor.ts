@@ -21,7 +21,8 @@ function shellQuote(value: string): string {
 	return "'" + value.replace(/'/g, "'\\''") + "'";
 }
 
-@Processor(QUEUES.PLUGIN_SCANS)
+// concurrency=2: plugin scans are SSH+PHP — moderate I/O, two at a time is safe.
+@Processor(QUEUES.PLUGIN_SCANS, { concurrency: 2 })
 export class PluginScanProcessor extends WorkerHost {
 	private readonly logger = new Logger(PluginScanProcessor.name);
 

@@ -272,7 +272,8 @@ type PrismaMonitor = Awaited<
 	monitor_results: { is_up: boolean }[];
 };
 
-@Processor(QUEUES.REPORTS, { lockDuration: 120_000 })
+// concurrency=1: PDF generation is CPU-bound — serialised to avoid spikes.
+@Processor(QUEUES.REPORTS, { concurrency: 1, lockDuration: 120_000 })
 export class ReportProcessor extends WorkerHost {
 	private readonly logger = new Logger(ReportProcessor.name);
 

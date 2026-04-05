@@ -28,7 +28,9 @@ type Creds = {
 };
 type Executor = Awaited<ReturnType<typeof createRemoteExecutor>>;
 
-@Processor(QUEUES.SYNC, { lockDuration: 90 * 60 * 1_000 })
+// concurrency=1: sync jobs do SSH+mysqldump+rsync — serialised to avoid
+// saturating CPU/network on concurrent large file transfers.
+@Processor(QUEUES.SYNC, { concurrency: 1, lockDuration: 90 * 60 * 1_000 })
 export class SyncProcessor extends WorkerHost {
 	private readonly logger = new Logger(SyncProcessor.name);
 	private readonly credParser = new CredentialParserService();

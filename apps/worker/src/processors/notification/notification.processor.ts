@@ -10,7 +10,8 @@ interface NotificationJob {
 	payload: Record<string, unknown>;
 }
 
-@Processor(QUEUES.NOTIFICATIONS, { lockDuration: 30_000 })
+// concurrency=3: Slack API calls are lightweight network I/O.
+@Processor(QUEUES.NOTIFICATIONS, { concurrency: 3, lockDuration: 30_000 })
 export class NotificationProcessor extends WorkerHost {
 	private readonly logger = new Logger(NotificationProcessor.name);
 
