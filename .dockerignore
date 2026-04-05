@@ -1,6 +1,10 @@
 # Turbo cache - must be excluded so Docker builds compile from scratch
 .turbo/
 
+# TypeScript incremental build state - excluded to force a clean tsc build
+# inside Docker (paths inside .tsbuildinfo point to the host machine, not /app)
+**/*.tsbuildinfo
+
 # App compiled outputs (builder stage recompiles these)
 # packages/*/dist/ is intentionally NOT excluded; packages like @bedrock-forge/shared
 # must have their pre-built .d.ts files available for downstream compilation
