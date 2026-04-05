@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useAuthStore } from '@/store/auth.store';
 
@@ -9,8 +9,10 @@ export function getSocket(): Socket {
 		const token = useAuthStore.getState().accessToken;
 		_socket = io('/ws', {
 			auth: { token },
-			reconnectionAttempts: 10,
-			reconnectionDelay: 2000,
+			// No reconnectionAttempts limit — default is Infinity.
+			// Exponential backoff capped at 30s prevents hammering on server downtime.
+			reconnectionDelay: 1000,
+			reconnectionDelayMax: 30_000,
 		});
 	}
 	return _socket;
@@ -21,10 +23,15 @@ export function destroySocket() {
 	_socket = null;
 }
 
-/** Update the socket's auth token so it is used on the next reconnection. */
+/**
+ * Update the socket auth token and force an immediate reconnection so the
+ * new token is used right away (not just on the next automatic reconnect).
+ */
 export function updateSocketToken(token: string) {
 	if (_socket) {
 		(_socket.auth as { token: string }).token = token;
+		// Reconnect immediately with the new token
+		_socket.disconnect().connect();
 	}
 }
 

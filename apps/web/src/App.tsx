@@ -67,26 +67,43 @@ const NotificationsPage = lazy(() =>
 const AuditLogsPage = lazy(() =>
 	import('@/pages/AuditLogsPage').then(m => ({ default: m.AuditLogsPage })),
 );
+const NotFoundPage = lazy(() =>
+	import('@/pages/NotFoundPage').then(m => ({ default: m.NotFoundPage })),
+);
 
 import React, { Component } from 'react';
 
-class ErrorBoundary extends Component<React.PropsWithChildren> {
-	state = { hasError: false };
-	static getDerivedStateFromError() {
-		return { hasError: true };
+class ErrorBoundary extends Component<
+	React.PropsWithChildren,
+	{ hasError: boolean; error: Error | null }
+> {
+	state = { hasError: false, error: null };
+	static getDerivedStateFromError(error: Error) {
+		return { hasError: true, error };
 	}
 	render() {
 		if (this.state.hasError) {
 			return (
 				<div className='flex h-screen items-center justify-center text-center p-8'>
-					<div>
+					<div className='max-w-lg'>
 						<h2 className='text-xl font-semibold mb-2'>Something went wrong</h2>
-						<button
-							className='text-sm underline'
-							onClick={() => window.location.reload()}
-						>
-							Reload
-						</button>
+						{import.meta.env.DEV && this.state.error && (
+							<pre className='text-left text-xs bg-muted p-4 rounded mb-4 overflow-auto max-h-64'>
+								{(this.state.error as Error).message}\n
+								{(this.state.error as Error).stack}
+							</pre>
+						)}
+						<div className='flex gap-3 justify-center'>
+							<button
+								className='text-sm underline'
+								onClick={() => window.location.reload()}
+							>
+								Reload
+							</button>
+							<a href='/dashboard' className='text-sm underline'>
+								Go to Dashboard
+							</a>
+						</div>
 					</div>
 				</div>
 			);
@@ -203,7 +220,7 @@ export default function App() {
 									</AdminRoute>
 								}
 							/>{' '}
-							<Route path='*' element={<Navigate to='/dashboard' replace />} />
+							<Route path='*' element={<NotFoundPage />} />
 						</Route>
 					</Routes>
 				</Suspense>
