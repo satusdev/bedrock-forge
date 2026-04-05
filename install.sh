@@ -16,11 +16,15 @@ if [ ! -f .env ]; then
 
   ENCRYPTION_KEY=$(openssl rand -hex 32)
   JWT_SECRET=$(openssl rand -hex 32)
+  JWT_REFRESH_SECRET=$(openssl rand -hex 32)
   POSTGRES_PASSWORD=$(openssl rand -hex 16)
+  REDIS_PASSWORD=$(openssl rand -hex 16)
 
   sed -i "s|ENCRYPTION_KEY=.*|ENCRYPTION_KEY=${ENCRYPTION_KEY}|" .env
   sed -i "s|JWT_SECRET=.*|JWT_SECRET=${JWT_SECRET}|" .env
+  sed -i "s|JWT_REFRESH_SECRET=.*|JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}|" .env
   sed -i "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${POSTGRES_PASSWORD}|" .env
+  sed -i "s|REDIS_PASSWORD=.*|REDIS_PASSWORD=${REDIS_PASSWORD}|" .env
 
   echo "Secrets written to .env"
 else
