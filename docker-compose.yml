@@ -1,13 +1,41 @@
+# Resource budget — Hetzner CX23: 2 vCPU / 4 GB RAM / 40 GB SSD.
+# Total reserved: ~2.8 GB RAM / ~2.2 CPU. Leaves ~1.2 GB for OS + Docker daemon.
+
 services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    # Tuned for ~1 GB budget: 25% shared_buffers, low max_connections.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=512MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - max_connections=40
+      - -c
+      - wal_buffers=8MB
+      - -c
+      - checkpoint_completion_target=0.9
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-forge}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
       POSTGRES_DB: ${POSTGRES_DB:-bedrock_forge}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          cpus: '0.80'
+          memory: 1024M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-forge}']
       interval: 10s
@@ -17,11 +45,22 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: redis-server --save 60 1 --loglevel warning
+    command:
+      redis-server --save 60 1 --loglevel warning --requirepass
+      ${REDIS_PASSWORD:?required} --maxmemory 128mb --maxmemory-policy
+      allkeys-lru
     volumes:
       - redis_data:/data
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 192M
+        reservations:
+          cpus: '0.05'
+          memory: 64M
     healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
+      test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD}', 'ping']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -34,17 +73,24 @@ services:
     restart: unless-stopped
     env_file: .env
     tmpfs:
-      # In-memory staging for backup tar.gz files. Avoids overlayfs write
-      # throttling for large files. Size accommodates multiple concurrent
-      # backups — adjust downward if RAM is constrained.
-      - /tmp/forge-backups:size=2g,uid=1000,gid=1000
+      # 512 MB — one backup archive at a time (backup processor concurrency=1).
+      - /tmp/forge-backups:size=512m,uid=1000,gid=1000
     environment:
-      CORS_ORIGIN: http://localhost:8080
-      # Constructed from POSTGRES_* vars so it always matches the postgres service.
-      # This overrides whatever DATABASE_URL is set in .env, preventing drift.
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8080}
       DATABASE_URL: postgresql://${POSTGRES_USER:-forge}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-bedrock_forge}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      # Cap V8 heap to avoid OOM on 4 GB VPS.
+      NODE_OPTIONS: '--max-old-space-size=768'
+    deploy:
+      resources:
+        limits:
+          cpus: '1.00'
+          memory: 1536M
+        reservations:
+          cpus: '0.30'
+          memory: 384M
     ports:
-      - '3000:3000'
+      - '3001:3000'
     depends_on:
       postgres:
         condition: service_healthy
@@ -63,8 +109,16 @@ services:
       dockerfile: Dockerfile
       target: web
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.15'
+          memory: 64M
+        reservations:
+          cpus: '0.05'
+          memory: 32M
     ports:
-      - '8080:80'
+      - '3002:80'
     depends_on:
       forge:
         condition: service_healthy
@@ -73,5 +127,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
+
+volumes:
   postgres_data:
   redis_data:

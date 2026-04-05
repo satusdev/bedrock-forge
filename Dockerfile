@@ -21,6 +21,12 @@ COPY . .
 
 # Generate Prisma client (prisma.config.js handles missing DATABASE_URL gracefully)
 RUN pnpm exec prisma generate
+
+# Build @bedrock-forge/shared first — turbo's ^build dependency resolves this
+# transitively, but an explicit pre-build step guarantees dist/index.d.ts is
+# present before remote-executor and api/worker compile against it.
+RUN pnpm --filter @bedrock-forge/shared build
+
 RUN pnpm turbo build --filter=@bedrock-forge/api --filter=@bedrock-forge/worker --filter=@bedrock-forge/web
 
 # Compile seed script for runtime use (outputs prisma/seed.js)
