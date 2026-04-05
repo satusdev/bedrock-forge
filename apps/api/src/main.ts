@@ -10,6 +10,24 @@ import { AppModule } from './app.module';
 	return Number(this);
 };
 
+// ── Pre-flight: fail fast on missing production secrets ──────────────────────
+const isProd = process.env.NODE_ENV === 'production';
+if (isProd) {
+	const required: [string, string][] = [
+		['JWT_SECRET', process.env.JWT_SECRET ?? ''],
+		['JWT_REFRESH_SECRET', process.env.JWT_REFRESH_SECRET ?? ''],
+		['ENCRYPTION_KEY', process.env.ENCRYPTION_KEY ?? ''],
+		['CORS_ORIGIN', process.env.CORS_ORIGIN ?? ''],
+	];
+	const missing = required.filter(([, v]) => !v).map(([k]) => k);
+	if (missing.length > 0) {
+		console.error(
+			`[Bootstrap] FATAL: Missing required environment variables in production: ${missing.join(', ')}`,
+		);
+		process.exit(1);
+	}
+}
+
 async function bootstrap() {
 	const logger = new Logger('Bootstrap');
 	const app = await NestFactory.create(AppModule, {
@@ -33,7 +51,7 @@ async function bootstrap() {
 	// Security headers
 	app.use(helmet());
 
-	// CORS — in production, restrict to your domain
+	// CORS — in production, CORS_ORIGIN must be set (validated above)
 	app.enableCors({
 		origin: process.env.CORS_ORIGIN ?? '*',
 		credentials: true,
