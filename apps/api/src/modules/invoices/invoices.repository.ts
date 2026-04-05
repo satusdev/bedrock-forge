@@ -156,4 +156,20 @@ export class InvoicesRepository {
 	remove(id: number) {
 		return this.prisma.invoice.delete({ where: { id: BigInt(id) } });
 	}
+
+	/**
+	 * Returns invoices in draft or sent status whose due_date is before `now`.
+	 * Used by the daily overdue-detection cron.
+	 */
+	findOverdue(now: Date) {
+		return this.prisma.invoice.findMany({
+			where: {
+				status: { in: ['draft', 'sent'] },
+				due_date: { lt: now },
+			},
+			include: {
+				client: { select: { id: true, name: true } },
+			},
+		});
+	}
 }

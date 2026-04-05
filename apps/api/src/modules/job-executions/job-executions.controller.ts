@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { JobExecutionsService } from './job-executions.service';
+import { QueryJobExecutionDto } from './dto/query-job-execution.dto';
 
 @Controller('job-executions')
 @UseGuards(AuthGuard('jwt'))
@@ -16,32 +17,22 @@ export class JobExecutionsController {
 
 	/** GET /job-executions?page=1&limit=25&queue_name=backups&status=failed&environment_id=3 */
 	@Get()
-	list(
-		@Query('page') page?: string,
-		@Query('limit') limit?: string,
-		@Query('queue_name') queue_name?: string,
-		@Query('job_type') job_type?: string,
-		@Query('status') status?: string,
-		@Query('environment_id') environment_id?: string,
-		@Query('environment_ids') environment_ids?: string,
-		@Query('date_from') date_from?: string,
-		@Query('date_to') date_to?: string,
-	) {
-		const envIds = environment_ids
-			? environment_ids.split(',').map(Number).filter(Boolean)
+	list(@Query() query: QueryJobExecutionDto) {
+		const envIds = query.environment_ids
+			? query.environment_ids.split(',').map(Number).filter(Boolean)
 			: undefined;
 		return this.svc.list(
 			{
-				queue_name: queue_name || undefined,
-				job_type: job_type || undefined,
-				status: status || undefined,
-				environment_id: environment_id ? Number(environment_id) : undefined,
+				queue_name: query.queue_name,
+				job_type: query.job_type,
+				status: query.status,
+				environment_id: query.environment_id,
 				environment_ids: envIds,
-				date_from: date_from ? new Date(date_from) : undefined,
-				date_to: date_to ? new Date(date_to) : undefined,
+				date_from: query.date_from ? new Date(query.date_from) : undefined,
+				date_to: query.date_to ? new Date(query.date_to) : undefined,
 			},
-			Number(page ?? 1),
-			Math.min(Number(limit ?? 25), 100),
+			query.page,
+			query.limit,
 		);
 	}
 
