@@ -1,6 +1,13 @@
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, FolderKanban, Mail, Phone, Tag } from 'lucide-react';
+import {
+	ArrowLeft,
+	FolderKanban,
+	Mail,
+	Phone,
+	Tag,
+	Receipt,
+} from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -17,6 +24,16 @@ interface Project {
 	name: string;
 	description: string | null;
 	created_at: string;
+}
+
+interface Invoice {
+	id: number;
+	invoice_number: string;
+	period_year: number;
+	total_amount: string | number;
+	status: 'draft' | 'sent' | 'paid' | 'overdue' | 'cancelled';
+	due_date: string | null;
+	project: { id: number; name: string } | null;
 }
 
 interface ClientDetail {
@@ -39,6 +56,23 @@ export function ClientDetailPage() {
 		queryFn: () => api.get(`/clients/${id}`),
 		enabled: !!id,
 	});
+
+	const { data: invoicesData } = useQuery<{ data: Invoice[]; total: number }>({
+		queryKey: ['client-invoices', id],
+		queryFn: () => api.get(`/invoices?client_id=${id}&limit=50&page=1`),
+		enabled: !!id,
+	});
+
+	const invoices = invoicesData?.data ?? [];
+
+	function statusVariant(
+		status: Invoice['status'],
+	): 'default' | 'secondary' | 'outline' | 'destructive' {
+		if (status === 'paid') return 'default';
+		if (status === 'overdue') return 'destructive';
+		if (status === 'cancelled') return 'secondary';
+		return 'outline';
+	}
 
 	if (isLoading) {
 		return (
@@ -180,6 +214,63 @@ export function ClientDetailPage() {
 									{new Date(project.created_at).toLocaleDateString()}
 								</span>
 							</Link>
+						))}
+					</div>
+				)}
+			</div>
+
+			{/* Invoices */}
+			<div>
+				<div className='flex items-center justify-between mb-3'>
+					<h2 className='font-semibold flex items-center gap-2'>
+						<Receipt className='h-4 w-4' />
+						Invoices ({invoices.length})
+					</h2>
+					<Button asChild variant='outline' size='sm'>
+						<Link to='/invoices'>View All Invoices</Link>
+					</Button>
+				</div>
+
+				{invoices.length === 0 ? (
+					<p className='text-muted-foreground text-sm'>
+						No invoices for this client.
+					</p>
+				) : (
+					<div className='space-y-2'>
+						{invoices.map(invoice => (
+							<div
+								key={invoice.id}
+								className='flex items-center justify-between p-3 bg-card border rounded-md'
+							>
+								<div>
+									<p className='text-sm font-medium'>
+										{invoice.invoice_number ?? `Invoice #${invoice.id}`}
+										{invoice.project && (
+											<span className='text-muted-foreground font-normal'>
+												{' '}
+												— {invoice.project.name}
+											</span>
+										)}
+									</p>
+									<p className='text-xs text-muted-foreground'>
+										{invoice.period_year}
+										{invoice.due_date && (
+											<>
+												{' '}
+												· Due {new Date(invoice.due_date).toLocaleDateString()}
+											</>
+										)}
+									</p>
+								</div>
+								<div className='flex items-center gap-3'>
+									<span className='text-sm font-medium tabular-nums'>
+										${Number(invoice.total_amount).toFixed(2)}
+									</span>
+									<Badge variant={statusVariant(invoice.status)}>
+										{invoice.status}
+									</Badge>
+								</div>
+							</div>
 						))}
 					</div>
 				)}
