@@ -35,7 +35,9 @@ export class EncryptionService {
 		const iv = buf.subarray(0, IV_LEN);
 		const tag = buf.subarray(buf.length - TAG_LEN);
 		const enc = buf.subarray(IV_LEN, buf.length - TAG_LEN);
-		const decipher = createDecipheriv(ALGO, this.keyBuffer, iv);
+		const decipher = createDecipheriv(ALGO, this.keyBuffer, iv, {
+			authTagLength: TAG_LEN,
+		});
 		decipher.setAuthTag(tag);
 		return Buffer.concat([decipher.update(enc), decipher.final()]).toString(
 			'utf8',
