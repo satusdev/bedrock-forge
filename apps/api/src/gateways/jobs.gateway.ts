@@ -32,7 +32,10 @@ import {
  * WebSocket clients — no direct coupling between Worker and API processes.
  */
 @WebSocketGateway({
-	cors: { origin: '*', credentials: true },
+	cors: {
+		origin: process.env.CORS_ORIGIN ?? 'http://localhost:8080',
+		credentials: true,
+	},
 	namespace: '/ws',
 })
 export class JobsGateway
