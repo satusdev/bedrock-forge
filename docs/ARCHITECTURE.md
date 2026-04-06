@@ -1,770 +1,356 @@
-# Architecture Guide
-
-System architecture, design patterns, and technical implementation details of Bedrock Forge.
-
-## 📋 Table of Contents
-
-- [Overview](#overview)
-- [Design Principles](#design-principles)
-- [System Architecture](#system-architecture)
-- [Core Components](#core-components)
-- [Command Architecture](#command-architecture)
-- [Data Flow](#data-flow)
-- [Plugin System](#plugin-system)
-- [Security Architecture](#security-architecture)
-- [Performance Architecture](#performance-architecture)
-- [Extensibility](#extensibility)
-
-## 🎯 Overview
-
-Bedrock Forge is built using a modular, plugin-based architecture that emphasizes:
-
-- **Modularity**: Clear separation of concerns with well-defined interfaces
-- **Extensibility**: Plugin system for adding new functionality
-- **Reliability**: Error handling, retry mechanisms, and resilience patterns
-- **Security**: Secure credential management and encrypted communications
-- **Performance**: Efficient resource usage and parallel processing
-
-## 🏛️ Design Principles
-
-### 1. Single Responsibility Principle
-Each module and class has a single, well-defined responsibility:
-- Commands handle CLI interface
-- Utilities provide reusable functionality
-- Provisioning modules manage server operations
-- Models define data structures
-
-### 2. Dependency Injection
-Dependencies are injected rather than hardcoded:
-```python
-# Instead of: HetznerClient()
-# Use: provider_factory.create("hetzner", config)
-```
-
-### 3. Configuration-Driven
-Behavior is controlled through configuration rather than code:
-```python
-# Configuration determines providers, settings, and behavior
-config = load_config()
-strategy = create_deployment_strategy(config.deployment.method)
-```
-
-### 4. Fail-Fast Philosophy
-Errors are detected and reported early:
-```python
-# Validate configuration before operations
-validate_deployment_config(config)
-# Check connectivity before deployment
-check_server_connectivity(server_config)
-```
-
-### 5. Immutable State
-Where possible, state is immutable to prevent side effects:
-```python
-# Return new configuration objects
-new_config = config.with_environment("production")
-```
-
-## 🏗️ System Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        CLI Interface                        │
-│                    (forge/main.py)                          │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│                    Command Layer                            │
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐          │
-│  │ Local   │ │Deploy   │ │Sync     │ │Provision│          │
-│  └─────────┘ └─────────┘ └─────────┘ └─────────┘          │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│                    Service Layer                            │
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐          │
-│  │Deploy   │ │Backup   │ │Monitor  │ │Provider │          │
-│  │Service  │ │Service  │ │Service  │ │Factory  │          │
-│  └─────────┘ └─────────┘ └─────────┘ └─────────┘          │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│                    Utility Layer                            │
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐          │
-│  │Config   │ │SSH      │ │API      │ │Security │          │
-│  │Manager  │ │Client   │ │Client   │ │Manager  │          │
-│  └─────────┘ └─────────┘ └─────────┘ └─────────┘          │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│                    Infrastructure                           │
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐          │
-│  │Storage  │ │Network  │ │External │ │Logging  │          │
-│  │(Files)  │ │(SSH/FTP)│ │APIs     │ │System   │          │
-│  └─────────┘ └─────────┘ └─────────┘ └─────────┘          │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## 🔧 Core Components
-
-### 1. CLI Entry Point (`forge/main.py`)
-
-The main CLI module uses Typer for command-line interface generation:
-
-```python
-import typer
-from .commands import local, provision, sync, deploy, ci, monitor, info, workflow, config
-
-app = typer.Typer(rich_markup_mode="rich", help="Unified CLI for Bedrock WordPress workflows")
-
-# Register command modules
-app.add_typer(local.app, name="local", help="Manage local projects with DDEV")
-app.add_typer(provision.app, name="provision", help="Provision servers and services")
-# ... other commands
-```
-
-**Features:**
-- Automatic help generation
-- Rich markup support
-- Subcommand organization
-- Global option handling
-
-### 2. Configuration System (`forge/utils/config.py`)
-
-Hierarchical configuration management with environment interpolation:
-
-```python
-class ConfigManager:
-    def __init__(self):
-        self.config_hierarchy = [
-            "command_line_args",
-            "environment_variables",
-            "project_config",
-            "environment_config",
-            "global_config",
-            "defaults"
-        ]
-
-    def load_config(self, env: str = None) -> Config:
-        # Merge configurations from all sources
-        # Interpolate environment variables
-        # Validate final configuration
-        pass
-```
-
-**Features:**
-- JSON-based configuration
-- Environment variable interpolation
-- Validation and schema checking
-- Configuration inheritance
-- Encryption for sensitive values
-
-### 3. Command Architecture
-
-Each command module follows a consistent pattern:
-
-```python
-# forge/commands/deploy.py
-import typer
-from forge.utils.logging import logger
-from forge.provision.enhanced_deployment import EnhancedDeployment
-
-app = typer.Typer()
-
-@app.command()
-def push(
-    project: str = typer.Argument(...),
-    environment: str = typer.Argument(...),
-    dry_run: bool = typer.Option(False),
-    build: bool = typer.Option(False)
-):
-    """Deploy project to environment."""
-    config = load_project_config(project, environment)
-    deployment = EnhancedDeployment(config)
-
-    if dry_run:
-        logger.info(f"Would deploy {project} to {environment}")
-        return
-
-    result = deployment.deploy(build_assets=build)
-    handle_result(result)
-```
-
-**Pattern:**
-- Command-line argument parsing
-- Configuration loading
-- Service instantiation
-- Business logic execution
-- Result handling
-
-### 4. Provider System (`forge/provision/`)
-
-Abstract provider system for different hosting providers:
-
-```python
-# forge/provision/core.py
-from abc import ABC, abstractmethod
-
-class Provider(ABC):
-    @abstractmethod
-    def create_server(self, config: ServerConfig) -> Server:
-        pass
-
-    @abstractmethod
-    def delete_server(self, server: Server) -> bool:
-        pass
-
-class HetznerProvider(Provider):
-    def create_server(self, config: ServerConfig) -> Server:
-        # Hetzner-specific implementation
-        client = self._get_client()
-        response = client.servers.create(config.to_hetzner_format())
-        return Server.from_hetzner_response(response)
-
-class ProviderFactory:
-    @staticmethod
-    def create(provider_type: str, config: dict) -> Provider:
-        providers = {
-            "hetzner": HetznerProvider,
-            "cyberpanel": CyberPanelProvider,
-            "libyanspider": LibyanSpiderProvider
-        }
-        return providers[provider_type](config)
-```
-
-**Benefits:**
-- Consistent interface across providers
-- Easy addition of new providers
-- Provider-specific optimizations
-- Configuration-driven provider selection
-
-### 5. Deployment System (`forge/provision/enhanced_deployment.py`)
-
-Advanced deployment system with multiple strategies:
-
-```python
-class EnhancedDeployment:
-    def __init__(self, config: DeploymentConfig):
-        self.config = config
-        self.strategy = self._create_strategy()
-        self.version_manager = VersionManager()
-        self.health_checker = HealthChecker()
-
-    def deploy(self, **kwargs) -> DeploymentResult:
-        # 1. Pre-deployment checks
-        self._validate_environment()
-        self._create_backup()
-
-        # 2. Execute deployment strategy
-        result = self.strategy.deploy(self.config, **kwargs)
-
-        # 3. Post-deployment verification
-        if result.success:
-            self._run_health_checks()
-            self._update_version()
-
-        return result
-
-    def _create_strategy(self) -> DeploymentStrategy:
-        strategies = {
-            "atomic": AtomicDeploymentStrategy,
-            "rolling": RollingDeploymentStrategy,
-            "blue-green": BlueGreenDeploymentStrategy
-        }
-        return strategies[self.config.strategy](self.config)
-```
-
-**Features:**
-- Multiple deployment strategies
-- Automatic rollback on failure
-- Health checks and verification
-- Version management
-- Zero-downtime deployments
-
-## 🌊 Data Flow
-
-### 1. Command Execution Flow
-
-```
-User Input → CLI Parser → Command Handler → Service Layer → Infrastructure → Result → User
-```
-
-### 2. Configuration Loading Flow
-
-```
-CLI Args → Environment Variables → Project Config → Environment Config → Global Config → Defaults → Merged Config
-```
-
-### 3. Deployment Flow
-
-```
-Project Config → Deployment Strategy → Build Assets → Transfer Files → Run Migrations → Health Checks → Update Version → Result
-```
-
-### 4. Backup Flow
-
-```
-Backup Request → Database Dump → File Collection → Compression → Encryption → Upload → Verification → Result
-```
-
-## 🔌 Plugin System
-
-### Plugin Architecture
-
-```python
-# forge/plugins/base.py
-from abc import ABC, abstractmethod
-
-class Plugin(ABC):
-    @property
-    @abstractmethod
-    def name(self) -> str:
-        pass
-
-    @property
-    @abstractmethod
-    def version(self) -> str:
-        pass
-
-    @abstractmethod
-    def initialize(self, config: dict) -> None:
-        pass
-
-    @abstractmethod
-    def register_commands(self, app: typer.Typer) -> None:
-        pass
-
-# forge/plugins/custom_plugin.py
-class CustomPlugin(Plugin):
-    @property
-    def name(self) -> str:
-        return "custom-plugin"
-
-    def register_commands(self, app: typer.Typer) -> None:
-        @app.command()
-        def custom_command():
-            print("Custom command from plugin!")
-
-# forge/plugin_manager.py
-class PluginManager:
-    def __init__(self):
-        self.plugins = {}
-
-    def load_plugins(self, plugin_dir: Path) -> None:
-        for plugin_path in plugin_dir.glob("*.py"):
-            plugin = self._load_plugin(plugin_path)
-            self.plugins[plugin.name] = plugin
-
-    def register_plugin_commands(self, app: typer.Typer) -> None:
-        for plugin in self.plugins.values():
-            plugin.register_commands(app)
-```
-
-**Plugin Features:**
-- Dynamic command registration
-- Configuration integration
-- Lifecycle hooks
-- Dependency management
-- Version compatibility checking
-
-## 🔒 Security Architecture
-
-### 1. Credential Management
-
-```python
-# forge/utils/security.py
-class CredentialManager:
-    def __init__(self):
-        self.keyring = keyring.get_keyring()
-        self.encryption_key = self._get_or_create_key()
-
-    def store_credential(self, service: str, username: str, password: str) -> None:
-        encrypted_password = self._encrypt(password)
-        self.keyring.set_password(service, username, encrypted_password)
-
-    def get_credential(self, service: str, username: str) -> str:
-        encrypted_password = self.keyring.get_password(service, username)
-        return self._decrypt(encrypted_password) if encrypted_password else None
-
-    def _encrypt(self, data: str) -> str:
-        # AES-256-GCM encryption
-        cipher = AESGCM(self.encryption_key)
-        nonce = os.urandom(12)
-        encrypted = cipher.encrypt(nonce, data.encode(), None)
-        return base64.b64encode(nonce + encrypted).decode()
-```
-
-### 2. SSH Security
-
-```python
-# forge/utils/ssh.py
-class SecureSSHClient:
-    def __init__(self, config: SSHConfig):
-        self.config = config
-        self.client = paramiko.SSHClient()
-        self.client.set_missing_host_key_policy(paramiko.RejectPolicy())
-
-    def connect(self) -> None:
-        # Use key-based authentication only
-        self.client.connect(
-            hostname=self.config.host,
-            username=self.config.user,
-            key_filename=self.config.key_path,
-            port=self.config.port,
-            timeout=self.config.timeout,
-            banner_timeout=self.config.banner_timeout
-        )
-
-    def execute_secure_command(self, command: str) -> SSHResult:
-        # Sanitize command
-        sanitized_command = self._sanitize_command(command)
-
-        # Execute with timeout
-        stdin, stdout, stderr = self.client.exec_command(
-            sanitized_command,
-            timeout=self.config.command_timeout
-        )
-
-        return SSHResult(
-            exit_code=stdout.channel.recv_exit_status(),
-            stdout=stdout.read().decode(),
-            stderr=stderr.read().decode()
-        )
-```
-
-### 3. Configuration Security
-
-```python
-# Security features in configuration:
-# 1. Sensitive value encryption
-# 2. Environment variable interpolation
-# 3. Access control and permissions
-# 4. Audit logging
-# 5. Configuration validation
-```
-
-## ⚡ Performance Architecture
-
-### 1. Parallel Processing
-
-```python
-# forge/utils/parallel.py
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
-
-class ParallelProcessor:
-    def __init__(self, max_workers: int = 4):
-        self.max_workers = max_workers
-
-    def process_files_parallel(self, files: List[Path], operation: callable) -> List[Result]:
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures = [executor.submit(operation, file) for file in files]
-            return [future.result() for future in futures]
-
-    async def process_async(self, tasks: List[Task]) -> List[Result]:
-        return await asyncio.gather(*[task.execute() for task in tasks])
-```
-
-### 2. Caching System
-
-```python
-# forge/utils/cache.py
-class CacheManager:
-    def __init__(self, cache_dir: Path):
-        self.cache_dir = cache_dir
-        self.memory_cache = {}
-
-    def get(self, key: str, ttl: int = 3600) -> Any:
-        # Check memory cache first
-        if key in self.memory_cache:
-            item = self.memory_cache[key]
-            if time.time() - item['timestamp'] < ttl:
-                return item['data']
-
-        # Check file cache
-        cache_file = self.cache_dir / f"{key}.cache"
-        if cache_file.exists():
-            with open(cache_file, 'rb') as f:
-                item = pickle.load(f)
-                if time.time() - item['timestamp'] < ttl:
-                    self.memory_cache[key] = item
-                    return item['data']
-
-        return None
-
-    def set(self, key: str, data: Any) -> None:
-        item = {
-            'data': data,
-            'timestamp': time.time()
-        }
-
-        # Store in memory
-        self.memory_cache[key] = item
-
-        # Store in file
-        cache_file = self.cache_dir / f"{key}.cache"
-        with open(cache_file, 'wb') as f:
-            pickle.dump(item, f)
-```
-
-### 3. Resource Management
-
-```python
-# forge/utils/resources.py
-class ResourceManager:
-    def __init__(self):
-        self.connections = {}
-        self.temp_files = []
-
-    @contextmanager
-    def get_ssh_connection(self, config: SSHConfig):
-        key = f"{config.host}:{config.port}"
-        if key not in self.connections:
-            self.connections[key] = SecureSSHClient(config)
-            self.connections[key].connect()
-
-        try:
-            yield self.connections[key]
-        finally:
-            # Keep connection alive for reuse
-            pass
-
-    @contextmanager
-    def temp_file(self, content: str = None, suffix: str = '.tmp'):
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-        self.temp_files.append(temp_file.name)
-
-        if content:
-            temp_file.write(content.encode())
-            temp_file.flush()
-
-        try:
-            yield temp_file.name
-        finally:
-            temp_file.close()
-
-    def cleanup(self):
-        # Close all connections
-        for connection in self.connections.values():
-            connection.close()
-        self.connections.clear()
-
-        # Remove temp files
-        for temp_file in self.temp_files:
-            try:
-                os.unlink(temp_file)
-            except FileNotFoundError:
-                pass
-        self.temp_files.clear()
-```
-
-## 🔧 Extensibility
-
-### 1. Adding New Commands
-
-```python
-# forge/commands/new_command.py
-import typer
-from forge.utils.logging import logger
-
-app = typer.Typer()
-
-@app.command()
-def new_feature(
-    project: str = typer.Argument(...),
-    option: str = typer.Option("default")
-):
-    """New feature command."""
-    logger.info(f"Running new feature on {project} with {option}")
-    # Implementation here
-
-# Register in main.py
-app.add_typer(new_command.app, name="new-command", help="New feature commands")
-```
-
-### 2. Adding New Providers
-
-```python
-# forge/provision/new_provider.py
-from forge.provision.core import Provider, ServerConfig, Server
-
-class NewProvider(Provider):
-    def create_server(self, config: ServerConfig) -> Server:
-        # Implementation specific to new provider
-        client = NewProviderClient(config.api_key)
-        response = client.create_server(config.to_provider_format())
-        return Server.from_provider_response(response)
-
-    def delete_server(self, server: Server) -> bool:
-        # Implementation for server deletion
-        pass
-
-# Register in provider factory
-providers["new_provider"] = NewProvider
-```
-
-### 3. Adding New Deployment Strategies
-
-```python
-# forge/provision/strategies/new_strategy.py
-from forge.provision.enhanced_deployment import DeploymentStrategy
-
-class NewDeploymentStrategy(DeploymentStrategy):
-    def deploy(self, config: DeploymentConfig, **kwargs) -> DeploymentResult:
-        # Implementation of new deployment strategy
-        try:
-            # Pre-deployment steps
-            self.prepare_deployment(config)
-
-            # Deployment steps
-            self.execute_deployment(config)
-
-            # Post-deployment steps
-            self.verify_deployment(config)
-
-            return DeploymentResult(success=True)
-        except Exception as e:
-            return DeploymentResult(success=False, error=str(e))
-
-# Register in strategy factory
-strategies["new_strategy"] = NewDeploymentStrategy
-```
-
-### 4. Custom Workflow Steps
-
-```python
-# forge/workflows/custom_steps.py
-class CustomWorkflowStep:
-    def __init__(self, config: dict):
-        self.config = config
-
-    def execute(self, context: WorkflowContext) -> StepResult:
-        # Custom workflow logic
-        try:
-            # Do something custom
-            result = self.custom_operation(context)
-
-            # Update context
-            context.add_data("custom_result", result)
-
-            return StepResult(success=True, data=result)
-        except Exception as e:
-            return StepResult(success=False, error=str(e))
-
-    def custom_operation(self, context: WorkflowContext) -> Any:
-        # Implementation of custom operation
-        pass
-
-# Register in workflow system
-workflow_registry.register_step("custom_step", CustomWorkflowStep)
-```
-
-## 📊 Monitoring and Observability
-
-### 1. Metrics Collection
-
-```python
-# forge/utils/metrics.py
-class MetricsCollector:
-    def __init__(self):
-        self.counters = defaultdict(int)
-        self.timers = {}
-        self.gauges = {}
-
-    def increment_counter(self, name: str, value: int = 1) -> None:
-        self.counters[name] += value
-
-    def start_timer(self, name: str) -> None:
-        self.timers[name] = time.time()
-
-    def end_timer(self, name: str) -> float:
-        if name in self.timers:
-            duration = time.time() - self.timers[name]
-            del self.timers[name]
-            return duration
-        return 0.0
-
-    def set_gauge(self, name: str, value: float) -> None:
-        self.gauges[name] = value
-```
-
-### 2. Health Checks
-
-```python
-# forge/utils/health.py
-class HealthChecker:
-    def __init__(self):
-        self.checks = {}
-
-    def register_check(self, name: str, check_func: callable) -> None:
-        self.checks[name] = check_func
-
-    def run_health_checks(self) -> HealthStatus:
-        results = {}
-        overall_healthy = True
-
-        for name, check_func in self.checks.items():
-            try:
-                result = check_func()
-                results[name] = result
-                if not result.is_healthy:
-                    overall_healthy = False
-            except Exception as e:
-                results[name] = HealthCheckResult(
-                    is_healthy=False,
-                    message=str(e)
-                )
-                overall_healthy = False
-
-        return HealthStatus(
-            is_healthy=overall_healthy,
-            checks=results
-        )
-```
-
-## 🎯 Design Patterns Used
-
-### 1. Factory Pattern
-- Provider creation
-- Deployment strategy selection
-- Service instantiation
-
-### 2. Strategy Pattern
-- Deployment strategies
-- Backup methods
-- Authentication methods
-
-### 3. Observer Pattern
-- Event system
-- Logging and monitoring
-- Notification system
-
-### 4. Command Pattern
-- CLI command execution
-- Workflow step execution
-- Undo/redo functionality
-
-### 5. Builder Pattern
-- Configuration building
-- Query building
-- Deployment planning
-
-### 6. Singleton Pattern
-- Configuration manager
-- Logging system
-- Cache manager
+# Architecture
 
 ---
 
-## 🔍 Future Architecture Improvements
+## System Overview
 
-1. **Microservices Architecture**: Split into separate services for scalability
-2. **Event-Driven Architecture**: Use message queues for async operations
-3. **GraphQL API**: Provide flexible API for integrations
-4. **Kubernetes Integration**: Container-based deployments
-5. **AI/ML Integration**: Intelligent optimization and recommendations
+Bedrock Forge is a self-hosted WordPress management dashboard. It connects to
+managed WordPress servers via SSH and performs all remote operations through a
+connection pool — no agent, no wp-cli, no sidecar process on managed servers.
 
-For implementation details, see:
-- [API Documentation](API.md)
-- [Development Guide](DEVELOPMENT.md)
-- [Testing Guide](TESTING.md)
+```
+                         ┌────────────────────────────────────────────┐
+                         │           forge (single container)         │
+                         │                                            │
+Browser ─────────────►  │  ┌─────────────────┐  ┌────────────────┐  │
+         HTTP + WS       │  │  NestJS API      │  │  BullMQ Worker │  │
+                         │  │  :3000           │  │  (no HTTP port)│  │
+                         │  │                  │  │                │  │
+                         │  │  REST routes     │  │  8 processors  │  │
+                         │  │  WebSocket GW    │  │  SSH pool      │  │
+                         │  │  Rate limiting   │  │  rclone        │  │
+                         │  │  JWT auth        │  │  whois         │  │
+                         │  └───────┬──────────┘  └───────┬────────┘  │
+                         │          │  enqueue              │ execute  │
+                         └──────────┼───────────────────────┼──────────┘
+                                    │                       │
+                         ┌──────────▼──┐          ┌────────▼──────────┐
+                         │  PostgreSQL  │          │  Redis 7          │
+                         │  :5432       │          │  BullMQ queues    │
+                         │  27 tables   │          │  WS pub/sub       │
+                         └─────────────┘          │  Rate limiting    │
+                                                   └───────────────────┘
+
+                ┌────────────────────────────────────────┐
+                │         web (nginx container)          │
+                │  :80 → serves React SPA static files   │
+                │  /api/* → proxy → forge:3000           │
+                │  /ws    → proxy+upgrade → forge:3000   │
+                └────────────────────────────────────────┘
+
+                   Managed servers (any Linux host with SSH)
+                ┌──────────────────────────────────────────┐
+                │  WordPress / Bedrock installations       │
+                │  No agent installed — SSH only           │
+                │  PHP scripts pushed on-demand            │
+                └──────────────────────────────────────────┘
+```
+
+---
+
+## Service Breakdown
+
+### API (`apps/api`)
+
+NestJS 11 REST server. Responsible for:
+
+- Authenticating and authorizing all HTTP requests (JWT + RBAC)
+- Validating all inputs via `class-validator` DTOs
+- Orchestrating business logic through services
+- Enqueueing background jobs to BullMQ (never executes remote operations inline)
+- Broadcasting real-time updates to WebSocket clients via the gateway
+
+**Does not** touch managed servers directly. All remote work is delegated to the
+Worker process via queues.
+
+22 feature modules, each following `controller → service → repository` — Prisma
+access is isolated to `*.repository.ts` files only.
+
+### Worker (`apps/worker`)
+
+NestJS standalone context running BullMQ consumers. Responsible for:
+
+- Executing all long-running operations: backups, syncs, plugin scans, monitor
+  checks, WHOIS lookups, provisioning, notifications, reports
+- Maintaining the SSH connection pool (max 15 concurrent per server)
+- Uploading backup archives to Google Drive via `rclone`
+- Publishing job progress events to Redis pub/sub (consumed by the API WebSocket
+  gateway)
+
+8 processor modules. No HTTP port exposed.
+
+### Web (`web` container)
+
+nginx serving the compiled React 19 SPA. Reverse proxies `/api/*` and WebSocket
+`/ws` to the forge API. Applies security headers (CSP, X-Frame-Options,
+X-Content-Type-Options) and gzip compression.
+
+---
+
+## Remote Execution Model
+
+All SSH operations use the `@bedrock-forge/remote-executor` package:
+
+- **`SshPoolManager`** — Global connection pool keyed by server ID. Reuses
+  connections across concurrent jobs. Max 15 concurrent connections per server.
+- **`RemoteExecutorService`** — Executes commands, pushes files (SFTP), and
+  pulls files over existing pool connections. Implements stall detection
+  (5-minute timeout with heartbeat).
+- **`CredentialParserService`** — Extracts WordPress DB credentials from
+  `wp-config.php` or Bedrock `.env` files using regex patterns. **Never sources,
+  evals, or shells out the credential file.**
+
+### PHP Scripts
+
+Two minimal PHP scripts are maintained in `apps/worker/scripts/`:
+
+| Script            | Purpose                                                                                                |
+| ----------------- | ------------------------------------------------------------------------------------------------------ |
+| `backup.php`      | Creates a WordPress backup archive (full, DB-only, or files-only) and reports progress via stdout JSON |
+| `plugin-scan.php` | Reads the WordPress plugin registry and returns structured JSON (no wp-cli)                            |
+
+Scripts are pushed to a temp path on the remote server, executed, and then
+cleaned up. They are versioned in `execution_scripts` table so cached versions
+are not re-pushed unnecessarily.
+
+---
+
+## Database Schema
+
+27 models across 6 domains. All migrations in `prisma/migrations/`.
+
+### Identity & Access (4 models)
+
+| Model          | Key Fields                                            |
+| -------------- | ----------------------------------------------------- |
+| `User`         | email (unique), name, password_hash (bcrypt)          |
+| `Role`         | name — exactly 3 values: `admin`, `manager`, `client` |
+| `UserRole`     | composite PK (user_id, role_id) — many-to-many        |
+| `RefreshToken` | token_hash (bcrypt), expires_at, revoked_at           |
+
+### Client Management (3 models)
+
+| Model       | Key Fields                       |
+| ----------- | -------------------------------- |
+| `Client`    | name, email, phone, notes        |
+| `Tag`       | name (unique), color (hex)       |
+| `ClientTag` | composite PK (client_id, tag_id) |
+
+### Packages (2 models)
+
+| Model            | Key Fields                                                       |
+| ---------------- | ---------------------------------------------------------------- |
+| `HostingPackage` | name, price_monthly, storage_gb, bandwidth_gb, max_sites, active |
+| `SupportPackage` | name, price_monthly, response_hours, includes_updates, active    |
+
+### Infrastructure (4 models)
+
+| Model            | Key Fields                                                                                   |
+| ---------------- | -------------------------------------------------------------------------------------------- |
+| `Server`         | name, ip_address, ssh_port, ssh_user, ssh_private_key_encrypted, provider, status            |
+| `Project`        | name, status (active/inactive/archived), client_id, hosting/support package FKs              |
+| `Environment`    | type, url, root_path, backup_path, google_drive_folder_id — unique on (server_id, root_path) |
+| `CyberpanelUser` | username, password_encrypted — auto-login credentials per environment                        |
+
+### Operations (8 models)
+
+| Model             | Key Fields                                                                         |
+| ----------------- | ---------------------------------------------------------------------------------- |
+| `Backup`          | type, status, file_path, size_bytes, environment_id                                |
+| `BackupSchedule`  | frequency, hour, minute, day_of_week/month, retention_count, retention_days        |
+| `PluginScan`      | plugins (JSONB: `{is_bedrock, plugins[]}`)                                         |
+| `Domain`          | name, whois_json (JSONB), expires_at — unique on (project_id, name)                |
+| `Monitor`         | enabled, interval_seconds (default 600), uptime_pct, last_response_ms, last_status |
+| `MonitorResult`   | status_code, response_ms, is_up, checked_at — rolling history                      |
+| `MonitorLog`      | event_type (down/up/degraded), duration_seconds, resolved_at                       |
+| `WpDbCredentials` | db_name, db_user, db_password, db_host — all AES-256-GCM encrypted                 |
+
+### System (4 models)
+
+| Model             | Key Fields                                                                             |
+| ----------------- | -------------------------------------------------------------------------------------- |
+| `ExecutionScript` | name (unique), version, content_hash, content (PHP source)                             |
+| `JobExecution`    | queue_name, bull_job_id, job_type, status, progress 0–100, execution_log (JSONB trace) |
+| `AppSetting`      | key (unique), value                                                                    |
+| `AuditLog`        | action, resource_type, resource_id, metadata (JSONB), ip_address                       |
+
+### Billing & Notifications (3 models)
+
+| Model                 | Key Fields                                                                               |
+| --------------------- | ---------------------------------------------------------------------------------------- |
+| `Invoice`             | invoice_number (unique: INV-YYYY-NNN), amounts, status, period, client/project snapshots |
+| `NotificationChannel` | name, type (slack), slack_bot_token_enc, events[] (string array)                         |
+| `NotificationLog`     | event_type, payload, status (sent/failed), error                                         |
+
+---
+
+## Queue System
+
+All background work goes through BullMQ. Controllers call `queue.add()` and
+return immediately. Workers process jobs asynchronously and publish progress via
+Redis pub/sub.
+
+| Queue           | Job Types                                                                   | Concurrency | Retries | Timeout |
+| --------------- | --------------------------------------------------------------------------- | ----------- | ------- | ------- |
+| `backups`       | `backup:create`, `backup:restore`, `backup:scheduled`, `backup:delete-file` | 3/server    | 3       | 30 min  |
+| `plugin-scans`  | `plugin-scan:run`, `plugin:manage`                                          | 5           | 3       | 5 min   |
+| `sync`          | `sync:clone`, `sync:push`                                                   | 2/server    | 3       | 15 min  |
+| `monitors`      | `monitor:check` (repeatable)                                                | 10          | 2       | 30 s    |
+| `domains`       | `domain:whois`                                                              | 10          | 3       | 30 s    |
+| `projects`      | `project:create-bedrock`                                                    | 2/server    | 2       | 20 min  |
+| `notifications` | `notification:send`                                                         | 20          | 3       | 30 s    |
+| `reports`       | `report:generate`                                                           | 1           | 3       | 5 min   |
+
+All queues: exponential backoff (base 1 s), dead-letter queue (`<name>-dlq`),
+`removeOnComplete: 1000`, `removeOnFail: 5000`.
+
+Job payloads are validated at enqueue time with Zod schemas (defined in
+`@bedrock-forge/shared`).
+
+### Dead-Letter Queues
+
+Failed jobs that exhaust all retries are moved to `<queue>-dlq`. The Activity
+page shows dead-letter jobs with their last error. Manual re-enqueue is planned
+for a future release.
+
+---
+
+## Real-Time Updates
+
+```
+Worker process
+  │
+  ├─ publishes to Redis channel: job.progress / job.completed / job.failed
+  │
+API WebSocket Gateway (NestJS)
+  │
+  ├─ subscribes to Redis pub/sub via @nestjs/socket-io Redis adapter
+  │
+  └─ broadcasts to authenticated WebSocket client:
+       { type: 'job.progress', jobId, progress, log }
+       { type: 'job.completed', jobId, result }
+       { type: 'job.failed', jobId, error }
+       { type: 'monitor.result', environmentId, status, responseMs }
+
+Frontend (Socket.IO client in apps/web/src/lib/websocket.ts)
+  │
+  └─ on job completion → invalidates TanStack Query cache for affected resource
+```
+
+The `ExecutionLogPanel` component subscribes to a specific job's progress events
+and renders structured log lines with timestamps in real time.
+
+---
+
+## Security Model
+
+### Credential Encryption
+
+`EncryptionService` wraps every sensitive value using AES-256-GCM:
+
+- SSH private keys (and passphrases)
+- CyberPanel auto-login passwords
+- WordPress DB credentials (`wp_db_credentials` table)
+- Slack bot tokens
+
+The `ENCRYPTION_KEY` env var (32 bytes / 64 hex chars) is the only secret not
+stored in the database. It must be backed up separately. Data encrypted with a
+key is permanently unreadable without it.
+
+### JWT Authentication
+
+- **Access tokens:** 15-minute TTL, signed with `JWT_SECRET`
+- **Refresh tokens:** 7-day TTL, signed with `JWT_REFRESH_SECRET`, stored as
+  bcrypt hash with rotation on every refresh
+- **Login throttle:** 5 attempts per 15 minutes per IP (Redis counter)
+- **Refresh throttle:** 30 requests per minute
+
+### Role-Based Access Control
+
+3-tier hierarchy enforced on every API route and frontend navigation item:
+
+```
+admin  > manager  > client
+```
+
+`hasMinimumRole(user, requiredRole)` is the single point of role evaluation (in
+`@bedrock-forge/shared`). No role check is performed inline in business logic —
+all protected routes use `@Roles()` decorator + `RolesGuard`.
+
+### Request Validation
+
+Global `ValidationPipe`:
+
+- `whitelist: true` — strips unknown fields
+- `forbidNonWhitelisted: true` — rejects requests with unknown fields rather
+  than silently stripping
+- `transform: true` — coerces primitives to declared types
+
+All controller inputs use explicitly typed DTOs with `class-validator`
+decorators.
+
+---
+
+## Backend Module Convention
+
+Every feature module is structured identically:
+
+```
+src/modules/<feature>/
+├── <feature>.module.ts       # @Module() declaration
+├── <feature>.controller.ts   # HTTP handlers — validate input, call service, return DTO
+├── <feature>.service.ts      # Business logic — calls repository only
+├── <feature>.repository.ts   # Prisma access only — no business logic
+├── dto/
+│   ├── create-<feature>.dto.ts
+│   ├── update-<feature>.dto.ts
+│   └── query-<feature>.dto.ts
+├── models/
+│   └── <feature>.model.ts    # TypeScript interfaces for domain objects
+└── tests/
+    ├── <feature>.service.spec.ts
+    └── <feature>.repository.spec.ts
+```
+
+Hard rules:
+
+- Controllers never call repositories directly
+- Services never import `PrismaService` or `PrismaClient`
+- Repositories never contain conditional business logic
+- All controller methods are `async` and return typed responses
+
+---
+
+## Frontend Architecture
+
+React 19 SPA with feature-based code organisation:
+
+```
+apps/web/src/
+├── features/           # Feature-scoped code (components, hooks, queries, mutations, pages)
+│   ├── auth/
+│   ├── dashboard/
+│   ├── clients/
+│   ├── servers/
+│   ├── projects/
+│   ├── backups/
+│   ├── monitors/
+│   ├── domains/
+│   ├── invoices/
+│   ├── notifications/
+│   ├── users/
+│   └── settings/
+├── components/
+│   ├── ui/             # shadcn/ui primitives (Button, Card, Dialog, etc.)
+│   └── layout/         # AppLayout, Sidebar, Header
+├── hooks/              # Shared custom hooks (useClientsList, useServersList, etc.)
+├── lib/                # api-client.ts, websocket.ts, utils.ts, cn.ts
+├── store/              # Zustand stores — auth.store.ts, ui.store.ts (UI state only)
+└── styles/             # Global CSS + Tailwind config
+```
+
+State rules:
+
+- **TanStack Query** — all server data (fetch, mutate, cache invalidation)
+- **Zustand** — UI-only state (sidebar open/closed, modals, active tab, theme)
+- Server data is **never** stored in Zustand

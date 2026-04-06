@@ -2,43 +2,114 @@ name: CI
 
 on:
   push:
-    branches: [main, staging]
+    branches: [main, develop]
   pull_request:
-    branches: [main, staging]
-  workflow_dispatch:
+    branches: [main, develop]
+
+env:
+  NODE_VERSION: '22'
+  PNPM_VERSION: '9'
 
 jobs:
-  lint:
+  build-and-test:
+    name: Build & Test
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install dependencies
-        run: pip install black flake8
-      - name: Lint
-        run: black --check . && flake8 .
 
-  test:
-    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: forge
+          POSTGRES_PASSWORD: forge
+          POSTGRES_DB: forge_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 10s --health-timeout
+          5s --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://forge:forge@localhost:5432/forge_test
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: ci-test-jwt-secret-not-for-production
+      JWT_REFRESH_SECRET: ci-test-refresh-secret-not-for-production
+      ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
         with:
-          python-version: '3.11'
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
       - name: Install dependencies
-        run: pip install -r forge/requirements.txt
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run:
+          pnpm turbo build --filter=@bedrock-forge/shared
+          --filter=@bedrock-forge/remote-executor
+
+      - name: Run Prisma migrations
+        run: pnpm --filter @bedrock-forge/api exec prisma migrate deploy
+
+      - name: Build apps
+        run:
+          pnpm turbo build --filter=@bedrock-forge/api
+          --filter=@bedrock-forge/worker
+
       - name: Run tests
-        run: pytest forge/tests
+        run: pnpm turbo test
 
-  release:
-    if: github.ref == 'refs/heads/main'
-    needs: [lint, test]
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-reports
+          path: '**/coverage/'
+          retention-days: 7
+
+  typecheck:
+    name: TypeScript typecheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Release (placeholder)
-        run: echo "Release step (add build/publish logic here)"
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared packages
+        run:
+          pnpm turbo build --filter=@bedrock-forge/shared
+          --filter=@bedrock-forge/remote-executor
+
+      - name: Typecheck frontend
+        run: pnpm --filter @bedrock-forge/web exec tsc --noEmit
