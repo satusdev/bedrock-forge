@@ -2,7 +2,7 @@ export default () => ({
 	app: {
 		port: parseInt(process.env.API_PORT ?? '3000', 10),
 		env: process.env.NODE_ENV ?? 'development',
-		corsOrigin: process.env.CORS_ORIGIN ?? '*',
+		corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:8080',
 		backupStoragePath: process.env.BACKUP_STORAGE_PATH ?? '/var/forge/backups',
 		rcloneConfigPath:
 			process.env.RCLONE_CONFIG_PATH ?? '/home/node/.config/rclone/rclone.conf',

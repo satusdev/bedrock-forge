@@ -12,9 +12,6 @@ export class HealthController {
 
 	@Get()
 	async check() {
-		const now = new Date().toISOString();
-
-		// Run both checks in parallel
 		const [dbResult, redisResult] = await Promise.allSettled([
 			this.prisma.$queryRaw`SELECT 1`,
 			this.pingRedis(),
@@ -22,15 +19,16 @@ export class HealthController {
 
 		const db = dbResult.status === 'fulfilled' ? 'ok' : 'error';
 		const redis = redisResult.status === 'fulfilled' ? 'ok' : 'error';
-		const status = db === 'ok' && redis === 'ok' ? 'ok' : 'degraded';
+		const overall = db === 'ok' && redis === 'ok' ? 'ok' : 'degraded';
 
-		const body = { status, db, redis, timestamp: now };
-
-		if (status !== 'ok') {
-			throw new HttpException(body, HttpStatus.SERVICE_UNAVAILABLE);
+		if (overall !== 'ok') {
+			throw new HttpException(
+				{ status: 'degraded' },
+				HttpStatus.SERVICE_UNAVAILABLE,
+			);
 		}
 
-		return body;
+		return { status: 'ok' };
 	}
 
 	private async pingRedis(): Promise<void> {
