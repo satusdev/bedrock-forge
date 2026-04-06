@@ -3,7 +3,8 @@ dist/
 .turbo/
 *.env
 !.env.example
-prisma/migrations/
+!.env.deploy.example
+.env.deploy
 *.log
 .DS_Store
 coverage/
