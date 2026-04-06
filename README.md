@@ -68,7 +68,7 @@ manual `.env` editing required on first run.
 Open **http://localhost:3000** — the admin credentials are printed at the end of
 the install output.
 
-Default credentials: `admin@bedrockforge.local` / `admin123` — **change these
+Default credentials are printed at the end of the install output — **change them
 immediately after first login.**
 
 > See [docs/QUICK_START.md](docs/QUICK_START.md) for a walkthrough of adding

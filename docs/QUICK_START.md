@@ -42,10 +42,10 @@ Navigate to **http://localhost:3000**
 
 Log in with the default admin credentials:
 
-| Field    | Value                      |
-| -------- | -------------------------- |
-| Email    | `admin@bedrockforge.local` |
-| Password | `admin123`                 |
+| Field    | Value                                |
+| -------- | ------------------------------------ |
+| Email    | `admin@bedrockforge.local`           |
+| Password | printed at the end of `./install.sh` |
 
 > **Change this password immediately** via Settings → Users after your first
 > login.
@@ -57,7 +57,7 @@ Log in with the default admin credentials:
 1. Click **Servers** in the left sidebar
 2. Click **Add Server**
 3. Fill in:
-   - **Name** — friendly label (e.g. `hetzner-cx23-de`)
+   - **Name** — friendly label (e.g. `production-server`)
    - **IP address** — your server's public IP
    - **SSH port** — default `22`
    - **SSH user** — e.g. `root` or `deploy`

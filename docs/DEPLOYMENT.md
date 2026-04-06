@@ -4,7 +4,8 @@
 
 ## Server Requirements
 
-Bedrock Forge is optimised for a **Hetzner CX23** or equivalent:
+Bedrock Forge runs on any VPS or dedicated server meeting the following
+requirements:
 
 | Resource       | Minimum                    | Recommended  |
 | -------------- | -------------------------- | ------------ |
@@ -203,7 +204,7 @@ capacity:
 - **Backup storage:** Mount an NFS volume or S3-compatible filesystem at
   `BACKUP_STORAGE_PATH` to avoid filling the local disk
 - **PostgreSQL:** For larger installations, migrate to a managed database
-  (Amazon RDS, Hetzner Managed PostgreSQL) by updating `DATABASE_URL`
+  (managed PostgreSQL) by updating `DATABASE_URL`
 - **Redis:** Use a managed Redis (Upstash, Redis Cloud) by updating `REDIS_URL`
 - **Worker concurrency:** Adjust concurrency settings per queue in
   `apps/worker/src/worker.module.ts` based on available RAM and managed server
@@ -252,5 +253,4 @@ ufw allow 443/tcp
 ufw enable
 ```
 
-If using a cloud provider (Hetzner, DigitalOcean), configure the firewall at the
-provider level as well.
+If using a cloud provider, configure the firewall at the provider level as well.
