@@ -5,14 +5,23 @@
 #   ./deploy.sh            # deploy (first run: full install; subsequent: update)
 #   ./deploy.sh --install  # force a fresh install even if .env already exists
 #
-# Target: root@49.13.65.81  /home/forge
-# Domain: https://forge.staging.ly/
+# Deployment config is read from .env.deploy (copy from .env.deploy.example).
 set -euo pipefail
 
-SERVER_USER="root"
-SERVER_HOST="49.13.65.81"
-SERVER_PATH="/home/forge"
-DOMAIN="https://forge.staging.ly"
+# ── Load deployment config ────────────────────────────────────────────────────
+if [[ ! -f .env.deploy ]]; then
+  echo "ERROR: .env.deploy not found. Copy .env.deploy.example and fill in your values."
+  exit 1
+fi
+# shellcheck source=.env.deploy.example
+source .env.deploy
+
+# Validate required vars
+: "${SERVER_USER:?SERVER_USER must be set in .env.deploy}"
+: "${SERVER_HOST:?SERVER_HOST must be set in .env.deploy}"
+: "${SERVER_PATH:?SERVER_PATH must be set in .env.deploy}"
+: "${DOMAIN:?DOMAIN must be set in .env.deploy}"
+
 CORS_ORIGIN="$DOMAIN"
 
 FORCE_INSTALL=false
