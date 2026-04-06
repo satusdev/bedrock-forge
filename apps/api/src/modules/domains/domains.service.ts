@@ -41,6 +41,16 @@ export class DomainsService {
 		return domain;
 	}
 
+	/**
+	 * Return the existing domain record if the name already exists globally,
+	 * otherwise create a new one. Prevents duplicate root domains across projects.
+	 */
+	async findOrCreate(dto: CreateDomainDto) {
+		const existing = await this.repo.findByName(dto.name);
+		if (existing) return existing;
+		return this.create(dto);
+	}
+
 	async update(id: number, dto: UpdateDomainDto) {
 		await this.findOne(id);
 		return this.repo.update(BigInt(id), {
