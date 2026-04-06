@@ -158,14 +158,14 @@ const columns: Column<AuditLog>[] = [
 export function AuditLogsPage() {
 	const [page, setPage] = useState(1);
 	const [action, setAction] = useState('');
-	const [resourceType, setResourceType] = useState('');
+	const [resourceType, setResourceType] = useState('all');
 	const [dateFrom, setDateFrom] = useState('');
 	const [dateTo, setDateTo] = useState('');
 
 	// Committed filter values (applied on search button)
 	const [filters, setFilters] = useState({
 		action: '',
-		resourceType: '',
+		resourceType: 'all',
 		dateFrom: '',
 		dateTo: '',
 	});
@@ -178,7 +178,7 @@ export function AuditLogsPage() {
 				limit: String(LIMIT),
 			});
 			if (filters.action) params.set('action', filters.action);
-			if (filters.resourceType)
+			if (filters.resourceType && filters.resourceType !== 'all')
 				params.set('resource_type', filters.resourceType);
 			if (filters.dateFrom) params.set('date_from', filters.dateFrom);
 			if (filters.dateTo) params.set('date_to', filters.dateTo);
@@ -194,11 +194,11 @@ export function AuditLogsPage() {
 
 	const handleReset = () => {
 		setAction('');
-		setResourceType('');
+		setResourceType('all');
 		setDateFrom('');
 		setDateTo('');
 		setPage(1);
-		setFilters({ action: '', resourceType: '', dateFrom: '', dateTo: '' });
+		setFilters({ action: '', resourceType: 'all', dateFrom: '', dateTo: '' });
 	};
 
 	return (
@@ -226,7 +226,7 @@ export function AuditLogsPage() {
 								<SelectValue placeholder='All types' />
 							</SelectTrigger>
 							<SelectContent>
-								<SelectItem value=''>All types</SelectItem>
+								<SelectItem value='all'>All types</SelectItem>
 								{RESOURCE_TYPES.map(t => (
 									<SelectItem key={t} value={t}>
 										{t.charAt(0).toUpperCase() + t.slice(1)}

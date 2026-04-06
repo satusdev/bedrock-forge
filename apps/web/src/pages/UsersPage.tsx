@@ -43,12 +43,15 @@ interface User {
 	name: string;
 	email: string;
 	created_at: string;
-	user_roles: { role: Role }[];
+	roles: string[];
 }
 
 interface PaginatedUsers {
-	items: User[];
+	data: User[];
 	total: number;
+	page: number;
+	limit: number;
+	totalPages: number;
 }
 
 const ROLE_COLORS: Record<string, string> = {
@@ -97,7 +100,7 @@ function UserFormDialog({
 			name: initial?.name ?? '',
 			email: initial?.email ?? '',
 			password: '',
-			roles: initial?.user_roles.map(ur => ur.role.name) ?? [],
+			roles: initial?.roles ?? [],
 		},
 	});
 
@@ -262,7 +265,7 @@ export function UsersPage() {
 		onError: () => toast({ title: 'Delete failed', variant: 'destructive' }),
 	});
 
-	const totalPages = data ? Math.ceil(data.total / 20) : 1;
+	const totalPages = data?.totalPages ?? 1;
 
 	function invalidate() {
 		qc.invalidateQueries({ queryKey: ['users'] });
@@ -293,11 +296,11 @@ export function UsersPage() {
 			header: 'Roles',
 			render: u => (
 				<div className='flex flex-wrap gap-1'>
-					{u.user_roles.map(ur => (
+					{u.roles.map(role => (
 						<Badge
-							key={ur.role.id}
+							key={role}
 							variant={
-								(ROLE_COLORS[ur.role.name] ?? 'outline') as
+								(ROLE_COLORS[role] ?? 'outline') as
 									| 'destructive'
 									| 'default'
 									| 'secondary'
@@ -306,7 +309,7 @@ export function UsersPage() {
 							className='capitalize text-xs'
 						>
 							<Shield className='h-2.5 w-2.5 mr-1' />
-							{ur.role.name}
+							{role}
 						</Badge>
 					))}
 				</div>
@@ -349,7 +352,7 @@ export function UsersPage() {
 
 			<DataTable
 				columns={columns}
-				data={data?.items ?? []}
+				data={data?.data ?? []}
 				isLoading={isLoading}
 				rowKey={u => u.id}
 				emptyMessage={search ? 'No results for that search.' : 'No users yet.'}
