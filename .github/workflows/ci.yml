@@ -64,7 +64,7 @@ jobs:
           --filter=@bedrock-forge/remote-executor
 
       - name: Run Prisma migrations
-        run: pnpm --filter @bedrock-forge/api exec prisma migrate deploy
+        run: pnpm db:deploy
 
       - name: Build apps
         run:
