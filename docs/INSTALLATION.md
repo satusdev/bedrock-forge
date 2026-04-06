@@ -15,8 +15,8 @@
 | Docker         | 24+       | Latest stable            |
 | Docker Compose | v2+       | v2.20+                   |
 
-The production Docker Compose config is tuned for a **Hetzner CX23** (2 vCPU / 4
-GB / 40 GB SSD). Resource limits per service:
+The production Docker Compose config is tuned for a **2 vCPU / 4 GB / 40 GB
+SSD** VPS. Resource limits per service:
 
 | Service                | CPU       | RAM    |
 | ---------------------- | --------- | ------ |
@@ -61,7 +61,7 @@ After completion the terminal prints:
 ```
 URL:      http://localhost:3000
 Email:    admin@bedrockforge.local
-Password: admin123
+Password: <printed during install>
 ```
 
 **Change the admin password immediately after first login.**
