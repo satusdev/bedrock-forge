@@ -3,36 +3,10 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import pg from 'pg';
 import * as bcrypt from 'bcryptjs';
-import { createCipheriv, randomBytes } from 'crypto';
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL ?? '' });
 const adapter = new PrismaPg(pool as any);
 const prisma = new PrismaClient({ adapter });
-
-// ── Encryption ──────────────────────────────────────────────────────────────
-// Mirrors EncryptionService: base64(IV[12] + ciphertext + authTag[16])
-
-function encrypt(plaintext: string): string {
-	const rawKey = process.env.ENCRYPTION_KEY ?? '';
-	if (rawKey.length !== 64) {
-		console.warn(
-			'[seed] ENCRYPTION_KEY is not set or invalid. Using zero-key placeholder. ' +
-				'Update server SSH keys via the UI before using any SSH features.',
-		);
-	}
-	const key = Buffer.from(
-		rawKey.length === 64 ? rawKey : '0'.repeat(64),
-		'hex',
-	);
-	const iv = randomBytes(12);
-	const cipher = createCipheriv('aes-256-gcm', key, iv, { authTagLength: 16 });
-	const encrypted = Buffer.concat([
-		cipher.update(plaintext, 'utf-8'),
-		cipher.final(),
-	]);
-	const tag = cipher.getAuthTag();
-	return Buffer.concat([iv, encrypted, tag]).toString('base64');
-}
 
 // ── Roles ────────────────────────────────────────────────────────────────────
 
@@ -52,6 +26,7 @@ async function seedRoles() {
 // ── Admin User ───────────────────────────────────────────────────────────────
 
 async function seedAdminUser() {
+	// ⚠ Development seed only — change password immediately after first login.
 	const email = 'admin@bedrockforge.local';
 	const existing = await prisma.user.findUnique({ where: { email } });
 	if (existing) return 0;
@@ -172,48 +147,13 @@ async function seedSupportPackages() {
 }
 
 // ── Servers ──────────────────────────────────────────────────────────────────
+// No servers are seeded by default. Add your own via Settings → Servers in the
+// UI, or extend this list for automated provisioning environments.
 
 async function seedServers() {
-	const placeholder = encrypt('REPLACE_ME');
-
-	const servers = [
-		{
-			name: 'Lamah Clients',
-			ip_address: '78.46.41.81',
-			ssh_user: 'root',
-			ssh_port: 22,
-			provider: 'cp.lamahost.ly',
-			ssh_private_key_encrypted: placeholder,
-		},
-		{
-			name: 'Lamah Internal',
-			ip_address: '46.224.201.233',
-			ssh_user: 'root',
-			ssh_port: 22,
-			provider: 'cp.lamah.ly',
-			ssh_private_key_encrypted: placeholder,
-		},
-		{
-			name: 'Lamah Staging',
-			ip_address: '138.199.151.80',
-			ssh_user: 'root',
-			ssh_port: 22,
-			provider: 'cp.staging.ly',
-			ssh_private_key_encrypted: placeholder,
-		},
-	];
-
-	let count = 0;
-	for (const server of servers) {
-		const existing = await prisma.server.findFirst({
-			where: { name: server.name },
-		});
-		if (!existing) {
-			await prisma.server.create({ data: server });
-			count++;
-		}
-	}
-	return count;
+	// Servers are intentionally not seeded — they contain environment-specific
+	// SSH credentials and IP addresses that must be supplied by the operator.
+	return 0 as number;
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
@@ -240,9 +180,8 @@ async function main() {
 	console.log(`  Servers created:           ${servers}`);
 
 	console.log('\nDone.');
-	console.log('\nAdmin credentials: admin@bedrockforge.local / admin123');
 	console.log(
-		'SSH keys are placeholder-encrypted. Update via Settings → Servers before use.',
+		'\nAdmin credentials are printed by install.sh. Change the password immediately after first login.',
 	);
 }
 
