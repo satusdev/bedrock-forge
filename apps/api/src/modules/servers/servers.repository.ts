@@ -1,0 +1,113 @@
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
+import { EncryptionService } from '../../common/encryption/encryption.service';
+import { CreateServerDto, UpdateServerDto } from './dto/server.dto';
+
+@Injectable()
+export class ServersRepository {
+	constructor(
+		private readonly prisma: PrismaService,
+		private readonly enc: EncryptionService,
+	) {}
+
+	private encryptServer(data: Partial<CreateServerDto>) {
+		const out: Record<string, unknown> = { ...data };
+		if (data.ssh_private_key)
+			out['ssh_private_key_encrypted'] = this.enc.encrypt(data.ssh_private_key);
+		delete out['ssh_private_key'];
+		if (data.ssh_user) out['ssh_user'] = data.ssh_user;
+		return out;
+	}
+
+	async findAll(opts: { page?: number; limit?: number; search?: string } = {}) {
+		const page = Math.max(1, opts.page ?? 1);
+		const limit = Math.min(100, Math.max(1, opts.limit ?? 50));
+		const search = opts.search?.trim();
+
+		const where = search
+			? {
+					OR: [
+						{ name: { contains: search, mode: 'insensitive' as const } },
+						{ ip_address: { contains: search, mode: 'insensitive' as const } },
+						{ provider: { contains: search, mode: 'insensitive' as const } },
+					],
+				}
+			: undefined;
+
+		const [items, total] = await Promise.all([
+			this.prisma.server.findMany({
+				where,
+				orderBy: { name: 'asc' },
+				skip: (page - 1) * limit,
+				take: limit,
+				select: {
+					id: true,
+					name: true,
+					ip_address: true,
+					ssh_port: true,
+					ssh_user: true,
+					provider: true,
+					status: true,
+					created_at: true,
+					updated_at: true,
+				},
+			}),
+			this.prisma.server.count({ where }),
+		]);
+
+		return { items, total, page, limit };
+	}
+
+	findById(id: bigint) {
+		return this.prisma.server.findUnique({
+			where: { id },
+			select: {
+				id: true,
+				name: true,
+				ip_address: true,
+				ssh_port: true,
+				ssh_user: true,
+				provider: true,
+				status: true,
+				created_at: true,
+				updated_at: true,
+			},
+		});
+	}
+
+	findByIdWithKey(id: bigint) {
+		return this.prisma.server.findUnique({ where: { id } });
+	}
+
+	create(dto: CreateServerDto) {
+		const data = this.encryptServer(dto);
+		return this.prisma.server.create({ data: data as never });
+	}
+
+	update(id: bigint, dto: UpdateServerDto) {
+		const data = this.encryptServer(dto);
+		return this.prisma.server.update({ where: { id }, data: data as never });
+	}
+
+	delete(id: bigint) {
+		return this.prisma.server.delete({ where: { id } });
+	}
+
+	/**
+	 * For a given server, return which root_paths already have an Environment record.
+	 * Used to mark projects as already-imported during scan.
+	 */
+	async findExistingEnvironmentPaths(
+		serverId: bigint,
+		paths: string[],
+	): Promise<{ root_path: string; project_id: bigint }[]> {
+		if (paths.length === 0) return [];
+		return this.prisma.environment.findMany({
+			where: {
+				server_id: serverId,
+				root_path: { in: paths },
+			},
+			select: { root_path: true, project_id: true },
+		});
+	}
+}

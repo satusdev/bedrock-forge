@@ -1,305 +1,273 @@
 # Installation Guide
 
-This guide will help you install and set up the Bedrock Forge CLI on your system.
+---
 
-## 🚀 Quick Installation
+## System Requirements
 
-### 🎯 Method 1: One-Command Installation (Easiest)
+### Production
 
-```bash
-# Install everything with one command
-curl -sSL https://raw.githubusercontent.com/bedrock-forge/bedrock-forge/main/install.sh | bash
+| Component      | Minimum   | Recommended              |
+| -------------- | --------- | ------------------------ |
+| CPU            | 1 vCPU    | 2 vCPU                   |
+| RAM            | 2 GB      | 4 GB                     |
+| Disk           | 10 GB     | 40 GB SSD                |
+| OS             | Any Linux | Ubuntu 24.04 / Debian 12 |
+| Docker         | 24+       | Latest stable            |
+| Docker Compose | v2+       | v2.20+                   |
 
-# Start using immediately
-forge --help
-```
+The production Docker Compose config is tuned for a **Hetzner CX23** (2 vCPU / 4
+GB / 40 GB SSD). Resource limits per service:
 
-**What this does:**
-- ✅ Detects your OS and Python version
-- ✅ Installs Python if needed (Ubuntu, macOS, CentOS)
-- ✅ Creates virtual environment automatically
-- ✅ Installs all dependencies
-- ✅ Creates global `forge` command
-- ✅ Adds to PATH if needed
-- ✅ Verifies installation
+| Service                | CPU       | RAM    |
+| ---------------------- | --------- | ------ |
+| `postgres`             | 1 core    | 1 GB   |
+| `redis`                | 0.25 core | 192 MB |
+| `forge` (API + Worker) | 1 core    | 1.5 GB |
+| `web` (nginx)          | 0.15 core | 64 MB  |
 
-### 📦 Method 2: Direct pip Installation
+### Development
 
-```bash
-# Install directly from GitHub
-pip install git+https://github.com/bedrock-forge/bedrock-forge.git
+- Node.js 22+
+- pnpm 9+
+- PostgreSQL 16 and Redis 7 (or Docker for these only)
 
-# Verify installation
-forge --help
-```
+---
 
-**Benefits:**
-- ✅ Single command installation
-- ✅ Uses pip package manager
-- ✅ Automatic dependency management
-- ✅ Easy to update with `pip install --upgrade`
+## Installation — Docker (Recommended)
 
-### 🔧 Method 3: Clone and Install (Manual)
+### One-Command Setup
 
 ```bash
-# Clone the repository
-git clone https://github.com/bedrock-forge/bedrock-forge.git
+git clone https://github.com/satusdev/bedrock-forge.git
 cd bedrock-forge
-
-# Create virtual environment
-python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install in editable mode
-pip install -e .
-
-# Create global symlink (optional)
-ln -sf $(pwd)/.venv/bin/forge ~/.local/bin/forge
-
-# Verify installation
-forge --help
+./install.sh
 ```
 
-**Benefits:**
-- ✅ Full control over installation
-- ✅ Easy for development and contributions
-- ✅ Can modify source code
-- ✅ Editable installation
+`install.sh` automates:
 
-## 📋 System Requirements
+1. Checks that `docker` and `openssl` are installed
+2. Generates `.env` from `.env.example` with randomized secrets:
+   - `ENCRYPTION_KEY` — 64-character hex (32 bytes for AES-256-GCM)
+   - `JWT_SECRET` and `JWT_REFRESH_SECRET`
+   - `POSTGRES_PASSWORD` and `REDIS_PASSWORD`
+3. Runs `docker compose build`
+4. Runs `docker compose up -d`
+5. Polls `http://localhost:3000/health` until the API is ready (up to 90
+   seconds)
+6. Seeds the database: roles, admin user, sample tags, starter packages
 
-### Required
-- **Python 3.9+** - Modern Python with type hints
-- **pip** - Python package installer
-- **Git** - For version control
+After completion the terminal prints:
 
-### Optional Dependencies
-- **DDEV** - For local WordPress development
-- **Docker** - For containerized environments
-- **Node.js** - For frontend build tools
-- **Cloud Accounts** - Hetzner, Cloudflare, Google Drive
+```
+URL:      http://localhost:3000
+Email:    admin@bedrockforge.local
+Password: admin123
+```
 
-## 🔧 Detailed Installation Steps
+**Change the admin password immediately after first login.**
 
-### 1. Prerequisites
+---
 
-Ensure you have Python 3.9+ installed:
+## Updating
+
+Apply updates without downtime (data is preserved):
 
 ```bash
-python3 --version  # Should be 3.9 or higher
-pip3 --version     # Should show pip version
+git pull
+./update.sh
 ```
 
-If you don't have Python installed, install it:
+`update.sh`:
+
+1. Pulls the latest code
+2. Rebuilds the `forge` Docker image
+3. Restarts the `forge` container (rolling — no downtime for postgres/redis)
+4. Automatically runs `prisma migrate deploy` inside the new container
+
+---
+
+## Full Reset (Destructive)
+
+Wipes all volumes, regenerates secrets, and starts fresh:
 
 ```bash
-# Ubuntu/Debian
-sudo apt update
-sudo apt install python3 python3-pip python3-venv
-
-# macOS (using Homebrew)
-brew install python3
-
-# Windows (using Chocolatey)
-choco install python
+./reset.sh
 ```
 
-### 2. Clone the Repository
+> **Warning:** This deletes all data — projects, backups records, users,
+> settings. Use only for a fresh start.
+
+---
+
+## Manual Docker Compose Setup
+
+If you prefer to manage the `.env` yourself:
 
 ```bash
-git clone https://github.com/bedrock-forge/bedrock-forge.git
-cd bedrock-forge
+cp .env.example .env
 ```
 
-### 3. Create Virtual Environment
+Edit `.env` — see the [Environment Variables](#environment-variables) section
+below for all values. Then:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+docker compose build
+docker compose up -d
+
+# Wait for the API to be healthy, then seed:
+docker compose exec forge node prisma/seed.js
 ```
 
-### 4. Install Dependencies
+---
+
+## Development Setup
+
+For local development with hot reload:
 
 ```bash
-pip install -r requirements.txt
+# 1. Start only postgres and redis in Docker
+docker compose -f docker-compose.dev.yml up -d postgres redis
+
+# 2. Install dependencies
+pnpm install
+
+# 3. Set up environment
+cp .env.example .env
+# Edit .env — fill DATABASE_URL, REDIS_URL, ENCRYPTION_KEY, JWT_SECRET, JWT_REFRESH_SECRET
+
+# 4. Generate Prisma client and run migrations
+pnpm prisma:generate
+pnpm prisma:migrate     # runs prisma migrate dev
+
+# 5. Start all apps with hot reload
+pnpm dev
 ```
 
-### 5. Install Package
+This starts:
+
+- **API** on `:3000` (NestJS, ts-jest, hot reload via `tsc --watch`)
+- **Worker** (NestJS standalone, hot reload)
+- **Web** on `:5173` (Vite dev server, proxies `/api` → `:3000` and `/ws` →
+  `:3000`)
+
+---
+
+## Environment Variables
+
+All secrets are auto-generated by `install.sh`. This table is for reference when
+setting up manually.
+
+| Variable               | Description                                                    | Required | Auto-generated        |
+| ---------------------- | -------------------------------------------------------------- | -------- | --------------------- |
+| `DATABASE_URL`         | PostgreSQL connection string (full URL)                        | ✅       | —                     |
+| `REDIS_PASSWORD`       | Redis auth password                                            | ✅       | ✅                    |
+| `REDIS_URL`            | Redis connection URL including password                        | ✅       | ✅                    |
+| `JWT_SECRET`           | Secret for signing JWT access tokens                           | ✅       | ✅                    |
+| `JWT_REFRESH_SECRET`   | Secret for signing JWT refresh tokens                          | ✅       | ✅                    |
+| `ENCRYPTION_KEY`       | AES-256-GCM key — must be exactly 64 hex characters (32 bytes) | ✅       | ✅                    |
+| `POSTGRES_DB`          | PostgreSQL database name                                       | ✅       | default: `forge`      |
+| `POSTGRES_USER`        | PostgreSQL username                                            | ✅       | default: `forge`      |
+| `POSTGRES_PASSWORD`    | PostgreSQL password                                            | ✅       | ✅                    |
+| `NODE_ENV`             | `production` or `development`                                  |          | default: `production` |
+| `API_PORT`             | Port the API process listens on                                |          | default: `3000`       |
+| `CORS_ORIGIN`          | Allowed origin for CORS (your public domain)                   |          |                       |
+| `BACKUP_STORAGE_PATH`  | Host path for temporary backup file storage                    |          |                       |
+| `SCRIPTS_PATH`         | Override the PHP scripts directory path                        |          | auto-detected         |
+| `GDRIVE_CLIENT_ID`     | Google Drive OAuth 2.0 client ID                               |          | optional              |
+| `GDRIVE_CLIENT_SECRET` | Google Drive OAuth 2.0 client secret                           |          | optional              |
+| `GDRIVE_TOKEN`         | rclone-formatted JSON token for Google Drive auth              |          | optional              |
+| `GDRIVE_FOLDER_ID`     | Default Google Drive folder ID for backup uploads              |          | optional              |
+| `VITE_DEV_EMAIL`       | Pre-fill login email in development mode                       |          | dev only              |
+| `VITE_DEV_PASSWORD`    | Pre-fill login password in development mode                    |          | dev only              |
+
+### Generating the Encryption Key Manually
 
 ```bash
-pip install -e .
+openssl rand -hex 32
 ```
 
-### 6. Create Global Command (Optional)
+The output (64 characters) is your `ENCRYPTION_KEY`. **This key encrypts all SSH
+private keys, DB credentials, and Slack tokens stored in the database. Back it
+up and never rotate it while data exists — the data will become unreadable.**
 
-For easy access without activating the virtual environment:
+### Google Drive Configuration
+
+Google Drive upload uses `rclone` under the hood.
+
+1. Create an OAuth 2.0 client in the
+   [Google Cloud Console](https://console.cloud.google.com/) with the Drive API
+   scope
+2. Run `rclone config` locally to generate the token JSON
+3. Set `GDRIVE_CLIENT_ID`, `GDRIVE_CLIENT_SECRET`, and `GDRIVE_TOKEN` in `.env`
+4. Optionally set `GDRIVE_FOLDER_ID` to a specific folder ID (defaults to root)
+
+Per-environment overrides are available in the environment settings page.
+
+---
+
+## Ports
+
+| Service                   | Internal Port | External Port (default) |
+| ------------------------- | ------------- | ----------------------- |
+| API (+ serves web SPA)    | 3000          | 3001                    |
+| Web (nginx reverse proxy) | 80            | 3002                    |
+| PostgreSQL                | 5432          | not exposed             |
+| Redis                     | 6379          | not exposed             |
+
+In production, put a reverse proxy (nginx, Caddy, HAProxy) in front of port
+`3002` and handle TLS termination there.
+
+---
+
+## Running Behind a Reverse Proxy
+
+Bedrock Forge uses WebSockets for real-time job progress. Your reverse proxy
+must upgrade WebSocket connections at the `/ws` path.
+
+### nginx example
+
+```nginx
+upstream forge_web {
+    server 127.0.0.1:3002;
+}
+
+server {
+    listen 443 ssl;
+    server_name forge.example.com;
+
+    # TLS config here ...
+
+    location / {
+        proxy_pass http://forge_web;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /ws {
+        proxy_pass http://forge_web;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 86400;
+    }
+}
+```
+
+Set `CORS_ORIGIN=https://forge.example.com` in your `.env` and restart.
+
+---
+
+## Uninstalling
 
 ```bash
-# Create symlink
-ln -sf $(pwd)/.venv/bin/forge ~/.local/bin/forge
+# Stop and remove containers + volumes (deletes all data):
+docker compose down -v
 
-# Ensure ~/.local/bin is in your PATH
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
+# Remove the project:
+cd ..
+rm -rf bedrock-forge
 ```
-
-### 7. Verify Installation
-
-```bash
-forge --help
-```
-
-You should see the Bedrock Forge CLI help message with all available commands.
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-#### 1. Command not found: forge
-```bash
-# Check if forge is in PATH
-which forge
-
-# If not found, add ~/.local/bin to PATH
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
-```
-
-#### 2. Permission denied
-```bash
-# Make sure the symlink is executable
-chmod +x ~/.local/bin/forge
-```
-
-#### 3. Python version compatibility
-```bash
-# Check Python version
-python3 --version
-
-# If using Python 2.x, use python3 explicitly
-python3 -m forge --help
-```
-
-#### 4. Virtual environment issues
-```bash
-# Deactivate and reactivate virtual environment
-deactivate
-source .venv/bin/activate
-
-# Recreate virtual environment if needed
-rm -rf .venv
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-```
-
-#### 5. Module import errors
-```bash
-# Ensure all dependencies are installed
-pip install -r requirements.txt
-
-# Reinstall in editable mode
-pip install -e .
-```
-
-### Getting Help
-
-If you encounter any issues:
-
-1. **Check the logs**: Use `--verbose` flag for detailed output
-2. **Verify installation**: Run `forge --help` to confirm CLI is working
-3. **Check dependencies**: Ensure all required packages are installed
-4. **Create an issue**: [GitHub Issues](https://github.com/bedrock-forge/bedrock-forge/issues)
-
-## 🔧 Installation Management
-
-### Check Installation Health
-
-```bash
-# Run diagnostics
-forge config doctor
-
-# Check version
-forge --version
-
-# List all commands
-forge --help
-```
-
-### Update to Latest Version
-
-```bash
-# Method 1: Using built-in update command
-forge update
-
-# Method 2: Using installation script
-curl -sSL https://raw.githubusercontent.com/bedrock-forge/bedrock-forge/main/install.sh | bash
-
-# Method 3: Manual update (if installed via git)
-cd ~/.bedrock-forge
-git pull origin main
-source venv/bin/activate
-pip install -e .
-
-# Method 4: Using pip (if installed via pip)
-pip install --upgrade git+https://github.com/bedrock-forge/bedrock-forge.git
-```
-
-### Uninstall Completely
-
-```bash
-# Method 1: Using built-in uninstall command
-forge uninstall
-
-# Method 2: Using installation script
-curl -sSL https://raw.githubusercontent.com/bedrock-forge/bedrock-forge/main/install.sh | bash -s --uninstall
-
-# Method 3: Manual removal
-rm -rf ~/.bedrock-forge
-rm -f ~/.local/bin/forge
-
-# Remove from PATH if needed (edit ~/.bashrc or ~/.zshrc)
-```
-
-## 🔄 Updating the Installation
-
-To update to the latest version:
-
-```bash
-cd bedrock-forge
-git pull origin main
-source .venv/bin/activate
-pip install -e .
-```
-
-## 🗂️ File Structure After Installation
-
-```
-bedrock-forge/
-├── forge/                    # Main CLI source code
-│   ├── main.py              # CLI entrypoint
-│   ├── commands/            # Subcommands
-│   ├── utils/               # Shared utilities
-│   └── ...
-├── docs/                    # Documentation
-├── requirements.txt         # Dependencies
-├── pyproject.toml          # Package configuration
-├── LICENSE                  # MIT License
-└── README.md               # Main documentation
-```
-
-## 🎯 Next Steps
-
-After successful installation:
-
-1. **Configure your environment**: `forge config setup`
-2. **Create your first project**: `forge local create-project mysite`
-3. **Explore commands**: `forge --help`
-4. **Read the documentation**: [Quick Start Guide](QUICK_START.md)
-
-## 📚 Additional Resources
-
-- [Quick Start Guide](QUICK_START.md) - Get started in 5 minutes
-- [Command Reference](COMMANDS.md) - Complete command documentation
-- [Configuration Guide](CONFIGURATION.md) - Setup and configuration
-- [Development Guide](DEVELOPMENT.md) - Contributing guidelines

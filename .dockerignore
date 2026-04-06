@@ -1,0 +1,35 @@
+# Turbo cache - must be excluded so Docker builds compile from scratch
+.turbo/
+
+# TypeScript incremental build state - excluded to force a clean tsc build
+# inside Docker (paths inside .tsbuildinfo point to the host machine, not /app)
+**/*.tsbuildinfo
+
+# App compiled outputs (builder stage recompiles these)
+# packages/*/dist/ is intentionally NOT excluded; packages like @bedrock-forge/shared
+# must have their pre-built .d.ts files available for downstream compilation
+apps/*/dist/
+
+# Dev dependencies and local state
+node_modules/
+apps/*/node_modules/
+packages/*/node_modules/
+
+# Tests and docs
+**/__tests__/
+**/*.test.ts
+**/*.spec.ts
+**/coverage/
+
+# Editor / OS files
+.vscode/
+.idea/
+*.DS_Store
+
+# Git
+.git/
+.gitignore
+
+# Local env overrides (the .env file is passed at runtime, not baked into image)
+# Note: .env is intentionally NOT excluded - build needs it for prisma generate
+# .env
