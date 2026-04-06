@@ -37,6 +37,14 @@ export class DomainsRepository {
 		});
 	}
 
+	/** Find the first domain record with this name across all projects. */
+	findByName(name: string) {
+		return this.prisma.domain.findFirst({
+			where: { name },
+			include: { project: { select: { id: true, name: true } } },
+		});
+	}
+
 	create(data: { name: string; project_id: bigint }) {
 		return this.prisma.domain.create({ data });
 	}

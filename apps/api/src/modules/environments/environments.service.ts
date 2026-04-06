@@ -58,10 +58,10 @@ export class EnvironmentsService {
 					`Failed to auto-create monitor for env ${env.id}: ${err}`,
 				);
 			}
-			// Auto-create a domain record from the environment URL
+			// Auto-create a domain record from the environment URL (global dedup by name)
 			try {
 				const hostname = new URL(dto.url).hostname;
-				await this.domainsService.create({
+				await this.domainsService.findOrCreate({
 					name: hostname,
 					project_id: projectId,
 				});

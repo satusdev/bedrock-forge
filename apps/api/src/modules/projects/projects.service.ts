@@ -159,12 +159,15 @@ export class ProjectsService {
 			);
 		}
 
-		// Primary domain from environment URL
+		// Domain: prefer the root/apex domain (mainDomain) over the full hostname.
+		// If mainDomain is available and differs from the hostname, the hostname is
+		// a subdomain — skip it and only track the apex domain to avoid clutter.
 		try {
 			const hostname = new URL(url).hostname;
-			if (hostname) {
-				await this.domainsService.create({
-					name: hostname,
+			const domainToCreate = mainDomain ?? hostname;
+			if (domainToCreate) {
+				await this.domainsService.findOrCreate({
+					name: domainToCreate,
 					project_id: projectId,
 				});
 			}
@@ -172,20 +175,6 @@ export class ProjectsService {
 			this.logger.warn(
 				`[import] Failed to create domain for env ${environmentId}: ${err}`,
 			);
-		}
-
-		// Main domain (root of the subdomain), if present and different
-		if (mainDomain) {
-			try {
-				await this.domainsService.create({
-					name: mainDomain,
-					project_id: projectId,
-				});
-			} catch (err) {
-				this.logger.warn(
-					`[import] Failed to create main domain ${mainDomain}: ${err}`,
-				);
-			}
 		}
 	}
 
