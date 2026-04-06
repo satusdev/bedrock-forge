@@ -3,6 +3,16 @@
 	"version": "2.0.0",
 	"private": true,
 	"description": "Self-hosted WordPress management dashboard",
+	"author": "Bedrock Forge Contributors",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/satusdev/bedrock-forge.git"
+	},
+	"bugs": {
+		"url": "https://github.com/satusdev/bedrock-forge/issues"
+	},
+	"homepage": "https://github.com/satusdev/bedrock-forge#readme",
 	"scripts": {
 		"dev": "turbo run dev",
 		"build": "turbo run build",
