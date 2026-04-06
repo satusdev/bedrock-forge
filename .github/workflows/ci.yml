@@ -8,7 +8,6 @@ on:
 
 env:
   NODE_VERSION: '22'
-  PNPM_VERSION: '9'
 
 jobs:
   build-and-test:
@@ -45,12 +44,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
+        uses: pnpm/action-setup@v5
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -82,7 +79,11 @@ jobs:
         if: always()
         with:
           name: coverage-reports
-          path: '**/coverage/'
+          path: |
+            apps/api/coverage/
+            apps/worker/coverage/
+            packages/remote-executor/coverage/
+          if-no-files-found: ignore
           retention-days: 7
 
   typecheck:
@@ -90,12 +91,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
+        uses: pnpm/action-setup@v5
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
