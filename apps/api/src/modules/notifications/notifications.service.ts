@@ -124,7 +124,10 @@ export class NotificationsService {
 
 			return { ok: true };
 		} catch (err: unknown) {
-			const msg = err instanceof Error ? err.message : String(err);
+			const raw = err instanceof Error ? err.message : String(err);
+			const msg = raw.includes('channel_not_found')
+				? `Channel not found. If this is a private channel, invite the bot first: /invite @BotName in Slack.`
+				: raw;
 			await this.repo.createLog({
 				channel_id: Number(ch.id),
 				event_type: 'test',
