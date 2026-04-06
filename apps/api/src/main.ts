@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import helmet from 'helmet';
+import { json } from 'express';
 import { AppModule } from './app.module';
 
 // Express JSON.stringify cannot handle BigInt (Prisma autoincrement IDs).
@@ -49,11 +50,19 @@ async function bootstrap() {
 	app.setGlobalPrefix('api', { exclude: ['health'] });
 
 	// Security headers
-	app.use(helmet());
+	app.use(
+		helmet({
+			hsts: { maxAge: 63072000, includeSubDomains: true, preload: true },
+			contentSecurityPolicy: isProd ? undefined : false,
+		}),
+	);
+
+	// Request body size limit
+	app.use(json({ limit: '10mb' }));
 
 	// CORS — in production, CORS_ORIGIN must be set (validated above)
 	app.enableCors({
-		origin: process.env.CORS_ORIGIN ?? '*',
+		origin: process.env.CORS_ORIGIN ?? 'http://localhost:8080',
 		credentials: true,
 	});
 
