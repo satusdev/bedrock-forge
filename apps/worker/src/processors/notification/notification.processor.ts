@@ -63,7 +63,10 @@ export class NotificationProcessor extends WorkerHost {
 					`Slack notification sent to channel ${channel.name} for ${eventType}`,
 				);
 			} catch (err: unknown) {
-				error = err instanceof Error ? err.message : String(err);
+				const raw = err instanceof Error ? err.message : String(err);
+				error = raw.includes('channel_not_found')
+					? `channel_not_found: Bot is not a member of the private channel "${channel.slack_channel_id}". Invite the bot via /invite @BotName in Slack.`
+					: raw;
 				this.logger.error(
 					`Failed to send Slack notification to channel ${channel.name}: ${error}`,
 				);
