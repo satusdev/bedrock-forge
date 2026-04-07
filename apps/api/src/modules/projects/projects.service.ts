@@ -164,7 +164,8 @@ export class ProjectsService {
 		// a subdomain — skip it and only track the apex domain to avoid clutter.
 		try {
 			const hostname = new URL(url).hostname;
-			const domainToCreate = mainDomain ?? hostname;
+			const domainToCreate =
+				mainDomain ?? this.extractRegistrableDomain(hostname);
 			if (domainToCreate) {
 				await this.domainsService.findOrCreate({
 					name: domainToCreate,
@@ -176,6 +177,21 @@ export class ProjectsService {
 				`[import] Failed to create domain for env ${environmentId}: ${err}`,
 			);
 		}
+	}
+
+	/**
+	 * Extract the registrable root domain from a hostname.
+	 * e.g. quranlibya.staging.ly → staging.ly, example.co.uk → example.co.uk
+	 */
+	private extractRegistrableDomain(hostname: string): string {
+		const MULTI_TLD = new Set([
+			'co.uk', 'com.au', 'co.nz', 'org.uk', 'net.au', 'co.za',
+		]);
+		const parts = hostname.split('.');
+		if (parts.length <= 2) return hostname;
+		const twoLabel = parts.slice(-2).join('.');
+		if (MULTI_TLD.has(twoLabel)) return parts.slice(-3).join('.');
+		return twoLabel;
 	}
 
 	async createBedrock(environmentId: number, jobExecutionId: bigint) {
