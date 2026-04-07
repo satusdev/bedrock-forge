@@ -93,6 +93,13 @@ export class ServersRepository {
 		return this.prisma.server.delete({ where: { id } });
 	}
 
+	updateStatus(id: bigint, status: 'online' | 'offline') {
+		return this.prisma.server.update({
+			where: { id },
+			data: { status },
+		});
+	}
+
 	/**
 	 * For a given server, return which root_paths already have an Environment record.
 	 * Used to mark projects as already-imported during scan.
