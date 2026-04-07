@@ -107,8 +107,11 @@ export class ServersService {
 
 		try {
 			const result = await executor.execute('echo ok');
-			return { success: result.code === 0, message: result.stdout.trim() };
+			const success = result.code === 0;
+			await this.repo.updateStatus(BigInt(id), success ? 'online' : 'offline');
+			return { success, message: result.stdout.trim() };
 		} catch (err: unknown) {
+			await this.repo.updateStatus(BigInt(id), 'offline').catch(() => {});
 			return {
 				success: false,
 				message: err instanceof Error ? err.message : String(err),
