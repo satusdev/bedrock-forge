@@ -35,6 +35,17 @@ export class EnvironmentsRepository {
 				server: {
 					select: { id: true, name: true, ip_address: true, status: true },
 				},
+				job_executions: {
+					where: { job_type: 'project:create-bedrock' },
+					orderBy: { created_at: 'desc' },
+					take: 1,
+					select: {
+						id: true,
+						status: true,
+						progress: true,
+						last_error: true,
+					},
+				},
 			},
 			orderBy: { created_at: 'asc' },
 		});
