@@ -26,7 +26,10 @@ import {
 	FolderSync,
 	CheckCircle2,
 	CircleDashed,
+	AlertTriangle,
 } from 'lucide-react';
+import { WS_EVENTS } from '@bedrock-forge/shared';
+import { useWebSocketEvent, useSubscribeEnvironment } from '@/lib/websocket';
 import { api } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
@@ -85,6 +88,12 @@ interface Environment {
 		ip_address: string;
 		status: 'online' | 'offline' | 'unknown';
 	};
+	latestProvisioningJob?: {
+		id: number;
+		status: string;
+		progress: number | null;
+		last_error: string | null;
+	} | null;
 }
 
 const envSchema = z.object({
@@ -615,6 +624,45 @@ function EnvironmentCard({
 }) {
 	const qc = useQueryClient();
 
+	// Subscribe to WS room so real-time progress events reach this card
+	useSubscribeEnvironment(env.id);
+
+	const job = env.latestProvisioningJob;
+	const isProvisioning =
+		!!job && (job.status === 'queued' || job.status === 'active');
+	const isProvisionFailed = !!job && job.status === 'failed';
+
+	// Real-time job events for this environment
+	useWebSocketEvent(WS_EVENTS.JOB_PROGRESS, (raw: unknown) => {
+		const d = raw as { environmentId?: number; queueName?: string };
+		if (d.environmentId === env.id && d.queueName === 'projects') {
+			qc.invalidateQueries({ queryKey: ['environments', projectId] });
+		}
+	});
+	useWebSocketEvent(WS_EVENTS.JOB_COMPLETED, (raw: unknown) => {
+		const d = raw as { environmentId?: number; queueName?: string };
+		if (d.environmentId === env.id && d.queueName === 'projects') {
+			qc.invalidateQueries({ queryKey: ['environments', projectId] });
+			qc.invalidateQueries({ queryKey: ['project', projectId] });
+			toast({ title: `${env.type} environment provisioned` });
+		}
+	});
+	useWebSocketEvent(WS_EVENTS.JOB_FAILED, (raw: unknown) => {
+		const d = raw as {
+			environmentId?: number;
+			queueName?: string;
+			error?: string;
+		};
+		if (d.environmentId === env.id && d.queueName === 'projects') {
+			qc.invalidateQueries({ queryKey: ['environments', projectId] });
+			toast({
+				title: 'Provisioning failed',
+				description: d.error,
+				variant: 'destructive',
+			});
+		}
+	});
+
 	function triggerBackup() {
 		api
 			.post('/backups/create', { environmentId: env.id, type: 'full' })
@@ -635,6 +683,31 @@ function EnvironmentCard({
 
 	return (
 		<Card className='flex flex-col'>
+			{isProvisioning && (
+				<div className='px-4 py-2 bg-blue-50 dark:bg-blue-950/40 border-b flex items-center gap-2 text-sm text-blue-700 dark:text-blue-300 rounded-t-lg'>
+					<Loader2 className='h-3.5 w-3.5 shrink-0 animate-spin' />
+					<span className='flex-1'>
+						{job.status === 'queued'
+							? 'Provisioning queued…'
+							: `Provisioning in progress${job.progress ? ` — ${job.progress}%` : '…'}`}
+					</span>
+				</div>
+			)}
+			{isProvisionFailed && (
+				<div className='px-4 py-2 bg-red-50 dark:bg-red-950/40 border-b flex items-start gap-2 text-sm text-red-700 dark:text-red-300 rounded-t-lg'>
+					<AlertTriangle className='h-3.5 w-3.5 shrink-0 mt-0.5' />
+					<span className='flex-1 line-clamp-2'>
+						Provisioning failed
+						{job.last_error ? `: ${job.last_error}` : ''}.
+					</span>
+					<a
+						href='/activity'
+						className='shrink-0 underline whitespace-nowrap'
+					>
+						View logs
+					</a>
+				</div>
+			)}
 			<CardHeader className='pb-3'>
 				<div className='flex items-start justify-between gap-2'>
 					<div className='flex items-center gap-2 flex-wrap'>
@@ -1030,8 +1103,32 @@ export function EnvironmentsTab({ projectId }: { projectId: number }) {
 
 	const { data: environments = [], isLoading } = useQuery({
 		queryKey: ['environments', projectId],
-		queryFn: () =>
-			api.get<Environment[]>(`/projects/${projectId}/environments`),
+		queryFn: async () => {
+			type ApiEnv = Omit<Environment, 'latestProvisioningJob'> & {
+				job_executions: Array<{
+					id: number;
+					status: string;
+					progress: number | null;
+					last_error: string | null;
+				}>;
+			};
+			const items = await api.get<ApiEnv[]>(
+				`/projects/${projectId}/environments`,
+			);
+			return items.map(e => ({
+				...e,
+				latestProvisioningJob: e.job_executions?.[0] ?? null,
+			})) satisfies Environment[];
+		},
+		refetchInterval: (query) => {
+			const data = query.state.data;
+			const hasActive = data?.some(
+				e =>
+					e.latestProvisioningJob?.status === 'queued' ||
+					e.latestProvisioningJob?.status === 'active',
+			);
+			return hasActive ? 5000 : false;
+		},
 	});
 
 	const { data: serversData } = useQuery({
