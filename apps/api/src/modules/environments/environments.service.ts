@@ -58,11 +58,12 @@ export class EnvironmentsService {
 					`Failed to auto-create monitor for env ${env.id}: ${err}`,
 				);
 			}
-			// Auto-create a domain record from the environment URL (global dedup by name)
+			// Auto-create a domain record from the registrable root domain
 			try {
 				const hostname = new URL(dto.url).hostname;
+				const domain = this.extractRegistrableDomain(hostname);
 				await this.domainsService.findOrCreate({
-					name: hostname,
+					name: domain,
 					project_id: projectId,
 				});
 			} catch (err) {
@@ -114,5 +115,20 @@ export class EnvironmentsService {
 				...site,
 				alreadyInThisProject: projectPaths.has(site.path),
 			}));
+	}
+
+	/**
+	 * Extract the registrable root domain from a hostname.
+	 * e.g. quranlibya.staging.ly → staging.ly
+	 */
+	private extractRegistrableDomain(hostname: string): string {
+		const MULTI_TLD = new Set([
+			'co.uk', 'com.au', 'co.nz', 'org.uk', 'net.au', 'co.za',
+		]);
+		const parts = hostname.split('.');
+		if (parts.length <= 2) return hostname;
+		const twoLabel = parts.slice(-2).join('.');
+		if (MULTI_TLD.has(twoLabel)) return parts.slice(-3).join('.');
+		return twoLabel;
 	}
 }
