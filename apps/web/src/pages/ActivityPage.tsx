@@ -68,30 +68,30 @@ const STATUS_ORDER = ['active', 'pending', 'completed', 'failed'];
 function StatusBadge({ status }: { status: string }) {
 	if (status === 'completed')
 		return (
-			<span className='inline-flex items-center gap-1 text-xs font-medium text-green-700 dark:text-green-400'>
-				<CheckCircle2 className='h-3.5 w-3.5' />
+			<Badge variant='success' className='gap-1'>
+				<CheckCircle2 className='h-3 w-3' />
 				Completed
-			</span>
+			</Badge>
 		);
 	if (status === 'failed')
 		return (
-			<span className='inline-flex items-center gap-1 text-xs font-medium text-destructive'>
-				<XCircle className='h-3.5 w-3.5' />
+			<Badge variant='destructive' className='gap-1'>
+				<XCircle className='h-3 w-3' />
 				Failed
-			</span>
+			</Badge>
 		);
 	if (status === 'active')
 		return (
-			<span className='inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-400'>
-				<Loader2 className='h-3.5 w-3.5 animate-spin' />
+			<Badge variant='info' className='gap-1'>
+				<Loader2 className='h-3 w-3 animate-spin' />
 				Running
-			</span>
+			</Badge>
 		);
 	return (
-		<span className='inline-flex items-center gap-1 text-xs font-medium text-muted-foreground'>
-			<Clock className='h-3.5 w-3.5' />
+		<Badge variant='secondary' className='gap-1'>
+			<Clock className='h-3 w-3' />
 			Pending
-		</span>
+		</Badge>
 	);
 }
 
