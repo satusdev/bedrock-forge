@@ -700,10 +700,7 @@ function EnvironmentCard({
 						Provisioning failed
 						{job.last_error ? `: ${job.last_error}` : ''}.
 					</span>
-					<a
-						href='/activity'
-						className='shrink-0 underline whitespace-nowrap'
-					>
+					<a href='/activity' className='shrink-0 underline whitespace-nowrap'>
 						View logs
 					</a>
 				</div>
@@ -1120,7 +1117,7 @@ export function EnvironmentsTab({ projectId }: { projectId: number }) {
 				latestProvisioningJob: e.job_executions?.[0] ?? null,
 			})) satisfies Environment[];
 		},
-		refetchInterval: (query) => {
+		refetchInterval: query => {
 			const data = query.state.data;
 			const hasActive = data?.some(
 				e =>

@@ -92,7 +92,11 @@ export class ServersService {
 	/** Execute a quick `echo ok` to verify SSH connectivity, and probe CyberPanel version */
 	async testConnection(
 		id: number,
-	): Promise<{ success: boolean; message: string; cyberpanelVersion?: string }> {
+	): Promise<{
+		success: boolean;
+		message: string;
+		cyberpanelVersion?: string;
+	}> {
 		const server = await this.repo.findByIdWithKey(BigInt(id));
 		if (!server) throw new NotFoundException(`Server ${id} not found`);
 
@@ -115,7 +119,7 @@ export class ServersService {
 				try {
 					const versionResult = await executor.execute(
 						"cat /usr/local/CyberCP/version.txt 2>/dev/null || echo ''",
-				);
+					);
 					const detected = versionResult.stdout.trim();
 					if (detected) {
 						cyberpanelVersion = detected;
