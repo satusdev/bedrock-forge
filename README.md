@@ -71,8 +71,8 @@ the install output.
 Default credentials are printed at the end of the install output — **change them
 immediately after first login.**
 
-> See [docs/getting-started/QUICK_START.md](docs/getting-started/QUICK_START.md) for a walkthrough of adding
-> your first server, project, backup, and monitor.
+> See [docs/getting-started/QUICK_START.md](docs/getting-started/QUICK_START.md)
+> for a walkthrough of adding your first server, project, backup, and monitor.
 
 ---
 
@@ -355,8 +355,8 @@ This starts:
 - **Worker** (BullMQ with hot reload)
 - **Web** on `:5173` (Vite dev server, proxies `/api` → `:3000`)
 
-> See [docs/guides/DEVELOPMENT.md](docs/guides/DEVELOPMENT.md) for the full guide — adding
-> modules, running tests, code conventions.
+> See [docs/guides/DEVELOPMENT.md](docs/guides/DEVELOPMENT.md) for the full
+> guide — adding modules, running tests, code conventions.
 
 ---
 
@@ -424,8 +424,8 @@ This starts:
 
 ## Documentation
 
-| Document                                     | Description                                               |
-| -------------------------------------------- | --------------------------------------------------------- |
+| Document                                                                     | Description                                               |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------- |
 | [docs/getting-started/QUICK_START.md](docs/getting-started/QUICK_START.md)   | First server, project, backup, and monitor in 5 minutes   |
 | [docs/getting-started/INSTALLATION.md](docs/getting-started/INSTALLATION.md) | System requirements, Docker setup, dev setup, env vars    |
 | [docs/reference/ARCHITECTURE.md](docs/reference/ARCHITECTURE.md)             | System design, data model, queue system, security model   |
@@ -438,7 +438,8 @@ This starts:
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/my-feature`)
-3. Follow the module conventions in [docs/guides/DEVELOPMENT.md](docs/guides/DEVELOPMENT.md)
+3. Follow the module conventions in
+   [docs/guides/DEVELOPMENT.md](docs/guides/DEVELOPMENT.md)
 4. Run `pnpm build && pnpm lint` before submitting
 5. Open a pull request against `main`
 

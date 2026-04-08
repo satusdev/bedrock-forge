@@ -11,7 +11,8 @@ how to get started.
    git clone https://github.com/<your-fork>/bedrock-forge.git
    cd bedrock-forge
    ```
-3. Follow the development setup in [docs/guides/DEVELOPMENT.md](docs/guides/DEVELOPMENT.md).
+3. Follow the development setup in
+   [docs/guides/DEVELOPMENT.md](docs/guides/DEVELOPMENT.md).
 4. Create a feature branch:
    ```bash
    git checkout -b feat/my-feature
