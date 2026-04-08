@@ -27,6 +27,7 @@ import {
 	FileText,
 	Bell,
 	ClipboardCheck,
+	FileBarChart,
 } from 'lucide-react';
 
 const navItems = [
@@ -52,6 +53,12 @@ const navItems = [
 		to: '/notifications',
 		label: 'Notifications',
 		icon: Bell,
+		minRole: 'admin',
+	},
+	{
+		to: '/reports',
+		label: 'Reports',
+		icon: FileBarChart,
 		minRole: 'admin',
 	},
 ];

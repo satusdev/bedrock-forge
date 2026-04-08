@@ -13,7 +13,10 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { ROLES } from '@bedrock-forge/shared';
 import { ReportsService } from './reports.service';
-import { UpdateReportScheduleDto } from './dto/report-schedule.dto';
+import {
+	UpdateReportScheduleDto,
+	GenerateReportDto,
+} from './dto/report-schedule.dto';
 
 @Controller('reports')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -33,7 +36,17 @@ export class ReportsController {
 
 	@Post('generate')
 	@HttpCode(HttpStatus.ACCEPTED)
-	generateNow() {
-		return this.svc.generateNow();
+	generateNow(@Body() dto: GenerateReportDto) {
+		return this.svc.generateNow(dto);
+	}
+
+	@Get('history')
+	getHistory() {
+		return this.svc.getHistory();
+	}
+
+	@Get('channels')
+	getAvailableChannels() {
+		return this.svc.getAvailableChannels();
 	}
 }
