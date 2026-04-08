@@ -214,6 +214,14 @@ export default function App() {
 									</AdminRoute>
 								}
 							/>
+							<Route
+								path='reports'
+								element={
+									<AdminRoute>
+										<ReportsPage />
+									</AdminRoute>
+								}
+							/>
 							<Route path='domains' element={<DomainsPage />} />
 							<Route
 								path='audit-logs'
