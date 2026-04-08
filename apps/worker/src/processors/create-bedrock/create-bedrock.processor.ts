@@ -70,6 +70,17 @@ export class CreateBedrockProcessor extends WorkerHost {
 				}
 
 				this.logger.log(`Creating CyberPanel website for ${domain}`);
+
+				// Verify CyberPanel API is accessible before starting
+				try {
+					await callCpApi(cpCreds, '/api/verifyLogin', {});
+				} catch (verifyErr) {
+					throw new Error(
+						`CyberPanel API is not accessible: ${verifyErr instanceof Error ? verifyErr.message : String(verifyErr)}. ` +
+							'Ensure API access is enabled in CyberPanel Admin → Security → API Access.',
+					);
+				}
+
 				await callCpApi(cpCreds, '/api/createWebsite', {
 					domainName: domain,
 					phpSelection: cyberpanel.phpVersion ?? '8.3',
@@ -88,12 +99,35 @@ export class CreateBedrockProcessor extends WorkerHost {
 				});
 
 				this.logger.log(`Creating database: ${cyberpanel.dbName}`);
-				await callCpApi(cpCreds, '/api/submitDBCreation', {
-					databaseWebsite: domain,
-					dbName: cyberpanel.dbName,
-					dbUsername: cyberpanel.dbUser,
-					dbPassword: cyberpanel.dbPassword,
-				});
+				try {
+					await callCpApi(cpCreds, '/api/submitDBCreation', {
+						databaseWebsite: domain,
+						dbName: cyberpanel.dbName,
+						dbUsername: cyberpanel.dbUser,
+						dbPassword: cyberpanel.dbPassword,
+					});
+				} catch (dbApiErr) {
+					this.logger.warn(
+						`CyberPanel submitDBCreation failed (${dbApiErr instanceof Error ? dbApiErr.message : String(dbApiErr)}), falling back to MySQL CLI`,
+					);
+					const dbName = escapeMysql(cyberpanel.dbName);
+					const dbUser = escapeMysql(cyberpanel.dbUser);
+					const dbPassword = escapeMysql(cyberpanel.dbPassword);
+					const mysqlResult = await executor.execute(
+						`mysql -e "CREATE DATABASE IF NOT EXISTS \`${dbName}\`; ` +
+							`CREATE USER IF NOT EXISTS '${dbUser}'@'localhost' IDENTIFIED BY '${dbPassword}'; ` +
+							`GRANT ALL PRIVILEGES ON \`${dbName}\`.* TO '${dbUser}'@'localhost'; ` +
+							`FLUSH PRIVILEGES;"`,
+					);
+					if (mysqlResult.code !== 0) {
+						throw new Error(
+							`Database creation failed via both CyberPanel API and MySQL CLI. ` +
+								`API error: ${dbApiErr instanceof Error ? dbApiErr.message : String(dbApiErr)}. ` +
+								`MySQL error: ${mysqlResult.stderr}`,
+						);
+					}
+					this.logger.log(`Database ${cyberpanel.dbName} created via MySQL CLI`);
+				}
 				await job.updateProgress({ value: 30, step: 'Database created' });
 			}
 
