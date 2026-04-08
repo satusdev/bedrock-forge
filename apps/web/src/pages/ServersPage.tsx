@@ -395,13 +395,11 @@ export function ServersPage() {
 
 	const testConnection = useMutation({
 		mutationFn: (id: number) =>
-			api
-				.post<{
-					success: boolean;
-					message: string;
-					cyberpanelVersion?: string;
-				}>(`/servers/${id}/test-connection`, {})
-				.then(r => r.data),
+			api.post<{
+				success: boolean;
+				message: string;
+				cyberpanelVersion?: string;
+			}>(`/servers/${id}/test-connection`, {}),
 		onSuccess: (result, id) => {
 			qc.invalidateQueries({ queryKey: ['servers'] });
 			const versionLine = result.cyberpanelVersion
