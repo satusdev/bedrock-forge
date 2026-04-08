@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, Layers, Eye, EyeOff, RefreshCw } from 'lucide-react';
+import { Loader2, Layers, Eye, EyeOff, RefreshCw, ScrollText } from 'lucide-react';
 import { WS_EVENTS } from '@bedrock-forge/shared';
 import { api } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
@@ -24,6 +24,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from '@/components/ui/select';
+import { ExecutionLogPanel } from '@/components/ui/execution-log-panel';
 
 interface Client {
 	id: number;
@@ -125,10 +126,12 @@ export function CreateBedrockDialog({ open, onOpenChange, onSuccess }: Props) {
 	const [jobId, setJobId] = useState<string | null>(null);
 	const [environmentId, setEnvironmentId] = useState<number | null>(null);
 	const [projectId, setProjectId] = useState<number | null>(null);
+	const [jobExecutionId, setJobExecutionId] = useState<number | null>(null);
 	const [progress, setProgress] = useState(0);
 	const [progressMsg, setProgressMsg] = useState('');
 	const [jobDone, setJobDone] = useState<'completed' | 'failed' | null>(null);
 	const [jobError, setJobError] = useState<string | null>(null);
+	const [showLogs, setShowLogs] = useState(false);
 
 	// Subscribe to WS room for environment once we have it
 	useSubscribeEnvironment(environmentId ?? 0);
@@ -198,6 +201,7 @@ export function CreateBedrockDialog({ open, onOpenChange, onSuccess }: Props) {
 			setJobId(res.jobId);
 			setEnvironmentId(res.environment.id);
 			setProjectId(res.project.id);
+			setJobExecutionId(res.jobExecutionId);
 			setProgress(0);
 			setProgressMsg('Starting...');
 		},
@@ -276,10 +280,12 @@ export function CreateBedrockDialog({ open, onOpenChange, onSuccess }: Props) {
 		setJobId(null);
 		setEnvironmentId(null);
 		setProjectId(null);
+		setJobExecutionId(null);
 		setProgress(0);
 		setProgressMsg('');
 		setJobDone(null);
 		setJobError(null);
+		setShowLogs(false);
 		mutation.reset();
 	}
 
@@ -724,6 +730,27 @@ export function CreateBedrockDialog({ open, onOpenChange, onSuccess }: Props) {
 									Your Bedrock project has been provisioned and is ready.
 								</p>
 							)}
+
+						{/* Execution log toggle — available once job is dispatched */}
+						{jobExecutionId && (
+							<div>
+								<button
+									onClick={() => setShowLogs(s => !s)}
+									className='inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors'
+								>
+									<ScrollText className='h-3.5 w-3.5' />
+									{showLogs ? 'Hide Logs' : 'View Logs'}
+								</button>
+								{showLogs && (
+									<div className='mt-2 max-h-60 overflow-y-auto border rounded-md p-2'>
+										<ExecutionLogPanel
+											jobExecutionId={jobExecutionId}
+											isActive={isRunning}
+										/>
+									</div>
+								)}
+							</div>
+						)}
 						</div>
 
 						<DialogFooter>

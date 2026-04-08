@@ -104,7 +104,7 @@ function ExpiryBadge({ expiresAt }: { expiresAt: string | null }) {
 
 	if (days <= 30) {
 		return (
-			<Badge className='gap-1 bg-red-500 text-white hover:bg-red-600'>
+			<Badge variant='destructive' className='gap-1'>
 				<Clock className='h-3 w-3' />
 				{days}d left
 			</Badge>
@@ -113,7 +113,7 @@ function ExpiryBadge({ expiresAt }: { expiresAt: string | null }) {
 
 	if (days <= 90) {
 		return (
-			<Badge className='gap-1 bg-amber-500 text-white hover:bg-amber-600'>
+			<Badge variant='warning' className='gap-1'>
 				<Clock className='h-3 w-3' />
 				{days}d left
 			</Badge>
