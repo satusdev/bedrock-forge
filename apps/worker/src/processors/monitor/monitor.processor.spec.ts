@@ -104,7 +104,12 @@ describe('MonitorProcessor', () => {
 	it('creates a JobExecution at the start of every check', async () => {
 		prisma.monitor.findUnique.mockResolvedValue(baseMonitor());
 		const job = { id: 'j1', data: { monitorId: 1 } } as any;
-		// Let the HTTP check fail fast (no real server)
+		// Fail both attempts immediately (skip real network + 5 s retry delay)
+		jest.spyOn(processor as any, 'checkHttp').mockRejectedValue(new Error('ECONNREFUSED'));
+		jest.spyOn(global, 'setTimeout').mockImplementation((fn: TimerHandler) => {
+			if (typeof fn === 'function') fn();
+			return 0 as unknown as ReturnType<typeof setTimeout>;
+		});
 		await processor.process(job).catch(() => {});
 		expect(prisma.jobExecution.create).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -141,11 +146,22 @@ describe('MonitorProcessor', () => {
 		prisma.monitor.findUnique.mockResolvedValue(monitor);
 		prisma.monitorResult.count.mockResolvedValue(5);
 
-		// Current check returns 503 → isUp = false
-		jest.spyOn(processor as any, 'checkHttp').mockResolvedValue({ statusCode: 503, body: '' });
+		// Both check and retry return 503 → confirmed down
+		const checkHttpSpy = jest
+			.spyOn(processor as any, 'checkHttp')
+			.mockResolvedValue({ statusCode: 503, body: '' });
+
+		// Skip the real 5 s retry delay
+		jest.spyOn(global, 'setTimeout').mockImplementation((fn: TimerHandler) => {
+			if (typeof fn === 'function') fn();
+			return 0 as unknown as ReturnType<typeof setTimeout>;
+		});
 
 		const job = { id: 'j3', data: { monitorId: 1 } } as any;
 		await processor.process(job);
+
+		// Must have been called twice: initial attempt + confirmation retry
+		expect(checkHttpSpy).toHaveBeenCalledTimes(2);
 
 		expect(notifQueue.add).toHaveBeenCalledWith(
 			expect.any(String),
@@ -153,6 +169,38 @@ describe('MonitorProcessor', () => {
 				eventType: 'monitor.down',
 				payload: expect.objectContaining({ transition: 'went_down' }),
 			}),
+			expect.any(Object),
+		);
+	});
+
+	it('does NOT fire down notification when retry succeeds after first failure', async () => {
+		// Previously up
+		const monitor = baseMonitor({
+			last_checked_at: new Date(Date.now() - 300_000),
+			last_status: 200,
+		});
+		prisma.monitor.findUnique.mockResolvedValue(monitor);
+		prisma.monitorResult.count.mockResolvedValue(5);
+
+		// First call fails, second (retry) succeeds → transient blip, not down
+		const checkHttpSpy = jest
+			.spyOn(processor as any, 'checkHttp')
+			.mockResolvedValueOnce({ statusCode: 503, body: '' })
+			.mockResolvedValueOnce({ statusCode: 200, body: '' });
+
+		jest.spyOn(global, 'setTimeout').mockImplementation((fn: TimerHandler) => {
+			if (typeof fn === 'function') fn();
+			return 0 as unknown as ReturnType<typeof setTimeout>;
+		});
+
+		const job = { id: 'j3b', data: { monitorId: 1 } } as any;
+		await processor.process(job);
+
+		expect(checkHttpSpy).toHaveBeenCalledTimes(2);
+		// No state transition to 'down' — retry recovered
+		expect(notifQueue.add).not.toHaveBeenCalledWith(
+			expect.any(String),
+			expect.objectContaining({ eventType: 'monitor.down' }),
 			expect.any(Object),
 		);
 	});

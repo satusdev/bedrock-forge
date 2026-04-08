@@ -293,7 +293,21 @@ export class ReportProcessor extends WorkerHost {
 
 		this.logger.log(`Generating weekly report: ${dateRange}`);
 
-		// ── 1. Backup data ─────────────────────────────────────────────────
+		// Track execution so this job appears in the dashboard activity feed
+		const execution = await this.prisma.jobExecution.create({
+			data: {
+				queue_name: QUEUES.REPORTS,
+				bull_job_id: String(job.id),
+				job_type: JOB_TYPES.REPORT_GENERATE,
+				status: 'active',
+				started_at: now,
+				payload: { dateRange },
+			},
+		});
+
+		try {
+
+		// ── 1. Backup data ─────────────────────────────────────────────────────
 
 		const rawBackups = (await this.prisma.backup.findMany({
 			where: { created_at: { gte: weekAgo } },
@@ -327,7 +341,7 @@ export class ReportProcessor extends WorkerHost {
 			}
 		}
 
-		// ── 2. Monitor data ────────────────────────────────────────────────
+		// ── 2. Monitor data ────────────────────────────────────────────────────
 
 		const rawMonitors = (await this.prisma.monitor.findMany({
 			include: {
@@ -347,11 +361,11 @@ export class ReportProcessor extends WorkerHost {
 			upChecks: m.monitor_results.filter(r => r.is_up).length,
 		}));
 
-		// ── 3. Build PDF ───────────────────────────────────────────────────
+		// ── 3. Build PDF ───────────────────────────────────────────────────────
 
 		const pdfBuffer = await this.buildPdf(dateRange, now, backups, monitors);
 
-		// ── 4. Send to Slack ───────────────────────────────────────────────
+		// ── 4. Send to Slack ───────────────────────────────────────────────────
 
 		const channels = await this.prisma.notificationChannel.findMany({
 			where: { active: true, events: { has: 'report.weekly' } },
@@ -359,44 +373,65 @@ export class ReportProcessor extends WorkerHost {
 
 		if (channels.length === 0) {
 			this.logger.warn('No active Slack channels subscribed to report.weekly');
-			return;
+		} else {
+			const { WebClient } = await import('@slack/web-api');
+			const filename = `bedrock-forge-weekly-${fmt(now)}.pdf`;
+			const okBackups = backups.filter(b => b.status === 'completed').length;
+			const failedBackups = backups.filter(b => b.status === 'failed').length;
+			const downMonitors = monitors.filter(
+				m =>
+					m.lastStatus !== null && (m.lastStatus === 0 || m.lastStatus >= 400),
+			).length;
+
+			const initialComment = [
+				`*Bedrock Forge — Weekly Report* (${dateRange})`,
+				``,
+				`• Backups: *${okBackups} successful*, ${failedBackups > 0 ? `*${failedBackups} failed*` : '0 failed'} in last 7 days`,
+				`• Monitors: ${downMonitors > 0 ? `*${downMonitors} currently down*` : 'all up'} of ${monitors.length} total`,
+				``,
+				`_(PDF attached)_`,
+			].join('\n');
+
+			for (const channel of channels) {
+				if (!channel.slack_bot_token_enc || !channel.slack_channel_id) continue;
+				try {
+					const token = this.encryption.decrypt(channel.slack_bot_token_enc);
+					const slack = new WebClient(token);
+					await slack.filesUploadV2({
+						channel_id: channel.slack_channel_id,
+						file: pdfBuffer,
+						filename,
+						title: `Weekly Report ${fmt(now)}`,
+						initial_comment: initialComment,
+					});
+					this.logger.log(`Report sent to channel "${channel.name}"`);
+				} catch (err) {
+					this.logger.error(
+						`Failed to send to channel "${channel.name}": ${err}`,
+					);
+				}
+			}
 		}
 
-		const { WebClient } = await import('@slack/web-api');
-		const filename = `bedrock-forge-weekly-${fmt(now)}.pdf`;
-		const okBackups = backups.filter(b => b.status === 'completed').length;
-		const failedBackups = backups.filter(b => b.status === 'failed').length;
-		const downMonitors = monitors.filter(
-			m => m.lastStatus !== null && (m.lastStatus === 0 || m.lastStatus >= 400),
-		).length;
-
-		const initialComment = [
-			`*Bedrock Forge — Weekly Report* (${dateRange})`,
-			``,
-			`• Backups: *${okBackups} successful*, ${failedBackups > 0 ? `*${failedBackups} failed*` : '0 failed'} in last 7 days`,
-			`• Monitors: ${downMonitors > 0 ? `*${downMonitors} currently down*` : 'all up'} of ${monitors.length} total`,
-			``,
-			`_(PDF attached)_`,
-		].join('\n');
-
-		for (const channel of channels) {
-			if (!channel.slack_bot_token_enc || !channel.slack_channel_id) continue;
-			try {
-				const token = this.encryption.decrypt(channel.slack_bot_token_enc);
-				const slack = new WebClient(token);
-				await slack.filesUploadV2({
-					channel_id: channel.slack_channel_id,
-					file: pdfBuffer,
-					filename,
-					title: `Weekly Report ${fmt(now)}`,
-					initial_comment: initialComment,
-				});
-				this.logger.log(`Report sent to channel "${channel.name}"`);
-			} catch (err) {
-				this.logger.error(
-					`Failed to send to channel "${channel.name}": ${err}`,
-				);
-			}
+		await this.prisma.jobExecution.update({
+			where: { id: execution.id },
+			data: { status: 'completed', progress: 100, completed_at: new Date() },
+		});
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			this.logger.error(`Weekly report generation failed: ${msg}`);
+			await this.prisma.jobExecution
+				.update({
+					where: { id: execution.id },
+					data: {
+						status: 'failed',
+						last_error: msg,
+						progress: 0,
+						completed_at: new Date(),
+					},
+				})
+				.catch(() => {});
+			throw err;
 		}
 	}
 
