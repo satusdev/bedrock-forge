@@ -2,9 +2,12 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { SettingsService } from '../settings/settings.service';
+import { PrismaService } from '../../prisma/prisma.service';
+import { EncryptionService } from '../../common/encryption/encryption.service';
 import { QUEUES, JOB_TYPES } from '@bedrock-forge/shared';
 import {
 	UpdateReportScheduleDto,
+	GenerateReportDto,
 	ReportScheduleConfig,
 } from './dto/report-schedule.dto';
 
@@ -17,6 +20,8 @@ export class ReportsService implements OnModuleInit {
 
 	constructor(
 		private readonly settings: SettingsService,
+		private readonly prisma: PrismaService,
+		private readonly encryption: EncryptionService,
 		@InjectQueue(QUEUES.REPORTS) private readonly reportsQueue: Queue,
 	) {}
 
@@ -70,13 +75,53 @@ export class ReportsService implements OnModuleInit {
 		return config;
 	}
 
-	async generateNow(): Promise<{ jobId: string }> {
+	async generateNow(dto: GenerateReportDto = {}): Promise<{ jobId: string }> {
 		const job = await this.reportsQueue.add(
 			JOB_TYPES.REPORT_GENERATE,
-			{},
+			{
+				period: dto.period ?? 'last_7d',
+				channelIds: dto.channelIds ?? null,
+			},
 			{ attempts: 1, removeOnComplete: 10, removeOnFail: 10 },
 		);
 		return { jobId: String(job.id) };
+	}
+
+	async getHistory() {
+		const rows = await this.prisma.jobExecution.findMany({
+			where: { queue_name: QUEUES.REPORTS },
+			orderBy: { created_at: 'desc' },
+			take: 50,
+			select: {
+				id: true,
+				bull_job_id: true,
+				job_type: true,
+				status: true,
+				progress: true,
+				last_error: true,
+				payload: true,
+				execution_log: true,
+				started_at: true,
+				completed_at: true,
+				created_at: true,
+			},
+		});
+		// BigInt IDs need to be serialised
+		return rows.map(r => ({ ...r, id: String(r.id) }));
+	}
+
+	async getAvailableChannels() {
+		const channels = await this.prisma.notificationChannel.findMany({
+			where: { active: true, events: { has: 'report.weekly' } },
+			orderBy: { name: 'asc' },
+		});
+		return channels.map(c => ({
+			id: Number(c.id),
+			name: c.name,
+			slack_channel_id: c.slack_channel_id,
+			has_token: !!c.slack_bot_token_enc,
+			active: c.active,
+		}));
 	}
 
 	// ── private helpers ──────────────────────────────────────────────────────

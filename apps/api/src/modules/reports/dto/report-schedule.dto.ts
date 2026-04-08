@@ -1,4 +1,12 @@
-import { IsBoolean, IsInt, Max, Min } from 'class-validator';
+import {
+	IsArray,
+	IsBoolean,
+	IsIn,
+	IsInt,
+	IsOptional,
+	Max,
+	Min,
+} from 'class-validator';
 
 export interface ReportScheduleConfig {
 	enabled: boolean;
@@ -6,6 +14,21 @@ export interface ReportScheduleConfig {
 	hour: number;
 	minute: number;
 }
+
+export type ReportPeriod =
+	| 'last_7d'
+	| 'last_30d'
+	| 'last_90d'
+	| 'this_month'
+	| 'last_month';
+
+export const REPORT_PERIODS: ReportPeriod[] = [
+	'last_7d',
+	'last_30d',
+	'last_90d',
+	'this_month',
+	'last_month',
+];
 
 export class UpdateReportScheduleDto {
 	@IsBoolean()
@@ -26,4 +49,17 @@ export class UpdateReportScheduleDto {
 	@Min(0)
 	@Max(59)
 	minute!: number;
+}
+
+export class GenerateReportDto {
+	/** Optional: channel IDs to target. Omit → send to all subscribed channels. */
+	@IsOptional()
+	@IsArray()
+	@IsInt({ each: true })
+	channelIds?: number[];
+
+	/** Time window for the report. Defaults to 'last_7d' when omitted. */
+	@IsOptional()
+	@IsIn(REPORT_PERIODS)
+	period?: ReportPeriod;
 }

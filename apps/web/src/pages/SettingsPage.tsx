@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -14,8 +14,6 @@ import {
 	Cloud,
 	CloudOff,
 	Loader2,
-	CalendarClock,
-	Send,
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { useAuthStore } from '@/store/auth.store';
@@ -72,12 +70,6 @@ export function SettingsPage() {
 		message: string;
 	} | null>(null);
 	const [deleteGdriveOpen, setDeleteGdriveOpen] = useState(false);
-
-	// ── Weekly Reports state ─────────────────────────────────────────────────
-	const [reportDayOfWeek, setReportDayOfWeek] = useState(1); // Monday
-	const [reportHour, setReportHour] = useState(8);
-	const [reportMinute, setReportMinute] = useState(0);
-	const [reportEnabled, setReportEnabled] = useState(true);
 
 	const { data: sshKeyStatus, refetch: refetchSshKey } = useQuery({
 		queryKey: ['ssh-key-status'],
@@ -164,57 +156,6 @@ export function SettingsPage() {
 		await saveGdrive.mutateAsync(gdriveToken.trim());
 		testGdrive.mutate();
 	}
-
-	// ── Weekly Reports queries & mutations ──────────────────────────────────
-	const { data: reportConfig, isLoading: reportConfigLoading } = useQuery({
-		queryKey: ['report-config'],
-		queryFn: () =>
-			api.get<{
-				enabled: boolean;
-				day_of_week: number;
-				hour: number;
-				minute: number;
-			} | null>('/reports/config'),
-	});
-
-	useEffect(() => {
-		if (reportConfig) {
-			setReportEnabled(reportConfig.enabled);
-			setReportDayOfWeek(reportConfig.day_of_week);
-			setReportHour(reportConfig.hour);
-			setReportMinute(reportConfig.minute);
-		}
-	}, [reportConfig]);
-
-	const saveReportSchedule = useMutation({
-		mutationFn: () =>
-			api.put('/reports/config', {
-				enabled: reportEnabled,
-				day_of_week: reportDayOfWeek,
-				hour: reportHour,
-				minute: reportMinute,
-			}),
-		onSuccess: () => {
-			qc.invalidateQueries({ queryKey: ['report-config'] });
-			toast({ title: 'Report schedule saved' });
-		},
-		onError: () =>
-			toast({
-				title: 'Failed to save report schedule',
-				variant: 'destructive',
-			}),
-	});
-
-	const sendReportNow = useMutation({
-		mutationFn: () => api.post('/reports/generate', {}),
-		onSuccess: () =>
-			toast({
-				title:
-					'Report generation queued — it will be sent to subscribed Slack channels shortly',
-			}),
-		onError: () =>
-			toast({ title: 'Failed to queue report', variant: 'destructive' }),
-	});
 
 	const { data, isLoading } = useQuery({
 		queryKey: ['settings'],
@@ -567,121 +508,6 @@ export function SettingsPage() {
 							</>
 						) : (
 							'Save & Test'
-						)}
-					</Button>
-				</div>
-			</div>
-
-			{/* Weekly Reports */}
-			<div className='border rounded-lg p-4 bg-card space-y-4'>
-				<div className='flex items-center justify-between'>
-					<h2 className='font-semibold flex items-center gap-2'>
-						<CalendarClock className='h-4 w-4' />
-						Weekly Reports
-					</h2>
-					<label className='flex items-center gap-2 cursor-pointer select-none text-sm'>
-						<input
-							type='checkbox'
-							checked={reportConfig ? reportEnabled : false}
-							onChange={e => setReportEnabled(e.target.checked)}
-							className='h-4 w-4'
-						/>
-						Enabled
-					</label>
-				</div>
-				<p className='text-sm text-muted-foreground'>
-					Sends a PDF report with backup status and monitor uptime to subscribed
-					Slack channels. Subscribe channels on the{' '}
-					<strong>Notifications</strong> page using the <em>Weekly Report</em>{' '}
-					event.
-				</p>
-				{reportConfigLoading ? (
-					<div className='flex items-center gap-2 text-sm text-muted-foreground'>
-						<Loader2 className='h-4 w-4 animate-spin' /> Loading schedule…
-					</div>
-				) : (
-					<div className='grid grid-cols-3 gap-3'>
-						<div className='space-y-1'>
-							<Label>Day of week</Label>
-							<select
-								value={reportDayOfWeek}
-								onChange={e => setReportDayOfWeek(Number(e.target.value))}
-								className='w-full h-9 rounded-md border bg-background px-3 text-sm'
-							>
-								{[
-									'Sunday',
-									'Monday',
-									'Tuesday',
-									'Wednesday',
-									'Thursday',
-									'Friday',
-									'Saturday',
-								].map((d, i) => (
-									<option key={i} value={i}>
-										{d}
-									</option>
-								))}
-							</select>
-						</div>
-						<div className='space-y-1'>
-							<Label>Hour (UTC)</Label>
-							<Input
-								type='number'
-								min={0}
-								max={23}
-								value={reportHour}
-								onChange={e =>
-									setReportHour(
-										Math.min(23, Math.max(0, Number(e.target.value))),
-									)
-								}
-							/>
-						</div>
-						<div className='space-y-1'>
-							<Label>Minute</Label>
-							<Input
-								type='number'
-								min={0}
-								max={59}
-								value={reportMinute}
-								onChange={e =>
-									setReportMinute(
-										Math.min(59, Math.max(0, Number(e.target.value))),
-									)
-								}
-							/>
-						</div>
-					</div>
-				)}
-				<div className='flex gap-2 flex-wrap'>
-					<Button
-						onClick={() => saveReportSchedule.mutate()}
-						disabled={saveReportSchedule.isPending || reportConfigLoading}
-					>
-						{saveReportSchedule.isPending ? (
-							<>
-								<Loader2 className='h-3.5 w-3.5 mr-1.5 animate-spin' />
-								Saving…
-							</>
-						) : (
-							'Save Schedule'
-						)}
-					</Button>
-					<Button
-						variant='outline'
-						onClick={() => sendReportNow.mutate()}
-						disabled={sendReportNow.isPending}
-					>
-						{sendReportNow.isPending ? (
-							<>
-								<Loader2 className='h-3.5 w-3.5 mr-1.5 animate-spin' />
-								Sending…
-							</>
-						) : (
-							<>
-								<Send className='h-3.5 w-3.5 mr-1.5' />
-								Send Report Now
-							</>
 						)}
 					</Button>
 				</div>

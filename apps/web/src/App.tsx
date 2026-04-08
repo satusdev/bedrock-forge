@@ -64,6 +64,9 @@ const NotificationsPage = lazy(() =>
 		default: m.NotificationsPage,
 	})),
 );
+const ReportsPage = lazy(() =>
+	import('@/pages/ReportsPage').then(m => ({ default: m.ReportsPage })),
+);
 const AuditLogsPage = lazy(() =>
 	import('@/pages/AuditLogsPage').then(m => ({ default: m.AuditLogsPage })),
 );
