@@ -384,10 +384,44 @@ export class CreateBedrockProcessor extends WorkerHost {
 				}
 			}
 
+			// Detach job execution from the environment before deleting it
 			await this.prisma.jobExecution.update({
 				where: { id: BigInt(jobExecutionId) },
-				data: { status: 'failed', last_error: msg, completed_at: new Date() },
+				data: {
+					status: 'failed',
+					last_error: msg,
+					completed_at: new Date(),
+					environment_id: null,
+				},
 			});
+
+			// Clean up local DB records so orphaned projects don't linger
+			try {
+				const envRecord = await this.prisma.environment.findUnique({
+					where: { id: BigInt(environmentId) },
+					select: { project_id: true },
+				});
+				if (envRecord) {
+					await this.prisma.environment.delete({
+						where: { id: BigInt(environmentId) },
+					});
+					// Delete project only if it has no other environments
+					const remaining = await this.prisma.environment.count({
+						where: { project_id: envRecord.project_id },
+					});
+					if (remaining === 0) {
+						await this.prisma.project.delete({
+							where: { id: envRecord.project_id },
+						});
+					}
+					this.logger.warn(
+						`Cleaned up local records for failed environment #${environmentId}`,
+					);
+				}
+			} catch (cleanupErr) {
+				this.logger.error(`Local DB cleanup failed: ${cleanupErr}`);
+			}
+
 			throw err;
 		} finally {
 			await Promise.allSettled(tempCleanup.map(fn => fn()));

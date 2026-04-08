@@ -66,11 +66,20 @@ export function callCpApi(
 			const chunks: Buffer[] = [];
 			res.on('data', (c: Buffer) => chunks.push(c));
 			res.on('end', () => {
+				const raw = Buffer.concat(chunks).toString();
+
+				// Reject early on non-2xx HTTP status (e.g. 401 HTML auth page)
+				if (res.statusCode && (res.statusCode < 200 || res.statusCode >= 300)) {
+					reject(
+						new Error(
+							`CyberPanel ${endpoint} HTTP ${res.statusCode}: ${raw.slice(0, 300)}`,
+						),
+					);
+					return;
+				}
+
 				try {
-					const data = JSON.parse(Buffer.concat(chunks).toString()) as Record<
-						string,
-						unknown
-					>;
+					const data = JSON.parse(raw) as Record<string, unknown>;
 					if (data.status === 0) {
 						const msg =
 							(data.error_message as string) ||
@@ -82,7 +91,9 @@ export function callCpApi(
 					}
 				} catch (e) {
 					reject(
-						new Error(`CyberPanel ${endpoint} response parse error: ${e}`),
+						new Error(
+							`CyberPanel ${endpoint} response parse error: ${e}\nBody: ${raw.slice(0, 300)}`,
+						),
 					);
 				}
 			});
