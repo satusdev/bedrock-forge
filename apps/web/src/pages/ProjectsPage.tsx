@@ -11,6 +11,7 @@ import {
 	Globe,
 	Layers,
 	ExternalLink,
+	History,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '@/lib/api-client';
@@ -44,6 +45,11 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { ImportFromServerDialog } from './projects/ImportFromServerDialog';
 import { CreateBedrockDialog } from './projects/CreateBedrockDialog';
+import {
+	ExecutionLogPanel,
+	ExpandLogButton,
+} from '@/components/ui/execution-log-panel';
+import { useWebSocketEvent } from '@/lib/websocket';
 
 interface Client {
 	id: number;
@@ -410,6 +416,183 @@ function ProjectCard({
 	);
 }
 
+// ─── Bedrock Jobs Dialog ─────────────────────────────────────────────────────
+
+interface BedrockJobRow {
+	id: number;
+	status: string;
+	progress: number | null;
+	last_error: string | null;
+	started_at: string | null;
+	completed_at: string | null;
+	created_at: string;
+	environment: {
+		id: number;
+		type: string;
+		url: string | null;
+		project: { id: number; name: string; client: { id: number; name: string } };
+	} | null;
+}
+
+const BEDROCK_JOB_STATUS_VARIANT: Record<
+	string,
+	'success' | 'destructive' | 'info' | 'secondary'
+> = {
+	completed: 'success',
+	failed: 'destructive',
+	active: 'info',
+	pending: 'secondary',
+};
+
+function bedrockDuration(
+	started?: string | null,
+	completed?: string | null,
+): string {
+	if (!started) return '—';
+	const diff =
+		(completed ? new Date(completed).getTime() : Date.now()) -
+		new Date(started).getTime();
+	if (diff < 1000) return `${diff}ms`;
+	if (diff < 60_000) return `${(diff / 1000).toFixed(1)}s`;
+	return `${Math.floor(diff / 60_000)}m ${Math.floor((diff % 60_000) / 1000)}s`;
+}
+
+function BedrockJobsDialog({
+	open,
+	onOpenChange,
+}: {
+	open: boolean;
+	onOpenChange: (o: boolean) => void;
+}) {
+	const qc = useQueryClient();
+	const [expandedId, setExpandedId] = useState<number | null>(null);
+
+	const { data, isLoading } = useQuery({
+		queryKey: ['bedrock-jobs'],
+		queryFn: () =>
+			api.get<{ data: BedrockJobRow[]; total: number }>(
+				'/job-executions?queue_name=projects&limit=10',
+			),
+		enabled: open,
+		staleTime: 10_000,
+		refetchInterval: open ? 10_000 : false,
+	});
+
+	useWebSocketEvent('job:completed', () => {
+		qc.invalidateQueries({ queryKey: ['bedrock-jobs'] });
+	});
+	useWebSocketEvent('job:failed', () => {
+		qc.invalidateQueries({ queryKey: ['bedrock-jobs'] });
+	});
+
+	const rows = data?.data ?? [];
+
+	return (
+		<Dialog open={open} onOpenChange={onOpenChange}>
+			<DialogContent className='max-w-2xl'>
+				<DialogHeader>
+					<DialogTitle>Bedrock Provisioning Jobs</DialogTitle>
+				</DialogHeader>
+
+				<div className='mt-2 max-h-[60vh] overflow-y-auto'>
+					{isLoading ? (
+						<div className='py-8 text-center text-sm text-muted-foreground'>
+							Loading…
+						</div>
+					) : rows.length === 0 ? (
+						<div className='py-8 text-center text-sm text-muted-foreground'>
+							No Bedrock provisioning jobs found.
+						</div>
+					) : (
+						<div className='divide-y rounded-md border'>
+							{rows.map(row => {
+								const isActive =
+									row.status === 'active' || row.status === 'pending';
+								const isExpanded = expandedId === row.id;
+								return (
+									<div key={row.id}>
+										<div className='flex items-center gap-3 px-4 py-3'>
+											<Badge
+												variant={
+													BEDROCK_JOB_STATUS_VARIANT[row.status] ??
+													'secondary'
+												}
+												className='shrink-0 capitalize'
+											>
+												{row.status}
+											</Badge>
+											<div className='min-w-0 flex-1'>
+												{row.environment ? (
+													<p className='text-sm font-medium truncate'>
+														{row.environment.project.name}
+													</p>
+												) : (
+													<p className='text-sm text-muted-foreground'>—</p>
+												)}
+												{row.environment?.url && (
+													<p className='text-xs text-muted-foreground truncate'>
+														{row.environment.url}
+													</p>
+												)}
+												{row.last_error && (
+													<p
+														className='text-xs text-destructive truncate'
+														title={row.last_error}
+													>
+														{row.last_error}
+													</p>
+												)}
+											</div>
+											<div className='shrink-0 text-right text-xs text-muted-foreground space-y-0.5'>
+												<p>
+													{new Date(
+														row.started_at ?? row.created_at,
+													).toLocaleString([], {
+														dateStyle: 'short',
+														timeStyle: 'short',
+													})}
+												</p>
+												<p>
+													{bedrockDuration(
+														row.started_at,
+														row.completed_at,
+													)}
+												</p>
+											</div>
+											<ExpandLogButton
+												expanded={isExpanded}
+												onToggle={() =>
+													setExpandedId(isExpanded ? null : row.id)
+												}
+											/>
+										</div>
+										{isExpanded && (
+											<div className='px-4 pb-4 bg-muted/20'>
+												<ExecutionLogPanel
+													jobExecutionId={row.id}
+													isActive={isActive}
+												/>
+											</div>
+										)}
+									</div>
+								);
+							})}
+						</div>
+					)}
+				</div>
+
+				<DialogFooter>
+					<Button variant='outline' onClick={() => onOpenChange(false)}>
+						Close
+					</Button>
+				</DialogFooter>
+			</DialogContent>
+		</Dialog>
+	);
+}
+
+// ─── Skeleton ─────────────────────────────────────────────────────────────────
+
 function ProjectCardSkeleton() {
 	return (
 		<Card className='animate-pulse'>
@@ -441,6 +624,7 @@ export function ProjectsPage() {
 	const [createOpen, setCreateOpen] = useState(false);
 	const [importOpen, setImportOpen] = useState(false);
 	const [bedrockOpen, setBedrockOpen] = useState(false);
+	const [bedrockJobsOpen, setBedrockJobsOpen] = useState(false);
 	const [editTarget, setEditTarget] = useState<Project | null>(null);
 	const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
 
@@ -498,6 +682,14 @@ export function ProjectsPage() {
 				<Button variant='outline' size='sm' onClick={() => setImportOpen(true)}>
 					<ServerIcon className='h-4 w-4 mr-1.5' />
 					Import from Server
+				</Button>
+				<Button
+					variant='outline'
+					size='sm'
+					onClick={() => setBedrockJobsOpen(true)}
+				>
+					<History className='h-4 w-4 mr-1.5' />
+					Bedrock Jobs
 				</Button>
 				<Button
 					variant='default'
@@ -642,6 +834,10 @@ export function ProjectsPage() {
 				open={bedrockOpen}
 				onOpenChange={setBedrockOpen}
 				onSuccess={invalidate}
+			/>
+			<BedrockJobsDialog
+				open={bedrockJobsOpen}
+				onOpenChange={setBedrockJobsOpen}
 			/>
 		</div>
 	);

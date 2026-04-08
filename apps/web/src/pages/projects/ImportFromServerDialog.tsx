@@ -98,10 +98,7 @@ function TypeBadge({
 }) {
 	if (isBedrock)
 		return (
-			<Badge
-				variant='secondary'
-				className='text-blue-400 border-blue-400/30 bg-blue-400/10 whitespace-nowrap'
-			>
+			<Badge variant='info' className='whitespace-nowrap'>
 				Bedrock WP
 			</Badge>
 		);
