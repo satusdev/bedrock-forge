@@ -72,9 +72,8 @@ services:
       target: runtime
     restart: unless-stopped
     env_file: .env
-    tmpfs:
-      # 512 MB — one backup archive at a time (backup processor concurrency=1).
-      - /tmp/forge-backups:size=512m,uid=1000,gid=1000
+    volumes:
+      - forge-backups:/tmp/forge-backups
     environment:
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8080}
       DATABASE_URL: postgresql://${POSTGRES_USER:-forge}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-bedrock_forge}
@@ -131,3 +130,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  forge-backups:
