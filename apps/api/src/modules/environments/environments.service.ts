@@ -123,7 +123,12 @@ export class EnvironmentsService {
 	 */
 	private extractRegistrableDomain(hostname: string): string {
 		const MULTI_TLD = new Set([
-			'co.uk', 'com.au', 'co.nz', 'org.uk', 'net.au', 'co.za',
+			'co.uk',
+			'com.au',
+			'co.nz',
+			'org.uk',
+			'net.au',
+			'co.za',
 		]);
 		const parts = hostname.split('.');
 		if (parts.length <= 2) return hostname;

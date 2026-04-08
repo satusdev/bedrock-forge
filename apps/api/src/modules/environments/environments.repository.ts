@@ -14,7 +14,6 @@ export class EnvironmentsRepository {
 		private readonly enc: EncryptionService,
 	) {}
 
-
 	findAll() {
 		return this.prisma.environment.findMany({
 			include: {

@@ -1,7 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, Layers, Eye, EyeOff, RefreshCw, ScrollText } from 'lucide-react';
+import {
+	Loader2,
+	Layers,
+	Eye,
+	EyeOff,
+	RefreshCw,
+	ScrollText,
+} from 'lucide-react';
 import { WS_EVENTS } from '@bedrock-forge/shared';
 import { api } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
@@ -731,26 +738,26 @@ export function CreateBedrockDialog({ open, onOpenChange, onSuccess }: Props) {
 								</p>
 							)}
 
-						{/* Execution log toggle — available once job is dispatched */}
-						{jobExecutionId && (
-							<div>
-								<button
-									onClick={() => setShowLogs(s => !s)}
-									className='inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors'
-								>
-									<ScrollText className='h-3.5 w-3.5' />
-									{showLogs ? 'Hide Logs' : 'View Logs'}
-								</button>
-								{showLogs && (
-									<div className='mt-2 max-h-60 overflow-y-auto border rounded-md p-2'>
-										<ExecutionLogPanel
-											jobExecutionId={jobExecutionId}
-											isActive={isRunning}
-										/>
-									</div>
-								)}
-							</div>
-						)}
+							{/* Execution log toggle — available once job is dispatched */}
+							{jobExecutionId && (
+								<div>
+									<button
+										onClick={() => setShowLogs(s => !s)}
+										className='inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors'
+									>
+										<ScrollText className='h-3.5 w-3.5' />
+										{showLogs ? 'Hide Logs' : 'View Logs'}
+									</button>
+									{showLogs && (
+										<div className='mt-2 max-h-60 overflow-y-auto border rounded-md p-2'>
+											<ExecutionLogPanel
+												jobExecutionId={jobExecutionId}
+												isActive={isRunning}
+											/>
+										</div>
+									)}
+								</div>
+							)}
 						</div>
 
 						<DialogFooter>

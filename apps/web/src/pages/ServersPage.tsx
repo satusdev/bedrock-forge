@@ -396,20 +396,21 @@ export function ServersPage() {
 	const testConnection = useMutation({
 		mutationFn: (id: number) =>
 			api
-				.post<{ success: boolean; message: string; cyberpanelVersion?: string }>(
-					`/servers/${id}/test-connection`,
-					{},
-				)
+				.post<{
+					success: boolean;
+					message: string;
+					cyberpanelVersion?: string;
+				}>(`/servers/${id}/test-connection`, {})
 				.then(r => r.data),
-			onSuccess: (result, id) => {
-				qc.invalidateQueries({ queryKey: ['servers'] });
-				const versionLine = result.cyberpanelVersion
-					? ` · CyberPanel ${result.cyberpanelVersion}`
-					: '';
-				toast({ title: `Server #${id} is reachable${versionLine}` });
-			},
-			onError: () =>
-				toast({ title: 'Connection test failed', variant: 'destructive' }),
+		onSuccess: (result, id) => {
+			qc.invalidateQueries({ queryKey: ['servers'] });
+			const versionLine = result.cyberpanelVersion
+				? ` · CyberPanel ${result.cyberpanelVersion}`
+				: '';
+			toast({ title: `Server #${id} is reachable${versionLine}` });
+		},
+		onError: () =>
+			toast({ title: 'Connection test failed', variant: 'destructive' }),
 	});
 
 	function invalidate() {

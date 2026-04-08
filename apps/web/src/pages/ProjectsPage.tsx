@@ -514,8 +514,7 @@ function BedrockJobsDialog({
 										<div className='flex items-center gap-3 px-4 py-3'>
 											<Badge
 												variant={
-													BEDROCK_JOB_STATUS_VARIANT[row.status] ??
-													'secondary'
+													BEDROCK_JOB_STATUS_VARIANT[row.status] ?? 'secondary'
 												}
 												className='shrink-0 capitalize'
 											>
@@ -553,10 +552,7 @@ function BedrockJobsDialog({
 													})}
 												</p>
 												<p>
-													{bedrockDuration(
-														row.started_at,
-														row.completed_at,
-													)}
+													{bedrockDuration(row.started_at, row.completed_at)}
 												</p>
 											</div>
 											<ExpandLogButton

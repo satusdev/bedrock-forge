@@ -126,7 +126,9 @@ export class CreateBedrockProcessor extends WorkerHost {
 								`MySQL error: ${mysqlResult.stderr}`,
 						);
 					}
-					this.logger.log(`Database ${cyberpanel.dbName} created via MySQL CLI`);
+					this.logger.log(
+						`Database ${cyberpanel.dbName} created via MySQL CLI`,
+					);
 				}
 				await job.updateProgress({ value: 30, step: 'Database created' });
 			}
