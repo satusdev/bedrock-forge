@@ -66,6 +66,34 @@ export class MonitorProcessor extends WorkerHost {
 			responseTimeMs = Date.now() - start;
 		}
 
+		// Confirmation retry: if first check failed, wait 5 s then try once more
+		// before declaring the site down. Prevents false-positive alerts on transient
+		// network blips or momentary process restarts.
+		if (!isUp) {
+			this.logger.warn(
+				`Monitor ${monitorId}: first check failed (HTTP ${statusCode ?? 0}) — retrying in 5 s`,
+			);
+			await new Promise(resolve => setTimeout(resolve, 5_000));
+			const retryStart = Date.now();
+			try {
+				const retryResult = await this.checkHttp(url, timeout);
+				statusCode = retryResult.statusCode;
+				responseTimeMs = Date.now() - retryStart;
+				isUp = retryResult.statusCode >= 200 && retryResult.statusCode < 400;
+				if (isUp) {
+					this.logger.log(
+						`Monitor ${monitorId}: retry succeeded (HTTP ${statusCode}) — not marking as down`,
+					);
+				}
+			} catch {
+				isUp = false;
+				responseTimeMs = Date.now() - retryStart;
+				this.logger.warn(
+					`Monitor ${monitorId}: retry also failed — confirming down`,
+				);
+			}
+		}
+
 		await this.prisma.monitorResult.create({
 			data: {
 				monitor_id: BigInt(monitorId),
@@ -102,6 +130,38 @@ export class MonitorProcessor extends WorkerHost {
 				uptime_pct: uptime,
 			},
 		});
+
+		// Detect degraded state: site responded but is slower than 5 s threshold
+		const isDegraded = isUp && (responseTimeMs ?? 0) > 5_000;
+		if (isDegraded) {
+			this.logger.warn(
+				`Monitor ${monitorId}: site is degraded — ${responseTimeMs}ms response time`,
+			);
+			await this.prisma.monitorLog.create({
+				data: {
+					monitor_id: BigInt(monitorId),
+					event_type: 'degraded',
+					status_code: statusCode,
+					response_ms: responseTimeMs,
+					message: `Site responding slowly: ${responseTimeMs}ms (threshold: 5000ms)`,
+				},
+			});
+			await this.notificationsQueue.add(
+				JOB_TYPES.NOTIFICATION_SEND,
+				{
+					eventType: 'monitor.degraded',
+					payload: {
+						monitorId: Number(monitorId),
+						environmentId: Number(monitor.environment.id),
+						url,
+						statusCode: statusCode ?? 0,
+						responseMs: responseTimeMs ?? 0,
+						checkedAt: checkedAt.toISOString(),
+					},
+				},
+				{ attempts: 3, removeOnComplete: 100, removeOnFail: 1000 },
+			);
+		}
 
 		// Persist state-transition log and fire notification on change (up→down or down→up)
 		if (prevIsUp !== null && prevIsUp !== isUp) {

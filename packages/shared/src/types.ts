@@ -232,7 +232,7 @@ export const NOTIFICATION_EVENTS = {
 		'sync.completed',
 		'sync.failed',
 	],
-	monitoring: ['monitor.down', 'monitor.up'],
+	monitoring: ['monitor.down', 'monitor.up', 'monitor.degraded'],
 	billing: ['invoice.created', 'invoice.overdue'],
 	users: ['user.registered', 'user.login'],
 	servers: ['server.created', 'server.deleted'],
@@ -247,6 +247,7 @@ export type NotificationEventType =
 	| 'sync.failed'
 	| 'monitor.down'
 	| 'monitor.up'
+	| 'monitor.degraded'
 	| 'invoice.created'
 	| 'invoice.overdue'
 	| 'user.registered'
@@ -263,6 +264,7 @@ export const ALL_NOTIFICATION_EVENTS: NotificationEventType[] = [
 	'sync.failed',
 	'monitor.down',
 	'monitor.up',
+	'monitor.degraded',
 	'invoice.created',
 	'invoice.overdue',
 	'user.registered',

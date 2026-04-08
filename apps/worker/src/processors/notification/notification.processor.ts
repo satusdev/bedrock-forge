@@ -128,6 +128,12 @@ export class NotificationProcessor extends WorkerHost {
 					`Response: ${payload.responseMs ?? '?'}ms`,
 				);
 				break;
+			case 'monitor.degraded':
+				lines.push(
+					`🟡 Site is DEGRADED (slow): ${payload.url ?? '?'}`,
+					`Response time: ${payload.responseMs ?? '?'}ms (threshold: 5000ms) | Status: ${payload.statusCode ?? '?'}`,
+				);
+				break;
 			case 'invoice.created':
 				lines.push(
 					`📄 Invoice ${payload.invoiceNumber ?? '?'} created`,
@@ -156,6 +162,12 @@ export class NotificationProcessor extends WorkerHost {
 				break;
 			case 'server.deleted':
 				lines.push(`🗑️ Server removed: ${payload.serverName ?? '?'}`);
+				break;
+			case 'report.weekly':
+				lines.push(
+					`📊 Weekly report generated`,
+					`Period: ${payload.dateRange ?? '?'} | Backups: ${payload.successfulBackups ?? '?'} ok / ${payload.failedBackups ?? '?'} failed | Monitors down: ${payload.monitorsDown ?? '?'}`,
+				);
 				break;
 			default:
 				lines.push(JSON.stringify(payload, null, 2).slice(0, 500));
