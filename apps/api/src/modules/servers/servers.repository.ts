@@ -48,6 +48,7 @@ export class ServersRepository {
 					ssh_user: true,
 					provider: true,
 					status: true,
+					cyberpanel_version: true,
 					created_at: true,
 					updated_at: true,
 				},
@@ -69,6 +70,7 @@ export class ServersRepository {
 				ssh_user: true,
 				provider: true,
 				status: true,
+				cyberpanel_version: true,
 				created_at: true,
 				updated_at: true,
 			},
@@ -97,6 +99,13 @@ export class ServersRepository {
 		return this.prisma.server.update({
 			where: { id },
 			data: { status },
+		});
+	}
+
+	updateCyberPanelVersion(id: bigint, version: string | null) {
+		return this.prisma.server.update({
+			where: { id },
+			data: { cyberpanel_version: version },
 		});
 	}
 

@@ -89,10 +89,10 @@ export class ServersService {
 		);
 	}
 
-	/** Execute a quick `echo ok` to verify SSH connectivity */
+	/** Execute a quick `echo ok` to verify SSH connectivity, and probe CyberPanel version */
 	async testConnection(
 		id: number,
-	): Promise<{ success: boolean; message: string }> {
+	): Promise<{ success: boolean; message: string; cyberpanelVersion?: string }> {
 		const server = await this.repo.findByIdWithKey(BigInt(id));
 		if (!server) throw new NotFoundException(`Server ${id} not found`);
 
@@ -109,7 +109,31 @@ export class ServersService {
 			const result = await executor.execute('echo ok');
 			const success = result.code === 0;
 			await this.repo.updateStatus(BigInt(id), success ? 'online' : 'offline');
-			return { success, message: result.stdout.trim() };
+
+			let cyberpanelVersion: string | undefined;
+			if (success) {
+				try {
+					const versionResult = await executor.execute(
+						"cat /usr/local/CyberCP/version.txt 2>/dev/null || echo ''",
+				);
+					const detected = versionResult.stdout.trim();
+					if (detected) {
+						cyberpanelVersion = detected;
+						await this.repo
+							.updateCyberPanelVersion(BigInt(id), detected)
+							.catch(() => {});
+					} else {
+						// CyberPanel not installed — clear any stale version
+						await this.repo
+							.updateCyberPanelVersion(BigInt(id), null)
+							.catch(() => {});
+					}
+				} catch {
+					// Version detection is non-critical — ignore failures
+				}
+			}
+
+			return { success, message: result.stdout.trim(), cyberpanelVersion };
 		} catch (err: unknown) {
 			await this.repo.updateStatus(BigInt(id), 'offline').catch(() => {});
 			return {
@@ -336,7 +360,7 @@ export class ServersService {
 				}
 			}
 
-				// Parse DB credentials and extract siteUrl
+			// Parse DB credentials and extract siteUrl
 			let dbCredentials: ScannedProject['dbCredentials'];
 			let siteUrl: string | undefined;
 
@@ -440,7 +464,14 @@ export class ServersService {
 	 *  known multi-part second-level TLDs like .co.uk).
 	 */
 	private extractMainDomain(hostname: string): string {
-		const MULTI_TLD = new Set(['co.uk', 'com.au', 'co.nz', 'org.uk', 'net.au', 'co.za']);
+		const MULTI_TLD = new Set([
+			'co.uk',
+			'com.au',
+			'co.nz',
+			'org.uk',
+			'net.au',
+			'co.za',
+		]);
 		const parts = hostname.split('.');
 		if (parts.length <= 2) return hostname;
 		const twoLabel = parts.slice(-2).join('.');

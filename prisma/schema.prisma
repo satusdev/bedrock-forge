@@ -156,6 +156,7 @@ model Server {
   provider                String?  // e.g. "hetzner", "digitalocean", "vultr"
   status                  ServerStatus @default(unknown)
   cyberpanel_login        Json?    // Encrypted JSON: { url, username, password }
+  cyberpanel_version      String?  // Detected from /usr/local/CyberCP/version.txt via SSH
   created_at              DateTime @default(now()) @db.Timestamptz()
   updated_at              DateTime @updatedAt @db.Timestamptz()
 
