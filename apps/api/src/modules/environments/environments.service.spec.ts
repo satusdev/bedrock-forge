@@ -30,7 +30,7 @@ function makeMonitorsService() {
 }
 
 function makeDomainsService() {
-	return { create: jest.fn().mockResolvedValue({}) };
+	return { findOrCreate: jest.fn().mockResolvedValue({}) };
 }
 
 function makeEnv(
@@ -123,7 +123,7 @@ describe('EnvironmentsService', () => {
 
 			await svc.create(10, { ...baseDto, url: 'https://mysite.com/wp-admin' });
 
-			expect(domainsService.create).toHaveBeenCalledWith(
+			expect(domainsService.findOrCreate).toHaveBeenCalledWith(
 				expect.objectContaining({ name: 'mysite.com', project_id: 10 }),
 			);
 		});
@@ -171,7 +171,7 @@ describe('EnvironmentsService', () => {
 		it('still succeeds when domain service throws', async () => {
 			const env = makeEnv({ id: BigInt(8) });
 			repo.create.mockResolvedValue(env);
-			domainsService.create.mockRejectedValue(new Error('Domain conflict'));
+			domainsService.findOrCreate.mockRejectedValue(new Error('Domain conflict'));
 
 			await expect(svc.create(10, baseDto)).resolves.toBe(env);
 		});
