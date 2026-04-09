@@ -50,7 +50,9 @@ RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
 # Install rclone for Google Drive backup uploads; whois for domain WHOIS lookups
 RUN apk add --no-cache rclone whois && \
     mkdir -p /home/node/.config/rclone && \
-    chown -R node:node /home/node/.config
+    chown -R node:node /home/node/.config && \
+    mkdir -p /tmp/forge-backups && \
+    chown node:node /tmp/forge-backups
 
 WORKDIR /app
 
