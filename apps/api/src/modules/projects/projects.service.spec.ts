@@ -30,7 +30,7 @@ function makeQueue() {
 }
 
 function makeDomainsService() {
-	return { create: jest.fn().mockResolvedValue({}) };
+	return { findOrCreate: jest.fn().mockResolvedValue({}) };
 }
 
 function makeMonitorsService() {
@@ -130,7 +130,7 @@ describe('ProjectsService', () => {
 			expect(monitorsService.create).toHaveBeenCalledWith(
 				expect.objectContaining({ environment_id: 10, enabled: true }),
 			);
-			expect(domainsService.create).toHaveBeenCalledWith(
+			expect(domainsService.findOrCreate).toHaveBeenCalledWith(
 				expect.objectContaining({ name: 'mysite.com', project_id: 1 }),
 			);
 			expect(result).toEqual({ project, environment });
@@ -140,7 +140,7 @@ describe('ProjectsService', () => {
 			const project = makeProject(BigInt(1));
 			const environment = makeEnvironment(BigInt(10));
 			repo.importFromServer.mockResolvedValue({ project, environment });
-			domainsService.create.mockRejectedValue(new Error('Domain conflict'));
+			domainsService.findOrCreate.mockRejectedValue(new Error('Domain conflict'));
 
 			// Should not throw
 			await expect(
@@ -195,7 +195,7 @@ describe('ProjectsService', () => {
 			} as any);
 
 			expect(monitorsService.create).toHaveBeenCalledTimes(2);
-			expect(domainsService.create).toHaveBeenCalledTimes(2);
+			expect(domainsService.findOrCreate).toHaveBeenCalledTimes(2);
 		});
 
 		it('creates main domain entry when mainDomain is provided', async () => {
@@ -224,13 +224,11 @@ describe('ProjectsService', () => {
 				],
 			} as any);
 
-			// domain.create called twice: once for sub.mysite.com and once for mainDomain
-			expect(domainsService.create).toHaveBeenCalledTimes(2);
-			const calls = (domainsService.create as jest.Mock).mock.calls.map(
-				c => c[0].name,
+			// domain.findOrCreate called once with mainDomain (subdomain is skipped in favour of apex)
+			expect(domainsService.findOrCreate).toHaveBeenCalledTimes(1);
+			expect(domainsService.findOrCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ name: 'mysite.com', project_id: 1 }),
 			);
-			expect(calls).toContain('sub.mysite.com');
-			expect(calls).toContain('mysite.com');
 		});
 
 		it('still completes when monitor/domain creation fails for one entry', async () => {
@@ -242,7 +240,7 @@ describe('ProjectsService', () => {
 			];
 			repo.importBulk.mockResolvedValue(results);
 			monitorsService.create.mockRejectedValue(new Error('Monitor quota'));
-			domainsService.create.mockRejectedValue(new Error('Domain conflict'));
+			domainsService.findOrCreate.mockRejectedValue(new Error('Domain conflict'));
 
 			// Should not throw
 			await expect(
