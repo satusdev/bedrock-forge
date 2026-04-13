@@ -171,7 +171,9 @@ describe('EnvironmentsService', () => {
 		it('still succeeds when domain service throws', async () => {
 			const env = makeEnv({ id: BigInt(8) });
 			repo.create.mockResolvedValue(env);
-			domainsService.findOrCreate.mockRejectedValue(new Error('Domain conflict'));
+			domainsService.findOrCreate.mockRejectedValue(
+				new Error('Domain conflict'),
+			);
 
 			await expect(svc.create(10, baseDto)).resolves.toBe(env);
 		});

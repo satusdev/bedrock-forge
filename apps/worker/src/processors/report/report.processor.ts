@@ -60,7 +60,10 @@ const PERIOD_LABELS: Record<ReportPeriod, string> = {
 	last_month: 'Last month',
 };
 
-function computeDateRange(period: ReportPeriod, now: Date): { startDate: Date; dateRange: string; periodLabel: string } {
+function computeDateRange(
+	period: ReportPeriod,
+	now: Date,
+): { startDate: Date; dateRange: string; periodLabel: string } {
 	let startDate: Date;
 	switch (period) {
 		case 'last_30d':
@@ -70,11 +73,16 @@ function computeDateRange(period: ReportPeriod, now: Date): { startDate: Date; d
 			startDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
 			break;
 		case 'this_month': {
-			startDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+			startDate = new Date(
+				Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+			);
 			break;
 		}
 		case 'last_month': {
-			const y = now.getUTCMonth() === 0 ? now.getUTCFullYear() - 1 : now.getUTCFullYear();
+			const y =
+				now.getUTCMonth() === 0
+					? now.getUTCFullYear() - 1
+					: now.getUTCFullYear();
 			const m = now.getUTCMonth() === 0 ? 11 : now.getUTCMonth() - 1;
 			startDate = new Date(Date.UTC(y, m, 1));
 			break;
@@ -408,13 +416,23 @@ export class ReportProcessor extends WorkerHost {
 
 			// ── 3. Build PDF ───────────────────────────────────────────────────────
 
-			const pdfBuffer = await this.buildPdf(dateRange, periodLabel, now, backups, monitors);
+			const pdfBuffer = await this.buildPdf(
+				dateRange,
+				periodLabel,
+				now,
+				backups,
+				monitors,
+			);
 
 			// ── 4. Send to Slack ───────────────────────────────────────────────────
 
 			// Honor channelIds filter when provided (manual trigger with specific channels)
 			const channelWhere = channelIds?.length
-				? { active: true, events: { has: 'report.weekly' }, id: { in: channelIds.map(id => BigInt(id)) } }
+				? {
+						active: true,
+						events: { has: 'report.weekly' },
+						id: { in: channelIds.map(id => BigInt(id)) },
+					}
 				: { active: true, events: { has: 'report.weekly' } };
 
 			const channels = await this.prisma.notificationChannel.findMany({
@@ -497,7 +515,13 @@ export class ReportProcessor extends WorkerHost {
 		monitors: MonitorRow[],
 	): Promise<Buffer> {
 		const printer = new PdfPrinter(FONTS, undefined, NOOP_RESOLVER);
-		const docDef = buildDocDef(dateRange, periodLabel, generatedAt, backups, monitors);
+		const docDef = buildDocDef(
+			dateRange,
+			periodLabel,
+			generatedAt,
+			backups,
+			monitors,
+		);
 		const doc = await printer.createPdfKitDocument(docDef);
 
 		return new Promise<Buffer>((resolve, reject) => {

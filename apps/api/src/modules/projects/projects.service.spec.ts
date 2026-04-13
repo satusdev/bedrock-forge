@@ -140,7 +140,9 @@ describe('ProjectsService', () => {
 			const project = makeProject(BigInt(1));
 			const environment = makeEnvironment(BigInt(10));
 			repo.importFromServer.mockResolvedValue({ project, environment });
-			domainsService.findOrCreate.mockRejectedValue(new Error('Domain conflict'));
+			domainsService.findOrCreate.mockRejectedValue(
+				new Error('Domain conflict'),
+			);
 
 			// Should not throw
 			await expect(
@@ -240,7 +242,9 @@ describe('ProjectsService', () => {
 			];
 			repo.importBulk.mockResolvedValue(results);
 			monitorsService.create.mockRejectedValue(new Error('Monitor quota'));
-			domainsService.findOrCreate.mockRejectedValue(new Error('Domain conflict'));
+			domainsService.findOrCreate.mockRejectedValue(
+				new Error('Domain conflict'),
+			);
 
 			// Should not throw
 			await expect(

@@ -3,6 +3,9 @@ import {
 	Get,
 	Put,
 	Post,
+	Patch,
+	Param,
+	ParseIntPipe,
 	Body,
 	UseGuards,
 	HttpCode,
@@ -16,6 +19,7 @@ import { ReportsService } from './reports.service';
 import {
 	UpdateReportScheduleDto,
 	GenerateReportDto,
+	ToggleChannelSubscriptionDto,
 } from './dto/report-schedule.dto';
 
 @Controller('reports')
@@ -48,5 +52,13 @@ export class ReportsController {
 	@Get('channels')
 	getAvailableChannels() {
 		return this.svc.getAvailableChannels();
+	}
+
+	@Patch('channels/:id/subscribe')
+	toggleSubscription(
+		@Param('id', ParseIntPipe) id: number,
+		@Body() dto: ToggleChannelSubscriptionDto,
+	) {
+		return this.svc.toggleChannelSubscription(id, dto.subscribed);
 	}
 }

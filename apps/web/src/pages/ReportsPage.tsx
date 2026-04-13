@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
 	FileBarChart,
@@ -10,6 +10,7 @@ import {
 	CalendarClock,
 	ChevronDown,
 	ChevronUp,
+	Bell,
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
@@ -25,6 +26,7 @@ import {
 	SelectValue,
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
+import { Switch } from '@/components/ui/switch';
 import {
 	ExecutionLogPanel,
 	ExpandLogButton,
@@ -38,6 +40,7 @@ interface ReportChannel {
 	slack_channel_id: string | null;
 	has_token: boolean;
 	active: boolean;
+	subscribed: boolean;
 }
 
 interface ReportScheduleConfig {
@@ -45,6 +48,7 @@ interface ReportScheduleConfig {
 	day_of_week: number;
 	hour: number;
 	minute: number;
+	period?: string;
 }
 
 interface ReportExecutionRow {
@@ -142,6 +146,7 @@ export function ReportsPage() {
 	const [reportHour, setReportHour] = useState(8);
 	const [reportMinute, setReportMinute] = useState(0);
 	const [reportEnabled, setReportEnabled] = useState(true);
+	const [reportPeriod, setReportPeriod] = useState<string>('last_7d');
 
 	// ── History expand state ─────────────────────────────────────────────────
 	const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
@@ -171,6 +176,7 @@ export function ReportsPage() {
 			setReportDayOfWeek(scheduleConfig.day_of_week);
 			setReportHour(scheduleConfig.hour);
 			setReportMinute(scheduleConfig.minute);
+			setReportPeriod(scheduleConfig.period ?? 'last_7d');
 		}
 	}, [scheduleConfig]);
 
@@ -180,7 +186,8 @@ export function ReportsPage() {
 		mutationFn: () =>
 			api.post<{ jobId: string }>('/reports/generate', {
 				period,
-				channelIds: selectedChannelIds.length > 0 ? selectedChannelIds : undefined,
+				channelIds:
+					selectedChannelIds.length > 0 ? selectedChannelIds : undefined,
 			}),
 		onSuccess: () => {
 			qc.invalidateQueries({ queryKey: ['report-history'] });
@@ -200,6 +207,7 @@ export function ReportsPage() {
 				day_of_week: reportDayOfWeek,
 				hour: reportHour,
 				minute: reportMinute,
+				period: reportPeriod,
 			}),
 		onSuccess: () => {
 			qc.invalidateQueries({ queryKey: ['report-config'] });
@@ -208,7 +216,18 @@ export function ReportsPage() {
 		onError: () =>
 			toast({ title: 'Failed to save schedule', variant: 'destructive' }),
 	});
-
+	const toggleSubscriptionMutation = useMutation({
+		mutationFn: ({ id, subscribed }: { id: number; subscribed: boolean }) =>
+			api.patch(`/reports/channels/${id}/subscribe`, { subscribed }),
+		onSuccess: () => {
+			qc.invalidateQueries({ queryKey: ['report-channels'] });
+		},
+		onError: () =>
+			toast({
+				title: 'Failed to update subscription',
+				variant: 'destructive',
+			}),
+	});
 	// ── Helpers ──────────────────────────────────────────────────────────────
 
 	function toggleChannel(id: number) {
@@ -240,8 +259,8 @@ export function ReportsPage() {
 			<div className='border rounded-lg p-5 bg-card space-y-4'>
 				<h2 className='font-semibold text-base'>Generate Report</h2>
 				<p className='text-sm text-muted-foreground'>
-					Generate a PDF backup and monitor status report and send it immediately
-					to selected Slack channels.
+					Generate a PDF backup and monitor status report and send it
+					immediately to selected Slack channels.
 				</p>
 
 				<div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
@@ -262,10 +281,10 @@ export function ReportsPage() {
 						</Select>
 					</div>
 
-					{/* Channel picker */}
+					{/* Channel override picker */}
 					<div className='space-y-1.5'>
 						<Label>
-							Channels{' '}
+							Override channels{' '}
 							<span className='text-muted-foreground font-normal'>
 								(leave empty to send to all subscribed)
 							</span>
@@ -276,12 +295,7 @@ export function ReportsPage() {
 							</div>
 						) : channels.length === 0 ? (
 							<p className='text-sm text-muted-foreground'>
-								No channels subscribed to{' '}
-								<span className='font-mono'>report.weekly</span>. Add one on the{' '}
-								<a href='/notifications' className='underline'>
-									Notifications
-								</a>{' '}
-								page.
+								No channels found. Subscribe channels below.
 							</p>
 						) : (
 							<div className='flex flex-wrap gap-2'>
@@ -295,12 +309,16 @@ export function ReportsPage() {
 											className={`px-3 py-1.5 rounded-md border text-sm font-medium transition-colors ${
 												selected
 													? 'bg-primary text-primary-foreground border-primary'
-													: 'bg-background text-foreground border-border hover:bg-accent'
+													: ch.subscribed
+														? 'bg-background text-foreground border-border hover:bg-accent'
+														: 'bg-background text-muted-foreground border-dashed border-border hover:bg-accent'
 											}`}
 										>
 											{ch.name}
-											{!ch.has_token && (
-												<span className='ml-1 text-xs opacity-60'>(no token)</span>
+											{!ch.subscribed && (
+												<span className='ml-1 text-xs opacity-50'>
+													(not subscribed)
+												</span>
 											)}
 										</button>
 									);
@@ -328,7 +346,62 @@ export function ReportsPage() {
 					)}
 				</Button>
 			</div>
-
+			{/* ── Channel Subscriptions ──────────────────────────────────────── */}
+			<div className='border rounded-lg p-5 bg-card space-y-4'>
+				<h2 className='font-semibold text-base flex items-center gap-2'>
+					<Bell className='h-4 w-4' />
+					Channel Subscriptions
+				</h2>
+				<p className='text-sm text-muted-foreground'>
+					Toggle which Slack channels automatically receive scheduled weekly
+					reports.
+				</p>
+				{channelsLoading ? (
+					<div className='text-sm text-muted-foreground flex items-center gap-2'>
+						<Loader2 className='h-4 w-4 animate-spin' /> Loading…
+					</div>
+				) : channels.length === 0 ? (
+					<p className='text-sm text-muted-foreground'>
+						No active notification channels.{' '}
+						<a href='/notifications' className='underline'>
+							Add one here.
+						</a>
+					</p>
+				) : (
+					<div className='divide-y border rounded-md'>
+						{channels.map(ch => (
+							<div
+								key={ch.id}
+								className='flex items-center gap-3 px-4 py-3'
+							>
+								<Switch
+									checked={ch.subscribed}
+									onCheckedChange={checked =>
+										toggleSubscriptionMutation.mutate({
+											id: ch.id,
+											subscribed: checked,
+										})
+									}
+									disabled={toggleSubscriptionMutation.isPending}
+								/>
+								<div className='flex-1 min-w-0'>
+									<p className='text-sm font-medium'>{ch.name}</p>
+									{ch.slack_channel_id && (
+										<p className='text-xs text-muted-foreground'>
+											#{ch.slack_channel_id}
+										</p>
+									)}
+								</div>
+								{!ch.has_token && (
+									<Badge variant='warning' className='text-xs shrink-0'>
+										No token
+									</Badge>
+								)}
+							</div>
+						))}
+					</div>
+				)}
+			</div>
 			{/* ── Report History ─────────────────────────────────────────────── */}
 			<div className='border rounded-lg bg-card overflow-hidden'>
 				<div className='px-5 py-4 border-b flex items-center justify-between'>
@@ -336,7 +409,9 @@ export function ReportsPage() {
 					<Button
 						variant='ghost'
 						size='sm'
-						onClick={() => qc.invalidateQueries({ queryKey: ['report-history'] })}
+						onClick={() =>
+							qc.invalidateQueries({ queryKey: ['report-history'] })
+						}
 					>
 						Refresh
 					</Button>
@@ -369,16 +444,16 @@ export function ReportsPage() {
 								{history.map(row => {
 									const isExpanded = expandedRows.has(row.id);
 									const hasLogs =
-										Array.isArray(row.execution_log) && row.execution_log.length > 0;
+										Array.isArray(row.execution_log) &&
+										row.execution_log.length > 0;
 									const periodLabel =
 										row.payload?.periodLabel ??
 										PERIOD_OPTIONS.find(o => o.value === row.payload?.period)
 											?.label ??
 										'Weekly';
 									return (
-										<>
+										<Fragment key={row.id}>
 											<tr
-												key={row.id}
 												className='border-b last:border-0 hover:bg-muted/30 transition-colors'
 											>
 												<td className='px-4 py-3'>
@@ -416,15 +491,15 @@ export function ReportsPage() {
 												</td>
 											</tr>
 											{isExpanded && hasLogs && (
-												<tr key={`${row.id}-log`} className='bg-muted/20'>
-													<td colSpan={7} className='px-4 py-3'>
-														<ExecutionLogPanel
-															jobExecutionId={Number(row.id)}
-														/>
-													</td>
-												</tr>
-											)}
-										</>
+											<tr className='bg-muted/20'>
+												<td colSpan={7} className='px-4 py-3'>
+													<ExecutionLogPanel
+														jobExecutionId={Number(row.id)}
+													/>
+												</td>
+											</tr>
+										)}
+										</Fragment>
 									);
 								})}
 							</tbody>
@@ -453,13 +528,9 @@ export function ReportsPage() {
 					</label>
 				</div>
 				<p className='text-sm text-muted-foreground'>
-					Automatically sends a weekly PDF report to all channels subscribed to
-					the <span className='font-mono'>report.weekly</span> event. Subscribe
-					channels on the{' '}
-					<a href='/notifications' className='underline'>
-						Notifications
-					</a>{' '}
-					page.
+					Automatically sends a PDF report to all channels subscribed to{' '}
+					<span className='font-mono'>report.weekly</span>. Manage subscriptions
+					in the Channel Subscriptions card above.
 				</p>
 
 				{scheduleLoading ? (
@@ -467,7 +538,22 @@ export function ReportsPage() {
 						<Loader2 className='h-4 w-4 animate-spin' /> Loading schedule…
 					</div>
 				) : (
-					<div className='grid grid-cols-3 gap-3'>
+					<div className='grid grid-cols-2 sm:grid-cols-4 gap-3'>
+						<div className='space-y-1'>
+							<Label>Period</Label>
+							<Select value={reportPeriod} onValueChange={setReportPeriod}>
+								<SelectTrigger>
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									{PERIOD_OPTIONS.map(opt => (
+										<SelectItem key={opt.value} value={opt.value}>
+											{opt.label}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						</div>
 						<div className='space-y-1'>
 							<Label>Day of week</Label>
 							<select
@@ -490,7 +576,9 @@ export function ReportsPage() {
 								max={23}
 								value={reportHour}
 								onChange={e =>
-									setReportHour(Math.min(23, Math.max(0, Number(e.target.value))))
+									setReportHour(
+										Math.min(23, Math.max(0, Number(e.target.value))),
+									)
 								}
 							/>
 						</div>
