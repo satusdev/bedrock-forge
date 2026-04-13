@@ -52,6 +52,7 @@ const EVENT_GROUPS: Record<string, string[]> = {
 	Billing: ['invoice.created', 'invoice.overdue'],
 	Users: ['user.registered', 'user.login'],
 	Servers: ['server.created', 'server.deleted'],
+	Reports: ['report.weekly'],
 };
 
 const ALL_EVENTS = Object.values(EVENT_GROUPS).flat();

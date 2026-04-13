@@ -364,21 +364,24 @@ function ProjectCard({
 			</CardHeader>
 
 			<CardContent className='pt-0 space-y-2'>
-				{primaryEnv && (
-					<div className='flex items-center gap-1.5 min-w-0'>
+				{project.environments.map(env => (
+					<div key={env.id} className='flex items-center gap-1.5 min-w-0'>
 						<Globe className='h-3.5 w-3.5 text-muted-foreground shrink-0' />
 						<a
-							href={primaryEnv.url}
+							href={env.url}
 							target='_blank'
 							rel='noreferrer'
 							className='text-xs text-primary hover:underline truncate flex items-center gap-1'
 							onClick={e => e.stopPropagation()}
 						>
-							{primaryEnv.url.replace(/^https?:\/\//, '')}
+							{env.url.replace(/^https?:\/\//, '')}
 							<ExternalLink className='h-2.5 w-2.5 shrink-0' />
 						</a>
+						<Badge variant='outline' className='text-[10px] px-1.5 py-0 shrink-0'>
+							{env.type}
+						</Badge>
 					</div>
-				)}
+				))}
 				{servers.length > 0 && (
 					<div className='flex items-center gap-1.5 min-w-0'>
 						<ServerIcon className='h-3.5 w-3.5 text-muted-foreground shrink-0' />
@@ -387,29 +390,14 @@ function ProjectCard({
 						</span>
 					</div>
 				)}
-				<div className='flex items-center justify-between'>
-					<div className='flex items-center gap-1.5'>
-						<Layers className='h-3.5 w-3.5 text-muted-foreground' />
-						<span className='text-xs text-muted-foreground'>
-							{project._count.environments}{' '}
-							{project._count.environments === 1
-								? 'environment'
-								: 'environments'}
-						</span>
-					</div>
-					{project._count.environments > 1 && (
-						<div className='flex gap-1'>
-							{project.environments.slice(0, 3).map(env => (
-								<Badge
-									key={env.id}
-									variant='outline'
-									className='text-[10px] px-1.5 py-0'
-								>
-									{env.type}
-								</Badge>
-							))}
-						</div>
-					)}
+				<div className='flex items-center gap-1.5'>
+					<Layers className='h-3.5 w-3.5 text-muted-foreground' />
+					<span className='text-xs text-muted-foreground'>
+						{project._count.environments}{' '}
+						{project._count.environments === 1
+							? 'environment'
+							: 'environments'}
+					</span>
 				</div>
 			</CardContent>
 		</Card>

@@ -54,10 +54,12 @@ function makeNotifQueue() {
 	return { add: jest.fn().mockResolvedValue({}) };
 }
 
-function baseMonitor(overrides: Partial<{
-	last_checked_at: Date | null;
-	last_status: number | null;
-}> = {}) {
+function baseMonitor(
+	overrides: Partial<{
+		last_checked_at: Date | null;
+		last_status: number | null;
+	}> = {},
+) {
 	return {
 		id: BigInt(1),
 		environment_id: BigInt(5),
@@ -105,7 +107,9 @@ describe('MonitorProcessor', () => {
 		prisma.monitor.findUnique.mockResolvedValue(baseMonitor());
 		const job = { id: 'j1', data: { monitorId: 1 } } as any;
 		// Fail both attempts immediately (skip real network + 5 s retry delay)
-		jest.spyOn(processor as any, 'checkHttp').mockRejectedValue(new Error('ECONNREFUSED'));
+		jest
+			.spyOn(processor as any, 'checkHttp')
+			.mockRejectedValue(new Error('ECONNREFUSED'));
 		jest.spyOn(global, 'setTimeout').mockImplementation((fn: TimerHandler) => {
 			if (typeof fn === 'function') fn();
 			return 0 as unknown as ReturnType<typeof setTimeout>;
@@ -129,7 +133,9 @@ describe('MonitorProcessor', () => {
 		prisma.monitorResult.count.mockResolvedValue(1);
 
 		// Spy on checkHttp to return a controlled response
-		jest.spyOn(processor as any, 'checkHttp').mockResolvedValue({ statusCode: 200, body: '' });
+		jest
+			.spyOn(processor as any, 'checkHttp')
+			.mockResolvedValue({ statusCode: 200, body: '' });
 
 		const job = { id: 'j2', data: { monitorId: 1 } } as any;
 		await processor.process(job);
@@ -215,7 +221,9 @@ describe('MonitorProcessor', () => {
 		prisma.monitorResult.count.mockResolvedValue(5);
 
 		// Current check returns 200 → isUp = true
-		jest.spyOn(processor as any, 'checkHttp').mockResolvedValue({ statusCode: 200, body: '' });
+		jest
+			.spyOn(processor as any, 'checkHttp')
+			.mockResolvedValue({ statusCode: 200, body: '' });
 
 		const job = { id: 'j4', data: { monitorId: 1 } } as any;
 		await processor.process(job);
@@ -233,7 +241,9 @@ describe('MonitorProcessor', () => {
 	it('marks execution completed when site is up', async () => {
 		const monitor = baseMonitor();
 		prisma.monitor.findUnique.mockResolvedValue(monitor);
-		jest.spyOn(processor as any, 'checkHttp').mockResolvedValue({ statusCode: 200, body: '' });
+		jest
+			.spyOn(processor as any, 'checkHttp')
+			.mockResolvedValue({ statusCode: 200, body: '' });
 
 		const job = { id: 'j5', data: { monitorId: 1 } } as any;
 		await processor.process(job);
@@ -248,7 +258,9 @@ describe('MonitorProcessor', () => {
 	it('marks execution failed when site is down', async () => {
 		const monitor = baseMonitor();
 		prisma.monitor.findUnique.mockResolvedValue(monitor);
-		jest.spyOn(processor as any, 'checkHttp').mockResolvedValue({ statusCode: 503, body: '' });
+		jest
+			.spyOn(processor as any, 'checkHttp')
+			.mockResolvedValue({ statusCode: 503, body: '' });
 
 		const job = { id: 'j6', data: { monitorId: 1 } } as any;
 		await processor.process(job);

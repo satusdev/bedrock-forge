@@ -56,6 +56,7 @@ export class ReportsService implements OnModuleInit {
 			day_of_week: dto.day_of_week,
 			hour: dto.hour,
 			minute: dto.minute,
+			period: dto.period ?? 'last_7d',
 		};
 
 		// Persist to AppSetting
@@ -112,7 +113,7 @@ export class ReportsService implements OnModuleInit {
 
 	async getAvailableChannels() {
 		const channels = await this.prisma.notificationChannel.findMany({
-			where: { active: true, events: { has: 'report.weekly' } },
+			where: { active: true },
 			orderBy: { name: 'asc' },
 		});
 		return channels.map(c => ({
@@ -121,7 +122,31 @@ export class ReportsService implements OnModuleInit {
 			slack_channel_id: c.slack_channel_id,
 			has_token: !!c.slack_bot_token_enc,
 			active: c.active,
+			subscribed: c.events.includes('report.weekly'),
 		}));
+	}
+
+	async toggleChannelSubscription(
+		id: number,
+		subscribed: boolean,
+	): Promise<{ id: number; name: string; subscribed: boolean }> {
+		const channel = await this.prisma.notificationChannel.findUnique({
+			where: { id: BigInt(id) },
+		});
+		if (!channel) throw new Error(`Channel ${id} not found`);
+
+		const events = channel.events.filter(e => e !== 'report.weekly');
+		if (subscribed) events.push('report.weekly');
+
+		const updated = await this.prisma.notificationChannel.update({
+			where: { id: BigInt(id) },
+			data: { events },
+		});
+		return {
+			id: Number(updated.id),
+			name: updated.name,
+			subscribed: updated.events.includes('report.weekly'),
+		};
 	}
 
 	// ── private helpers ──────────────────────────────────────────────────────
@@ -134,7 +159,7 @@ export class ReportsService implements OnModuleInit {
 	private async registerRepeatableJob(config: ReportScheduleConfig) {
 		await this.reportsQueue.add(
 			JOB_TYPES.REPORT_GENERATE,
-			{},
+			{ period: config.period ?? 'last_7d' },
 			{
 				repeat: { pattern: this.toCron(config) },
 				jobId: REPEATABLE_JOB_NAME,

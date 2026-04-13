@@ -13,6 +13,7 @@ export interface ReportScheduleConfig {
 	day_of_week: number;
 	hour: number;
 	minute: number;
+	period?: ReportPeriod;
 }
 
 export type ReportPeriod =
@@ -49,6 +50,15 @@ export class UpdateReportScheduleDto {
 	@Min(0)
 	@Max(59)
 	minute!: number;
+
+	@IsOptional()
+	@IsIn(REPORT_PERIODS)
+	period?: ReportPeriod;
+}
+
+export class ToggleChannelSubscriptionDto {
+	@IsBoolean()
+	subscribed!: boolean;
 }
 
 export class GenerateReportDto {
