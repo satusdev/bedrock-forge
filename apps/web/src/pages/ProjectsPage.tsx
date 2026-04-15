@@ -377,7 +377,10 @@ function ProjectCard({
 							{env.url.replace(/^https?:\/\//, '')}
 							<ExternalLink className='h-2.5 w-2.5 shrink-0' />
 						</a>
-						<Badge variant='outline' className='text-[10px] px-1.5 py-0 shrink-0'>
+						<Badge
+							variant='outline'
+							className='text-[10px] px-1.5 py-0 shrink-0'
+						>
 							{env.type}
 						</Badge>
 					</div>
@@ -394,9 +397,7 @@ function ProjectCard({
 					<Layers className='h-3.5 w-3.5 text-muted-foreground' />
 					<span className='text-xs text-muted-foreground'>
 						{project._count.environments}{' '}
-						{project._count.environments === 1
-							? 'environment'
-							: 'environments'}
+						{project._count.environments === 1 ? 'environment' : 'environments'}
 					</span>
 				</div>
 			</CardContent>

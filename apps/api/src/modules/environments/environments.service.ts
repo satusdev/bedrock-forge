@@ -119,7 +119,7 @@ export class EnvironmentsService {
 
 	/**
 	 * Extract the registrable root domain from a hostname.
-	 * e.g. quranlibya.staging.ly → staging.ly
+	 * e.g. blog.example.com → example.com
 	 */
 	private extractRegistrableDomain(hostname: string): string {
 		const MULTI_TLD = new Set([

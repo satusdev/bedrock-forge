@@ -163,35 +163,35 @@ DB_HOST=localhost
 		expect(result?.dbName).toBe('mydb');
 	});
 
-	// ─── .env format: DB_HOST commented out (real Bedrock .env) ───────────────
+	// ─── .env format: DB_HOST commented out ─────────────────────────────────
 
 	it('defaults DB_HOST to localhost when DB_HOST is commented out', () => {
 		const content = `
-DB_NAME='mg_stage'
-DB_USER='mg_stage'
-DB_PASSWORD='%N71NyMn6ghKGAgM'
+DB_NAME='test_db'
+DB_USER='test_db'
+DB_PASSWORD='TestP@ssw0rd123'
 
 # Optional database variables
 # DB_HOST='localhost'
 DB_PREFIX='wp0m_'
 
-WP_HOME='https://mg.staging.ly'
+WP_HOME='https://test.example.com'
     `;
 		expect(parser.parseEnvFile(content)).toEqual({
-			dbName: 'mg_stage',
-			dbUser: 'mg_stage',
-			dbPassword: '%N71NyMn6ghKGAgM',
+			dbName: 'test_db',
+			dbUser: 'test_db',
+			dbPassword: 'TestP@ssw0rd123',
 			dbHost: 'localhost',
 		});
 	});
 
-	// ─── .env format: full real-world Bedrock .env ────────────────────────────
+	// ─── .env format: full Bedrock .env ─────────────────────────────────────
 
-	it('parses a full real-world Bedrock .env file', () => {
+	it('parses a full Bedrock .env file', () => {
 		const content = `
-DB_NAME='mg_stage'
-DB_USER='mg_stage'
-DB_PASSWORD='%N71NyMn6ghKGAgM'
+DB_NAME='test_db'
+DB_USER='test_db'
+DB_PASSWORD='TestP@ssw0rd123'
 
 # Optionally, you can use a data source name (DSN)
 # When using a DSN, you can remove the DB_NAME, DB_USER, DB_PASSWORD, and DB_HOST variables
@@ -202,7 +202,7 @@ DB_PASSWORD='%N71NyMn6ghKGAgM'
 DB_PREFIX='wp0m_'
 
 WP_ENV=development
-WP_HOME='https://mg.staging.ly'
+WP_HOME='https://test.example.com'
 WP_DEBUG=false
 WP_DEBUG_DISPLAY=false
 WP_DEBUG_LOG=false
@@ -211,9 +211,9 @@ AUTH_KEY='kgsX^yzyR;D)3e>rP0]G@$>Om;>725\`i]7_>H.}:&i{+0di(dT9Qw_prT1t*$gQa'
 NONCE_KEY='5YGt%VcB=k=={ai]YZA.P7H>jlifP\`RC&Gp.vM{7]crers!9bA(xZ+HE:-$g,D*%'
     `;
 		expect(parser.parseEnvFile(content)).toEqual({
-			dbName: 'mg_stage',
-			dbUser: 'mg_stage',
-			dbPassword: '%N71NyMn6ghKGAgM',
+			dbName: 'test_db',
+			dbUser: 'test_db',
+			dbPassword: 'TestP@ssw0rd123',
 			dbHost: 'localhost',
 		});
 	});

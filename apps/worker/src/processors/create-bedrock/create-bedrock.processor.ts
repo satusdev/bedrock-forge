@@ -301,6 +301,11 @@ export class CreateBedrockProcessor extends WorkerHost {
 							`UPDATE \`${p}usermeta\` SET meta_value = REPLACE(meta_value, '${o}', '${n}')`,
 							`UPDATE \`${p}comments\` SET comment_content = REPLACE(comment_content, '${o}', '${n}')`,
 							`UPDATE \`${p}comments\` SET comment_author_url = REPLACE(comment_author_url, '${o}', '${n}')`,
+							`UPDATE \`${p}commentmeta\` SET meta_value = REPLACE(meta_value, '${o}', '${n}')`,
+							`UPDATE \`${p}termmeta\` SET meta_value = REPLACE(meta_value, '${o}', '${n}')`,
+							`UPDATE \`${p}links\` SET link_url = REPLACE(link_url, '${o}', '${n}')`,
+							`UPDATE \`${p}links\` SET link_image = REPLACE(link_image, '${o}', '${n}')`,
+							`UPDATE \`${p}links\` SET link_rss = REPLACE(link_rss, '${o}', '${n}')`,
 						);
 					}
 					await executor.pushFile({
@@ -323,6 +328,48 @@ export class CreateBedrockProcessor extends WorkerHost {
 					value: 80,
 					step: 'URL search-replace done',
 				});
+
+				// Replace hardcoded URLs in wp-content files (CSS, JS, PHP, etc.)
+				if (srcUrl && tgtUrl && srcUrl !== tgtUrl) {
+					const sedEscape = (s: string) =>
+						s.replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
+					const wpContent = `${tgtPath}/wp-content`;
+					const filePairs: Array<[string, string]> = [[srcUrl, tgtUrl]];
+					const altSrc = flipProtocol(srcUrl);
+					const altTgt = flipProtocol(tgtUrl);
+					if (altSrc && altTgt && altSrc !== tgtUrl)
+						filePairs.push([altSrc, altTgt]);
+					for (const [oldUrl, newUrl] of filePairs) {
+						await executor
+							.execute(
+								[
+									`find ${shellQuote(wpContent)} -type f`,
+									`\\( -name '*.css' -o -name '*.js' -o -name '*.json' -o -name '*.html'`,
+									`-o -name '*.htm' -o -name '*.svg' -o -name '*.xml' -o -name '*.txt'`,
+									`-o -name '*.php' \\)`,
+									`-exec sed -i 's|${sedEscape(oldUrl)}|${sedEscape(newUrl)}|g' {} +`,
+								].join(' '),
+							)
+							.catch(() => {});
+					}
+				}
+
+				// Flush WordPress caches (WP-CLI preferred; disk cache fallback)
+				await executor
+					.execute(
+						`wp cache flush --path=${shellQuote(tgtPath)} --allow-root 2>&1`,
+					)
+					.catch(() => {});
+				await executor
+					.execute(
+						`wp rewrite flush --path=${shellQuote(tgtPath)} --allow-root 2>&1`,
+					)
+					.catch(() => {});
+				await executor
+					.execute(
+						`rm -rf ${shellQuote(tgtPath)}/wp-content/cache ${shellQuote(tgtPath)}/wp-content/et-cache 2>/dev/null; true`,
+					)
+					.catch(() => {});
 
 				// Write .env with new DB + URL
 				const dbName2 = cyberpanel?.dbName ?? srcCreds.dbName;

@@ -11,3 +11,7 @@ coverage/
 *.tsbuildinfo
 *.d.ts.map
 *.js.map
+.agents/
+.vscode/
+.idea/
+tasks/
