@@ -143,7 +143,6 @@ bedrock-forge/
 ├── prisma/
 │   ├── schema.prisma
 │   └── migrations/
-├── tasks/                      # Orchestrator task files
 ├── PROJECT.md
 ├── package.json
 ├── pnpm-workspace.yaml
