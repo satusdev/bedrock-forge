@@ -5,6 +5,7 @@
 
 <div align="center">
 
+[![CI](https://github.com/satusdev/bedrock-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/satusdev/bedrock-forge/actions/workflows/ci.yml)
 [![Node.js 22](https://img.shields.io/badge/node-22-brightgreen.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/typescript-5-blue.svg)](https://www.typescriptlang.org/)
 [![NestJS 11](https://img.shields.io/badge/nestjs-11-red.svg)](https://nestjs.com/)
@@ -48,8 +49,6 @@ Docker containers and deploys with a single command.
 | 📋 **Reports**                     | ✅ Complete | Weekly summary report generation                            |
 
 ---
-
-## Quick Start
 
 ## Quick Start
 
@@ -344,8 +343,8 @@ pnpm install
 cp .env.example .env
 # Edit .env — fill in DATABASE_URL, REDIS_URL, ENCRYPTION_KEY, JWT_SECRET
 
-pnpm prisma:generate
-pnpm prisma:migrate
+pnpm db:generate
+pnpm db:migrate
 pnpm dev
 ```
 

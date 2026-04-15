@@ -48,13 +48,13 @@ POSTGRES_PASSWORD=forge
 
 ```bash
 # Generate the Prisma client
-pnpm prisma:generate
+pnpm db:generate
 
 # Run migrations
-pnpm prisma:migrate
+pnpm db:migrate
 
 # Seed the database
-pnpm prisma:seed
+pnpm db:seed
 
 # Start all apps with hot reload
 pnpm dev
@@ -99,7 +99,6 @@ bedrock-forge/
 │   ├── schema.prisma
 │   ├── migrations/
 │   └── seed.ts / seed.js
-├── tasks/                    # Task tracking markdown files
 ├── docs/                     # Documentation (this directory)
 ├── Dockerfile
 ├── docker-compose.yml
@@ -135,7 +134,7 @@ apps/api/src/modules/<feature>/
 **1. Create the Prisma model** in `prisma/schema.prisma`, then run:
 
 ```bash
-pnpm prisma:migrate:dev -- --name add-<feature>
+pnpm db:migrate -- --name add-<feature>
 ```
 
 **2. Create the module file:**
@@ -355,19 +354,19 @@ ESLint config is inherited from the root. Prettier is enforced via ESLint's
 
 ```bash
 # Create a new migration (dev only — generates SQL from schema diff)
-pnpm prisma:migrate:dev -- --name <migration-name>
+pnpm db:migrate -- --name <migration-name>
 
 # Apply pending migrations (used in CI and production)
-pnpm prisma:migrate:deploy
+pnpm db:deploy
 
 # Generate Prisma client after schema changes
-pnpm prisma:generate
+pnpm db:generate
 
 # Open Prisma Studio (GUI database browser)
 pnpx prisma studio
 
 # Re-seed the database
-pnpm prisma:seed
+pnpm db:seed
 ```
 
 ---

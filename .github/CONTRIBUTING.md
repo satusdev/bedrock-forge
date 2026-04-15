@@ -25,7 +25,7 @@ how to get started.
 - **Frontend:** `apps/web/` (React + Vite)
 - **Shared:** `packages/shared/` (types, queue definitions, Zod schemas)
 
-See [PROJECT.md](PROJECT.md) for architecture conventions and module structure.
+See [PROJECT.md](docs/reference/PROJECT.md) for architecture conventions and module structure.
 
 ## Code Style
 

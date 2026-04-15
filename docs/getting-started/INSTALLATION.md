@@ -136,8 +136,8 @@ cp .env.example .env
 # Edit .env — fill DATABASE_URL, REDIS_URL, ENCRYPTION_KEY, JWT_SECRET, JWT_REFRESH_SECRET
 
 # 4. Generate Prisma client and run migrations
-pnpm prisma:generate
-pnpm prisma:migrate     # runs prisma migrate dev
+pnpm db:generate
+pnpm db:migrate         # runs prisma migrate dev
 
 # 5. Start all apps with hot reload
 pnpm dev
