@@ -370,10 +370,7 @@ export function ReportsPage() {
 				) : (
 					<div className='divide-y border rounded-md'>
 						{channels.map(ch => (
-							<div
-								key={ch.id}
-								className='flex items-center gap-3 px-4 py-3'
-							>
+							<div key={ch.id} className='flex items-center gap-3 px-4 py-3'>
 								<Switch
 									checked={ch.subscribed}
 									onCheckedChange={checked =>
@@ -453,9 +450,7 @@ export function ReportsPage() {
 										'Weekly';
 									return (
 										<Fragment key={row.id}>
-											<tr
-												className='border-b last:border-0 hover:bg-muted/30 transition-colors'
-											>
+											<tr className='border-b last:border-0 hover:bg-muted/30 transition-colors'>
 												<td className='px-4 py-3'>
 													<StatusBadge status={row.status} />
 												</td>
@@ -491,14 +486,14 @@ export function ReportsPage() {
 												</td>
 											</tr>
 											{isExpanded && hasLogs && (
-											<tr className='bg-muted/20'>
-												<td colSpan={7} className='px-4 py-3'>
-													<ExecutionLogPanel
-														jobExecutionId={Number(row.id)}
-													/>
-												</td>
-											</tr>
-										)}
+												<tr className='bg-muted/20'>
+													<td colSpan={7} className='px-4 py-3'>
+														<ExecutionLogPanel
+															jobExecutionId={Number(row.id)}
+														/>
+													</td>
+												</tr>
+											)}
 										</Fragment>
 									);
 								})}

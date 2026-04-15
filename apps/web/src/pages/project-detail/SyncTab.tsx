@@ -552,19 +552,19 @@ const SCOPE_OPTIONS = [
 		value: 'database',
 		label: 'Database only',
 		icon: Database,
-		desc: 'mysqldump + import + URL search-replace',
+		desc: 'mysqldump + import + URL search-replace (DROP & recreate)',
 	},
 	{
 		value: 'files',
 		label: 'Files only',
 		icon: Files,
-		desc: 'wp-content/ via rsync (or tar relay fallback)',
+		desc: 'Full site via rsync — excludes .env, wp-config.php, .htaccess',
 	},
 	{
 		value: 'both',
 		label: 'Database + Files',
 		icon: Upload,
-		desc: 'Database first, then wp-content/',
+		desc: 'Database first (clean slate), then full site files',
 	},
 ] as const;
 

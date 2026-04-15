@@ -1,4 +1,4 @@
-# Resource budget — Hetzner CX23: 2 vCPU / 4 GB RAM / 40 GB SSD.
+# Resource budget — 2 vCPU / 4 GB RAM / 40 GB SSD.
 # Total reserved: ~2.8 GB RAM / ~2.2 CPU. Leaves ~1.2 GB for OS + Docker daemon.
 
 services:
