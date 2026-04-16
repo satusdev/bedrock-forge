@@ -244,16 +244,16 @@ src/modules/<feature>/
 
 ## BullMQ Queue Registry
 
-| Queue           | Job Types                     | Concurrency | Retries | Timeout |
-| --------------- | ----------------------------- | ----------- | ------- | ------- |
-| `backups`       | `create`, `restore`           | 3/server    | 3       | 30min   |
-| `plugin-scans`  | `run`                         | 5           | 3       | 5min    |
-| `sync`          | `clone`, `push`               | 2/server    | 3       | 15min   |
-| `monitors`      | `check`                       | 10          | 2       | 30s     |
-| `domains`       | `whois`                       | 10          | 3       | 30s     |
-| `projects`      | `create-bedrock`             | 2/server    | 2       | 20min   |
-| `notifications` | `send`                        | 20          | 3       | 30s     |
-| `reports`       | `weekly-report`               | 1           | 3       | 5min    |
+| Queue           | Job Types           | Concurrency | Retries | Timeout |
+| --------------- | ------------------- | ----------- | ------- | ------- |
+| `backups`       | `create`, `restore` | 3/server    | 3       | 30min   |
+| `plugin-scans`  | `run`               | 5           | 3       | 5min    |
+| `sync`          | `clone`, `push`     | 2/server    | 3       | 15min   |
+| `monitors`      | `check`             | 10          | 2       | 30s     |
+| `domains`       | `whois`             | 10          | 3       | 30s     |
+| `projects`      | `create-bedrock`    | 2/server    | 2       | 20min   |
+| `notifications` | `send`              | 20          | 3       | 30s     |
+| `reports`       | `weekly-report`     | 1           | 3       | 5min    |
 
 All queues: exponential backoff (base 1s), dead-letter queue (`<name>-dlq`),
 `removeOnComplete: 1000`, `removeOnFail: 5000`.
