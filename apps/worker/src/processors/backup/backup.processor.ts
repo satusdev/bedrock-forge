@@ -11,6 +11,7 @@ import { EncryptionService } from '../../encryption/encryption.service';
 import { createRemoteExecutor } from '@bedrock-forge/remote-executor';
 import { QUEUES, JOB_TYPES, DEFAULT_JOB_OPTIONS } from '@bedrock-forge/shared';
 import { ConfigService } from '@nestjs/config';
+import { fixCyberPanelOwnership } from '../../utils/processor-utils';
 
 const STAGING_DIR = '/tmp/forge-backups';
 
@@ -677,6 +678,9 @@ export class BackupProcessor extends WorkerHost {
 					level: 'info',
 				});
 			}
+
+			// ── Step D+: Fix file ownership ─────────────────────────────────────
+			await fixCyberPanelOwnership(executor, env.root_path, tracker);
 
 			await job.updateProgress({
 				value: 95,

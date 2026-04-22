@@ -71,6 +71,36 @@ if ($restore) {
         fwrite(STDERR, "WARNING: tar exited 1 during extract (harmless race) — continuing\n");
     }
 
+    // ── Fix file ownership (CyberPanel pattern) ────────────────────────────
+    // CyberPanel expects:
+    //   - docroot folder itself → user:nogroup  mode 750  (drwxr-x---)
+    //   - all files/dirs inside → user:user     (recursive)
+    // Detect the site owner from the parent directory (e.g. /home/<domain>),
+    // then fall back to the docroot itself.  Skip when owner resolves to root.
+    $ownerDetected = null;
+    $parentForOwner = dirname($docroot);
+    exec('stat -c %U ' . escapeshellarg($parentForOwner) . ' 2>/dev/null', $parentOwnerOut, $parentOwnerCode);
+    if ($parentOwnerCode === 0 && !empty($parentOwnerOut[0]) && trim($parentOwnerOut[0]) !== 'root') {
+        $ownerDetected = trim($parentOwnerOut[0]);
+    }
+    if (!$ownerDetected) {
+        exec('stat -c %U ' . escapeshellarg($docroot) . ' 2>/dev/null', $selfOwnerOut, $selfOwnerCode);
+        if ($selfOwnerCode === 0 && !empty($selfOwnerOut[0]) && trim($selfOwnerOut[0]) !== 'root') {
+            $ownerDetected = trim($selfOwnerOut[0]);
+        }
+    }
+    if ($ownerDetected) {
+        // Step 1: inner files → user:user (recursive)
+        exec('chown -R ' . escapeshellarg($ownerDetected . ':' . $ownerDetected) . ' ' . escapeshellarg($docroot) . ' 2>&1');
+        // Step 2: docroot folder itself → user:nogroup (non-recursive override)
+        exec('chown ' . escapeshellarg($ownerDetected . ':nogroup') . ' ' . escapeshellarg($docroot) . ' 2>&1');
+        // Step 3: enforce drwxr-x--- on the docroot
+        exec('chmod 750 ' . escapeshellarg($docroot) . ' 2>&1');
+        fwrite(STDERR, "Fixed ownership: {$ownerDetected}:nogroup on {$docroot}, {$ownerDetected}:{$ownerDetected} on contents\n");
+    } else {
+        fwrite(STDERR, "WARNING: could not detect site owner — skipping ownership fix\n");
+    }
+
     // ── Database import ────────────────────────────────────────────────────
     // The archive places forge_db_*.sql at the $extractTo level (same level
     // as the docroot directory itself).  Import it if found.
