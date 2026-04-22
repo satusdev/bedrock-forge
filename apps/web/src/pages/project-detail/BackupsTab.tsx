@@ -531,7 +531,21 @@ export function BackupsTab({
 														)
 													}
 													disabled={!b.jobExecution?.id}
-												/>
+												/>{' '}
+												{b.status === 'running' && b.jobExecution?.id && (
+													<Button
+														variant='ghost'
+														size='icon'
+														className='h-7 w-7'
+														title='Force stop backup'
+														disabled={cancelBackupMutation.isPending}
+														onClick={() =>
+															cancelBackupMutation.mutate(b.jobExecution!.id)
+														}
+													>
+														<XCircle className='h-3.5 w-3.5 text-destructive' />
+													</Button>
+												)}{' '}
 												{b.status === 'completed' && (
 													<Button
 														variant='ghost'

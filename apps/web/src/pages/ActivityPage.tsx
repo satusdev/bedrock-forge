@@ -103,6 +103,7 @@ function durationLabel(
 	const startMs = new Date(started).getTime();
 	const endMs = completed ? new Date(completed).getTime() : Date.now();
 	const diff = endMs - startMs;
+	if (diff < 0) return '—';
 	if (diff < 1000) return `${diff}ms`;
 	if (diff < 60_000) return `${(diff / 1000).toFixed(1)}s`;
 	const mins = Math.floor(diff / 60_000);

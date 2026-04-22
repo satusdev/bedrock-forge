@@ -120,6 +120,7 @@ function durationLabel(
 	const diff =
 		(completed ? new Date(completed).getTime() : Date.now()) -
 		new Date(started).getTime();
+	if (diff < 0) return '\u2014';
 	if (diff < 1000) return `${diff}ms`;
 	if (diff < 60_000) return `${(diff / 1000).toFixed(1)}s`;
 	const mins = Math.floor(diff / 60_000);
@@ -133,7 +134,15 @@ function jobTypeLabel(row: JobExecutionRow): string {
 	return row.environment?.type ?? '\u2014';
 }
 
-function SyncHistoryRow({ row }: { row: JobExecutionRow }) {
+function SyncHistoryRow({
+	row,
+	onCancel,
+	isCancelling,
+}: {
+	row: JobExecutionRow;
+	onCancel?: (id: number) => void;
+	isCancelling?: boolean;
+}) {
 	const [expanded, setExpanded] = useState(false);
 	const isActive = row.status === 'active' || row.status === 'pending';
 
@@ -184,10 +193,23 @@ function SyncHistoryRow({ row }: { row: JobExecutionRow }) {
 					) : null}
 				</td>
 				<td className='py-2.5 pr-4 pl-2 text-right whitespace-nowrap'>
-					<ExpandLogButton
-						expanded={expanded}
-						onToggle={() => setExpanded(v => !v)}
-					/>
+					<div className='flex items-center gap-1 justify-end'>
+						<ExpandLogButton
+							expanded={expanded}
+							onToggle={() => setExpanded(v => !v)}
+						/>
+						{row.status === 'active' && (
+							<Button
+								variant='ghost'
+								size='icon'
+								disabled={isCancelling}
+								onClick={() => onCancel?.(row.id)}
+								title='Force stop job'
+							>
+								<XCircle className='h-4 w-4 text-destructive' />
+							</Button>
+						)}
+					</div>
 				</td>
 			</tr>
 			{expanded && (
@@ -865,6 +887,8 @@ export function SyncTab({
 }) {
 	const envIds = environments.map(e => e.id).join(',');
 
+	const qc = useQueryClient();
+
 	const { data: historyData } = useQuery({
 		queryKey: ['sync-history', projectId],
 		queryFn: () =>
@@ -874,6 +898,17 @@ export function SyncTab({
 		enabled: environments.length > 0,
 		staleTime: 15_000,
 		refetchInterval: 30_000,
+	});
+
+	const cancelHistoryMutation = useMutation({
+		mutationFn: (id: number) =>
+			api.post<{ cancelled: boolean }>(`/sync/execution/${id}/cancel`, {}),
+		onSuccess: () => {
+			qc.invalidateQueries({ queryKey: ['sync-history', projectId] });
+			toast({ title: 'Job stopped' });
+		},
+		onError: () =>
+			toast({ title: 'Could not stop job', variant: 'destructive' }),
 	});
 
 	if (environments.length < 2) {
@@ -947,7 +982,12 @@ export function SyncTab({
 							</thead>
 							<tbody>
 								{historyData.data.map(row => (
-									<SyncHistoryRow key={row.id} row={row} />
+									<SyncHistoryRow
+										key={row.id}
+										row={row}
+										onCancel={cancelHistoryMutation.mutate}
+										isCancelling={cancelHistoryMutation.isPending}
+									/>
 								))}
 							</tbody>
 						</table>
