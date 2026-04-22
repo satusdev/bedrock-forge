@@ -186,7 +186,6 @@ model Project {
   hosting_package HostingPackage? @relation(fields: [hosting_package_id], references: [id])
   support_package SupportPackage? @relation(fields: [support_package_id], references: [id])
   environments    Environment[]
-  domains         Domain[]
   invoices        Invoice[]
 
   @@index([client_id])
@@ -307,18 +306,17 @@ model PluginScan {
 
 model Domain {
   id              BigInt    @id @default(autoincrement())
-  project_id      BigInt
-  name            String
+  name            String    @unique
   whois_json      Json?     // Raw WHOIS response parsed as JSON
   expires_at      DateTime? @db.Timestamptz()
   last_checked_at DateTime? @db.Timestamptz()
+  ssl_json        Json?     // Raw TLS certificate data
+  ssl_expires_at  DateTime? @db.Timestamptz()
+  ssl_issuer      String?
+  ssl_checked_at  DateTime? @db.Timestamptz()
   created_at      DateTime  @default(now()) @db.Timestamptz()
 
-  project Project @relation(fields: [project_id], references: [id], onDelete: Cascade)
-
-  @@index([project_id])
   @@index([name])
-  @@unique([project_id, name])
   @@map("domains")
 }
 
