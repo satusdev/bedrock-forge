@@ -15,6 +15,18 @@ import {
  */
 const SFTP_STALL_TIMEOUT_MS = 5 * 60 * 1_000; // 5 minutes with no data = stall
 
+/**
+ * Returns true when `err` is an SSH channel-open rejection — a sign that the
+ * pooled connection is stale/exhausted and must be evicted, not returned idle.
+ */
+function isChannelOpenFailure(err: unknown): boolean {
+	return (
+		err instanceof Error &&
+		(err.message.includes('Channel open failure') ||
+			err.message.includes('open failed'))
+	);
+}
+
 export interface ExecuteOptions {
 	timeout?: number; // ms, default 30000
 	cwd?: string;
@@ -58,37 +70,16 @@ export class RemoteExecutorService {
 		opts: ExecuteOptions = {},
 	): Promise<ExecuteResult> {
 		const timeout = opts.timeout ?? 30_000;
-		const client = await this.pool.getConnection(
-			`${this.config.host}:${this.config.port}`,
-			this.config,
+		return this.withConnection(client =>
+			this.runCommand(client, command, timeout),
 		);
-
-		try {
-			return await this.runCommand(client, command, timeout);
-		} finally {
-			this.pool.releaseConnection(
-				`${this.config.host}:${this.config.port}`,
-				client,
-			);
-		}
 	}
 
 	/**
 	 * Push a file to the remote server via SFTP.
 	 */
 	async pushFile(file: RemoteFile): Promise<void> {
-		const client = await this.pool.getConnection(
-			`${this.config.host}:${this.config.port}`,
-			this.config,
-		);
-		try {
-			await this.sftpPut(client, file);
-		} finally {
-			this.pool.releaseConnection(
-				`${this.config.host}:${this.config.port}`,
-				client,
-			);
-		}
+		return this.withConnection(client => this.sftpPut(client, file));
 	}
 
 	/**
@@ -97,18 +88,7 @@ export class RemoteExecutorService {
 	 * For large files (backups, etc.) use pullFileToPath() instead.
 	 */
 	async pullFile(remotePath: string): Promise<Buffer> {
-		const client = await this.pool.getConnection(
-			`${this.config.host}:${this.config.port}`,
-			this.config,
-		);
-		try {
-			return await this.sftpGet(client, remotePath);
-		} finally {
-			this.pool.releaseConnection(
-				`${this.config.host}:${this.config.port}`,
-				client,
-			);
-		}
+		return this.withConnection(client => this.sftpGet(client, remotePath));
 	}
 
 	/**
@@ -123,24 +103,9 @@ export class RemoteExecutorService {
 		timeoutMs: number = SFTP_STALL_TIMEOUT_MS,
 		onProgress?: (bytes: number) => void,
 	): Promise<void> {
-		const client = await this.pool.getConnection(
-			`${this.config.host}:${this.config.port}`,
-			this.config,
+		return this.withConnection(client =>
+			this.sftpGetToFile(client, remotePath, localPath, timeoutMs, onProgress),
 		);
-		try {
-			await this.sftpGetToFile(
-				client,
-				remotePath,
-				localPath,
-				timeoutMs,
-				onProgress,
-			);
-		} finally {
-			this.pool.releaseConnection(
-				`${this.config.host}:${this.config.port}`,
-				client,
-			);
-		}
 	}
 
 	/**
@@ -155,23 +120,45 @@ export class RemoteExecutorService {
 		timeoutMs: number = SFTP_STALL_TIMEOUT_MS,
 		onProgress?: (bytes: number) => void,
 	): Promise<void> {
-		const client = await this.pool.getConnection(
-			`${this.config.host}:${this.config.port}`,
-			this.config,
-		);
-		try {
-			await this.sftpPutFromStream(
+		return this.withConnection(client =>
+			this.sftpPutFromStream(
 				client,
 				remotePath,
 				readable,
 				timeoutMs,
 				onProgress,
-			);
+			),
+		);
+	}
+
+	/**
+	 * Acquire a connection from the pool, run `fn`, and release it back.
+	 * If `fn` throws a channel-open failure (stale/exhausted connection), the
+	 * connection is evicted from the pool and the call is retried once on a
+	 * freshly established connection.
+	 */
+	private async withConnection<T>(
+		fn: (client: Client) => Promise<T>,
+	): Promise<T> {
+		const serverKey = `${this.config.host}:${this.config.port}`;
+		const client = await this.pool.getConnection(serverKey, this.config);
+		try {
+			return await fn(client);
+		} catch (err) {
+			if (isChannelOpenFailure(err)) {
+				// Stale connection — evict and retry once on a fresh one
+				this.pool.destroyConnection(serverKey, client);
+				const fresh = await this.pool.getConnection(serverKey, this.config);
+				try {
+					return await fn(fresh);
+				} finally {
+					this.pool.releaseConnection(serverKey, fresh);
+				}
+			}
+			throw err;
 		} finally {
-			this.pool.releaseConnection(
-				`${this.config.host}:${this.config.port}`,
-				client,
-			);
+			// No-op if the connection was already destroyed above
+			this.pool.releaseConnection(serverKey, client);
 		}
 	}
 
@@ -237,7 +224,10 @@ export class RemoteExecutorService {
 					mode: file.mode ?? 0o644,
 				});
 
-				writeStream.on('close', resolve);
+				writeStream.on('close', () => {
+					sftp.end();
+					resolve();
+				});
 				writeStream.on('error', reject);
 				writeStream.end(content);
 			});
@@ -253,7 +243,10 @@ export class RemoteExecutorService {
 				const readStream = sftp.createReadStream(remotePath);
 
 				readStream.on('data', (chunk: Buffer) => chunks.push(chunk));
-				readStream.on('end', () => resolve(Buffer.concat(chunks)));
+				readStream.on('end', () => {
+					sftp.end();
+					resolve(Buffer.concat(chunks));
+				});
 				readStream.on('error', reject);
 			});
 		});
@@ -321,17 +314,28 @@ export class RemoteExecutorService {
 
 				readStream.on('error', (e: Error) => {
 					writeStream.destroy();
-					settle(() => reject(e));
+					settle(() => {
+						sftp.end();
+						reject(e);
+					});
 				});
 
 				writeStream.on('error', (e: Error) => {
 					readStream.destroy();
-					settle(() => reject(e));
+					settle(() => {
+						sftp.end();
+						reject(e);
+					});
 				});
 
 				// 'close' fires after all data is flushed and the fd is released.
 				// This is the correct completion signal for a file WriteStream.
-				writeStream.on('close', () => settle(() => resolve()));
+				writeStream.on('close', () =>
+					settle(() => {
+						sftp.end();
+						resolve();
+					}),
+				);
 
 				readStream.pipe(writeStream);
 			});
@@ -395,15 +399,26 @@ export class RemoteExecutorService {
 
 				readable.on('error', (e: Error) => {
 					writeStream.destroy();
-					settle(() => reject(e));
+					settle(() => {
+						sftp.end();
+						reject(e);
+					});
 				});
 
 				writeStream.on('error', (e: Error) => {
-					settle(() => reject(e));
+					settle(() => {
+						sftp.end();
+						reject(e);
+					});
 				});
 
 				// 'close' fires after all bytes are flushed to the remote fd.
-				writeStream.on('close', () => settle(() => resolve()));
+				writeStream.on('close', () =>
+					settle(() => {
+						sftp.end();
+						resolve();
+					}),
+				);
 
 				readable.pipe(writeStream);
 			});
