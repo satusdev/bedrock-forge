@@ -93,6 +93,23 @@ export class SshPoolManager extends EventEmitter {
 		}
 	}
 
+	/**
+	 * Forcefully remove a connection from the pool and destroy the underlying
+	 * TCP socket. Called when a channel-open failure signals the connection is
+	 * dead and must not be reused. A subsequent releaseConnection() call for
+	 * the same client becomes a no-op because the entry is already gone.
+	 */
+	destroyConnection(serverKey: string, client: Client): void {
+		const pool = this.getPool(serverKey);
+		const idx = pool.findIndex(c => c.client === client);
+		if (idx !== -1) pool.splice(idx, 1);
+		try {
+			client.destroy();
+		} catch (_) {
+			// ignore
+		}
+	}
+
 	closeServer(serverKey: string): void {
 		const pool = this.getPool(serverKey);
 		pool.forEach(c => {
