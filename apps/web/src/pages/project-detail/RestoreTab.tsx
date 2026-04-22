@@ -67,6 +67,7 @@ function restoreDuration(
 	const diff =
 		(completed ? new Date(completed).getTime() : Date.now()) -
 		new Date(started).getTime();
+	if (diff < 0) return '\u2014';
 	if (diff < 1000) return `${diff}ms`;
 	if (diff < 60_000) return `${(diff / 1000).toFixed(1)}s`;
 	const mins = Math.floor(diff / 60_000);
