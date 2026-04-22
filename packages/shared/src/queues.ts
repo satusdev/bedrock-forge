@@ -47,6 +47,7 @@ export const JOB_TYPES = {
 
 	// Domains
 	DOMAIN_WHOIS: 'domain:whois',
+	DOMAIN_SSL_CHECK: 'domain:ssl-check',
 
 	// Projects
 	PROJECT_CREATE_BEDROCK: 'project:create-bedrock',

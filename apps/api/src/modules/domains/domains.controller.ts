@@ -17,7 +17,11 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { ROLES } from '@bedrock-forge/shared';
 import { DomainsService } from './domains.service';
-import { CreateDomainDto, UpdateDomainDto, DomainQueryDto } from './dto/domain.dto';
+import {
+	CreateDomainDto,
+	UpdateDomainDto,
+	DomainQueryDto,
+} from './dto/domain.dto';
 
 @Controller('domains')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -49,5 +53,8 @@ export class DomainsController {
 		@Param('id', ParseIntPipe) id: number,
 	) {
 		return this.svc.refreshWhois(id);
+	}
+	@Post(':id/ssl-refresh') refreshSsl(@Param('id', ParseIntPipe) id: number) {
+		return this.svc.refreshSsl(id);
 	}
 }
