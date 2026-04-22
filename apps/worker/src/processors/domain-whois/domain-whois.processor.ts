@@ -1,8 +1,9 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
+import * as tls from 'tls';
 import { PrismaService } from '../../prisma/prisma.service';
-import { QUEUES } from '@bedrock-forge/shared';
+import { QUEUES, JOB_TYPES } from '@bedrock-forge/shared';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 
@@ -18,6 +19,13 @@ export class DomainWhoisProcessor extends WorkerHost {
 	}
 
 	async process(job: Job) {
+		if (job.name === JOB_TYPES.DOMAIN_SSL_CHECK) {
+			return this.processSsl(job);
+		}
+		return this.processWhois(job);
+	}
+
+	private async processWhois(job: Job) {
 		const { domainId, domain } = job.data;
 
 		const whoisData = await this.runWhois(domain);
@@ -36,6 +44,59 @@ export class DomainWhoisProcessor extends WorkerHost {
 			},
 		});
 		this.logger.log(`WHOIS updated for ${domain}`);
+	}
+
+	private async processSsl(job: Job) {
+		const { domainId, domain } = job.data;
+
+		const cert = await this.fetchSslCert(domain);
+		if (!cert) {
+			this.logger.warn(`SSL cert not retrievable for ${domain}`);
+			return;
+		}
+
+		const sslExpiresAt = cert.valid_to ? new Date(cert.valid_to) : null;
+		const sslIssuer =
+			(cert.issuer as Record<string, string> | undefined)?.O ?? null;
+
+		await this.prisma.domain.update({
+			where: { id: BigInt(domainId) },
+			data: {
+				ssl_json: cert as never,
+				ssl_expires_at: sslExpiresAt,
+				ssl_issuer: sslIssuer,
+				ssl_checked_at: new Date(),
+			},
+		});
+		this.logger.log(
+			`SSL updated for ${domain} (expires: ${sslExpiresAt?.toISOString()})`,
+		);
+	}
+
+	private fetchSslCert(domain: string): Promise<tls.PeerCertificate | null> {
+		return new Promise(resolve => {
+			const socket = tls.connect(
+				{
+					host: domain,
+					port: 443,
+					servername: domain,
+					rejectUnauthorized: false,
+				},
+				() => {
+					const cert = socket.getPeerCertificate();
+					socket.destroy();
+					resolve(cert && Object.keys(cert).length ? cert : null);
+				},
+			);
+			socket.on('error', () => {
+				socket.destroy();
+				resolve(null);
+			});
+			socket.setTimeout(15_000, () => {
+				socket.destroy();
+				resolve(null);
+			});
+		});
 	}
 
 	private async runWhois(domain: string): Promise<string> {

@@ -17,7 +17,7 @@ export class DomainsService {
 		@InjectQueue(QUEUES.DOMAINS) private readonly queue: Queue,
 	) {}
 
-	findAll(query: PaginationQuery & { projectId?: number }) {
+	findAll(query: PaginationQuery) {
 		return this.repo.findAll(query);
 	}
 
@@ -28,34 +28,37 @@ export class DomainsService {
 	}
 
 	async create(dto: CreateDomainDto) {
-		const domain = await this.repo.create({
-			name: dto.name,
-			project_id: BigInt(dto.project_id),
-		});
-		// Kick off initial WHOIS lookup
-		await this.queue.add(
-			JOB_TYPES.DOMAIN_WHOIS,
-			{ domainId: Number(domain.id), domain: domain.name },
-			DEFAULT_JOB_OPTIONS,
-		);
+		const domain = await this.repo.create({ name: dto.name });
+		// Kick off initial WHOIS + SSL lookups
+		await Promise.all([
+			this.queue.add(
+				JOB_TYPES.DOMAIN_WHOIS,
+				{ domainId: Number(domain.id), domain: domain.name },
+				DEFAULT_JOB_OPTIONS,
+			),
+			this.queue.add(
+				JOB_TYPES.DOMAIN_SSL_CHECK,
+				{ domainId: Number(domain.id), domain: domain.name },
+				DEFAULT_JOB_OPTIONS,
+			),
+		]);
 		return domain;
 	}
 
 	/**
 	 * Return the existing domain record if the name already exists globally,
-	 * otherwise create a new one. Prevents duplicate root domains across projects.
+	 * otherwise create a new one. Prevents duplicate root domains.
 	 */
-	async findOrCreate(dto: CreateDomainDto) {
-		const existing = await this.repo.findByName(dto.name);
+	async findOrCreate(name: string) {
+		const existing = await this.repo.findByName(name);
 		if (existing) return existing;
-		return this.create(dto);
+		return this.create({ name });
 	}
 
 	async update(id: number, dto: UpdateDomainDto) {
 		await this.findOne(id);
 		return this.repo.update(BigInt(id), {
 			...(dto.name && { name: dto.name }),
-			...(dto.project_id && { project_id: BigInt(dto.project_id) }),
 		});
 	}
 
@@ -68,6 +71,16 @@ export class DomainsService {
 		const d = await this.findOne(id);
 		const job = await this.queue.add(
 			JOB_TYPES.DOMAIN_WHOIS,
+			{ domainId: Number(d.id), domain: d.name },
+			DEFAULT_JOB_OPTIONS,
+		);
+		return { bullJobId: job.id };
+	}
+
+	async refreshSsl(id: number) {
+		const d = await this.findOne(id);
+		const job = await this.queue.add(
+			JOB_TYPES.DOMAIN_SSL_CHECK,
 			{ domainId: Number(d.id), domain: d.name },
 			DEFAULT_JOB_OPTIONS,
 		);

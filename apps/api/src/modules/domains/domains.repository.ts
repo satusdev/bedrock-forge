@@ -6,15 +6,12 @@ import type { PaginationQuery } from '@bedrock-forge/shared';
 export class DomainsRepository {
 	constructor(private readonly prisma: PrismaService) {}
 
-	findAll(query: PaginationQuery & { projectId?: number }) {
+	findAll(query: PaginationQuery) {
 		const page = query.page ?? 1;
 		const limit = query.limit ?? 20;
 		const where: Record<string, unknown> = {};
 		if (query.search) {
 			where['name'] = { contains: query.search, mode: 'insensitive' };
-		}
-		if (query.projectId) {
-			where['project_id'] = BigInt(query.projectId);
 		}
 		return this.prisma
 			.$transaction([
@@ -23,7 +20,6 @@ export class DomainsRepository {
 					skip: (page - 1) * limit,
 					take: limit,
 					orderBy: { name: 'asc' },
-					include: { project: { select: { id: true, name: true } } },
 				}),
 				this.prisma.domain.count({ where }),
 			])
@@ -31,25 +27,19 @@ export class DomainsRepository {
 	}
 
 	findById(id: bigint) {
-		return this.prisma.domain.findUnique({
-			where: { id },
-			include: { project: { select: { id: true, name: true } } },
-		});
+		return this.prisma.domain.findUnique({ where: { id } });
 	}
 
-	/** Find the first domain record with this name across all projects. */
+	/** Find an existing domain record by exact name. */
 	findByName(name: string) {
-		return this.prisma.domain.findFirst({
-			where: { name },
-			include: { project: { select: { id: true, name: true } } },
-		});
+		return this.prisma.domain.findUnique({ where: { name } });
 	}
 
-	create(data: { name: string; project_id: bigint }) {
+	create(data: { name: string }) {
 		return this.prisma.domain.create({ data });
 	}
 
-	update(id: bigint, data: { name?: string; project_id?: bigint }) {
+	update(id: bigint, data: { name?: string }) {
 		return this.prisma.domain.update({ where: { id }, data });
 	}
 
