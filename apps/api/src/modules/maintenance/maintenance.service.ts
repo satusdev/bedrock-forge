@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -12,10 +12,34 @@ import { PrismaService } from '../../prisma/prisma.service';
  * - Completed/failed JobExecution records older than 90 days
  */
 @Injectable()
-export class MaintenanceService {
+export class MaintenanceService implements OnApplicationBootstrap {
 	private readonly logger = new Logger(MaintenanceService.name);
 
 	constructor(private readonly prisma: PrismaService) {}
+
+	/**
+	 * On startup, mark any job_executions that are still 'active' as failed.
+	 * They were interrupted by a process restart and will never complete.
+	 */
+	async onApplicationBootstrap(): Promise<void> {
+		try {
+			const recovered = await this.prisma.jobExecution.updateMany({
+				where: { status: 'active' },
+				data: {
+					status: 'failed',
+					last_error: 'Process interrupted — forge was restarted',
+					completed_at: new Date(),
+				},
+			});
+			if (recovered.count > 0) {
+				this.logger.warn(
+					`Startup recovery: marked ${recovered.count} interrupted job(s) as failed`,
+				);
+			}
+		} catch (e) {
+			this.logger.error('Startup recovery failed', e);
+		}
+	}
 
 	@Cron(CronExpression.EVERY_DAY_AT_3AM)
 	async runCleanup(): Promise<void> {
