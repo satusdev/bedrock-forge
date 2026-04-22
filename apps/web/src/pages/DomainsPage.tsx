@@ -11,6 +11,7 @@ import {
 	MoreHorizontal,
 	AlertTriangle,
 	Clock,
+	ShieldCheck,
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
@@ -40,27 +41,16 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from '@/components/ui/select';
-
-interface Project {
-	id: number;
-	name: string;
-}
 
 interface Domain {
 	id: number;
 	name: string;
-	project_id: number;
-	project: Project;
 	expires_at: string | null;
 	last_checked_at: string | null;
 	whois_json: Record<string, unknown> | null;
+	ssl_expires_at: string | null;
+	ssl_issuer: string | null;
+	ssl_checked_at: string | null;
 }
 
 interface PaginatedDomains {
@@ -76,7 +66,6 @@ const domainSchema = z.object({
 		.min(1, 'Domain name is required')
 		.max(253)
 		.regex(/^[a-zA-Z0-9.-]+$/, 'Invalid domain name format'),
-	project_id: z.coerce.number().int().positive('Project is required'),
 });
 type DomainForm = z.infer<typeof domainSchema>;
 
@@ -127,6 +116,48 @@ function ExpiryBadge({ expiresAt }: { expiresAt: string | null }) {
 	);
 }
 
+function SslBadge({ sslExpiresAt }: { sslExpiresAt: string | null }) {
+	const days = daysUntilExpiry(sslExpiresAt);
+
+	if (days === null) {
+		return <span className='text-muted-foreground text-sm'>—</span>;
+	}
+
+	if (days < 0) {
+		return (
+			<Badge variant='destructive' className='gap-1'>
+				<AlertTriangle className='h-3 w-3' />
+				Expired
+			</Badge>
+		);
+	}
+
+	if (days <= 14) {
+		return (
+			<Badge variant='destructive' className='gap-1'>
+				<Clock className='h-3 w-3' />
+				{days}d left
+			</Badge>
+		);
+	}
+
+	if (days <= 30) {
+		return (
+			<Badge variant='warning' className='gap-1'>
+				<Clock className='h-3 w-3' />
+				{days}d left
+			</Badge>
+		);
+	}
+
+	return (
+		<span className='text-sm text-muted-foreground flex items-center gap-1'>
+			<ShieldCheck className='h-3.5 w-3.5 text-green-500' />
+			{new Date(sslExpiresAt!).toLocaleDateString()}
+		</span>
+	);
+}
+
 export function DomainsPage() {
 	const qc = useQueryClient();
 	const role = useAuthStore(s => s.user?.roles?.[0]);
@@ -135,44 +166,34 @@ export function DomainsPage() {
 	const [page, setPage] = useState(1);
 	const [search, setSearch] = useState('');
 	const [searchInput, setSearchInput] = useState('');
-	const [projectFilter, setProjectFilter] = useState('');
 
 	const [dialogOpen, setDialogOpen] = useState(false);
 	const [editTarget, setEditTarget] = useState<Domain | null>(null);
 	const [deleteTarget, setDeleteTarget] = useState<Domain | null>(null);
 	const [refreshingId, setRefreshingId] = useState<number | null>(null);
+	const [refreshingSslId, setRefreshingSslId] = useState<number | null>(null);
 	const [whoisTarget, setWhoisTarget] = useState<Domain | null>(null);
 
 	const limit = 20;
 
 	const { data, isLoading } = useQuery<PaginatedDomains>({
-		queryKey: ['domains', page, search, projectFilter],
+		queryKey: ['domains', page, search],
 		queryFn: () => {
 			const params = new URLSearchParams({
 				page: String(page),
 				limit: String(limit),
 				...(search && { search }),
-				...(projectFilter && { projectId: projectFilter }),
 			});
 			return api.get(`/domains?${params}`);
 		},
 	});
 
-	const { data: projects } = useQuery<{ items: Project[] }>({
-		queryKey: ['projects-list-domains'],
-		queryFn: () => api.get('/projects?limit=200'),
-	});
-
 	const {
 		register,
 		handleSubmit,
-		setValue,
-		watch,
 		reset,
 		formState: { errors },
 	} = useForm<DomainForm>({ resolver: zodResolver(domainSchema) });
-
-	const selectedProjectId = watch('project_id');
 
 	const invalidate = () => qc.invalidateQueries({ queryKey: ['domains'] });
 
@@ -182,7 +203,7 @@ export function DomainsPage() {
 			invalidate();
 			setDialogOpen(false);
 			reset();
-			toast({ title: 'Domain added — WHOIS lookup started' });
+			toast({ title: 'Domain added — WHOIS + SSL lookup started' });
 		},
 		onError: (e: { message?: string }) =>
 			toast({ title: 'Error', description: e.message, variant: 'destructive' }),
@@ -229,16 +250,31 @@ export function DomainsPage() {
 		}
 	}
 
+	async function handleSslRefresh(domain: Domain) {
+		setRefreshingSslId(domain.id);
+		try {
+			await api.post(`/domains/${domain.id}/ssl-refresh`, {});
+			toast({ title: `SSL refresh queued for ${domain.name}` });
+		} catch (e: unknown) {
+			const msg =
+				e && typeof e === 'object' && 'message' in e
+					? String((e as { message: unknown }).message)
+					: 'Failed';
+			toast({ title: 'Error', description: msg, variant: 'destructive' });
+		} finally {
+			setRefreshingSslId(null);
+		}
+	}
+
 	function openCreate() {
 		setEditTarget(null);
-		reset({ name: '', project_id: undefined as unknown as number });
+		reset({ name: '' });
 		setDialogOpen(true);
 	}
 
 	function openEdit(d: Domain) {
 		setEditTarget(d);
-		reset({ name: d.name, project_id: d.project_id });
-		setValue('project_id', d.project_id);
+		reset({ name: d.name });
 		setDialogOpen(true);
 	}
 
@@ -269,12 +305,20 @@ export function DomainsPage() {
 			),
 		},
 		{
-			header: 'Project',
-			render: d => <span className='text-sm'>{d.project?.name ?? '—'}</span>,
-		},
-		{
 			header: 'Expires',
 			render: d => <ExpiryBadge expiresAt={d.expires_at} />,
+		},
+		{
+			header: 'SSL Expires',
+			render: d => <SslBadge sslExpiresAt={d.ssl_expires_at} />,
+		},
+		{
+			header: 'SSL Issuer',
+			render: d => (
+				<span className='text-sm text-muted-foreground'>
+					{d.ssl_issuer ?? '—'}
+				</span>
+			),
 		},
 		{
 			header: 'Last Checked',
@@ -308,25 +352,6 @@ export function DomainsPage() {
 					}}
 					placeholder='Search domains…'
 				/>
-				<Select
-					value={projectFilter}
-					onValueChange={v => {
-						setProjectFilter(v === 'all' ? '' : v);
-						setPage(1);
-					}}
-				>
-					<SelectTrigger className='w-48'>
-						<SelectValue placeholder='All projects' />
-					</SelectTrigger>
-					<SelectContent>
-						<SelectItem value='all'>All projects</SelectItem>
-						{projects?.items.map(p => (
-							<SelectItem key={p.id} value={String(p.id)}>
-								{p.name}
-							</SelectItem>
-						))}
-					</SelectContent>
-				</Select>
 			</div>
 
 			<DataTable
@@ -350,6 +375,15 @@ export function DomainsPage() {
 									className={`h-4 w-4 mr-2 ${refreshingId === d.id ? 'animate-spin' : ''}`}
 								/>
 								Refresh WHOIS
+							</DropdownMenuItem>
+							<DropdownMenuItem
+								onClick={() => handleSslRefresh(d)}
+								disabled={refreshingSslId === d.id}
+							>
+								<RefreshCw
+									className={`h-4 w-4 mr-2 ${refreshingSslId === d.id ? 'animate-spin' : ''}`}
+								/>
+								Refresh SSL
 							</DropdownMenuItem>
 							{d.whois_json && (
 								<DropdownMenuItem onClick={() => setWhoisTarget(d)}>
@@ -383,7 +417,6 @@ export function DomainsPage() {
 				/>
 			)}
 
-			{/* Create / Edit dialog */}
 			<Dialog
 				open={dialogOpen}
 				onOpenChange={open => {
@@ -414,32 +447,6 @@ export function DomainsPage() {
 							{errors.name && (
 								<p className='text-xs text-destructive'>
 									{errors.name.message}
-								</p>
-							)}
-						</div>
-
-						<div className='space-y-1.5'>
-							<Label>
-								Project <span className='text-destructive'>*</span>
-							</Label>
-							<Select
-								value={selectedProjectId ? String(selectedProjectId) : ''}
-								onValueChange={v => setValue('project_id', Number(v))}
-							>
-								<SelectTrigger>
-									<SelectValue placeholder='Select project…' />
-								</SelectTrigger>
-								<SelectContent>
-									{projects?.items.map(p => (
-										<SelectItem key={p.id} value={String(p.id)}>
-											{p.name}
-										</SelectItem>
-									))}
-								</SelectContent>
-							</Select>
-							{errors.project_id && (
-								<p className='text-xs text-destructive'>
-									{errors.project_id.message}
 								</p>
 							)}
 						</div>
