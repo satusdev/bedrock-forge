@@ -1,7 +1,7 @@
 import { Processor, WorkerHost, InjectQueue } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job, Queue } from 'bullmq';
-import { mkdir, rm, mkdtemp, stat } from 'fs/promises';
+import { mkdir, rm, mkdtemp, stat, readFile } from 'fs/promises';
 import { createReadStream } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -16,7 +16,12 @@ import {
 } from '@bedrock-forge/remote-executor';
 import { QUEUES, JOB_TYPES } from '@bedrock-forge/shared';
 import { escapeMysql } from '../../utils/cyberpanel-http';
-import { shellQuote, flipProtocol } from '../../utils/processor-utils';
+import {
+	shellQuote,
+	flipProtocol,
+	fixCyberPanelOwnership,
+	buildWpCliPrefix,
+} from '../../utils/processor-utils';
 
 const STAGING_DIR = '/tmp/forge-sync';
 
@@ -347,6 +352,7 @@ export class SyncProcessor extends WorkerHost {
 		const dumpStart = Date.now();
 		const dumpResult = await sourceExecutor.execute(
 			`mysqldump --defaults-extra-file=${srcMycnf} --single-transaction --quick ${sourceCreds.dbName} > ${dumpRemote}`,
+			{ timeout: 10 * 60_000 },
 		);
 		await sourceExecutor.execute(`rm -f ${srcMycnf}`);
 		await tracker.trackCommand(
@@ -409,13 +415,19 @@ export class SyncProcessor extends WorkerHost {
 		});
 		const dropCreateResult = await targetExecutor.execute(
 			`mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`DROP DATABASE IF EXISTS \`${targetCreds.dbName}\`; CREATE DATABASE \`${targetCreds.dbName}\`;`)}`,
+			{ timeout: 2 * 60_000 },
 		);
 		if (dropCreateResult.code !== 0) {
-			await tracker.track({
-				step: 'DROP/CREATE skipped — insufficient privileges, importing on top',
-				level: 'warn',
-				detail: dropCreateResult.stderr,
-			});
+			// Clean up temp files before failing so the target server is not littered.
+			await targetExecutor
+				.execute(`rm -f ${tgtMycnf} ${dumpRemote}`)
+				.catch(() => {});
+			throw new Error(
+				`Cannot reset target database for a clean-slate import. ` +
+					`DROP DATABASE / CREATE DATABASE failed for \`${targetCreds.dbName}\` — ` +
+					`ensure ${targetCreds.dbUser} has DROP and CREATE privileges then retry.\n` +
+					`Detail: ${dropCreateResult.stderr.trim()}`,
+			);
 		}
 
 		const maskedImport = `mysql --defaults-extra-file=*** ${targetCreds.dbName}`;
@@ -428,6 +440,7 @@ export class SyncProcessor extends WorkerHost {
 		const importStart = Date.now();
 		const importResult = await targetExecutor.execute(
 			`mysql --defaults-extra-file=${tgtMycnf} ${targetCreds.dbName} < ${dumpRemote}`,
+			{ timeout: 10 * 60_000 },
 		);
 		await targetExecutor.execute(`rm -f ${tgtMycnf}`);
 		await tracker.trackCommand(
@@ -468,8 +481,21 @@ export class SyncProcessor extends WorkerHost {
 			'sync',
 		);
 
+		// Verify the source URL is no longer present in siteurl/home after replacement.
+		// Throws hard if the DB still carries the source domain — prevents a sync that
+		// "completes" but leaves all content rendering with the wrong domain.
+		if (sourceUrl && targetUrl && sourceUrl !== targetUrl) {
+			await this.validateUrlReplacement(
+				targetExecutor,
+				targetCreds,
+				sourceUrl,
+				targetUrl,
+				tracker,
+			);
+		}
+
 		await job.updateProgress({
-			value: 70,
+			value: 83,
 			step: 'Database cloned, syncing files',
 		});
 		if (await this.isCancelled(job.id)) throw new Error('Cancelled by user');
@@ -498,13 +524,20 @@ export class SyncProcessor extends WorkerHost {
 		}
 		await job.updateProgress({ value: 93, step: 'File URLs replaced' });
 
-		// Flush all WordPress caches on target
+		// When URLs differ, delete Elementor's generated CSS so it rebuilds from the
+		// freshly URL-replaced database. The rsync'd CSS files were sed-replaced via
+		// replaceUrlsInFiles, but Elementor may also generate CSS from database-stored
+		// widget data; a stale generated CSS file would serve source-domain URLs.
+		// When URLs are identical the copied files are already correct — preserve them.
+		const urlsIdentical = !sourceUrl || !targetUrl || sourceUrl === targetUrl;
 		await this.flushWordPressCaches(
 			targetExecutor,
 			targetCreds,
 			targetLayout,
 			tracker,
 			'Clone',
+			urlsIdentical, // skipElementorCssFlush — skip only when URLs are identical
+			targetUrl,
 		);
 
 		await job.updateProgress({ value: 100, step: 'Clone complete' });
@@ -624,6 +657,7 @@ export class SyncProcessor extends WorkerHost {
 		await job.updateProgress({ value: 20, step: 'Safety backup complete' });
 
 		if (await this.isCancelled(job.id)) throw new Error('Cancelled by user');
+		let filesUrlsChanged: boolean | null = null;
 
 		if (scope === 'database' || scope === 'both') {
 			await this.pushDatabase(
@@ -687,6 +721,9 @@ export class SyncProcessor extends WorkerHost {
 					'target (file-replace)',
 					targetEnv.url,
 				);
+				if (filesSrcUrl && filesTgtUrl) {
+					filesUrlsChanged = filesSrcUrl !== filesTgtUrl;
+				}
 			} catch (e) {
 				await tracker.track({
 					step: 'Could not resolve URLs for file search-replace — skipping',
@@ -722,6 +759,11 @@ export class SyncProcessor extends WorkerHost {
 				targetPushLayout,
 				tracker,
 				'Push',
+				// Files-only pushes keep the target DB, so preserving generated CSS is
+				// safe. For scope=both, skip only when we positively know URLs did not
+				// change; otherwise delete/regenerate Elementor CSS from the new DB.
+				scope === 'files' || (scope === 'both' && filesUrlsChanged === false),
+				targetEnv.url,
 			);
 		} catch (e) {
 			await tracker.track({
@@ -813,6 +855,7 @@ export class SyncProcessor extends WorkerHost {
 		const dumpStart = Date.now();
 		const dumpResult = await sourceExecutor.execute(
 			`mysqldump --defaults-extra-file=${srcMycnf} --single-transaction --quick ${sourceCreds.dbName} > ${dumpRemote}`,
+			{ timeout: 10 * 60_000 },
 		);
 		await sourceExecutor.execute(`rm -f ${srcMycnf}`);
 		await tracker.trackCommand(
@@ -861,13 +904,18 @@ export class SyncProcessor extends WorkerHost {
 		});
 		const dropCreateResult = await targetExecutor.execute(
 			`mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`DROP DATABASE IF EXISTS \`${targetCreds.dbName}\`; CREATE DATABASE \`${targetCreds.dbName}\`;`)}`,
+			{ timeout: 2 * 60_000 },
 		);
 		if (dropCreateResult.code !== 0) {
-			await tracker.track({
-				step: 'DROP/CREATE skipped — insufficient privileges, importing on top',
-				level: 'warn',
-				detail: dropCreateResult.stderr,
-			});
+			await targetExecutor
+				.execute(`rm -f ${tgtMycnf} ${dumpRemote}`)
+				.catch(() => {});
+			throw new Error(
+				`Cannot reset target database for a clean-slate import. ` +
+					`DROP DATABASE / CREATE DATABASE failed for \`${targetCreds.dbName}\` — ` +
+					`ensure ${targetCreds.dbUser} has DROP and CREATE privileges then retry.\n` +
+					`Detail: ${dropCreateResult.stderr.trim()}`,
+			);
 		}
 
 		const maskedImport = `mysql --defaults-extra-file=*** ${targetCreds.dbName}`;
@@ -880,6 +928,7 @@ export class SyncProcessor extends WorkerHost {
 		const importStart = Date.now();
 		const importResult = await targetExecutor.execute(
 			`mysql --defaults-extra-file=${tgtMycnf} ${targetCreds.dbName} < ${dumpRemote}`,
+			{ timeout: 10 * 60_000 },
 		);
 		await targetExecutor
 			.execute(`rm -f ${tgtMycnf} ${dumpRemote}`)
@@ -907,6 +956,17 @@ export class SyncProcessor extends WorkerHost {
 			job,
 			'push',
 		);
+
+		// Verify the source URL is no longer present in siteurl/home after replacement.
+		if (sourceUrl && targetUrl && sourceUrl !== targetUrl) {
+			await this.validateUrlReplacement(
+				targetExecutor,
+				targetCreds,
+				sourceUrl,
+				targetUrl,
+				tracker,
+			);
+		}
 	}
 
 	/**
@@ -997,60 +1057,7 @@ export class SyncProcessor extends WorkerHost {
 			);
 		}
 
-		// Fix file ownership on target. CyberPanel assigns each site a unique
-		// system user — detect it from the PARENT of root_path (e.g. the owner of
-		// /home/example.com/ is exampleuser) and apply it recursively to all synced
-		// files. Without this, rsync/tar leaves files owned by root or the staging
-		// user, causing 403/404 on CSS, fonts, and uploads.
-		const parentDir = targetSite.replace(/\/+$/, '').replace(/\/[^/]+$/, '');
-		const ownerResult = await targetExecutor
-			.execute(
-				`stat -c '%U:%G' ${shellQuote(parentDir)} 2>/dev/null || stat -f '%Su:%Sg' ${shellQuote(parentDir)} 2>/dev/null`,
-			)
-			.catch(() => ({ code: 1, stdout: '', stderr: '' }));
-		const detectedOwner =
-			ownerResult.code === 0 && ownerResult.stdout.trim()
-				? ownerResult.stdout.trim()
-				: null;
-		// Fall back to root_path itself if parent is root-owned
-		const selfOwnerResult =
-			!detectedOwner || detectedOwner.startsWith('root:')
-				? await targetExecutor
-						.execute(
-							`stat -c '%U:%G' ${shellQuote(targetSite)} 2>/dev/null || stat -f '%Su:%Sg' ${shellQuote(targetSite)} 2>/dev/null`,
-						)
-						.catch(() => ({ code: 1, stdout: '', stderr: '' }))
-				: null;
-		const owner =
-			detectedOwner && !detectedOwner.startsWith('root:')
-				? detectedOwner
-				: selfOwnerResult?.code === 0 &&
-					  selfOwnerResult.stdout.trim() &&
-					  !selfOwnerResult.stdout.trim().startsWith('root:')
-					? selfOwnerResult.stdout.trim()
-					: null;
-		if (owner) {
-			await tracker.track({
-				step: `Fixing file ownership: chown -R ${owner} on target site`,
-				level: 'info',
-				detail: `Detected from ${detectedOwner && !detectedOwner.startsWith('root:') ? parentDir : targetSite}`,
-			});
-			await targetExecutor
-				.execute(`chown -R ${shellQuote(owner)} ${shellQuote(targetSite)}`)
-				.catch(async (e: unknown) => {
-					await tracker.track({
-						step: 'chown failed — files may have wrong ownership',
-						level: 'warn',
-						detail: e instanceof Error ? e.message : String(e),
-					});
-				});
-		} else {
-			await tracker.track({
-				step: 'Could not detect site owner — skipping chown',
-				level: 'warn',
-				detail: `parent=${parentDir}, self=${targetSite}`,
-			});
-		}
+		await fixCyberPanelOwnership(targetExecutor, targetSite, tracker);
 	}
 
 	/** rsync source → target using SSH, executed on the source server. */
@@ -1239,6 +1246,7 @@ export class SyncProcessor extends WorkerHost {
 	 *
 	 * @param suffix  Short label used for temp file names ('sync' | 'push')
 	 */
+
 	private async runUrlSearchReplace(
 		sourceUrl: string | null,
 		targetUrl: string | null,
@@ -1280,7 +1288,15 @@ export class SyncProcessor extends WorkerHost {
 			if (oj !== old) jsonPairs.push([oj, nj]);
 		}
 
-		const allDisplayPairs = [...pairs, ...jsonPairs];
+		// URL-encoded variants (redirect params, WooCommerce callbacks, plugin options)
+		const urlEncodedPairs: Array<[string, string]> = [];
+		for (const [old, nw] of pairs) {
+			const oe = old.replace('://', '%3A%2F%2F');
+			const ne = nw.replace('://', '%3A%2F%2F');
+			if (oe !== old) urlEncodedPairs.push([oe, ne]);
+		}
+
+		const allDisplayPairs = [...pairs, ...jsonPairs, ...urlEncodedPairs];
 
 		await tracker.track({
 			step: 'Running URL search-replace on target',
@@ -1296,35 +1312,66 @@ export class SyncProcessor extends WorkerHost {
 		// Try WITHOUT --skip-plugins first so Elementor classes are loaded and no rows
 		// are skipped with "Skipping an uninitialized class" warnings. If WP-CLI crashes
 		// (Elementor PHP fatal), auto-retry with --skip-plugins.
-		const allWpCliPairs = [...pairs, ...jsonPairs];
+		const allWpCliPairs = [...pairs, ...jsonPairs, ...urlEncodedPairs];
+
+		// Run WP-CLI as the WP directory owner so the correct PHP environment is used.
+		// On CyberPanel each site user has their own PHP-FPM pool with mysqli; root's
+		// system CLI PHP commonly lacks it, causing the "missing MySQL extension" error.
+		const {
+			prefix: wpPrefix,
+			allowRootFlag,
+			lsphpBin,
+			wpBin,
+		} = await buildWpCliPrefix(executor, rootPath);
+		const wp = (args: string): string => {
+			let phpAndWp: string;
+			if (lsphpBin && wpBin) {
+				// Direct phar call — bypasses hardcoded #!/usr/bin/env php shebang
+				phpAndWp = `${shellQuote(lsphpBin)} ${shellQuote(wpBin)}`;
+			} else if (lsphpBin) {
+				// Shell-wrapper wp install: WP_CLI_PHP is honoured
+				phpAndWp = `env WP_CLI_PHP=${shellQuote(lsphpBin)} wp`;
+			} else {
+				phpAndWp = 'wp';
+			}
+			const parts = [wpPrefix, phpAndWp, args.trim(), allowRootFlag].filter(
+				Boolean,
+			);
+			return parts.join(' ') + ' 2>&1';
+		};
+
 		let wpCliSuccess = false;
 		for (const skipPlugins of [false, true]) {
-			const skipFlag = skipPlugins ? '--skip-themes --skip-plugins ' : '';
+			const skiparg = skipPlugins ? ' --skip-themes --skip-plugins' : '';
 			let passOk = true;
 			for (const [oldUrl, newUrl] of allWpCliPairs) {
-				const wpCliResult = await executor.execute(
-					`wp search-replace ${shellQuote(oldUrl)} ${shellQuote(newUrl)} --path=${shellQuote(rootPath)} --all-tables --precise --skip-columns=guid ${skipFlag}--allow-root 2>&1`,
-				);
+				const srArgs = `search-replace ${shellQuote(oldUrl)} ${shellQuote(newUrl)} --path=${shellQuote(rootPath)} --all-tables --precise --skip-columns=guid${skiparg}`;
+				const wpCliResult = await executor.execute(wp(srArgs));
 				if (wpCliResult.code === 0) {
 					await tracker.track({
 						step: `URL search-replace complete (WP-CLI${skipPlugins ? ', skip-plugins' : ''}): ${oldUrl} → ${newUrl}`,
 						level: 'info',
 						detail: wpCliResult.stdout.trim() || 'Done',
 					});
-					wpCliSuccess = true;
 				} else {
-					// Try cd-based invocation (works when wp binary is not on PATH)
-					const cdResult = await executor.execute(
-						`cd ${shellQuote(rootPath)} && wp search-replace ${shellQuote(oldUrl)} ${shellQuote(newUrl)} --all-tables --precise --skip-columns=guid ${skipFlag}--allow-root 2>&1`,
-					);
-					if (cdResult.code === 0) {
-						await tracker.track({
-							step: `URL search-replace complete (WP-CLI via cd${skipPlugins ? ', skip-plugins' : ''}): ${oldUrl} → ${newUrl}`,
-							level: 'info',
-							detail: cdResult.stdout.trim() || 'Done',
-						});
-						wpCliSuccess = true;
-					} else {
+					// cd-based fallback: only attempted without a sudo prefix —
+					// with sudo the system PATH already includes /usr/local/bin/wp.
+					let cdOk = false;
+					if (!wpPrefix) {
+						const cdArgs = `search-replace ${shellQuote(oldUrl)} ${shellQuote(newUrl)} --all-tables --precise --skip-columns=guid${skiparg}${allowRootFlag ? ' ' + allowRootFlag : ''}`;
+						const cdResult = await executor.execute(
+							`cd ${shellQuote(rootPath)} && wp ${cdArgs} 2>&1`,
+						);
+						if (cdResult.code === 0) {
+							await tracker.track({
+								step: `URL search-replace complete (WP-CLI via cd${skipPlugins ? ', skip-plugins' : ''}): ${oldUrl} → ${newUrl}`,
+								level: 'info',
+								detail: cdResult.stdout.trim() || 'Done',
+							});
+							cdOk = true;
+						}
+					}
+					if (!cdOk) {
 						passOk = false;
 						if (!skipPlugins) {
 							await tracker.track({
@@ -1343,14 +1390,29 @@ export class SyncProcessor extends WorkerHost {
 					}
 				}
 			}
-			if (passOk) break; // all pairs succeeded — done
+			if (passOk) {
+				wpCliSuccess = true; // every pair in this mode succeeded
+				break;
+			}
 			if (skipPlugins) break; // already tried both modes, give up on WP-CLI
-			wpCliSuccess = false; // reset — will retry with --skip-plugins
+			// else: retry the full set of pairs with --skip-plugins
 		}
 
 		if (wpCliSuccess) return;
 
-		// Strategy 2: SQL fallback — broader table coverage + protocol variants.
+		// Strategy 2: PHP script — serialization-aware, handles Elementor/page-builder data.
+		// Falls back to raw SQL REPLACE (Strategy 3) if PHP CLI is unavailable on the server.
+		const scriptsPath = join(__dirname, '..', '..', '..', 'scripts');
+		const srScript = `/tmp/forge_sr_${suffix}_${job.id}.php`;
+		const scriptContent = await readFile(
+			join(scriptsPath, 'search-replace.php'),
+		);
+		await executor.pushFile({
+			remotePath: srScript,
+			content: scriptContent,
+		});
+
+		// Auto-detect table prefix (needed for both PHP and SQL fallback paths)
 		const srMycnf = `/tmp/forge_sr_${suffix}_${job.id}.cnf`;
 		await executor.pushFile({
 			remotePath: srMycnf,
@@ -1360,7 +1422,6 @@ export class SyncProcessor extends WorkerHost {
 		});
 		await executor.execute(`chmod 600 ${srMycnf}`);
 
-		// Auto-detect table prefix from information_schema; fallback 'wp_'
 		const prefixResult = await executor.execute(
 			`mysql --defaults-extra-file=${srMycnf} ${creds.dbName} -sN -e ${shellQuote(
 				`SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${escapeMysql(creds.dbName)}' AND table_name LIKE '%options' LIMIT 1`,
@@ -1377,10 +1438,65 @@ export class SyncProcessor extends WorkerHost {
 			detail: `prefix=${p}`,
 		});
 
-		// Build all UPDATE statements for every URL pair and every table/column.
-		// Include JSON-escaped variants to catch page-builder data (Elementor, etc.).
+		// Try PHP serialization-aware search-replace first
+		let phpSuccess = true;
+		const allPairs = [...pairs, ...jsonPairs, ...urlEncodedPairs];
+		for (const [oldUrl, newUrl] of allPairs) {
+			const phpResult = await executor.execute(
+				`php ${srScript}` +
+					` --mycnf=${srMycnf}` +
+					` --db-name=${shellQuote(creds.dbName)}` +
+					` --prefix=${shellQuote(p)}` +
+					` --search=${shellQuote(oldUrl)}` +
+					` --replace=${shellQuote(newUrl)}`,
+				{ timeout: 5 * 60_000 },
+			);
+			if (phpResult.code !== 0) {
+				await tracker.track({
+					step: 'PHP search-replace failed — falling back to SQL',
+					level: 'warn',
+					detail: (phpResult.stderr || phpResult.stdout || '').slice(0, 300),
+				});
+				phpSuccess = false;
+				break;
+			}
+			try {
+				const parsed = JSON.parse(phpResult.stdout) as {
+					tables_scanned: number;
+					rows_affected: number;
+					errors: string[];
+				};
+				await tracker.track({
+					step: `PHP search-replace: ${oldUrl} → ${newUrl}`,
+					level: 'info',
+					detail: `${parsed.tables_scanned} tables scanned, ${parsed.rows_affected} rows updated${
+						parsed.errors.length ? ` (${parsed.errors.length} errors)` : ''
+					}`,
+				});
+			} catch {
+				await tracker.track({
+					step: `PHP search-replace: ${oldUrl} → ${newUrl}`,
+					level: 'info',
+					detail: phpResult.stdout.slice(0, 200),
+				});
+			}
+		}
+
+		if (phpSuccess) {
+			await executor.execute(`rm -f ${srScript} ${srMycnf}`).catch(() => {});
+			await tracker.track({
+				step: 'URL search-replace complete (PHP, serialization-aware)',
+				level: 'info',
+				detail: `prefix=${p}, ${allPairs.length} pair(s) — serialized data handled correctly`,
+				durationMs: Date.now() - srStart,
+			});
+			return;
+		}
+
+		// Strategy 3: Raw SQL REPLACE fallback (no serialization fix)
+		await executor.execute(`rm -f ${srScript}`).catch(() => {});
 		const statements: string[] = [];
-		for (const [oldRaw, newRaw] of [...pairs, ...jsonPairs]) {
+		for (const [oldRaw, newRaw] of allPairs) {
 			const o = escapeMysql(oldRaw);
 			const n = escapeMysql(newRaw);
 			statements.push(
@@ -1406,9 +1522,10 @@ export class SyncProcessor extends WorkerHost {
 			content: Buffer.from(srSql),
 		});
 
-		const maskedSr = `mysql --defaults-extra-file=*** ${creds.dbName} < ${sqlFile} (prefix=${p}, ${pairs.length + jsonPairs.length} pair(s))`;
+		const maskedSr = `mysql --defaults-extra-file=*** ${creds.dbName} < ${sqlFile} (prefix=${p}, ${allPairs.length} pair(s))`;
 		const sqlResult = await executor.execute(
 			`mysql --defaults-extra-file=${srMycnf} ${creds.dbName} < ${sqlFile}`,
+			{ timeout: 5 * 60_000 },
 		);
 		await executor.execute(`rm -f ${srMycnf} ${sqlFile}`).catch(() => {});
 
@@ -1457,10 +1574,28 @@ export class SyncProcessor extends WorkerHost {
 			pairs.push([srcAlt, tgtAlt]);
 		}
 
+		// JSON-escaped variants (Elementor/page-builder data in .json files, JS bundles)
+		const jsonPairs: Array<[string, string]> = [];
+		for (const [old, nw] of pairs) {
+			const oj = old.replace(/\//g, '\\/');
+			const nj = nw.replace(/\//g, '\\/');
+			if (oj !== old) jsonPairs.push([oj, nj]);
+		}
+
+		// URL-encoded variants (redirect params, WooCommerce callbacks, plugin options)
+		const urlEncodedPairs: Array<[string, string]> = [];
+		for (const [old, nw] of pairs) {
+			const oe = old.replace('://', '%3A%2F%2F');
+			const ne = nw.replace('://', '%3A%2F%2F');
+			if (oe !== old) urlEncodedPairs.push([oe, ne]);
+		}
+
+		const allFilePairs = [...pairs, ...jsonPairs, ...urlEncodedPairs];
+
 		await tracker.track({
 			step: 'Replacing URLs in wp-content files',
 			level: 'info',
-			detail: `${wpContentPath} — ${pairs.map(([o, n]) => `${o} → ${n}`).join(', ')}`,
+			detail: `${wpContentPath} — ${allFilePairs.map(([o, n]) => `${o} → ${n}`).join(', ')}`,
 		});
 
 		// Verify the directory exists before attempting find
@@ -1479,7 +1614,7 @@ export class SyncProcessor extends WorkerHost {
 		const fileStart = Date.now();
 		let anyError = false;
 
-		for (const [oldUrl, newUrl] of pairs) {
+		for (const [oldUrl, newUrl] of allFilePairs) {
 			// Escape characters that could break sed's s|…|…|g delimiter
 			// We use | as delimiter so forward slashes don't need escaping.
 			// The only chars that need escaping are: | and \
@@ -1513,9 +1648,25 @@ export class SyncProcessor extends WorkerHost {
 				? 'File URL replace completed with warnings'
 				: 'File URL replace complete',
 			level: anyError ? 'warn' : 'info',
-			detail: `${wpContentPath}, ${pairs.length} pair(s), extensions: css/js/json/html/svg/xml/txt/php`,
+			detail: `${wpContentPath}, ${allFilePairs.length} pair(s), extensions: css/js/json/html/svg/xml/txt/php`,
 			durationMs: Date.now() - fileStart,
 		});
+
+		if (anyError) {
+			throw new Error(
+				`File URL replacement failed for one or more URL patterns in ${wpContentPath}. ` +
+					`The target may contain stale source-domain URLs in static assets (CSS, JS). ` +
+					`Check the execution log above for per-pattern error details.`,
+			);
+		}
+
+		await this.validateFileUrlReplacement(
+			sourceUrl,
+			targetUrl,
+			wpContentPath,
+			executor,
+			tracker,
+		);
 	}
 
 	/**
@@ -1532,13 +1683,47 @@ export class SyncProcessor extends WorkerHost {
 		layout: WpLayout,
 		tracker: StepTracker,
 		label: string,
+		/** When true, skip deleting uploads/elementor/css — used when files were just
+		 *  synced and URL-replaced, so the CSS files are already correct on disk. */
+		skipElementorCssFlush = false,
+		/** Site URL used to send an HTTP PURGE request, clearing LiteSpeed's
+		 *  in-memory page cache. Pass null/undefined to skip. Non-fatal. */
+		siteUrl: string | null | undefined = undefined,
 	): Promise<void> {
 		const { corePath, contentPath, isBedrock } = layout;
+
+		// Run WP-CLI as the WP directory owner so the correct PHP environment is used.
+		// On CyberPanel each site user has their own PHP-FPM pool with mysqli; root's
+		// system CLI PHP commonly lacks it, causing the "missing MySQL extension" error.
+		const {
+			prefix: wpPrefix,
+			allowRootFlag,
+			lsphpBin,
+			wpBin,
+		} = await buildWpCliPrefix(executor, corePath);
+		const wp = (args: string): string => {
+			let phpAndWp: string;
+			if (lsphpBin && wpBin) {
+				// Direct phar call — bypasses hardcoded #!/usr/bin/env php shebang
+				phpAndWp = `${shellQuote(lsphpBin)} ${shellQuote(wpBin)}`;
+			} else if (lsphpBin) {
+				// Shell-wrapper wp install: WP_CLI_PHP is honoured
+				phpAndWp = `env WP_CLI_PHP=${shellQuote(lsphpBin)} wp`;
+			} else {
+				phpAndWp = 'wp';
+			}
+			const parts = [wpPrefix, phpAndWp, args.trim(), allowRootFlag].filter(
+				Boolean,
+			);
+			return parts.join(' ') + ' 2>&1';
+		};
 
 		// Strategy 1: WP-CLI (use detected WP core path so it's found correctly)
 		const cacheResult = await executor
 			.execute(
-				`wp cache flush --path=${shellQuote(corePath)} --skip-themes --skip-plugins --allow-root 2>&1`,
+				wp(
+					`cache flush --path=${shellQuote(corePath)} --skip-themes --skip-plugins`,
+				),
 			)
 			.catch(() => ({ code: 1, stdout: '', stderr: 'executor error' }));
 		if (cacheResult.code === 0) {
@@ -1548,43 +1733,63 @@ export class SyncProcessor extends WorkerHost {
 			});
 			await executor
 				.execute(
-					`wp rewrite flush --path=${shellQuote(corePath)} --skip-themes --skip-plugins --allow-root 2>&1`,
+					wp(
+						`rewrite flush --path=${shellQuote(corePath)} --skip-themes --skip-plugins`,
+					),
 				)
 				.catch(() => {});
 			await executor
 				.execute(
-					`wp eval 'if(function_exists("opcache_reset")){opcache_reset();}' --path=${shellQuote(corePath)} --skip-themes --skip-plugins --allow-root 2>&1`,
+					wp(
+						`eval 'if(function_exists("opcache_reset")){opcache_reset();}' --path=${shellQuote(corePath)} --skip-themes --skip-plugins`,
+					),
 				)
 				.catch(() => {});
-			// Regenerate Elementor CSS — must run WITHOUT --skip-plugins so Elementor
-			// is loaded and can write its generated CSS files. Falls back to deleting
-			// the cache dir so Elementor auto-regenerates on the next page visit.
-			const elFlush = await executor
-				.execute(
-					`wp elementor flush-css --path=${shellQuote(corePath)} --allow-root 2>&1`,
-				)
-				.catch(() => ({ code: 1, stdout: '', stderr: '' }));
-			if (elFlush.code !== 0) {
-				// CLI failed (Elementor fatal, not installed, etc.) — nuke the CSS dir
-				// so Elementor rebuilds it fresh on the next front-end request.
-				await executor
-					.execute(
-						`rm -rf ${shellQuote(contentPath)}/uploads/elementor/css 2>/dev/null; true`,
-					)
-					.catch(() => {});
-				await tracker.track({
-					step: `${label}: Elementor flush-css failed — removed CSS cache for auto-regeneration`,
-					level: 'warn',
-					detail: (elFlush.stderr || elFlush.stdout || 'command failed').slice(
-						0,
-						200,
-					),
-				});
+			// Regenerate Elementor CSS — skip entirely when files were just synced;
+			// those CSS files are already correct on disk after the URL sed-replace.
+			// When files were NOT synced (db-only), regenerate or delete the stale
+			// CSS so Elementor rebuilds it from the freshly-imported database.
+			if (!skipElementorCssFlush) {
+				// Must run WITHOUT --skip-plugins so Elementor is loaded and can write
+				// its generated CSS files. Falls back to deleting the cache dir so
+				// Elementor auto-regenerates on the next page visit.
+				const elFlush = await executor
+					.execute(wp(`elementor flush-css --path=${shellQuote(corePath)}`))
+					.catch(() => ({ code: 1, stdout: '', stderr: '' }));
+				if (elFlush.code !== 0) {
+					// CLI failed (Elementor fatal, not installed, etc.) — nuke the CSS dir
+					// so Elementor rebuilds it fresh on the next front-end request.
+					await executor
+						.execute(
+							`rm -rf ${shellQuote(contentPath)}/uploads/elementor/css 2>/dev/null; true`,
+						)
+						.catch(() => {});
+					await tracker.track({
+						step: `${label}: Elementor flush-css failed — removed CSS cache for auto-regeneration`,
+						level: 'warn',
+						detail: (
+							elFlush.stderr ||
+							elFlush.stdout ||
+							'command failed'
+						).slice(0, 200),
+					});
+				}
 			}
 			await tracker.track({
 				step: `${label}: rewrite rules, OPcache, and Elementor CSS flushed (WP-CLI)`,
 				level: 'info',
 			});
+			if (siteUrl) {
+				await executor
+					.execute(
+						`curl -s -o /dev/null --max-time 5 -X PURGE ${shellQuote(siteUrl)}/ 2>/dev/null; true`,
+					)
+					.catch(() => {});
+				await tracker.track({
+					step: `${label}: LiteSpeed HTTP PURGE sent`,
+					level: 'info',
+				});
+			}
 			return;
 		}
 
@@ -1613,12 +1818,12 @@ export class SyncProcessor extends WorkerHost {
 					: 'wp_';
 			await executor
 				.execute(
-					`mysql --defaults-extra-file=${flushMycnf} ${creds.dbName} -e "DELETE FROM \`${p}options\` WHERE option_name LIKE '_transient_%' OR option_name LIKE '_site_transient_%';"`,
+					`mysql --defaults-extra-file=${flushMycnf} ${creds.dbName} -e "DELETE FROM \`${p}options\` WHERE option_name LIKE '_transient_%' OR option_name LIKE '_site_transient_%' OR option_name = 'elementor_log';"`,
 				)
 				.catch(() => {});
 			await executor.execute(`rm -f ${flushMycnf}`).catch(() => {});
 			await tracker.track({
-				step: `${label}: transients cleared (SQL, prefix=${p})`,
+				step: `${label}: transients and stale logs cleared (SQL, prefix=${p})`,
 				level: 'info',
 			});
 		} catch (e) {
@@ -1628,12 +1833,28 @@ export class SyncProcessor extends WorkerHost {
 				detail: e instanceof Error ? e.message : String(e),
 			});
 		}
+		// Remove WordPress object-cache drop-in so WP re-queries the (now fresh) DB
+		// directly until the caching plugin reinstates it on the next admin request.
+		await executor
+			.execute(
+				`rm -f ${shellQuote(contentPath)}/object-cache.php 2>/dev/null; true`,
+			)
+			.catch(() => {});
+		await tracker.track({
+			step: `${label}: WordPress object cache drop-in removed — WP will re-query from DB until plugin restores it`,
+			level: 'info',
+		});
 		// Remove common disk cache directories (non-fatal)
 		// Covers both standard wp-content/cache and Bedrock web/app/cache paths
+		// uploads/elementor/css is intentionally excluded when files were just
+		// synced: those CSS files are already correct after URL replace.
 		const cacheRmParts = [
 			`${shellQuote(contentPath)}/cache`,
 			`${shellQuote(contentPath)}/et-cache`,
-			`${shellQuote(contentPath)}/uploads/elementor/css`,
+			`${shellQuote(contentPath)}/litespeed`,
+			...(!skipElementorCssFlush
+				? [`${shellQuote(contentPath)}/uploads/elementor/css`]
+				: []),
 		];
 		if (isBedrock) {
 			// Bedrock may also have a cache dir at web/app/cache or app/cache directly
@@ -1645,7 +1866,19 @@ export class SyncProcessor extends WorkerHost {
 		await tracker.track({
 			step: `${label}: disk cache directories removed`,
 			level: 'info',
+			detail: cacheRmParts.join(', '),
 		});
+		if (siteUrl) {
+			await executor
+				.execute(
+					`curl -s -o /dev/null --max-time 5 -X PURGE ${shellQuote(siteUrl)}/ 2>/dev/null; true`,
+				)
+				.catch(() => {});
+			await tracker.track({
+				step: `${label}: LiteSpeed HTTP PURGE sent`,
+				level: 'info',
+			});
+		}
 	}
 
 	/**
@@ -1869,6 +2102,196 @@ export class SyncProcessor extends WorkerHost {
 			detail: 'Search-replace skipped for this side',
 		});
 		return null;
+	}
+
+	/**
+	 * Verify that the source URL is no longer present in the target database's
+	 * core content locations after a URL search-replace operation.
+	 *
+	 * Throws if common content stores still contain the source URL — this
+	 * indicates that the search-replace strategy (WP-CLI, PHP, or SQL) silently
+	 * failed without updating the database, which would leave content rendering
+	 * with the wrong domain.
+	 *
+	 * Non-fatal when the database cannot be queried (connectivity issues) — logged
+	 * as a warning so the job does not fail due to a transient probe error.
+	 */
+	private async validateUrlReplacement(
+		executor: Executor,
+		creds: Creds,
+		sourceUrl: string,
+		targetUrl: string,
+		tracker: StepTracker,
+	): Promise<void> {
+		const valMycnf = `/tmp/forge_val_${Date.now()}.cnf`;
+		try {
+			await executor.pushFile({
+				remotePath: valMycnf,
+				content: Buffer.from(
+					`[client]\nuser=${creds.dbUser}\npassword=${creds.dbPassword}\nhost=${creds.dbHost}\n`,
+				),
+			});
+			await executor.execute(`chmod 600 ${valMycnf}`);
+
+			// Detect table prefix
+			const pfxRes = await executor.execute(
+				`mysql --defaults-extra-file=${valMycnf} ${creds.dbName} -sN -e ${shellQuote(
+					`SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${escapeMysql(creds.dbName)}' AND table_name LIKE '%options' LIMIT 1`,
+				)}`,
+			);
+			const tblPrefix =
+				pfxRes.code === 0 && pfxRes.stdout.trim()
+					? pfxRes.stdout.trim()
+					: 'wp_';
+
+			const likeSource = escapeMysql(sourceUrl);
+			// Log/diagnostic option names that may contain historical source-domain
+			// URLs inside PHP-serialized objects with null bytes (private property
+			// markers). WP-CLI cannot replace inside those byte sequences, but the
+			// values are non-functional debug data that do not affect page rendering.
+			const NON_FUNCTIONAL_OPTIONS = ['elementor_log', '_elementor_log'];
+			const excludeOptionNames = NON_FUNCTIONAL_OPTIONS.map(
+				n => `'${escapeMysql(n)}'`,
+			).join(',');
+			const probes = [
+				{
+					label: `${tblPrefix}options`,
+					sql:
+						`SELECT 'options', option_name, LEFT(REPLACE(REPLACE(option_value, CHAR(10), ' '), CHAR(13), ' '), 180) ` +
+						`FROM \`${tblPrefix}options\` WHERE option_value LIKE '%${likeSource}%' ` +
+						`AND option_name NOT IN (${excludeOptionNames}) ` +
+						`AND option_name NOT LIKE '\_transient\_%' ` +
+						`AND option_name NOT LIKE '\_site\_transient\_%' LIMIT 5`,
+				},
+				{
+					label: `${tblPrefix}posts`,
+					sql:
+						`SELECT 'posts', CONCAT(ID, ':', post_type), LEFT(REPLACE(REPLACE(post_content, CHAR(10), ' '), CHAR(13), ' '), 180) ` +
+						`FROM \`${tblPrefix}posts\` WHERE post_content LIKE '%${likeSource}%' LIMIT 5`,
+				},
+				{
+					label: `${tblPrefix}postmeta`,
+					sql:
+						`SELECT 'postmeta', CONCAT(post_id, ':', meta_key), LEFT(REPLACE(REPLACE(CAST(meta_value AS CHAR), CHAR(10), ' '), CHAR(13), ' '), 180) ` +
+						`FROM \`${tblPrefix}postmeta\` WHERE CAST(meta_value AS CHAR) LIKE '%${likeSource}%' LIMIT 5`,
+				},
+			] as const;
+
+			const staleMatches: string[] = [];
+			for (const probe of probes) {
+				const result = await executor.execute(
+					`mysql --defaults-extra-file=${valMycnf} ${creds.dbName} -sN -e ${shellQuote(probe.sql)}`,
+				);
+				if (result.code !== 0) {
+					throw new Error(
+						`Validation probe failed for ${probe.label}: ${(result.stderr || result.stdout || `exit ${result.code}`).trim()}`,
+					);
+				}
+				if (!result.stdout.trim()) continue;
+				for (const line of result.stdout.trim().split('\n')) {
+					const [bucket = probe.label, key = '(unknown)', ...excerptParts] =
+						line.split('\t');
+					const excerpt = excerptParts.join('\t').trim();
+					staleMatches.push(
+						`${bucket.trim()} ${key.trim()} = ${excerpt || '(empty)'}`,
+					);
+				}
+			}
+
+			if (staleMatches.length > 0) {
+				throw new Error(
+					`URL replacement did not complete: source URL (${sourceUrl}) is still present ` +
+						`in target content after search-replace.\n` +
+						`Sample stale rows: ${staleMatches.join('; ')}.\n` +
+						`This would cause content to render with the wrong domain on the target site.`,
+				);
+			}
+
+			await tracker.track({
+				step: 'URL replacement verified — no stale source URLs remain in core WP content',
+				level: 'info',
+				detail:
+					`${tblPrefix}options, ${tblPrefix}posts, and ${tblPrefix}postmeta no longer contain ${sourceUrl} ` +
+					`(expected target: ${targetUrl})`,
+			});
+		} catch (e) {
+			// Re-throw validation failures — these are intentional hard stops.
+			if (
+				e instanceof Error &&
+				e.message.includes('URL replacement did not complete')
+			) {
+				throw e;
+			}
+			// Any other error (DB probe failure, SSH timeout) is a warning — the job
+			// should not fail because the validation probe itself had a connectivity issue.
+			await tracker.track({
+				step: 'URL replacement validation probe failed — could not verify target content',
+				level: 'warn',
+				detail: e instanceof Error ? e.message : String(e),
+			});
+		} finally {
+			await executor.execute(`rm -f ${valMycnf}`).catch(() => {});
+		}
+	}
+
+	/**
+	 * Verify that text assets under wp-content no longer contain the source URL
+	 * after the file sed replacement pass.
+	 */
+	private async validateFileUrlReplacement(
+		sourceUrl: string,
+		targetUrl: string,
+		wpContentPath: string,
+		executor: Executor,
+		tracker: StepTracker,
+	): Promise<void> {
+		try {
+			const grepCmd = [
+				`find ${shellQuote(wpContentPath)} -type f`,
+				`\\( -name '*.css' -o -name '*.js' -o -name '*.json' -o -name '*.html'`,
+				`-o -name '*.htm' -o -name '*.svg' -o -name '*.xml' -o -name '*.txt'`,
+				`-o -name '*.php' \\)`,
+				`-exec grep -nHF -m 1 -- ${shellQuote(sourceUrl)} {} + 2>/dev/null`,
+			].join(' ');
+			const grepResult = await executor.execute(grepCmd);
+
+			if (grepResult.code === 0 && grepResult.stdout.trim()) {
+				const samples = grepResult.stdout
+					.trim()
+					.split('\n')
+					.slice(0, 10)
+					.join('; ');
+				throw new Error(
+					`File URL replacement did not complete: source URL (${sourceUrl}) is still present ` +
+						`in text assets under ${wpContentPath} after search-replace.\n` +
+						`Sample files: ${samples}.\n` +
+						`This would cause stale links or assets to render from the wrong domain.`,
+				);
+			}
+			if (grepResult.code > 1) {
+				throw new Error(
+					`File validation probe failed: ${(grepResult.stderr || grepResult.stdout || `exit ${grepResult.code}`).trim()}`,
+				);
+			}
+
+			await tracker.track({
+				step: 'File URL replacement verified — no stale source URLs remain in text assets',
+				level: 'info',
+				detail: `${wpContentPath} no longer contains ${sourceUrl} (expected target: ${targetUrl})`,
+			});
+		} catch (e) {
+			if (
+				e instanceof Error &&
+				e.message.includes('File URL replacement did not complete')
+			) {
+				throw e;
+			}
+			await tracker.track({
+				step: 'File URL replacement validation probe failed — could not verify text assets',
+				level: 'warn',
+				detail: e instanceof Error ? e.message : String(e),
+			});
+		}
 	}
 
 	/**
