@@ -62,10 +62,7 @@ export class EnvironmentsService {
 			try {
 				const hostname = new URL(dto.url).hostname;
 				const domain = this.extractRegistrableDomain(hostname);
-				await this.domainsService.findOrCreate({
-					name: domain,
-					project_id: projectId,
-				});
+				await this.domainsService.findOrCreate(domain);
 			} catch (err) {
 				this.logger.warn(
 					`Failed to auto-create domain for env ${env.id}: ${err}`,

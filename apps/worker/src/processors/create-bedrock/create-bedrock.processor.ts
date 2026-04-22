@@ -8,7 +8,12 @@ import { EncryptionService } from '../../encryption/encryption.service';
 import { createRemoteExecutor } from '@bedrock-forge/remote-executor';
 import { QUEUES, JOB_TYPES, CreateBedrockPayload } from '@bedrock-forge/shared';
 import { callCpApi, CpCreds, escapeMysql } from '../../utils/cyberpanel-http';
-import { shellQuote, flipProtocol } from '../../utils/processor-utils';
+import {
+	shellQuote,
+	flipProtocol,
+	fixCyberPanelOwnership,
+	buildWpCliPrefix,
+} from '../../utils/processor-utils';
 
 // concurrency=1: Bedrock provisioning runs composer, git clone, SSH commands.
 @Processor(QUEUES.PROJECTS, { concurrency: 1 })
@@ -355,16 +360,36 @@ export class CreateBedrockProcessor extends WorkerHost {
 				}
 
 				// Flush WordPress caches (WP-CLI preferred; disk cache fallback)
-				await executor
-					.execute(
-						`wp cache flush --path=${shellQuote(tgtPath)} --allow-root 2>&1`,
-					)
-					.catch(() => {});
-				await executor
-					.execute(
-						`wp rewrite flush --path=${shellQuote(tgtPath)} --allow-root 2>&1`,
-					)
-					.catch(() => {});
+				// Run as the site owner so their PHP-FPM environment (with mysqli) is used.
+				{
+					const {
+						prefix: flushPrefix,
+						allowRootFlag: flushFlag,
+						lsphpBin: flushLsphpBin,
+						wpBin: flushWpBin,
+					} = await buildWpCliPrefix(executor, tgtPath);
+					const wpFlush = (args: string): string => {
+						let phpAndWp: string;
+						if (flushLsphpBin && flushWpBin) {
+							phpAndWp = `${shellQuote(flushLsphpBin)} ${shellQuote(flushWpBin)}`;
+						} else if (flushLsphpBin) {
+							phpAndWp = `env WP_CLI_PHP=${shellQuote(flushLsphpBin)} wp`;
+						} else {
+							phpAndWp = 'wp';
+						}
+						return (
+							[flushPrefix, phpAndWp, args.trim(), flushFlag]
+								.filter(Boolean)
+								.join(' ') + ' 2>&1'
+						);
+					};
+					await executor
+						.execute(wpFlush(`cache flush --path=${shellQuote(tgtPath)}`))
+						.catch(() => {});
+					await executor
+						.execute(wpFlush(`rewrite flush --path=${shellQuote(tgtPath)}`))
+						.catch(() => {});
+				}
 				await executor
 					.execute(
 						`rm -rf ${shellQuote(tgtPath)}/wp-content/cache ${shellQuote(tgtPath)}/wp-content/et-cache 2>/dev/null; true`,
@@ -439,6 +464,9 @@ export class CreateBedrockProcessor extends WorkerHost {
 					dbHost,
 				);
 			}
+
+			// Fix ownership: public_html itself → user:nogroup (750), contents → user:user
+			await fixCyberPanelOwnership(executor, env.root_path);
 
 			await job.updateProgress({ value: 95, step: 'Finalizing' });
 
