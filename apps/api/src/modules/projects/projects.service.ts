@@ -167,10 +167,7 @@ export class ProjectsService {
 			const domainToCreate =
 				mainDomain ?? this.extractRegistrableDomain(hostname);
 			if (domainToCreate) {
-				await this.domainsService.findOrCreate({
-					name: domainToCreate,
-					project_id: projectId,
-				});
+				await this.domainsService.findOrCreate(domainToCreate);
 			}
 		} catch (err) {
 			this.logger.warn(
