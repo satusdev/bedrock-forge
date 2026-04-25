@@ -13,6 +13,8 @@ export class DashboardService {
 			monitors,
 			recentJobs,
 			domainsExpiringSoon,
+			runningJobs,
+			failedJobs24h,
 		} = await this.repo.getSummaryData();
 
 		const monitorsUp = monitors.filter(m => m.last_status === 200).length;
@@ -27,6 +29,19 @@ export class DashboardService {
 					) / monitors.length
 				: null;
 
+		const mapJob = (j: { id: bigint; queue_name: string; job_type: string | null; status: string; progress: number; last_error?: string | null; payload?: unknown; created_at: Date; environment?: { id?: bigint; url: string; project?: { id: bigint; name: string } } | null }) => ({
+			...j,
+			id: Number(j.id),
+			environment: j.environment ? {
+				...j.environment,
+				id: j.environment.id ? Number(j.environment.id) : undefined,
+				project: j.environment.project ? {
+					...j.environment.project,
+					id: Number(j.environment.project.id),
+				} : undefined,
+			} : null,
+		});
+
 		return {
 			projects: { total: projectTotal },
 			servers: { total: serverTotal },
@@ -38,10 +53,22 @@ export class DashboardService {
 				avgUptime: avgUptime !== null ? Number(avgUptime.toFixed(1)) : null,
 			},
 			domains: { expiringSoon: domainsExpiringSoon },
-			recentJobs: recentJobs.map(j => ({
-				...j,
-				id: Number(j.id),
-			})),
+			recentJobs: recentJobs.map(j => ({ ...j, id: Number(j.id) })),
+			runningJobs: runningJobs.map(mapJob),
+			failedJobs24h: failedJobs24h.map(mapJob),
 		};
 	}
+
+	getHealthScores() {
+		return this.repo.getHealthScores();
+	}
+
+	getAttentionItems() {
+		return this.repo.getAttentionItems();
+	}
+
+	get24hSummary() {
+		return this.repo.get24hSummary();
+	}
 }
+
