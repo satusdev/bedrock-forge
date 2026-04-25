@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { cn } from '@/lib/utils';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -27,6 +28,9 @@ import {
 	CheckCircle2,
 	CircleDashed,
 	AlertTriangle,
+	X,
+	Users,
+	LogIn,
 } from 'lucide-react';
 import { WS_EVENTS } from '@bedrock-forge/shared';
 import { useWebSocketEvent, useSubscribeEnvironment } from '@/lib/websocket';
@@ -82,18 +86,28 @@ interface Environment {
 	root_path: string;
 	backup_path: string | null;
 	google_drive_folder_id: string | null;
+	protected_tables: string[];
 	server: {
 		id: number;
 		name: string;
 		ip_address: string;
 		status: 'online' | 'offline' | 'unknown';
 	};
+	environment_tags?: Array<{
+		tag: { id: number; name: string; color: string | null };
+	}>;
 	latestProvisioningJob?: {
 		id: number;
 		status: string;
 		progress: number | null;
 		last_error: string | null;
 	} | null;
+}
+
+interface Tag {
+	id: number;
+	name: string;
+	color: string | null;
 }
 
 const envSchema = z.object({
@@ -123,6 +137,217 @@ const SERVER_STATUS_VARIANT: Record<
 	offline: 'destructive',
 	unknown: 'secondary',
 };
+
+function ProtectedTablesPicker({
+	projectId,
+	envId,
+	value,
+	onChange,
+}: {
+	projectId: number;
+	envId: number | undefined;
+	value: string[];
+	onChange: (v: string[]) => void;
+}) {
+	const [dialogOpen, setDialogOpen] = useState(false);
+	const [allTables, setAllTables] = useState<string[]>([]);
+	const [pendingSelection, setPendingSelection] = useState<string[]>([]);
+	const [search, setSearch] = useState('');
+	const [manualInput, setManualInput] = useState('');
+
+	const fetchMutation = useMutation({
+		mutationFn: () =>
+			api.get<string[]>(
+				`/projects/${projectId}/environments/${envId!}/db-tables`,
+			),
+		onSuccess: data => setAllTables(data),
+		onError: () =>
+			toast({
+				title: 'Failed to load tables from server',
+				variant: 'destructive',
+			}),
+	});
+
+	const openDialog = () => {
+		setPendingSelection([...value]);
+		setSearch('');
+		setDialogOpen(true);
+	};
+
+	const addManual = () => {
+		const name = manualInput.trim().replace(/[^a-zA-Z0-9_$]/g, '');
+		if (!name) return;
+		if (!value.includes(name)) onChange([...value, name]);
+		setManualInput('');
+	};
+
+	const filtered = allTables.filter(t =>
+		t.toLowerCase().includes(search.toLowerCase()),
+	);
+
+	return (
+		<div className='space-y-2'>
+			{/* Selected badges */}
+			{value.length > 0 && (
+				<div className='flex flex-wrap gap-1'>
+					{value.map(t => (
+						<Badge key={t} variant='secondary' className='gap-1 pr-1'>
+							{t}
+							<button
+								type='button'
+								onClick={() => onChange(value.filter(x => x !== t))}
+								className='ml-0.5 rounded-sm hover:text-destructive focus:outline-none'
+								aria-label={`Remove ${t}`}
+							>
+								<X className='h-3 w-3' />
+							</button>
+						</Badge>
+					))}
+				</div>
+			)}
+
+			{/* Manual input + Browse button */}
+			<div className='flex gap-2'>
+				<Input
+					value={manualInput}
+					onChange={e => setManualInput(e.target.value)}
+					onKeyDown={e => {
+						if (e.key === 'Enter') {
+							e.preventDefault();
+							addManual();
+						}
+					}}
+					placeholder='Type table name…'
+					className='h-8 text-sm'
+				/>
+				<Button type='button' variant='outline' size='sm' onClick={addManual}>
+					Add
+				</Button>
+				{envId && (
+					<Button
+						type='button'
+						variant='outline'
+						size='sm'
+						onClick={openDialog}
+					>
+						Browse
+					</Button>
+				)}
+			</div>
+			{value.length === 0 && (
+				<p className='text-xs text-muted-foreground'>
+					No tables protected. Add table names to preserve them during DB
+					push/clone.
+				</p>
+			)}
+
+			{/* Browse dialog */}
+			<Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+				<DialogContent className='sm:max-w-md'>
+					<DialogHeader>
+						<DialogTitle>Select Protected Tables</DialogTitle>
+					</DialogHeader>
+					<div className='space-y-3'>
+						<Button
+							type='button'
+							variant='outline'
+							size='sm'
+							className='w-full'
+							onClick={() => fetchMutation.mutate()}
+							disabled={fetchMutation.isPending}
+						>
+							{fetchMutation.isPending ? (
+								<>
+									<Loader2 className='h-4 w-4 mr-2 animate-spin' />
+									Loading tables…
+								</>
+							) : (
+								<>
+									<Database className='h-4 w-4 mr-2' />
+									{allTables.length > 0
+										? 'Reload tables from server'
+										: 'Load tables from server'}
+								</>
+							)}
+						</Button>
+
+						{allTables.length > 0 && (
+							<Input
+								value={search}
+								onChange={e => setSearch(e.target.value)}
+								placeholder='Search tables…'
+								className='h-8'
+							/>
+						)}
+
+						{allTables.length > 0 && (
+							<div className='max-h-60 overflow-y-auto rounded border divide-y'>
+								{filtered.length === 0 && (
+									<p className='text-xs text-muted-foreground p-3'>
+										No tables match
+									</p>
+								)}
+								{filtered.map(t => {
+									const selected = pendingSelection.includes(t);
+									return (
+										<button
+											key={t}
+											type='button'
+											onClick={() =>
+												setPendingSelection(prev =>
+													selected ? prev.filter(x => x !== t) : [...prev, t],
+												)
+											}
+											className={cn(
+												'w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-muted transition-colors',
+												selected && 'bg-primary/10 text-primary font-medium',
+											)}
+										>
+											<CheckCircle2
+												className={cn(
+													'h-4 w-4 shrink-0',
+													selected
+														? 'text-primary'
+														: 'text-muted-foreground opacity-20',
+												)}
+											/>
+											{t}
+										</button>
+									);
+								})}
+							</div>
+						)}
+
+						{allTables.length > 0 && (
+							<p className='text-xs text-muted-foreground'>
+								{pendingSelection.length} table
+								{pendingSelection.length !== 1 ? 's' : ''} selected
+							</p>
+						)}
+					</div>
+					<DialogFooter>
+						<Button
+							type='button'
+							variant='outline'
+							onClick={() => setDialogOpen(false)}
+						>
+							Cancel
+						</Button>
+						<Button
+							type='button'
+							onClick={() => {
+								onChange(pendingSelection);
+								setDialogOpen(false);
+							}}
+						>
+							Apply ({pendingSelection.length})
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+		</div>
+	);
+}
 
 function EnvironmentFormDialog({
 	open,
@@ -157,6 +382,10 @@ function EnvironmentFormDialog({
 		},
 	});
 
+	const [protectedTables, setProtectedTables] = useState<string[]>(
+		initial?.protected_tables ?? [],
+	);
+
 	async function onSubmit(data: EnvForm) {
 		try {
 			const payload: Record<string, unknown> = {
@@ -166,6 +395,7 @@ function EnvironmentFormDialog({
 				root_path: data.root_path,
 				backup_path: data.backup_path || null,
 				google_drive_folder_id: data.google_drive_folder_id || null,
+				protected_tables: protectedTables,
 			};
 			if (initial) {
 				await api.put(
@@ -314,6 +544,25 @@ function EnvironmentFormDialog({
 						)}
 					</div>
 
+					<div className='space-y-1'>
+						<Label>
+							Protected Tables{' '}
+							<span className='text-muted-foreground font-normal text-xs'>
+								(optional)
+							</span>
+						</Label>
+						<ProtectedTablesPicker
+							projectId={projectId}
+							envId={initial?.id}
+							value={protectedTables}
+							onChange={setProtectedTables}
+						/>
+						<p className='text-xs text-muted-foreground'>
+							WP table names preserved during DB push/clone. Use for custom
+							plugin tables that hold production-only data.
+						</p>
+					</div>
+
 					<DialogFooter>
 						<Button
 							type='button'
@@ -339,6 +588,238 @@ const dbCredsSchema = z.object({
 	dbHost: z.string().min(1, 'Required').max(255),
 });
 type DbCredsForm = z.infer<typeof dbCredsSchema>;
+
+interface WpUser {
+	id: number;
+	user_login: string;
+	user_email: string;
+	display_name: string;
+	user_registered: string;
+	roles: string[];
+}
+
+interface QuickLoginResult {
+	loginUrl: string;
+	expiresAt: string;
+}
+
+function WpUsersSection({
+	projectId,
+	envId,
+}: {
+	projectId: number;
+	envId: number;
+}) {
+	const [open, setOpen] = useState(false);
+	const [loginResult, setLoginResult] = useState<QuickLoginResult | null>(null);
+	const [loginDialogOpen, setLoginDialogOpen] = useState(false);
+	const [loadingUserId, setLoadingUserId] = useState<number | null>(null);
+	const [copied, setCopied] = useState(false);
+
+	const {
+		data: users,
+		isLoading,
+		isError,
+		refetch,
+	} = useQuery<WpUser[]>({
+		queryKey: ['wp-users', envId],
+		queryFn: () =>
+			api.get<WpUser[]>(
+				`/projects/${projectId}/environments/${envId}/wp-users`,
+			),
+		enabled: open,
+		retry: false,
+	});
+
+	async function handleQuickLogin(userId: number) {
+		setLoadingUserId(userId);
+		try {
+			const result = await api.post<QuickLoginResult>(
+				`/projects/${projectId}/environments/${envId}/wp-quick-login`,
+				{ user_id: userId },
+			);
+			setLoginResult(result);
+			setLoginDialogOpen(true);
+		} catch {
+			toast({ title: 'Failed to create login link', variant: 'destructive' });
+		} finally {
+			setLoadingUserId(null);
+		}
+	}
+
+	function copyLoginUrl() {
+		if (!loginResult) return;
+		navigator.clipboard.writeText(loginResult.loginUrl).then(() => {
+			setCopied(true);
+			setTimeout(() => setCopied(false), 2000);
+		});
+	}
+
+	const ROLE_COLORS: Record<string, string> = {
+		administrator:
+			'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+		editor: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+		author:
+			'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
+		contributor:
+			'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400',
+		subscriber: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400',
+	};
+
+	return (
+		<>
+			<div className='border rounded-md overflow-hidden'>
+				<button
+					type='button'
+					className='w-full flex items-center justify-between px-3 py-2 text-xs font-medium bg-muted/50 hover:bg-muted transition-colors'
+					onClick={() => setOpen(o => !o)}
+				>
+					<span className='flex items-center gap-1.5'>
+						<Users className='h-3.5 w-3.5 text-muted-foreground' />
+						WP Users
+					</span>
+					{open ? (
+						<ChevronUp className='h-3.5 w-3.5 text-muted-foreground' />
+					) : (
+						<ChevronDown className='h-3.5 w-3.5 text-muted-foreground' />
+					)}
+				</button>
+
+				{open && (
+					<div className='px-3 py-2.5 text-xs'>
+						{isLoading && (
+							<div className='space-y-1.5'>
+								<Skeleton className='h-5 w-full' />
+								<Skeleton className='h-5 w-4/5' />
+								<Skeleton className='h-5 w-3/5' />
+							</div>
+						)}
+						{isError && (
+							<div className='flex items-center justify-between'>
+								<p className='text-muted-foreground'>Failed to load users</p>
+								<Button
+									size='sm'
+									variant='outline'
+									className='h-6 text-xs'
+									onClick={() => refetch()}
+								>
+									Retry
+								</Button>
+							</div>
+						)}
+						{!isLoading && !isError && users && users.length === 0 && (
+							<p className='text-muted-foreground text-center py-1'>
+								No users found
+							</p>
+						)}
+						{!isLoading && !isError && users && users.length > 0 && (
+							<div className='space-y-1'>
+								{users.map(u => (
+									<div
+										key={u.id}
+										className='flex items-center justify-between gap-2 py-1 border-b last:border-0'
+									>
+										<div className='flex items-center gap-2 min-w-0'>
+											<div
+												className='h-6 w-6 rounded-full flex items-center justify-center text-white text-xs font-semibold shrink-0'
+												style={{
+													backgroundColor: `hsl(${(u.user_login.charCodeAt(0) * 47) % 360}, 60%, 45%)`,
+												}}
+											>
+												{u.user_login[0].toUpperCase()}
+											</div>
+											<div className='min-w-0'>
+												<p className='font-medium truncate leading-tight'>
+													{u.user_login}
+												</p>
+												<p className='text-muted-foreground truncate leading-tight'>
+													{u.user_email}
+												</p>
+											</div>
+											<div className='flex flex-wrap gap-1 shrink-0'>
+												{u.roles.map(role => (
+													<span
+														key={role}
+														className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${ROLE_COLORS[role] ?? 'bg-muted text-muted-foreground'}`}
+													>
+														{role}
+													</span>
+												))}
+											</div>
+										</div>
+										<Button
+											size='sm'
+											variant='outline'
+											className='h-6 text-xs shrink-0'
+											disabled={loadingUserId === u.id}
+											onClick={() => handleQuickLogin(u.id)}
+										>
+											{loadingUserId === u.id ? (
+												<Loader2 className='h-3 w-3 animate-spin' />
+											) : (
+												<>
+													<LogIn className='h-3 w-3 mr-1' />
+													Login
+												</>
+											)}
+										</Button>
+									</div>
+								))}
+							</div>
+						)}
+					</div>
+				)}
+			</div>
+
+			{/* Quick login link dialog */}
+			<Dialog open={loginDialogOpen} onOpenChange={setLoginDialogOpen}>
+				<DialogContent className='sm:max-w-md'>
+					<DialogHeader>
+						<DialogTitle className='flex items-center gap-2'>
+							<LogIn className='h-4 w-4' /> Quick Login Link
+						</DialogTitle>
+					</DialogHeader>
+					{loginResult && (
+						<div className='space-y-4'>
+							<p className='text-sm text-muted-foreground'>
+								This one-time link expires at{' '}
+								<span className='font-medium text-foreground'>
+									{new Date(loginResult.expiresAt).toLocaleTimeString()}
+								</span>{' '}
+								and self-destructs after use.
+							</p>
+							<div className='flex items-center gap-2'>
+								<code className='flex-1 text-xs bg-muted px-2 py-1.5 rounded font-mono break-all'>
+									{loginResult.loginUrl}
+								</code>
+							</div>
+							<div className='flex gap-2'>
+								<Button
+									variant='outline'
+									className='flex-1'
+									onClick={copyLoginUrl}
+								>
+									<Copy className='h-4 w-4 mr-2' />
+									{copied ? 'Copied!' : 'Copy URL'}
+								</Button>
+								<Button
+									className='flex-1'
+									onClick={() => {
+										window.open(loginResult.loginUrl, '_blank', 'noopener');
+										setLoginDialogOpen(false);
+									}}
+								>
+									<ExternalLink className='h-4 w-4 mr-2' />
+									Open
+								</Button>
+							</div>
+						</div>
+					)}
+				</DialogContent>
+			</Dialog>
+		</>
+	);
+}
 
 function DbCredentialsSection({
 	projectId,
@@ -623,6 +1104,7 @@ function EnvironmentCard({
 	onDelete: (e: Environment) => void;
 }) {
 	const qc = useQueryClient();
+	const [showAddTag, setShowAddTag] = useState(false);
 
 	// Subscribe to WS room so real-time progress events reach this card
 	useSubscribeEnvironment(env.id);
@@ -662,6 +1144,39 @@ function EnvironmentCard({
 			});
 		}
 	});
+
+	// ── Available tags query ────────────────────────────────────────────────
+	const { data: allTags = [] } = useQuery<Tag[]>({
+		queryKey: ['tags'],
+		queryFn: () => api.get('/tags'),
+		staleTime: 60_000,
+	});
+
+	const addTagMutation = useMutation({
+		mutationFn: (tagId: number) =>
+			api.post(`/environments/${env.id}/tags/${tagId}`, {}),
+		onSuccess: () => {
+			qc.invalidateQueries({ queryKey: ['environments', projectId] });
+			setShowAddTag(false);
+		},
+		onError: () =>
+			toast({ title: 'Failed to add tag', variant: 'destructive' }),
+	});
+
+	const removeTagMutation = useMutation({
+		mutationFn: (tagId: number) =>
+			api.delete(`/environments/${env.id}/tags/${tagId}`),
+		onSuccess: () => {
+			qc.invalidateQueries({ queryKey: ['environments', projectId] });
+		},
+		onError: () =>
+			toast({ title: 'Failed to remove tag', variant: 'destructive' }),
+	});
+
+	const currentTagIds = new Set(
+		(env.environment_tags ?? []).map(et => et.tag.id),
+	);
+	const availableToAdd = allTags.filter(t => !currentTagIds.has(t.id));
 
 	function triggerBackup() {
 		api
@@ -781,6 +1296,64 @@ function EnvironmentCard({
 				)}
 
 				<DbCredentialsSection projectId={projectId} envId={env.id} />
+
+				<WpUsersSection projectId={projectId} envId={env.id} />
+
+				{/* Tags */}
+				{((env.environment_tags && env.environment_tags.length > 0) ||
+					allTags.length > 0) && (
+					<div className='flex flex-wrap items-center gap-1.5 pt-1'>
+						{(env.environment_tags ?? []).map(et => (
+							<span
+								key={et.tag.id}
+								className='inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border'
+								style={
+									et.tag.color
+										? { borderColor: et.tag.color, color: et.tag.color }
+										: undefined
+								}
+							>
+								{et.tag.name}
+								<button
+									type='button'
+									onClick={() => removeTagMutation.mutate(et.tag.id)}
+									className='hover:opacity-70 transition-opacity leading-none'
+									aria-label={`Remove tag ${et.tag.name}`}
+								>
+									<X className='h-2.5 w-2.5' />
+								</button>
+							</span>
+						))}
+						{availableToAdd.length > 0 &&
+							(showAddTag ? (
+								<Select
+									onValueChange={v => {
+										addTagMutation.mutate(Number(v));
+									}}
+								>
+									<SelectTrigger className='h-6 text-xs w-32'>
+										<SelectValue placeholder='Add tag…' />
+									</SelectTrigger>
+									<SelectContent>
+										{availableToAdd.map(t => (
+											<SelectItem key={t.id} value={String(t.id)}>
+												{t.name}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							) : (
+								<button
+									type='button'
+									onClick={() => setShowAddTag(true)}
+									className='inline-flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground border border-dashed rounded-full px-2 py-0.5 transition-colors'
+								>
+									<Plus className='h-2.5 w-2.5' />
+									Tag
+								</button>
+							))}
+					</div>
+				)}
 
 				<div className='flex items-center gap-1.5 pt-2 mt-auto border-t'>
 					<Button

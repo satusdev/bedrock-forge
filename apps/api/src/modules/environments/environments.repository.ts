@@ -45,6 +45,7 @@ export class EnvironmentsRepository {
 						last_error: true,
 					},
 				},
+				environment_tags: { include: { tag: true } },
 			},
 			orderBy: { created_at: 'asc' },
 		});
@@ -71,6 +72,7 @@ export class EnvironmentsRepository {
 				root_path: dto.root_path,
 				backup_path: dto.backup_path ?? null,
 				google_drive_folder_id: dto.google_drive_folder_id ?? null,
+				protected_tables: dto.protected_tables ?? [],
 			},
 			include: {
 				server: {
@@ -96,6 +98,9 @@ export class EnvironmentsRepository {
 				// Allow explicit null to clear the field
 				...(dto.google_drive_folder_id !== undefined && {
 					google_drive_folder_id: dto.google_drive_folder_id || null,
+				}),
+				...(dto.protected_tables !== undefined && {
+					protected_tables: dto.protected_tables,
 				}),
 			},
 			include: {
@@ -148,5 +153,29 @@ export class EnvironmentsRepository {
 			dbPassword: dto.dbPassword,
 			dbHost: dto.dbHost,
 		};
+	}
+
+	// ── Tags ──────────────────────────────────────────────────────────────────
+
+	addTag(envId: bigint, tagId: bigint) {
+		return this.prisma.environmentTag.create({
+			data: { environment_id: envId, tag_id: tagId },
+			include: { tag: true },
+		});
+	}
+
+	removeTag(envId: bigint, tagId: bigint) {
+		return this.prisma.environmentTag.delete({
+			where: {
+				environment_id_tag_id: { environment_id: envId, tag_id: tagId },
+			},
+		});
+	}
+
+	listTags(envId: bigint) {
+		return this.prisma.environmentTag.findMany({
+			where: { environment_id: envId },
+			include: { tag: true },
+		});
 	}
 }
