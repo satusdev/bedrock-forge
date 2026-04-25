@@ -6,6 +6,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2](https://github.com/satusdev/bedrock-forge/compare/bedrock-forge-v0.1.1...bedrock-forge-v0.1.2) (2026-04-25)
+
+
+### Features
+
+* **cleanup-schedules:** add scheduled WordPress cleanup jobs ([4d639bc](https://github.com/satusdev/bedrock-forge/commit/4d639bcbadf94679785b03a32951e9a3d1a77646))
+* **config-drift:** add environment config drift detection and baseline comparison ([7410250](https://github.com/satusdev/bedrock-forge/commit/7410250c87aa7e318f1ba8e8f492351ff8fa33fe))
+* **custom-plugins:** add GitHub-hosted plugin catalog and per-environment management ([acab64d](https://github.com/satusdev/bedrock-forge/commit/acab64d3271530fe2ab576ebb41c040e08d0101a))
+* **dashboard:** add extended metrics, problems feed, and problems page ([be1ea4b](https://github.com/satusdev/bedrock-forge/commit/be1ea4be53bc640532c4cf0f176fde968f0fe676))
+* **database:** add domain SSL standalone fields and migration ([b03c966](https://github.com/satusdev/bedrock-forge/commit/b03c966a6735f37c1323567fb54dfe8852c8eb9c))
+* **domains:** add SSL standalone certificate management ([eb2ca20](https://github.com/satusdev/bedrock-forge/commit/eb2ca209c3e609bb5ce1d674cb4b3328de182a86))
+* **environments:** add tags, baseline flag, protected tables, DB table listing, WP users, and PHP info ([a72650c](https://github.com/satusdev/bedrock-forge/commit/a72650c37e10ecb9bc0f8dc8f660e0d23bd5efe6))
+* **monitors:** enhance uptime monitoring with SSL alerts, advanced check config, and detailed reporting ([3a0365c](https://github.com/satusdev/bedrock-forge/commit/3a0365c3e7c72085f850c3675405355ba4e2b0f8))
+* **notifications:** add per-user notification inbox with real-time delivery ([2119310](https://github.com/satusdev/bedrock-forge/commit/2119310c278e0b4925aafee3c0aab5d1fba7dfa1))
+* **plugin-update-schedules:** add scheduled plugin update jobs with cron configuration ([5efb2f1](https://github.com/satusdev/bedrock-forge/commit/5efb2f1cc8377be0c08d6ed1bafde14fe196e363))
+* **prisma:** add schema models for env tags, baseline, plugin update schedules, cleanup schedules, custom plugins, user notifications, and maintainer role ([66c218c](https://github.com/satusdev/bedrock-forge/commit/66c218c4dc32c4f1add88fba2afd442eb59521a7))
+* **projects:** extend project DTO with environment counts, update clients and packages pages ([97d0032](https://github.com/satusdev/bedrock-forge/commit/97d003259f84378541aa4c04b6a06a6d7d66c8dc))
+* **servers:** add getServerSshConfig helper, SSH pool health endpoint, and server detail improvements ([e08ef46](https://github.com/satusdev/bedrock-forge/commit/e08ef46f5b58daee006d1c70ecc698cbfc4a483a))
+* **shared:** add maintainer role, new queues, job types, and WS events ([f0ae9d8](https://github.com/satusdev/bedrock-forge/commit/f0ae9d89eb8520c18acdd7ffa1d0e8989ac1c4fd))
+* **sync:** enhance sync with SYNC_JOB_OPTIONS backoff, protected-tables support, and sync progress UI ([1aabb21](https://github.com/satusdev/bedrock-forge/commit/1aabb21ca6dd0c76a94273dcb7cf61385fd953d9))
+* **ui:** add SSL certificate info and refresh action to domains page ([6f247ff](https://github.com/satusdev/bedrock-forge/commit/6f247ff3f179b2d30555f79d74b93bdbbd203b6a))
+* **web:** add Problems, Drift, and Tools routes; extend sidebar, command palette, and execution log panel ([21272a0](https://github.com/satusdev/bedrock-forge/commit/21272a08169f9e86523808bbfacab3576fa5deac))
+* **worker:** add PHP search-replace fallback script for URL replacement ([98fa4b3](https://github.com/satusdev/bedrock-forge/commit/98fa4b3173fcd48828b58ecd095c01e8d2ed54a0))
+* **wp-tools:** add WordPress tools tab with WP-CLI actions via SSH ([3238682](https://github.com/satusdev/bedrock-forge/commit/32386829bcf09010b72a4f545c31e08f6f98cc34))
+
+
+### Bug Fixes
+
+* **backup:** apply lsphp detection to backup processor and update PHP script ([45eedab](https://github.com/satusdev/bedrock-forge/commit/45eedabfd33bfb9f3250fa7fd512e06b687bf9b0))
+* **infra:** mark interrupted active job executions as failed on startup ([de5ef7e](https://github.com/satusdev/bedrock-forge/commit/de5ef7e8eb43acc667fdd88d2afe766998612004))
+* **ssh:** improve connection pooling and executor reliability ([0870c08](https://github.com/satusdev/bedrock-forge/commit/0870c08f7a5580e274cadb327bfcd67275d00926))
+* **sync:** lsphp phar invocation, object-cache flush, HTTP PURGE, and URL validation fixes ([b730b4d](https://github.com/satusdev/bedrock-forge/commit/b730b4d1d1fc5418dfb9d9ab940bcd2a9fd62c9e))
+* **ui:** add force-stop button for active jobs and clamp negative durations ([f1814ce](https://github.com/satusdev/bedrock-forge/commit/f1814ce8fa836d35d708ee238edffafe338a742c))
+* **worker:** detect lsphp binary and invoke WP-CLI phar directly on LiteSpeed servers ([d26ff92](https://github.com/satusdev/bedrock-forge/commit/d26ff9219b3c244977012534ef527201dae92687))
+
 ## [0.1.1](https://github.com/satusdev/bedrock-forge/compare/bedrock-forge-v0.1.0...bedrock-forge-v0.1.1) (2026-04-16)
 
 
