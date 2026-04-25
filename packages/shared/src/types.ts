@@ -183,6 +183,22 @@ export interface JobLogEvent {
 	};
 }
 
+// ─── Custom Plugin Payload Types ─────────────────────────────────────────────
+
+export const CustomPluginManagePayloadSchema = z.object({
+	environmentId: z.number().int().positive(),
+	jobExecutionId: z.number().int().positive(),
+	action: z.enum(['add', 'remove']),
+	customPluginId: z.number().int().positive(),
+	slug: z.string().regex(/^[a-z0-9_-]+$/),
+	repoUrl: z.string().min(1),
+	repoPath: z.string().default('.'),
+	type: z.enum(['plugin', 'theme']),
+});
+export type CustomPluginManagePayload = z.infer<
+	typeof CustomPluginManagePayloadSchema
+>;
+
 // ─── Plugin Scan Types ────────────────────────────────────────────────────────
 
 /**
@@ -229,10 +245,19 @@ export const NOTIFICATION_EVENTS = {
 		'backup.completed',
 		'backup.failed',
 		'plugin-scan.completed',
+		'plugin-update.completed',
+		'plugin-update.failed',
 		'sync.completed',
 		'sync.failed',
 	],
-	monitoring: ['monitor.down', 'monitor.up', 'monitor.degraded'],
+	monitoring: [
+		'monitor.down',
+		'monitor.up',
+		'monitor.degraded',
+		'monitor.ssl_expiry',
+		'monitor.dns_failed',
+		'monitor.keyword_missing',
+	],
 	billing: ['invoice.created', 'invoice.overdue'],
 	users: ['user.registered', 'user.login'],
 	servers: ['server.created', 'server.deleted'],
@@ -243,11 +268,16 @@ export type NotificationEventType =
 	| 'backup.completed'
 	| 'backup.failed'
 	| 'plugin-scan.completed'
+	| 'plugin-update.completed'
+	| 'plugin-update.failed'
 	| 'sync.completed'
 	| 'sync.failed'
 	| 'monitor.down'
 	| 'monitor.up'
 	| 'monitor.degraded'
+	| 'monitor.ssl_expiry'
+	| 'monitor.dns_failed'
+	| 'monitor.keyword_missing'
 	| 'invoice.created'
 	| 'invoice.overdue'
 	| 'user.registered'
@@ -260,11 +290,16 @@ export const ALL_NOTIFICATION_EVENTS: NotificationEventType[] = [
 	'backup.completed',
 	'backup.failed',
 	'plugin-scan.completed',
+	'plugin-update.completed',
+	'plugin-update.failed',
 	'sync.completed',
 	'sync.failed',
 	'monitor.down',
 	'monitor.up',
 	'monitor.degraded',
+	'monitor.ssl_expiry',
+	'monitor.dns_failed',
+	'monitor.keyword_missing',
 	'invoice.created',
 	'invoice.overdue',
 	'user.registered',
@@ -273,6 +308,16 @@ export const ALL_NOTIFICATION_EVENTS: NotificationEventType[] = [
 	'server.deleted',
 	'report.weekly',
 ];
+
+// ─── Plugin Scheduled Update Payload ─────────────────────────────────────────
+
+export const PluginScheduledUpdatePayloadSchema = z.object({
+	scheduleId: z.number().int().positive(),
+	environmentId: z.number().int().positive(),
+});
+export type PluginScheduledUpdatePayload = z.infer<
+	typeof PluginScheduledUpdatePayloadSchema
+>;
 
 // ─── Notification Send Job Payload ────────────────────────────────────────────
 
