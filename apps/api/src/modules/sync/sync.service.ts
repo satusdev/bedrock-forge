@@ -6,7 +6,12 @@ import {
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { randomUUID } from 'crypto';
-import { QUEUES, JOB_TYPES, DEFAULT_JOB_OPTIONS } from '@bedrock-forge/shared';
+import {
+	QUEUES,
+	JOB_TYPES,
+	DEFAULT_JOB_OPTIONS,
+	SYNC_JOB_OPTIONS,
+} from '@bedrock-forge/shared';
 import { SyncCloneDto, SyncPushDto } from './dto/sync.dto';
 import { SyncRepository } from './sync.repository';
 
@@ -44,7 +49,7 @@ export class SyncService {
 		const job = await this.queue.add(
 			JOB_TYPES.SYNC_CLONE,
 			{ ...dto, jobExecutionId: Number(exec.id) },
-			{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
+			{ ...SYNC_JOB_OPTIONS, jobId: bullJobId },
 		);
 		return { jobExecutionId: Number(exec.id), jobId: job.id };
 	}
@@ -60,7 +65,7 @@ export class SyncService {
 		const job = await this.queue.add(
 			JOB_TYPES.SYNC_PUSH,
 			{ ...dto, jobExecutionId: Number(exec.id) },
-			{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
+			{ ...SYNC_JOB_OPTIONS, jobId: bullJobId },
 		);
 		return { jobExecutionId: Number(exec.id), jobId: job.id };
 	}

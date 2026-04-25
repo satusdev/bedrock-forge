@@ -41,6 +41,7 @@ interface Environment {
 	type: string;
 	url?: string;
 	google_drive_folder_id?: string | null;
+	protected_tables?: string[];
 	server: { name: string };
 }
 
@@ -477,6 +478,18 @@ function ClonePanel({
 				<EnvCard env={target} label='Target' />
 			</div>
 
+			{target?.protected_tables && target.protected_tables.length > 0 && (
+				<div className='flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm dark:border-blue-800 dark:bg-blue-950/40'>
+					<Database className='h-4 w-4 mt-0.5 flex-none text-blue-500' />
+					<div>
+						<p className='font-medium text-blue-700 dark:text-blue-400'>Protected tables will be preserved</p>
+						<p className='text-xs text-muted-foreground mt-0.5'>
+							{target.protected_tables.join(', ')} — these tables on the target will not be overwritten
+						</p>
+					</div>
+				</div>
+			)}
+
 			{target && !target.google_drive_folder_id && !skipSafetyBackup && (
 				<div className='flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950/40'>
 					<AlertTriangle className='h-4 w-4 mt-0.5 flex-none text-amber-500' />
@@ -784,6 +797,20 @@ function PushPanel({
 				</div>
 				<EnvCard env={target} label='Target' />
 			</div>
+
+			{(scope === 'database' || scope === 'both') &&
+				target?.protected_tables &&
+				target.protected_tables.length > 0 && (
+					<div className='flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm dark:border-blue-800 dark:bg-blue-950/40'>
+						<Database className='h-4 w-4 mt-0.5 flex-none text-blue-500' />
+						<div>
+							<p className='font-medium text-blue-700 dark:text-blue-400'>Protected tables will be preserved</p>
+							<p className='text-xs text-muted-foreground mt-0.5'>
+								{target.protected_tables.join(', ')} — these tables on the target will not be overwritten
+							</p>
+						</div>
+					</div>
+				)}
 
 			{needsGdrive &&
 				target &&
