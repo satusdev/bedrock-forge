@@ -8,6 +8,7 @@ import { CreateMonitorDto, UpdateMonitorDto } from './dto/monitor.dto';
 export interface PaginationQuery {
 	page?: number;
 	limit?: number;
+	search?: string;
 }
 
 @Injectable()
@@ -17,8 +18,10 @@ export class MonitorsService {
 		@InjectQueue(QUEUES.MONITORS) private readonly queue: Queue,
 	) {}
 
-	findAll() {
-		return this.repo.findAll();
+	async findAll(query: PaginationQuery = {}) {
+		const page = Math.max(1, query.page ?? 1);
+		const limit = Math.min(100, Math.max(1, query.limit ?? 20));
+		return this.repo.findAll({ page, limit, search: query.search });
 	}
 
 	async findOne(id: number) {
@@ -32,6 +35,15 @@ export class MonitorsService {
 			environment_id: BigInt(dto.environment_id),
 			interval_seconds: dto.interval_seconds,
 			...(dto.enabled !== undefined && { enabled: dto.enabled }),
+			...(dto.check_ssl !== undefined && { check_ssl: dto.check_ssl }),
+			...(dto.ssl_alert_days !== undefined && {
+				ssl_alert_days: dto.ssl_alert_days,
+			}),
+			...(dto.check_dns !== undefined && { check_dns: dto.check_dns }),
+			...(dto.check_keyword !== undefined && {
+				check_keyword: dto.check_keyword,
+			}),
+			...(dto.keyword !== undefined && { keyword: dto.keyword }),
 		});
 		await this.registerRepeatable(monitor);
 		return monitor;
@@ -45,6 +57,15 @@ export class MonitorsService {
 				interval_seconds: dto.interval_seconds,
 			}),
 			...(dto.enabled !== undefined && { enabled: dto.enabled }),
+			...(dto.check_ssl !== undefined && { check_ssl: dto.check_ssl }),
+			...(dto.ssl_alert_days !== undefined && {
+				ssl_alert_days: dto.ssl_alert_days,
+			}),
+			...(dto.check_dns !== undefined && { check_dns: dto.check_dns }),
+			...(dto.check_keyword !== undefined && {
+				check_keyword: dto.check_keyword,
+			}),
+			...(dto.keyword !== undefined && { keyword: dto.keyword }),
 		});
 		if (monitor.enabled) await this.registerRepeatable(monitor);
 		return monitor;
