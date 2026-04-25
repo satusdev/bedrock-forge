@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
+import { useAuthStore } from '@/store/auth.store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -363,8 +364,41 @@ function ServerFormDialog({
 	);
 }
 
+interface SshHealth {
+	active: number;
+	idle: number;
+	total: number;
+	maxConnections: number;
+	status: 'healthy' | 'busy' | 'empty';
+}
+
+function SshHealthCell({ serverId }: { serverId: number }) {
+	const { data } = useQuery<SshHealth>({
+		queryKey: ['ssh-health', serverId],
+		queryFn: () => api.get(`/servers/${serverId}/ssh-health`),
+		staleTime: 30_000,
+		retry: false,
+	});
+
+	if (!data) return <span className='text-muted-foreground'>—</span>;
+
+	const statusClass =
+		data.status === 'healthy'
+			? 'text-green-600 dark:text-green-400'
+			: data.status === 'busy'
+				? 'text-yellow-600 dark:text-yellow-400'
+				: 'text-muted-foreground';
+
+	return (
+		<span className={`text-xs font-mono ${statusClass}`}>
+			{data.active}/{data.total}
+		</span>
+	);
+}
+
 export function ServersPage() {
 	const qc = useQueryClient();
+	const isAdmin = useAuthStore(s => s.user?.roles?.includes('admin') ?? false);
 	const [createOpen, setCreateOpen] = useState(false);
 	const [editTarget, setEditTarget] = useState<Server | null>(null);
 	const [deleteTarget, setDeleteTarget] = useState<Server | null>(null);
@@ -487,13 +521,17 @@ export function ServersPage() {
 				</Badge>
 			),
 		},
+		{
+			header: 'SSH Pool',
+			render: s => <SshHealthCell serverId={s.id} />,
+		},
 	];
 
 	return (
 		<div className='space-y-4'>
 			<PageHeader
 				title='Servers'
-				onCreate={() => setCreateOpen(true)}
+				onCreate={isAdmin ? () => setCreateOpen(true) : undefined}
 				createLabel='New Server'
 			/>
 
@@ -539,17 +577,21 @@ export function ServersPage() {
 								<ExternalLink className='h-4 w-4 mr-2' />
 								Open Panel
 							</DropdownMenuItem>
-							<DropdownMenuItem onClick={() => setEditTarget(s)}>
-								<Pencil className='h-4 w-4 mr-2' />
-								Edit
-							</DropdownMenuItem>
-							<DropdownMenuItem
-								className='text-destructive focus:text-destructive'
-								onClick={() => setDeleteTarget(s)}
-							>
-								<Trash2 className='h-4 w-4 mr-2' />
-								Delete
-							</DropdownMenuItem>
+							{isAdmin && (
+								<DropdownMenuItem onClick={() => setEditTarget(s)}>
+									<Pencil className='h-4 w-4 mr-2' />
+									Edit
+								</DropdownMenuItem>
+							)}
+							{isAdmin && (
+								<DropdownMenuItem
+									className='text-destructive focus:text-destructive'
+									onClick={() => setDeleteTarget(s)}
+								>
+									<Trash2 className='h-4 w-4 mr-2' />
+									Delete
+								</DropdownMenuItem>
+							)}
 						</DropdownMenuContent>
 					</DropdownMenu>
 				)}
