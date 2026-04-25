@@ -12,8 +12,9 @@ import {
 	Layers,
 	ExternalLink,
 	History,
+	HardDrive,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
@@ -45,6 +46,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { ImportFromServerDialog } from './projects/ImportFromServerDialog';
 import { CreateBedrockDialog } from './projects/CreateBedrockDialog';
+import { useServersList } from '@/hooks/useServersList';
 import {
 	ExecutionLogPanel,
 	ExpandLogButton,
@@ -66,6 +68,8 @@ interface ProjectEnvironment {
 	url: string;
 	type: string;
 	server: { id: number; name: string; ip_address: string };
+	monitors: { last_status: number | null; uptime_pct: string | null }[];
+	backups: { created_at: string; status: string }[];
 }
 
 interface Project {
@@ -293,16 +297,57 @@ function ProjectCard({
 	onEdit,
 	onDelete,
 	onClick,
+	onBackupNow,
 }: {
 	project: Project;
 	onEdit: () => void;
 	onDelete: () => void;
 	onClick: () => void;
+	onBackupNow: (envId: number) => void;
 }) {
-	const primaryEnv = project.environments[0];
 	const servers = [
 		...new Map(project.environments.map(e => [e.server.id, e.server])).values(),
 	];
+
+	function relativeTime(iso: string): string {
+		const diff = Date.now() - new Date(iso).getTime();
+		const h = Math.floor(diff / 3_600_000);
+		if (h < 1) return `${Math.floor(diff / 60_000)}m ago`;
+		if (h < 24) return `${h}h ago`;
+		return `${Math.floor(h / 24)}d ago`;
+	}
+
+	function MonitorDot({ env }: { env: ProjectEnvironment }) {
+		const monitor = env.monitors?.[0] ?? null;
+		if (!monitor)
+			return (
+				<span
+					className='h-2 w-2 rounded-full bg-muted-foreground/40 shrink-0'
+					title='No monitor'
+				/>
+			);
+		const s = monitor.last_status;
+		if (s === null)
+			return (
+				<span
+					className='h-2 w-2 rounded-full bg-muted-foreground/40 shrink-0'
+					title='Pending'
+				/>
+			);
+		if (s === 200)
+			return (
+				<span
+					className='h-2 w-2 rounded-full bg-green-500 shrink-0'
+					title='Up'
+				/>
+			);
+		return (
+			<span
+				className='h-2 w-2 rounded-full bg-red-500 shrink-0'
+				title={`Down (${s})`}
+			/>
+		);
+	}
 
 	return (
 		<Card
@@ -363,30 +408,60 @@ function ProjectCard({
 				</div>
 			</CardHeader>
 
-			<CardContent className='pt-0 space-y-2'>
-				{project.environments.map(env => (
-					<div key={env.id} className='flex items-center gap-1.5 min-w-0'>
-						<Globe className='h-3.5 w-3.5 text-muted-foreground shrink-0' />
-						<a
-							href={env.url}
-							target='_blank'
-							rel='noreferrer'
-							className='text-xs text-primary hover:underline truncate flex items-center gap-1'
-							onClick={e => e.stopPropagation()}
+			<CardContent className='pt-0 space-y-1.5'>
+				{project.environments.map(env => {
+					const lastBackup = env.backups[0];
+					return (
+						<div
+							key={env.id}
+							className='flex items-center gap-1.5 min-w-0 group/env'
 						>
-							{env.url.replace(/^https?:\/\//, '')}
-							<ExternalLink className='h-2.5 w-2.5 shrink-0' />
-						</a>
-						<Badge
-							variant='outline'
-							className='text-[10px] px-1.5 py-0 shrink-0'
-						>
-							{env.type}
-						</Badge>
-					</div>
-				))}
+							<MonitorDot env={env} />
+							<a
+								href={env.url}
+								target='_blank'
+								rel='noreferrer'
+								className='text-xs text-primary hover:underline truncate flex items-center gap-1 flex-1 min-w-0'
+								onClick={e => e.stopPropagation()}
+							>
+								{env.url.replace(/^https?:\/\//, '')}
+								<ExternalLink className='h-2.5 w-2.5 shrink-0' />
+							</a>
+							<Badge
+								variant='outline'
+								className='text-[10px] px-1.5 py-0 shrink-0'
+							>
+								{env.type}
+							</Badge>
+							{lastBackup ? (
+								<span
+									className='text-[10px] text-muted-foreground shrink-0'
+									title={`Last backup: ${lastBackup.status}`}
+								>
+									{relativeTime(lastBackup.created_at)}
+								</span>
+							) : (
+								<span className='text-[10px] text-amber-500 shrink-0'>
+									no backup
+								</span>
+							)}
+							<Button
+								variant='ghost'
+								size='icon'
+								className='h-5 w-5 opacity-0 group-hover/env:opacity-100 transition-opacity shrink-0'
+								title='Backup now'
+								onClick={e => {
+									e.stopPropagation();
+									onBackupNow(env.id);
+								}}
+							>
+								<HardDrive className='h-3 w-3' />
+							</Button>
+						</div>
+					);
+				})}
 				{servers.length > 0 && (
-					<div className='flex items-center gap-1.5 min-w-0'>
+					<div className='flex items-center gap-1.5 min-w-0 pt-1 border-t border-border/50'>
 						<ServerIcon className='h-3.5 w-3.5 text-muted-foreground shrink-0' />
 						<span className='text-xs text-muted-foreground truncate'>
 							{servers.map(s => s.name).join(', ')}
@@ -602,10 +677,16 @@ function ProjectCardSkeleton() {
 export function ProjectsPage() {
 	const qc = useQueryClient();
 	const navigate = useNavigate();
+	const [searchParams, setSearchParams] = useSearchParams();
 	const [page, setPage] = useState(1);
 	const [search, setSearch] = useState('');
 	const [searchInput, setSearchInput] = useState('');
-	const [clientFilter, setClientFilter] = useState('');
+	const [clientFilter, setClientFilter] = useState(
+		searchParams.get('client_id') ?? '',
+	);
+	const [serverFilter, setServerFilter] = useState(
+		searchParams.get('server_id') ?? '',
+	);
 	const [createOpen, setCreateOpen] = useState(false);
 	const [importOpen, setImportOpen] = useState(false);
 	const [bedrockOpen, setBedrockOpen] = useState(false);
@@ -614,11 +695,12 @@ export function ProjectsPage() {
 	const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
 
 	const { data, isLoading } = useQuery({
-		queryKey: ['projects', page, search, clientFilter],
+		queryKey: ['projects', page, search, clientFilter, serverFilter],
 		queryFn: () => {
 			const qs = new URLSearchParams({ page: String(page), limit: '20' });
 			if (search) qs.set('search', search);
 			if (clientFilter) qs.set('client_id', clientFilter);
+			if (serverFilter) qs.set('server_id', serverFilter);
 			return api.get<{ items: Project[]; total: number }>(`/projects?${qs}`);
 		},
 	});
@@ -628,6 +710,8 @@ export function ProjectsPage() {
 		queryFn: () =>
 			api.get<{ items: Client[] }>('/clients?limit=100').then(r => r.items),
 	});
+
+	const { data: servers = [] } = useServersList();
 
 	const { data: hostingPkgs = [] } = useQuery({
 		queryKey: ['packages-hosting'],
@@ -647,6 +731,17 @@ export function ProjectsPage() {
 			toast({ title: 'Project deleted' });
 		},
 		onError: () => toast({ title: 'Delete failed', variant: 'destructive' }),
+	});
+
+	const backupNowMutation = useMutation({
+		mutationFn: (environmentId: number) =>
+			api.post('/backups/create', {
+				environment_id: environmentId,
+				type: 'full',
+			}),
+		onSuccess: () => toast({ title: 'Backup queued' }),
+		onError: () =>
+			toast({ title: 'Failed to queue backup', variant: 'destructive' }),
 	});
 
 	const totalPages = data ? Math.ceil(data.total / 20) : 1;
@@ -703,7 +798,7 @@ export function ProjectsPage() {
 				totalLabel='total projects'
 			/>
 
-			{/* Client filter */}
+			{/* Filters */}
 			<div className='flex gap-3 flex-wrap items-center'>
 				<Select
 					value={clientFilter || 'all'}
@@ -724,16 +819,36 @@ export function ProjectsPage() {
 						))}
 					</SelectContent>
 				</Select>
-				{clientFilter && (
+				<Select
+					value={serverFilter || 'all'}
+					onValueChange={v => {
+						setServerFilter(v === 'all' ? '' : v);
+						setPage(1);
+					}}
+				>
+					<SelectTrigger className='w-44'>
+						<SelectValue placeholder='All Servers' />
+					</SelectTrigger>
+					<SelectContent>
+						<SelectItem value='all'>All Servers</SelectItem>
+						{servers.map(s => (
+							<SelectItem key={s.id} value={String(s.id)}>
+								{s.name}
+							</SelectItem>
+						))}
+					</SelectContent>
+				</Select>
+				{(clientFilter || serverFilter) && (
 					<Button
 						variant='ghost'
 						size='sm'
 						onClick={() => {
 							setClientFilter('');
+							setServerFilter('');
 							setPage(1);
 						}}
 					>
-						Clear filter
+						Clear filters
 					</Button>
 				)}
 			</div>
@@ -770,6 +885,7 @@ export function ProjectsPage() {
 							onClick={() => navigate(`/projects/${project.id}`)}
 							onEdit={() => setEditTarget(project)}
 							onDelete={() => setDeleteTarget(project)}
+							onBackupNow={envId => backupNowMutation.mutate(envId)}
 						/>
 					))}
 				</div>

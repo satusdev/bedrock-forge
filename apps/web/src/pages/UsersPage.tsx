@@ -57,6 +57,7 @@ interface PaginatedUsers {
 const ROLE_COLORS: Record<string, string> = {
 	admin: 'destructive',
 	manager: 'default',
+	maintainer: 'warning',
 	client: 'secondary',
 };
 

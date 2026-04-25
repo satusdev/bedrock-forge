@@ -26,4 +26,10 @@ export class QueryProjectsDto extends PaginationQueryDto {
 	@IsInt()
 	@IsPositive()
 	client_id?: number;
+
+	@IsOptional()
+	@Type(() => Number)
+	@IsInt()
+	@IsPositive()
+	server_id?: number;
 }

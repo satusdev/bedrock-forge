@@ -62,6 +62,16 @@ const PROJECT_LIST_INCLUDE = {
 			url: true,
 			type: true,
 			server: { select: { id: true, name: true, ip_address: true } },
+			monitors: {
+				take: 1,
+				orderBy: { created_at: 'desc' as const },
+				select: { last_status: true, uptime_pct: true },
+			},
+			backups: {
+				take: 1,
+				orderBy: { created_at: 'desc' as const },
+				select: { created_at: true, status: true },
+			},
 		},
 		orderBy: { created_at: 'asc' as const },
 	},
@@ -96,6 +106,8 @@ export class ProjectsRepository {
 		if (query.search)
 			where.name = { contains: query.search, mode: 'insensitive' as const };
 		if (query.client_id) where.client_id = BigInt(query.client_id);
+		if (query.server_id)
+			where.environments = { some: { server_id: BigInt(query.server_id) } };
 
 		const [items, total] = await this.prisma.$transaction([
 			this.prisma.project.findMany({

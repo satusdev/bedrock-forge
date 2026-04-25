@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
+import { useAuthStore } from '@/store/auth.store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -222,6 +223,7 @@ function ClientFormDialog({
 export function ClientsPage() {
 	const qc = useQueryClient();
 	const navigate = useNavigate();
+	const isAdmin = useAuthStore(s => s.user?.roles?.includes('admin') ?? false);
 	const [page, setPage] = useState(1);
 	const [search, setSearch] = useState('');
 	const [searchInput, setSearchInput] = useState('');
@@ -298,7 +300,7 @@ export function ClientsPage() {
 		<div className='space-y-4'>
 			<PageHeader
 				title='Clients'
-				onCreate={() => setCreateOpen(true)}
+				onCreate={isAdmin ? () => setCreateOpen(true) : undefined}
 				createLabel='New Client'
 			/>
 
@@ -341,17 +343,21 @@ export function ClientsPage() {
 								<ExternalLink className='h-4 w-4 mr-2' />
 								View Details
 							</DropdownMenuItem>
-							<DropdownMenuItem onClick={() => setEditTarget(client)}>
-								<Pencil className='h-4 w-4 mr-2' />
-								Edit
-							</DropdownMenuItem>
-							<DropdownMenuItem
-								className='text-destructive focus:text-destructive'
-								onClick={() => setDeleteTarget(client)}
-							>
-								<Trash2 className='h-4 w-4 mr-2' />
-								Delete
-							</DropdownMenuItem>
+							{isAdmin && (
+								<DropdownMenuItem onClick={() => setEditTarget(client)}>
+									<Pencil className='h-4 w-4 mr-2' />
+									Edit
+								</DropdownMenuItem>
+							)}
+							{isAdmin && (
+								<DropdownMenuItem
+									className='text-destructive focus:text-destructive'
+									onClick={() => setDeleteTarget(client)}
+								>
+									<Trash2 className='h-4 w-4 mr-2' />
+									Delete
+								</DropdownMenuItem>
+							)}
 						</DropdownMenuContent>
 					</DropdownMenu>
 				)}

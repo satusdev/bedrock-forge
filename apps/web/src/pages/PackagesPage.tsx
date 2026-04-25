@@ -19,7 +19,12 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { AlertDialog } from '@/components/ui/alert-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { PageHeader, DataTable, type Column } from '@/components/crud';
+import {
+	PageHeader,
+	DataTable,
+	Pagination,
+	type Column,
+} from '@/components/crud';
 import {
 	Dialog,
 	DialogContent,
@@ -353,6 +358,8 @@ function HostingTab() {
 	const [createOpen, setCreateOpen] = useState(false);
 	const [editTarget, setEditTarget] = useState<HostingPackage | null>(null);
 	const [deleteTarget, setDeleteTarget] = useState<HostingPackage | null>(null);
+	const [page, setPage] = useState(1);
+	const PAGE_SIZE = 10;
 
 	const { data = [], isLoading } = useQuery({
 		queryKey: ['hosting-packages'],
@@ -423,7 +430,7 @@ function HostingTab() {
 
 			<DataTable
 				columns={columns}
-				data={data}
+				data={data.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)}
 				isLoading={isLoading}
 				rowKey={p => p.id}
 				emptyMessage='No hosting packages yet.'
@@ -447,6 +454,11 @@ function HostingTab() {
 						</DropdownMenuContent>
 					</DropdownMenu>
 				)}
+			/>
+			<Pagination
+				page={page}
+				totalPages={Math.ceil(data.length / PAGE_SIZE)}
+				onPageChange={setPage}
 			/>
 
 			<HostingFormDialog
@@ -483,6 +495,8 @@ function SupportTab() {
 	const [createOpen, setCreateOpen] = useState(false);
 	const [editTarget, setEditTarget] = useState<SupportPackage | null>(null);
 	const [deleteTarget, setDeleteTarget] = useState<SupportPackage | null>(null);
+	const [page, setPage] = useState(1);
+	const PAGE_SIZE = 10;
 
 	const { data = [], isLoading } = useQuery({
 		queryKey: ['support-packages'],
@@ -548,7 +562,7 @@ function SupportTab() {
 
 			<DataTable
 				columns={columns}
-				data={data}
+				data={data.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)}
 				isLoading={isLoading}
 				rowKey={p => p.id}
 				emptyMessage='No support packages yet.'
@@ -572,6 +586,11 @@ function SupportTab() {
 						</DropdownMenuContent>
 					</DropdownMenu>
 				)}
+			/>
+			<Pagination
+				page={page}
+				totalPages={Math.ceil(data.length / PAGE_SIZE)}
+				onPageChange={setPage}
 			/>
 
 			<SupportFormDialog
