@@ -28,6 +28,9 @@ export class NotificationProcessor extends WorkerHost {
 		const { eventType, payload } = job.data;
 		this.logger.debug(`Dispatching notification for event: ${eventType}`);
 
+		// Always create in-app notifications for alert events, regardless of Slack config
+		await this.createInAppNotification(eventType, payload);
+
 		const channels = await this.prisma.notificationChannel.findMany({
 			where: {
 				active: true,
@@ -82,6 +85,95 @@ export class NotificationProcessor extends WorkerHost {
 					error: error ?? null,
 				},
 			});
+		}
+	}
+
+	private async createInAppNotification(
+		eventType: string,
+		payload: Record<string, unknown>,
+	): Promise<void> {
+		const ALERT_EVENTS = new Set([
+			'backup.failed',
+			'plugin-update.failed',
+			'sync.failed',
+			'monitor.down',
+			'monitor.ssl_expiry',
+			'monitor.dns_failed',
+			'invoice.overdue',
+		]);
+
+		if (!ALERT_EVENTS.has(eventType)) return;
+
+		try {
+			const users = await this.prisma.user.findMany({
+				where: {
+					user_roles: {
+						some: { role: { name: { in: ['admin', 'manager'] } } },
+					},
+				},
+				select: { id: true },
+			});
+
+			if (users.length === 0) return;
+
+			const { title, message } = this.buildInAppContent(eventType, payload);
+
+			await this.prisma.userNotification.createMany({
+				data: users.map(u => ({
+					user_id: u.id,
+					type: eventType,
+					title,
+					message,
+					action_url: null,
+				})),
+			});
+		} catch (err: unknown) {
+			this.logger.error(`Failed to create in-app notification: ${err instanceof Error ? err.message : String(err)}`);
+		}
+	}
+
+	private buildInAppContent(
+		eventType: string,
+		payload: Record<string, unknown>,
+	): { title: string; message: string } {
+		switch (eventType) {
+			case 'backup.failed':
+				return {
+					title: 'Backup failed',
+					message: `Backup for environment #${payload.environmentId ?? '?'} failed: ${payload.error ?? 'Unknown error'}`,
+				};
+			case 'plugin-update.failed':
+				return {
+					title: 'Plugin update failed',
+					message: `Plugin update for environment #${payload.environmentId ?? '?'} failed`,
+				};
+			case 'sync.failed':
+				return {
+					title: 'Sync failed',
+					message: `Sync operation failed: ${payload.error ?? 'Unknown error'}`,
+				};
+			case 'monitor.down':
+				return {
+					title: 'Site is down',
+					message: `${payload.url ?? 'Unknown site'} returned HTTP ${payload.statusCode ?? '?'}`,
+				};
+			case 'monitor.ssl_expiry':
+				return {
+					title: 'SSL certificate expiring',
+					message: `SSL certificate for ${payload.url ?? 'unknown'} expires in ${payload.daysRemaining ?? '?'} days`,
+				};
+			case 'monitor.dns_failed':
+				return {
+					title: 'DNS resolution failed',
+					message: `DNS lookup failed for ${payload.url ?? 'unknown'}`,
+				};
+			case 'invoice.overdue':
+				return {
+					title: 'Invoice overdue',
+					message: `Invoice ${payload.invoiceNumber ?? '?'} is overdue (€${payload.totalAmount ?? '?'})`,
+				};
+			default:
+				return { title: eventType, message: JSON.stringify(payload).slice(0, 200) };
 		}
 	}
 
