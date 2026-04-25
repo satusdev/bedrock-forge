@@ -2,17 +2,54 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
+export interface MonitorCreateData {
+	environment_id: bigint;
+	interval_seconds: number;
+	enabled?: boolean;
+	check_ssl?: boolean;
+	ssl_alert_days?: number | null;
+	check_dns?: boolean;
+	check_keyword?: boolean;
+	keyword?: string;
+}
+
+export interface MonitorUpdateData {
+	interval_seconds?: number;
+	enabled?: boolean;
+	check_ssl?: boolean;
+	ssl_alert_days?: number | null;
+	check_dns?: boolean;
+	check_keyword?: boolean;
+	keyword?: string;
+}
+
 @Injectable()
 export class MonitorsRepository {
 	constructor(private readonly prisma: PrismaService) {}
 
-	findAll() {
-		return this.prisma.monitor.findMany({
-			orderBy: { created_at: 'desc' },
-			include: {
-				environment: { select: { id: true, url: true, type: true } },
-			},
-		});
+	async findAll(opts: { page: number; limit: number; search?: string }) {
+		const skip = (opts.page - 1) * opts.limit;
+		const where: Prisma.MonitorWhereInput = opts.search
+			? {
+					environment: {
+						url: { contains: opts.search, mode: 'insensitive' },
+					},
+				}
+			: {};
+
+		const [items, total] = await Promise.all([
+			this.prisma.monitor.findMany({
+				where,
+				orderBy: { created_at: 'desc' },
+				skip,
+				take: opts.limit,
+				include: {
+					environment: { select: { id: true, url: true, type: true } },
+				},
+			}),
+			this.prisma.monitor.count({ where }),
+		]);
+		return { items, total };
 	}
 
 	findById(id: bigint) {
@@ -25,21 +62,26 @@ export class MonitorsRepository {
 		});
 	}
 
-	create(data: {
-		environment_id: bigint;
-		interval_seconds: number;
-		enabled?: boolean;
-	}) {
+	create(data: MonitorCreateData) {
 		return this.prisma.monitor.create({
 			data: {
 				environment_id: data.environment_id,
 				interval_seconds: data.interval_seconds,
 				...(data.enabled !== undefined && { enabled: data.enabled }),
+				...(data.check_ssl !== undefined && { check_ssl: data.check_ssl }),
+				...(data.ssl_alert_days !== undefined && {
+					ssl_alert_days: data.ssl_alert_days,
+				}),
+				...(data.check_dns !== undefined && { check_dns: data.check_dns }),
+				...(data.check_keyword !== undefined && {
+					check_keyword: data.check_keyword,
+				}),
+				...(data.keyword !== undefined && { keyword: data.keyword }),
 			},
 		});
 	}
 
-	update(id: bigint, data: { interval_seconds?: number; enabled?: boolean }) {
+	update(id: bigint, data: MonitorUpdateData) {
 		return this.prisma.monitor.update({
 			where: { id },
 			data: {
@@ -47,6 +89,15 @@ export class MonitorsRepository {
 					interval_seconds: data.interval_seconds,
 				}),
 				...(data.enabled !== undefined && { enabled: data.enabled }),
+				...(data.check_ssl !== undefined && { check_ssl: data.check_ssl }),
+				...(data.ssl_alert_days !== undefined && {
+					ssl_alert_days: data.ssl_alert_days,
+				}),
+				...(data.check_dns !== undefined && { check_dns: data.check_dns }),
+				...(data.check_keyword !== undefined && {
+					check_keyword: data.check_keyword,
+				}),
+				...(data.keyword !== undefined && { keyword: data.keyword }),
 			},
 		});
 	}

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -7,12 +8,16 @@ import {
 	TrendingUp,
 	Wifi,
 	WifiOff,
+	Shield,
+	Globe,
+	Type,
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Pagination } from '@/components/crud';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -24,6 +29,16 @@ interface MonitorDetail {
 	last_status: number | null;
 	last_response_ms: number | null;
 	last_checked_at: string | null;
+	check_ssl: boolean;
+	ssl_expires_at: string | null;
+	ssl_issuer: string | null;
+	ssl_days_remaining: number | null;
+	ssl_alert_days: number | null;
+	check_dns: boolean;
+	dns_resolves: boolean | null;
+	check_keyword: boolean;
+	keyword: string | null;
+	keyword_found: boolean | null;
 	environment: { id: number; url: string; type: string };
 	monitor_results: MonitorResult[];
 }
@@ -34,6 +49,9 @@ interface MonitorResult {
 	status_code: number;
 	response_ms: number;
 	checked_at: string;
+	ssl_days_remaining: number | null;
+	dns_resolves: boolean | null;
+	keyword_found: boolean | null;
 }
 
 interface MonitorLog {
@@ -260,6 +278,7 @@ export function MonitorDetailPage() {
 	const { id } = useParams<{ id: string }>();
 	const navigate = useNavigate();
 	const monitorId = Number(id);
+	const [logPage, setLogPage] = useState(1);
 
 	const { data: monitor, isLoading } = useQuery({
 		queryKey: ['monitor', monitorId],
@@ -268,9 +287,11 @@ export function MonitorDetailPage() {
 	});
 
 	const { data: logsData, isLoading: logsLoading } = useQuery({
-		queryKey: ['monitor-logs', monitorId],
+		queryKey: ['monitor-logs', monitorId, logPage],
 		queryFn: () =>
-			api.get<PaginatedLogs>(`/monitors/${monitorId}/logs?limit=20`),
+			api.get<PaginatedLogs>(
+				`/monitors/${monitorId}/logs?page=${logPage}&limit=20`,
+			),
 		refetchInterval: 30_000,
 	});
 
@@ -436,6 +457,105 @@ export function MonitorDetailPage() {
 				</Card>
 			</div>
 
+			{/* Advanced checks stat cards */}
+			{(monitor.check_ssl || monitor.check_dns || monitor.check_keyword) && (
+				<div className='grid grid-cols-1 sm:grid-cols-3 gap-3'>
+					{monitor.check_ssl && (
+						<Card>
+							<CardHeader className='pb-1 pt-3 px-4'>
+								<CardTitle className='text-xs text-muted-foreground font-normal flex items-center gap-1'>
+									<Shield className='h-3 w-3' /> SSL Certificate
+								</CardTitle>
+							</CardHeader>
+							<CardContent className='px-4 pb-3'>
+								{monitor.ssl_days_remaining !== null ? (
+									<>
+										<p
+											className={`text-xl font-semibold font-mono ${
+												monitor.ssl_days_remaining <= 7
+													? 'text-destructive'
+													: monitor.ssl_days_remaining <= 30
+														? 'text-yellow-600 dark:text-yellow-400'
+														: 'text-green-600 dark:text-green-400'
+											}`}
+										>
+											{monitor.ssl_days_remaining}d
+										</p>
+										<p className='text-xs text-muted-foreground truncate'>
+											{monitor.ssl_issuer ?? 'Unknown issuer'}
+											{monitor.ssl_expires_at &&
+												` · Expires ${new Date(monitor.ssl_expires_at).toLocaleDateString()}`}
+										</p>
+									</>
+								) : (
+									<p className='text-xl font-semibold text-muted-foreground'>
+										Pending
+									</p>
+								)}
+							</CardContent>
+						</Card>
+					)}
+					{monitor.check_dns && (
+						<Card>
+							<CardHeader className='pb-1 pt-3 px-4'>
+								<CardTitle className='text-xs text-muted-foreground font-normal flex items-center gap-1'>
+									<Globe className='h-3 w-3' /> DNS
+								</CardTitle>
+							</CardHeader>
+							<CardContent className='px-4 pb-3'>
+								<p
+									className={`text-xl font-semibold ${
+										monitor.dns_resolves === null
+											? 'text-muted-foreground'
+											: monitor.dns_resolves
+												? 'text-green-600 dark:text-green-400'
+												: 'text-destructive'
+									}`}
+								>
+									{monitor.dns_resolves === null
+										? 'Pending'
+										: monitor.dns_resolves
+											? 'Resolves'
+											: 'FAILED'}
+								</p>
+								<p className='text-xs text-muted-foreground'>
+									DNS A record lookup
+								</p>
+							</CardContent>
+						</Card>
+					)}
+					{monitor.check_keyword && monitor.keyword && (
+						<Card>
+							<CardHeader className='pb-1 pt-3 px-4'>
+								<CardTitle className='text-xs text-muted-foreground font-normal flex items-center gap-1'>
+									<Type className='h-3 w-3' /> Keyword
+								</CardTitle>
+							</CardHeader>
+							<CardContent className='px-4 pb-3'>
+								<p
+									className={`text-xl font-semibold ${
+										monitor.keyword_found === null
+											? 'text-muted-foreground'
+											: monitor.keyword_found
+												? 'text-green-600 dark:text-green-400'
+												: 'text-destructive'
+									}`}
+								>
+									{monitor.keyword_found === null
+										? 'Pending'
+										: monitor.keyword_found
+											? 'Found'
+											: 'Missing'}
+								</p>
+								<p className='text-xs text-muted-foreground font-mono truncate'>
+									"{monitor.keyword}"
+								</p>
+							</CardContent>
+						</Card>
+					)}
+				</div>
+			)}
+
 			{/* Response time chart */}
 			<Card>
 				<CardHeader className='pb-2'>
@@ -459,7 +579,18 @@ export function MonitorDetailPage() {
 							))}
 						</div>
 					) : (
-						<IncidentLog logs={logs} />
+						<>
+							<IncidentLog logs={logs} />
+							{logsData && logsData.total > 20 && (
+								<div className='mt-4'>
+									<Pagination
+										page={logPage}
+										totalPages={Math.ceil(logsData.total / 20)}
+										onPageChange={setLogPage}
+									/>
+								</div>
+							)}
+						</>
 					)}
 				</CardContent>
 			</Card>
@@ -486,6 +617,21 @@ export function MonitorDetailPage() {
 									<th className='px-4 py-2.5 text-right font-medium text-muted-foreground'>
 										Response
 									</th>
+									{monitor.check_ssl && (
+										<th className='px-4 py-2.5 text-right font-medium text-muted-foreground'>
+											SSL days
+										</th>
+									)}
+									{monitor.check_dns && (
+										<th className='px-4 py-2.5 text-center font-medium text-muted-foreground'>
+											DNS
+										</th>
+									)}
+									{monitor.check_keyword && (
+										<th className='px-4 py-2.5 text-center font-medium text-muted-foreground'>
+											Keyword
+										</th>
+									)}
 								</tr>
 							</thead>
 							<tbody className='divide-y divide-border'>
@@ -517,6 +663,35 @@ export function MonitorDetailPage() {
 										<td className='px-4 py-2 text-right font-mono'>
 											{r.response_ms}ms
 										</td>
+										{monitor.check_ssl && (
+											<td className='px-4 py-2 text-right font-mono text-muted-foreground'>
+												{r.ssl_days_remaining != null
+													? `${r.ssl_days_remaining}d`
+													: '—'}
+											</td>
+										)}
+										{monitor.check_dns && (
+											<td className='px-4 py-2 text-center'>
+												{r.dns_resolves == null ? (
+													<span className='text-muted-foreground'>—</span>
+												) : r.dns_resolves ? (
+													<Globe className='h-3 w-3 text-green-500 mx-auto' />
+												) : (
+													<Globe className='h-3 w-3 text-destructive mx-auto' />
+												)}
+											</td>
+										)}
+										{monitor.check_keyword && (
+											<td className='px-4 py-2 text-center'>
+												{r.keyword_found == null ? (
+													<span className='text-muted-foreground'>—</span>
+												) : r.keyword_found ? (
+													<Type className='h-3 w-3 text-green-500 mx-auto' />
+												) : (
+													<Type className='h-3 w-3 text-destructive mx-auto' />
+												)}
+											</td>
+										)}
 									</tr>
 								))}
 							</tbody>
