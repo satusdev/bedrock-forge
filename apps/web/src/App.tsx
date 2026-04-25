@@ -67,6 +67,9 @@ const NotificationsPage = lazy(() =>
 const ReportsPage = lazy(() =>
 	import('@/pages/ReportsPage').then(m => ({ default: m.ReportsPage })),
 );
+const ProblemsPage = lazy(() =>
+	import('@/pages/ProblemsPage').then(m => ({ default: m.ProblemsPage })),
+);
 const AuditLogsPage = lazy(() =>
 	import('@/pages/AuditLogsPage').then(m => ({ default: m.AuditLogsPage })),
 );
@@ -181,6 +184,7 @@ export default function App() {
 							<Route path='monitors' element={<MonitorsPage />} />
 							<Route path='monitors/:id' element={<MonitorDetailPage />} />
 							<Route path='activity' element={<ActivityPage />} />
+							<Route path='problems' element={<ProblemsPage />} />
 							<Route path='settings' element={<SettingsPage />} />{' '}
 							<Route
 								path='users'

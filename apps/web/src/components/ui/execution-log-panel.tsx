@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
 	ChevronDown,
@@ -7,6 +8,8 @@ import {
 	CheckCircle2,
 	XCircle,
 	AlertTriangle,
+	Copy,
+	Download,
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -149,6 +152,8 @@ export function ExecutionLogPanel({
 	jobExecutionId: number | null;
 	isActive?: boolean;
 }) {
+	const [copied, setCopied] = useState(false);
+
 	const { data, isLoading } = useQuery({
 		queryKey: ['execution-log', jobExecutionId],
 		queryFn: () =>
@@ -180,8 +185,53 @@ export function ExecutionLogPanel({
 		);
 	}
 
+	function formatAsText() {
+		return entries
+			.map(e =>
+				[new Date(e.ts).toLocaleTimeString(), e.step, e.detail, e.command]
+					.filter(Boolean)
+					.join(' | '),
+			)
+			.join('\n');
+	}
+
+	function handleCopy() {
+		navigator.clipboard.writeText(formatAsText()).then(() => {
+			setCopied(true);
+			setTimeout(() => setCopied(false), 2000);
+		});
+	}
+
+	function handleDownload() {
+		const blob = new Blob([formatAsText()], { type: 'text/plain' });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = `execution-log-${jobExecutionId}.txt`;
+		a.click();
+		URL.revokeObjectURL(url);
+	}
+
 	return (
 		<div className='pt-2'>
+			<div className='flex items-center justify-end gap-2 mb-2'>
+				<button
+					type='button'
+					onClick={handleCopy}
+					className='inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors'
+				>
+					<Copy className='h-3.5 w-3.5' />
+					{copied ? 'Copied!' : 'Copy'}
+				</button>
+				<button
+					type='button'
+					onClick={handleDownload}
+					className='inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors'
+				>
+					<Download className='h-3.5 w-3.5' />
+					Download
+				</button>
+			</div>
 			{entries.map((entry, i) => (
 				<EntryRow key={i} entry={entry} isLast={i === entries.length - 1} />
 			))}

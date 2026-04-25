@@ -20,6 +20,8 @@ import { BackupsTab } from './project-detail/BackupsTab';
 import { PluginsTab } from './project-detail/PluginsTab';
 import { SyncTab } from './project-detail/SyncTab';
 import { RestoreTab } from './project-detail/RestoreTab';
+import { ToolsTab } from './project-detail/ToolsTab';
+import { DriftTab } from './project-detail/DriftTab';
 import { ProjectFormDialog } from './ProjectsPage';
 
 interface Server {
@@ -235,6 +237,8 @@ export function ProjectDetailPage() {
 					<TabsTrigger value='plugins'>Plugins</TabsTrigger>
 					<TabsTrigger value='sync'>Sync</TabsTrigger>
 					<TabsTrigger value='restore'>Restore</TabsTrigger>
+					<TabsTrigger value='tools'>Tools</TabsTrigger>
+					<TabsTrigger value='drift'>Drift</TabsTrigger>
 				</TabsList>
 
 				<TabsContent value='environments'>
@@ -255,6 +259,14 @@ export function ProjectDetailPage() {
 
 				<TabsContent value='restore'>
 					<RestoreTab projectId={projectId} environments={environments} />
+				</TabsContent>
+
+				<TabsContent value='tools'>
+					<ToolsTab environments={environments} />
+				</TabsContent>
+
+				<TabsContent value='drift'>
+					<DriftTab projectId={projectId} environments={environments} />
 				</TabsContent>
 			</Tabs>
 
