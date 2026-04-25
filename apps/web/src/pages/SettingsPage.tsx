@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { CustomPluginsSettings } from './settings/CustomPluginsSettings';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -10,6 +11,7 @@ import {
 	Check,
 	X,
 	Key,
+	Shield,
 	ShieldCheck,
 	Cloud,
 	CloudOff,
@@ -21,6 +23,7 @@ import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { AlertDialog } from '@/components/ui/alert-dialog';
 
@@ -511,6 +514,44 @@ export function SettingsPage() {
 						)}
 					</Button>
 				</div>
+			</div>
+
+			{/* Safety & Automation */}
+			<div className='border rounded-lg p-4 bg-card space-y-4'>
+				<h2 className='font-semibold flex items-center gap-2'>
+					<Shield className='h-4 w-4' />
+					Safety &amp; Automation
+				</h2>
+				<div className='flex items-center justify-between gap-4'>
+					<div className='space-y-1'>
+						<Label
+							htmlFor='safety-backup-toggle'
+							className='text-sm font-medium'
+						>
+							Backup before sync
+						</Label>
+						<p className='text-xs text-muted-foreground'>
+							Automatically create a full backup of the target environment
+							before every sync operation.
+						</p>
+					</div>
+					<Switch
+						id='safety-backup-toggle'
+						checked={data?.safety_backup_before_sync === 'true'}
+						onCheckedChange={checked =>
+							updateMutation.mutate({
+								key: 'safety_backup_before_sync',
+								value: String(checked),
+							})
+						}
+						disabled={isLoading || updateMutation.isPending}
+					/>
+				</div>
+			</div>
+
+			{/* Custom GitHub Plugins */}
+			<div className='border rounded-lg p-4 bg-card'>
+				<CustomPluginsSettings />
 			</div>
 
 			{/* New setting form */}

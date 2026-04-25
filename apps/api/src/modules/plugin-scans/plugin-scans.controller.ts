@@ -90,4 +90,36 @@ export class PluginScansController {
 	getExecution(@Param('execId', ParseIntPipe) execId: number) {
 		return this.svc.findExecution(execId);
 	}
+
+	// ─── Custom GitHub Plugin routes ─────────────────────────────────────────
+
+	/** List custom plugins installed on this environment */
+	@Get('environment/:envId/custom-plugins')
+	listCustomPlugins(@Param('envId', ParseIntPipe) envId: number) {
+		return this.svc.listEnvironmentCustomPlugins(envId);
+	}
+
+	/** Enqueue install of a custom GitHub plugin on this environment */
+	@Post('environment/:envId/custom-plugins/:customPluginId')
+	installCustomPlugin(
+		@Param('envId', ParseIntPipe) envId: number,
+		@Param('customPluginId', ParseIntPipe) customPluginId: number,
+	) {
+		return this.svc.enqueueCustomPluginManage(envId, customPluginId, 'add');
+	}
+
+	/** Enqueue removal of a custom GitHub plugin from this environment */
+	@Delete('environment/:envId/custom-plugins/:customPluginId')
+	uninstallCustomPlugin(
+		@Param('envId', ParseIntPipe) envId: number,
+		@Param('customPluginId', ParseIntPipe) customPluginId: number,
+	) {
+		return this.svc.enqueueCustomPluginManage(envId, customPluginId, 'remove');
+	}
+
+	/** Check latest GitHub tags for all installed custom plugins and persist results */
+	@Post('environment/:envId/custom-plugins/check-versions')
+	checkCustomPluginVersions(@Param('envId', ParseIntPipe) envId: number) {
+		return this.svc.checkCustomPluginVersions(envId);
+	}
 }
