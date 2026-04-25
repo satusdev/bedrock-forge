@@ -12,6 +12,9 @@ import { DomainWhoisProcessorModule } from './processors/domain-whois/domain-who
 import { CreateBedrockProcessorModule } from './processors/create-bedrock/create-bedrock-processor.module';
 import { NotificationProcessorModule } from './processors/notification/notification-processor.module';
 import { ReportProcessorModule } from './processors/report/report-processor.module';
+import { PluginUpdateProcessorModule } from './processors/plugin-update/plugin-update-processor.module';
+import { WpActionsProcessorModule } from './processors/wp-actions/wp-actions-processor.module';
+import { CustomPluginProcessorModule } from './processors/custom-plugin/custom-plugin-processor.module';
 import { SshKeyModule } from './services/ssh-key.module';
 import workerConfig from './config/worker.config';
 
@@ -39,6 +42,9 @@ import workerConfig from './config/worker.config';
 			{ name: QUEUES.PROJECTS },
 			{ name: QUEUES.NOTIFICATIONS },
 			{ name: QUEUES.REPORTS },
+			{ name: QUEUES.PLUGIN_UPDATES },
+			{ name: QUEUES.WP_ACTIONS },
+			{ name: QUEUES.CUSTOM_PLUGINS },
 		),
 
 		PrismaModule,
@@ -53,6 +59,9 @@ import workerConfig from './config/worker.config';
 		CreateBedrockProcessorModule,
 		NotificationProcessorModule,
 		ReportProcessorModule,
+		PluginUpdateProcessorModule,
+		WpActionsProcessorModule,
+		CustomPluginProcessorModule,
 	],
 })
 export class WorkerModule {}

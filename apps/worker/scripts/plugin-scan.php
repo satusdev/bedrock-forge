@@ -193,7 +193,18 @@ if ($muPluginsDir) {
 }
 
 echo json_encode(
-    ['is_bedrock' => $isBedrock, 'plugins' => $plugins],
+    [
+        'is_bedrock'   => $isBedrock,
+        'plugins'      => $plugins,
+        'php_settings' => [
+            'php_version'        => PHP_VERSION,
+            'memory_limit'       => ini_get('memory_limit'),
+            'max_execution_time' => ini_get('max_execution_time'),
+            'upload_max_filesize'=> ini_get('upload_max_filesize'),
+            'post_max_size'      => ini_get('post_max_size'),
+            'display_errors'     => ini_get('display_errors'),
+        ],
+    ],
     JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
 );
 exit(0);
