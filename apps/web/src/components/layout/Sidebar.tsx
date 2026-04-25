@@ -28,38 +28,88 @@ import {
 	Bell,
 	ClipboardCheck,
 	FileBarChart,
+	AlertTriangle,
 } from 'lucide-react';
 
-const navItems = [
-	{ to: '/', label: 'Dashboard', icon: LayoutDashboard },
-	{ to: '/clients', label: 'Clients', icon: Users },
-	{ to: '/servers', label: 'Servers', icon: Server },
-	{ to: '/projects', label: 'Projects', icon: FolderKanban },
-	{ to: '/backups', label: 'Backups', icon: HardDrive },
-	{ to: '/domains', label: 'Domains', icon: Globe },
-	{ to: '/monitors', label: 'Monitors', icon: Activity },
-	{ to: '/activity', label: 'Activity', icon: ClipboardList },
-	{ to: '/packages', label: 'Packages', icon: Package, minRole: 'manager' },
-	{ to: '/invoices', label: 'Invoices', icon: FileText, minRole: 'manager' },
-	{ to: '/settings', label: 'Settings', icon: Settings },
-	{ to: '/users', label: 'Users & Roles', icon: Shield, minRole: 'admin' },
+interface NavItemDef {
+	to: string;
+	label: string;
+	icon: React.ElementType;
+	minRole?: string;
+}
+
+interface NavGroup {
+	label: string | null;
+	items: NavItemDef[];
+}
+
+const NAV_GROUPS: NavGroup[] = [
 	{
-		to: '/audit-logs',
-		label: 'Audit Logs',
-		icon: ClipboardCheck,
-		minRole: 'admin',
+		label: null,
+		items: [{ to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard }],
 	},
 	{
-		to: '/notifications',
-		label: 'Notifications',
-		icon: Bell,
-		minRole: 'admin',
+		label: 'Infrastructure',
+		items: [
+			{ to: '/clients', label: 'Clients', icon: Users },
+			{ to: '/servers', label: 'Servers', icon: Server },
+			{ to: '/projects', label: 'Projects', icon: FolderKanban },
+		],
 	},
 	{
-		to: '/reports',
-		label: 'Reports',
-		icon: FileBarChart,
-		minRole: 'admin',
+		label: 'Operations',
+		items: [
+			{ to: '/backups', label: 'Backups', icon: HardDrive },
+			{ to: '/monitors', label: 'Monitors', icon: Activity },
+			{ to: '/domains', label: 'Domains', icon: Globe },
+			{ to: '/activity', label: 'Activity', icon: ClipboardList },
+			{
+				to: '/problems',
+				label: 'Problems',
+				icon: AlertTriangle,
+				minRole: 'maintainer',
+			},
+		],
+	},
+	{
+		label: 'Finance',
+		items: [
+			{ to: '/packages', label: 'Packages', icon: Package, minRole: 'manager' },
+			{
+				to: '/invoices',
+				label: 'Invoices',
+				icon: FileText,
+				minRole: 'manager',
+			},
+		],
+	},
+	{
+		label: 'System',
+		items: [{ to: '/settings', label: 'Settings', icon: Settings }],
+	},
+	{
+		label: 'Admin',
+		items: [
+			{ to: '/users', label: 'Users & Roles', icon: Shield, minRole: 'admin' },
+			{
+				to: '/audit-logs',
+				label: 'Audit Logs',
+				icon: ClipboardCheck,
+				minRole: 'admin',
+			},
+			{
+				to: '/notifications',
+				label: 'Notifications',
+				icon: Bell,
+				minRole: 'admin',
+			},
+			{
+				to: '/reports',
+				label: 'Reports',
+				icon: FileBarChart,
+				minRole: 'admin',
+			},
+		],
 	},
 ];
 
@@ -147,27 +197,46 @@ export function SidebarInner({ collapsed = false }: SidebarInnerProps) {
 				{/* Nav */}
 				<nav
 					className={cn(
-						'flex-1 py-3 space-y-0.5 overflow-y-auto',
+						'flex-1 py-3 overflow-y-auto',
 						collapsed ? 'px-2' : 'px-3',
 					)}
 				>
-					{navItems.map(item => {
+					{(() => {
 						const ROLE_WEIGHT: Record<string, number> = {
-							admin: 3,
-							manager: 2,
+							admin: 4,
+							manager: 3,
+							maintainer: 2,
 							client: 1,
 						};
-						const userRoles = user?.roles ?? [];
 						const userWeight = Math.max(
-							...userRoles.map(r => ROLE_WEIGHT[r] ?? 0),
+							...(user?.roles ?? []).map(r => ROLE_WEIGHT[r] ?? 0),
 							0,
 						);
-						const minWeight = item.minRole
-							? (ROLE_WEIGHT[item.minRole] ?? 0)
-							: 0;
-						if (minWeight > userWeight) return null;
-						return <NavItem key={item.to} {...item} collapsed={collapsed} />;
-					})}
+						const visibleGroups = NAV_GROUPS.map(group => ({
+							...group,
+							items: group.items.filter(item => {
+								const minW = item.minRole
+									? (ROLE_WEIGHT[item.minRole] ?? 0)
+									: 0;
+								return minW <= userWeight;
+							}),
+						})).filter(g => g.items.length > 0);
+						return visibleGroups.map((group, gi) => (
+							<div key={group.label ?? 'core'}>
+								{gi > 0 && <Separator className='my-2' />}
+								{!collapsed && group.label && (
+									<p className='px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50 select-none'>
+										{group.label}
+									</p>
+								)}
+								<div className='space-y-0.5'>
+									{group.items.map(item => (
+										<NavItem key={item.to} {...item} collapsed={collapsed} />
+									))}
+								</div>
+							</div>
+						));
+					})()}
 				</nav>
 
 				<Separator />

@@ -12,8 +12,17 @@ import {
 	Shield,
 	Settings,
 	X,
+	HardDrive,
+	ClipboardList,
+	ClipboardCheck,
+	AlertTriangle,
+	Package,
+	FileText,
+	Bell,
+	Activity,
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
+import { useAuthStore } from '@/store/auth.store';
 import {
 	Dialog,
 	DialogContent,
@@ -26,6 +35,7 @@ interface StaticItem {
 	label: string;
 	path: string;
 	icon: React.ElementType;
+	minRole?: 'manager' | 'admin' | 'maintainer';
 }
 
 interface DynamicItem {
@@ -47,12 +57,54 @@ const STATIC_PAGES: StaticItem[] = [
 	{ type: 'page', label: 'Clients', path: '/clients', icon: Users },
 	{ type: 'page', label: 'Servers', path: '/servers', icon: Server },
 	{ type: 'page', label: 'Projects', path: '/projects', icon: FolderOpen },
-	{ type: 'page', label: 'Backups', path: '/backups', icon: FileBarChart },
+	{ type: 'page', label: 'Backups', path: '/backups', icon: HardDrive },
 	{ type: 'page', label: 'Domains', path: '/domains', icon: Globe },
-	{ type: 'page', label: 'Activity', path: '/activity', icon: FileBarChart },
+	{ type: 'page', label: 'Monitors', path: '/monitors', icon: Activity },
+	{ type: 'page', label: 'Activity', path: '/activity', icon: ClipboardList },
+	{ type: 'page', label: 'Problems', path: '/problems', icon: AlertTriangle },
 	{ type: 'page', label: 'Settings', path: '/settings', icon: Settings },
-	{ type: 'page', label: 'Users & Roles', path: '/users', icon: Shield },
-	{ type: 'page', label: 'Audit Logs', path: '/audit-logs', icon: Shield },
+	{
+		type: 'page',
+		label: 'Packages',
+		path: '/packages',
+		icon: Package,
+		minRole: 'manager',
+	},
+	{
+		type: 'page',
+		label: 'Invoices',
+		path: '/invoices',
+		icon: FileText,
+		minRole: 'manager',
+	},
+	{
+		type: 'page',
+		label: 'Users & Roles',
+		path: '/users',
+		icon: Shield,
+		minRole: 'admin',
+	},
+	{
+		type: 'page',
+		label: 'Audit Logs',
+		path: '/audit-logs',
+		icon: ClipboardCheck,
+		minRole: 'admin',
+	},
+	{
+		type: 'page',
+		label: 'Notifications',
+		path: '/notifications',
+		icon: Bell,
+		minRole: 'admin',
+	},
+	{
+		type: 'page',
+		label: 'Reports',
+		path: '/reports',
+		icon: FileBarChart,
+		minRole: 'admin',
+	},
 ];
 
 function getItemIcon(item: PaletteItem): React.ReactNode {
@@ -79,6 +131,13 @@ function getItemSubLabel(item: PaletteItem): string {
 	return 'Project';
 }
 
+const ROLE_WEIGHT: Record<string, number> = {
+	admin: 4,
+	manager: 3,
+	maintainer: 2,
+	client: 1,
+};
+
 interface CommandPaletteProps {
 	open: boolean;
 	onClose: () => void;
@@ -86,6 +145,11 @@ interface CommandPaletteProps {
 
 export function CommandPalette({ open, onClose }: CommandPaletteProps) {
 	const navigate = useNavigate();
+	const user = useAuthStore(s => s.user);
+	const userWeight = Math.max(
+		...(user?.roles ?? []).map(r => ROLE_WEIGHT[r] ?? 0),
+		0,
+	);
 	const [query, setQuery] = useState('');
 	const [activeIndex, setActiveIndex] = useState(0);
 	const listRef = useRef<HTMLDivElement>(null);
@@ -130,10 +194,14 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
 	});
 
 	const filteredPages = debouncedQuery
-		? STATIC_PAGES.filter(p =>
-				p.label.toLowerCase().includes(debouncedQuery.toLowerCase()),
+		? STATIC_PAGES.filter(
+				p =>
+					p.label.toLowerCase().includes(debouncedQuery.toLowerCase()) &&
+					(p.minRole ? (ROLE_WEIGHT[p.minRole] ?? 0) <= userWeight : true),
 			)
-		: STATIC_PAGES;
+		: STATIC_PAGES.filter(p =>
+				p.minRole ? (ROLE_WEIGHT[p.minRole] ?? 0) <= userWeight : true,
+			);
 
 	const dynamicItems: DynamicItem[] = [
 		...clients.map(c => ({
@@ -235,25 +303,46 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
 						</p>
 					)}
 
-					{allItems.map((item, i) => (
-						<button
-							key={`${item.type}-${item.type === 'page' ? item.path : item.id}`}
-							data-index={i}
-							onClick={() => handleSelect(item)}
-							onMouseEnter={() => setActiveIndex(i)}
-							className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left transition-colors ${
-								i === activeIndex
-									? 'bg-accent text-accent-foreground'
-									: 'text-foreground'
-							}`}
-						>
-							{getItemIcon(item)}
-							<span className='flex-1 truncate'>{getItemLabel(item)}</span>
-							<span className='text-xs text-muted-foreground shrink-0'>
-								{getItemSubLabel(item)}
-							</span>
-						</button>
-					))}
+					{allItems.map((item, i) => {
+						const prevItem = allItems[i - 1];
+						const isFirstOfType = !prevItem || prevItem.type !== item.type;
+						const groupLabel = isFirstOfType
+							? item.type === 'page'
+								? 'Pages'
+								: item.type === 'client'
+									? 'Clients'
+									: item.type === 'server'
+										? 'Servers'
+										: 'Projects'
+							: null;
+						return (
+							<div
+								key={`${item.type}-${item.type === 'page' ? item.path : item.id}`}
+							>
+								{groupLabel && (
+									<div className='px-4 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 select-none'>
+										{groupLabel}
+									</div>
+								)}
+								<button
+									data-index={i}
+									onClick={() => handleSelect(item)}
+									onMouseEnter={() => setActiveIndex(i)}
+									className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left transition-colors ${
+										i === activeIndex
+											? 'bg-accent text-accent-foreground'
+											: 'text-foreground'
+									}`}
+								>
+									{getItemIcon(item)}
+									<span className='flex-1 truncate'>{getItemLabel(item)}</span>
+									<span className='text-xs text-muted-foreground shrink-0'>
+										{getItemSubLabel(item)}
+									</span>
+								</button>
+							</div>
+						);
+					})}
 				</div>
 
 				{/* Footer hint */}
