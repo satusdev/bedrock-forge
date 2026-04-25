@@ -44,4 +44,74 @@ export class PluginScansRepository {
 			},
 		});
 	}
+
+	// ─── EnvironmentCustomPlugin CRUD ─────────────────────────────────────────
+
+	listEnvironmentCustomPlugins(envId: bigint) {
+		return this.prisma.environmentCustomPlugin.findMany({
+			where: { environment_id: envId },
+			include: { custom_plugin: true },
+			orderBy: { created_at: 'asc' },
+		});
+	}
+
+	findCustomPlugin(id: bigint) {
+		return this.prisma.customPlugin.findUnique({ where: { id } });
+	}
+
+	upsertEnvironmentCustomPlugin(
+		environmentId: bigint,
+		customPluginId: bigint,
+		data: {
+			installed_version?: string | null;
+			latest_version?: string | null;
+			version_checked_at?: Date | null;
+		},
+	) {
+		return this.prisma.environmentCustomPlugin.upsert({
+			where: {
+				environment_id_custom_plugin_id: {
+					environment_id: environmentId,
+					custom_plugin_id: customPluginId,
+				},
+			},
+			update: data,
+			create: {
+				environment_id: environmentId,
+				custom_plugin_id: customPluginId,
+				...data,
+			},
+		});
+	}
+
+	updateEnvironmentCustomPlugin(
+		environmentId: bigint,
+		customPluginId: bigint,
+		data: {
+			installed_version?: string | null;
+			latest_version?: string | null;
+			version_checked_at?: Date | null;
+		},
+	) {
+		return this.prisma.environmentCustomPlugin.update({
+			where: {
+				environment_id_custom_plugin_id: {
+					environment_id: environmentId,
+					custom_plugin_id: customPluginId,
+				},
+			},
+			data,
+		});
+	}
+
+	deleteEnvironmentCustomPlugin(environmentId: bigint, customPluginId: bigint) {
+		return this.prisma.environmentCustomPlugin.delete({
+			where: {
+				environment_id_custom_plugin_id: {
+					environment_id: environmentId,
+					custom_plugin_id: customPluginId,
+				},
+			},
+		});
+	}
 }

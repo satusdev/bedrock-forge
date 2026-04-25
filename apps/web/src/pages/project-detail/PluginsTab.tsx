@@ -13,12 +13,24 @@ import {
 	Package,
 	Pencil,
 	Code2,
+	Calendar,
+	Clock,
+	Github,
+	Download,
+	AlertTriangle,
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import {
+	Card,
+	CardContent,
+	CardHeader,
+	CardTitle,
+	CardDescription,
+} from '@/components/ui/card';
 import {
 	Select,
 	SelectContent,
@@ -65,6 +77,26 @@ interface PluginScan {
 	id: number;
 	plugins: PluginScanOutput | Plugin[];
 	scanned_at: string;
+}
+
+interface CustomPlugin {
+	id: number;
+	name: string;
+	slug: string;
+	description: string | null;
+	repo_url: string;
+	repo_path: string;
+	type: string;
+}
+
+interface EnvironmentCustomPlugin {
+	id: number;
+	custom_plugin_id: number;
+	installed_version: string | null;
+	latest_version: string | null;
+	version_checked_at: string | null;
+	created_at: string;
+	custom_plugin: CustomPlugin;
 }
 
 function parseScanPlugins(scan: PluginScan | undefined): {
@@ -252,6 +284,250 @@ function EditConstraintDialog({
 	);
 }
 
+interface PluginUpdateSchedule {
+	id: number;
+	enabled: boolean;
+	frequency: 'daily' | 'weekly' | 'monthly';
+	hour: number;
+	minute: number;
+	day_of_week: number | null;
+	day_of_month: number | null;
+	last_run_at: string | null;
+}
+
+function PluginUpdateScheduleCard({ envId }: { envId: number }) {
+	const qc = useQueryClient();
+	const [frequency, setFrequency] = useState<'daily' | 'weekly' | 'monthly'>(
+		'daily',
+	);
+	const [enabled, setEnabled] = useState(true);
+	const [hour, setHour] = useState(3);
+	const [minute, setMinute] = useState(0);
+	const [dayOfWeek, setDayOfWeek] = useState(1);
+	const [dayOfMonth, setDayOfMonth] = useState(1);
+	const [initialized, setInitialized] = useState(false);
+
+	const { data: schedule, isLoading } = useQuery<PluginUpdateSchedule | null>({
+		queryKey: ['plugin-update-schedule', envId],
+		queryFn: () =>
+			api
+				.get<PluginUpdateSchedule>(
+					`/environments/${envId}/plugin-update-schedule`,
+				)
+				.catch(() => null),
+	});
+
+	// Sync form from loaded schedule
+	if (schedule && !initialized) {
+		setEnabled(schedule.enabled);
+		setFrequency(schedule.frequency);
+		setHour(schedule.hour);
+		setMinute(schedule.minute);
+		if (schedule.day_of_week != null) setDayOfWeek(schedule.day_of_week);
+		if (schedule.day_of_month != null) setDayOfMonth(schedule.day_of_month);
+		setInitialized(true);
+	}
+
+	const saveMutation = useMutation({
+		mutationFn: () =>
+			api.put(`/environments/${envId}/plugin-update-schedule`, {
+				enabled,
+				frequency,
+				hour,
+				minute,
+				day_of_week: frequency === 'weekly' ? dayOfWeek : undefined,
+				day_of_month: frequency === 'monthly' ? dayOfMonth : undefined,
+			}),
+		onSuccess: () => {
+			qc.invalidateQueries({ queryKey: ['plugin-update-schedule', envId] });
+			toast({ title: 'Auto-update schedule saved' });
+		},
+		onError: () => toast({ title: 'Save failed', variant: 'destructive' }),
+	});
+
+	const deleteMutation = useMutation({
+		mutationFn: () =>
+			api.delete(`/environments/${envId}/plugin-update-schedule`),
+		onSuccess: () => {
+			qc.invalidateQueries({ queryKey: ['plugin-update-schedule', envId] });
+			setInitialized(false);
+			toast({ title: 'Schedule removed' });
+		},
+		onError: () => toast({ title: 'Delete failed', variant: 'destructive' }),
+	});
+
+	const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+	return (
+		<Card>
+			<CardHeader className='pb-3'>
+				<CardTitle className='text-sm flex items-center gap-2'>
+					<Calendar className='h-4 w-4' />
+					Auto-Update Schedule
+				</CardTitle>
+				<CardDescription className='text-xs'>
+					Automatically run <code className='font-mono'>composer update</code>{' '}
+					on a schedule.
+					{schedule?.last_run_at && (
+						<span className='ml-1'>
+							Last run:{' '}
+							<span className='font-medium text-foreground'>
+								{new Date(schedule.last_run_at).toLocaleString()}
+							</span>
+						</span>
+					)}
+				</CardDescription>
+			</CardHeader>
+			<CardContent>
+				{isLoading ? (
+					<div className='space-y-2'>
+						<div className='h-8 bg-muted animate-pulse rounded' />
+						<div className='h-8 bg-muted animate-pulse rounded w-3/4' />
+					</div>
+				) : (
+					<div className='space-y-4'>
+						{/* Enabled toggle */}
+						<div className='flex items-center gap-3'>
+							<button
+								type='button'
+								role='switch'
+								aria-checked={enabled}
+								onClick={() => setEnabled(v => !v)}
+								className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${enabled ? 'bg-primary' : 'bg-muted-foreground/30'}`}
+							>
+								<span
+									className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${enabled ? 'translate-x-4' : 'translate-x-0.5'}`}
+								/>
+							</button>
+							<label className='text-sm font-medium'>
+								{enabled ? 'Enabled' : 'Disabled'}
+							</label>
+						</div>
+
+						<div className='grid grid-cols-2 sm:grid-cols-4 gap-3'>
+							{/* Frequency */}
+							<div className='space-y-1'>
+								<label className='text-xs text-muted-foreground'>
+									Frequency
+								</label>
+								<Select
+									value={frequency}
+									onValueChange={v => setFrequency(v as typeof frequency)}
+								>
+									<SelectTrigger className='h-8 text-sm'>
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value='daily'>Daily</SelectItem>
+										<SelectItem value='weekly'>Weekly</SelectItem>
+										<SelectItem value='monthly'>Monthly</SelectItem>
+									</SelectContent>
+								</Select>
+							</div>
+
+							{/* Time */}
+							<div className='space-y-1'>
+								<label className='text-xs text-muted-foreground flex items-center gap-1'>
+									<Clock className='h-3 w-3' /> Time (UTC)
+								</label>
+								<div className='flex items-center gap-1'>
+									<Input
+										type='number'
+										min={0}
+										max={23}
+										value={hour}
+										onChange={e => setHour(Number(e.target.value))}
+										className='h-8 w-14 text-sm font-mono text-center p-1'
+									/>
+									<span className='text-muted-foreground text-sm'>:</span>
+									<Input
+										type='number'
+										min={0}
+										max={59}
+										value={minute}
+										onChange={e => setMinute(Number(e.target.value))}
+										className='h-8 w-14 text-sm font-mono text-center p-1'
+									/>
+								</div>
+							</div>
+
+							{/* Day of week (weekly only) */}
+							{frequency === 'weekly' && (
+								<div className='space-y-1'>
+									<label className='text-xs text-muted-foreground'>Day</label>
+									<Select
+										value={String(dayOfWeek)}
+										onValueChange={v => setDayOfWeek(Number(v))}
+									>
+										<SelectTrigger className='h-8 text-sm'>
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											{DAY_NAMES.map((d, i) => (
+												<SelectItem key={i} value={String(i)}>
+													{d}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+								</div>
+							)}
+
+							{/* Day of month (monthly only) */}
+							{frequency === 'monthly' && (
+								<div className='space-y-1'>
+									<label className='text-xs text-muted-foreground'>
+										Day of month
+									</label>
+									<Input
+										type='number'
+										min={1}
+										max={28}
+										value={dayOfMonth}
+										onChange={e => setDayOfMonth(Number(e.target.value))}
+										className='h-8 w-14 text-sm font-mono text-center p-1'
+									/>
+								</div>
+							)}
+						</div>
+
+						<div className='flex gap-2 pt-1'>
+							<Button
+								size='sm'
+								onClick={() => saveMutation.mutate()}
+								disabled={saveMutation.isPending}
+								className='flex-1'
+							>
+								{saveMutation.isPending ? (
+									<>
+										<Loader2 className='h-3 w-3 mr-1.5 animate-spin' /> Saving…
+									</>
+								) : (
+									'Save schedule'
+								)}
+							</Button>
+							{schedule && (
+								<Button
+									size='sm'
+									variant='destructive'
+									onClick={() => deleteMutation.mutate()}
+									disabled={deleteMutation.isPending}
+								>
+									{deleteMutation.isPending ? (
+										<Loader2 className='h-3 w-3 animate-spin' />
+									) : (
+										<Trash2 className='h-3 w-3' />
+									)}
+								</Button>
+							)}
+						</div>
+					</div>
+				)}
+			</CardContent>
+		</Card>
+	);
+}
+
 export function PluginsTab({
 	projectId,
 	environments,
@@ -282,6 +558,8 @@ export function PluginsTab({
 	const managingJobIdRef = useRef<string | null>(null);
 	const composerReadJobIdRef = useRef<string | null>(null);
 	const composerReadExecIdRef = useRef<number | null>(null);
+	const [customJobId, setCustomJobId] = useState<string | null>(null);
+	const customJobIdRef = useRef<string | null>(null);
 
 	useSubscribeEnvironment(selectedEnvId);
 
@@ -291,6 +569,19 @@ export function PluginsTab({
 			jobId?: string;
 			environmentId?: number;
 		};
+
+		// Handle custom-plugins queue separately before the plugin-scans guard
+		if (event.queueName === 'custom-plugins') {
+			if (event.jobId != null && event.jobId === customJobIdRef.current) {
+				setCustomJobId(null);
+				customJobIdRef.current = null;
+				qc.invalidateQueries({
+					queryKey: ['env-custom-plugins', selectedEnvId],
+				});
+			}
+			return;
+		}
+
 		if (event.queueName !== 'plugin-scans') return;
 
 		const isScanJob =
@@ -354,6 +645,20 @@ export function PluginsTab({
 			environmentId?: number;
 			error?: string;
 		};
+
+		if (event.queueName === 'custom-plugins') {
+			if (event.jobId != null && event.jobId === customJobIdRef.current) {
+				setCustomJobId(null);
+				customJobIdRef.current = null;
+				toast({
+					title: 'Custom plugin operation failed',
+					description: event.error ?? 'An unexpected error occurred',
+					variant: 'destructive',
+				});
+			}
+			return;
+		}
+
 		if (event.queueName !== 'plugin-scans') return;
 
 		const isScanJob =
@@ -407,6 +712,26 @@ export function PluginsTab({
 	});
 
 	const latestScan = scans?.items[0];
+
+	const { data: customCatalog = [] } = useQuery<CustomPlugin[]>({
+		queryKey: ['custom-plugins'],
+		queryFn: () => api.get<CustomPlugin[]>('/custom-plugins'),
+	});
+
+	const { data: envCustomPlugins = [], isLoading: isLoadingCustom } = useQuery<
+		EnvironmentCustomPlugin[]
+	>({
+		queryKey: ['env-custom-plugins', selectedEnvId],
+		enabled: !!selectedEnvId,
+		queryFn: () =>
+			api.get<EnvironmentCustomPlugin[]>(
+				`/plugin-scans/environment/${selectedEnvId}/custom-plugins`,
+			),
+	});
+
+	const installedCustomIds = new Set(
+		envCustomPlugins.map(e => e.custom_plugin_id),
+	);
 
 	useEffect(() => {
 		if (scanning && latestScan) {
@@ -513,6 +838,55 @@ export function PluginsTab({
 		},
 		onError: () =>
 			toast({ title: 'Failed to update constraint', variant: 'destructive' }),
+	});
+
+	const installCustomMutation = useMutation({
+		mutationFn: (customPluginId: number) =>
+			api.post<{ jobExecutionId: number; bullJobId: string }>(
+				`/plugin-scans/environment/${selectedEnvId}/custom-plugins/${customPluginId}`,
+				{},
+			),
+		onSuccess: (data, id) => {
+			const jobId = data?.bullJobId ?? null;
+			setCustomJobId(jobId);
+			customJobIdRef.current = jobId;
+			toast({
+				title: 'Install queued',
+				description: 'Plugin will be installed via monorepo-fetcher.',
+			});
+		},
+		onError: () => toast({ title: 'Install failed', variant: 'destructive' }),
+	});
+
+	const uninstallCustomMutation = useMutation({
+		mutationFn: (customPluginId: number) =>
+			api.delete<{ jobExecutionId: number; bullJobId: string }>(
+				`/plugin-scans/environment/${selectedEnvId}/custom-plugins/${customPluginId}`,
+			),
+		onSuccess: data => {
+			const jobId = data?.bullJobId ?? null;
+			setCustomJobId(jobId);
+			customJobIdRef.current = jobId;
+			toast({
+				title: 'Uninstall queued',
+				description: 'Plugin will be removed via monorepo-fetcher.',
+			});
+		},
+		onError: () => toast({ title: 'Uninstall failed', variant: 'destructive' }),
+	});
+
+	const checkVersionsMutation = useMutation({
+		mutationFn: () =>
+			api.post(
+				`/plugin-scans/environment/${selectedEnvId}/custom-plugins/check-versions`,
+				{},
+			),
+		onSuccess: () => {
+			qc.invalidateQueries({ queryKey: ['env-custom-plugins', selectedEnvId] });
+			toast({ title: 'Version check complete' });
+		},
+		onError: () =>
+			toast({ title: 'Version check failed', variant: 'destructive' }),
 	});
 
 	const composerReadMutation = useMutation({
@@ -877,6 +1251,142 @@ export function PluginsTab({
 				</>
 			)}
 
+			{/* Custom GitHub Plugins section */}
+			{(customCatalog.length > 0 || envCustomPlugins.length > 0) && (
+				<div className='border rounded-lg overflow-hidden'>
+					<div className='flex items-center gap-2 px-4 py-2.5 border-b bg-muted/20'>
+						<Github className='h-4 w-4 text-muted-foreground' />
+						<span className='text-sm font-medium'>Custom GitHub Plugins</span>
+						{envCustomPlugins.length > 0 && (
+							<Badge variant='secondary' className='text-xs'>
+								{envCustomPlugins.length}
+							</Badge>
+						)}
+						<Button
+							size='sm'
+							variant='ghost'
+							className='ml-auto h-7 px-2 text-xs'
+							onClick={() => checkVersionsMutation.mutate()}
+							disabled={
+								checkVersionsMutation.isPending ||
+								isLoadingCustom ||
+								envCustomPlugins.length === 0
+							}
+							title='Check latest versions on GitHub'
+						>
+							{checkVersionsMutation.isPending ? (
+								<Loader2 className='h-3 w-3 mr-1.5 animate-spin' />
+							) : (
+								<RefreshCw className='h-3 w-3 mr-1.5' />
+							)}
+							Check Versions
+						</Button>
+					</div>
+					<table className='w-full text-sm'>
+						<thead className='border-b bg-muted/30'>
+							<tr>
+								<th className='text-left px-4 py-2.5 font-medium text-xs'>
+									Plugin
+								</th>
+								<th className='text-left px-4 py-2.5 font-medium text-xs'>
+									Installed
+								</th>
+								<th className='text-left px-4 py-2.5 font-medium text-xs'>
+									Latest
+								</th>
+								<th className='w-24 px-4 py-2.5' />
+							</tr>
+						</thead>
+						<tbody className='divide-y'>
+							{customCatalog.map(cp => {
+								const envEntry = envCustomPlugins.find(
+									e => e.custom_plugin_id === cp.id,
+								);
+								const isInstalled = !!envEntry;
+								const isOutdated =
+									envEntry?.installed_version != null &&
+									envEntry?.latest_version != null &&
+									envEntry.installed_version !== envEntry.latest_version;
+								const isThisJobPending = !!customJobId;
+								return (
+									<tr key={cp.id} className='hover:bg-muted/10'>
+										<td className='px-4 py-2.5'>
+											<div className='flex items-center gap-2'>
+												<span className='font-medium'>{cp.name}</span>
+												<Badge variant='outline' className='text-xs capitalize'>
+													{cp.type}
+												</Badge>
+												{isOutdated && (
+													<Badge className='text-xs bg-amber-500/20 text-amber-700 dark:text-amber-400 border-amber-500/30'>
+														<AlertTriangle className='h-2.5 w-2.5 mr-1' />
+														Update available
+													</Badge>
+												)}
+											</div>
+											<p className='text-xs text-muted-foreground font-mono mt-0.5'>
+												{cp.slug}
+											</p>
+										</td>
+										<td className='px-4 py-2.5 font-mono text-xs text-muted-foreground'>
+											{isInstalled
+												? (envEntry.installed_version ?? 'dev')
+												: '—'}
+										</td>
+										<td className='px-4 py-2.5 font-mono text-xs text-muted-foreground'>
+											{isInstalled ? (envEntry.latest_version ?? '—') : '—'}
+										</td>
+										<td className='px-4 py-2.5'>
+											{isInstalled ? (
+												<Button
+													size='sm'
+													variant='ghost'
+													className='h-7 px-2 text-xs text-destructive hover:text-destructive'
+													disabled={isThisJobPending}
+													onClick={() => uninstallCustomMutation.mutate(cp.id)}
+													title='Uninstall'
+												>
+													{isThisJobPending ? (
+														<Loader2 className='h-3 w-3 animate-spin' />
+													) : (
+														<Trash2 className='h-3 w-3' />
+													)}
+												</Button>
+											) : (
+												<Button
+													size='sm'
+													variant='ghost'
+													className='h-7 px-2 text-xs'
+													disabled={isThisJobPending}
+													onClick={() => installCustomMutation.mutate(cp.id)}
+													title='Install'
+												>
+													{isThisJobPending ? (
+														<Loader2 className='h-3 w-3 animate-spin' />
+													) : (
+														<Download className='h-3 w-3' />
+													)}
+												</Button>
+											)}
+										</td>
+									</tr>
+								);
+							})}
+							{customCatalog.length === 0 && (
+								<tr>
+									<td
+										colSpan={4}
+										className='px-4 py-6 text-center text-sm text-muted-foreground'
+									>
+										No custom plugins registered. Add them in Settings → Custom
+										GitHub Plugins.
+									</td>
+								</tr>
+							)}
+						</tbody>
+					</table>
+				</div>
+			)}
+
 			{/* Must-Use Plugins section */}
 			{muPlugins.length > 0 && (
 				<div className='border rounded-lg overflow-hidden'>
@@ -977,6 +1487,11 @@ export function PluginsTab({
 					open={showAddDialog}
 					onClose={() => setShowAddDialog(false)}
 				/>
+			)}
+
+			{/* Auto-update schedule (Bedrock only) */}
+			{isBedrock && selectedEnvId && (
+				<PluginUpdateScheduleCard envId={selectedEnvId} />
 			)}
 		</div>
 	);
