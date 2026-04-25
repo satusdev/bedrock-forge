@@ -11,7 +11,7 @@ const prisma = new PrismaClient({ adapter });
 // ── Roles ────────────────────────────────────────────────────────────────────
 
 async function seedRoles() {
-	const roles = ['admin', 'manager', 'client'] as const;
+	const roles = ['admin', 'manager', 'maintainer', 'client'] as const;
 	let count = 0;
 	for (const name of roles) {
 		const existing = await prisma.role.findUnique({ where: { name } });

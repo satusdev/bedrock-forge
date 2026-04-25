@@ -23,6 +23,7 @@ model User {
   user_roles     UserRole[]
   refresh_tokens RefreshToken[]
   audit_logs     AuditLog[]
+  notifications  UserNotification[]
 
   @@map("users")
 }
@@ -89,7 +90,8 @@ model Tag {
   name  String @unique
   color String @default("#6366f1")
 
-  client_tags ClientTag[]
+  client_tags      ClientTag[]
+  environment_tags EnvironmentTag[]
 
   @@map("tags")
 }
@@ -105,6 +107,19 @@ model ClientTag {
   @@index([client_id])
   @@index([tag_id])
   @@map("client_tags")
+}
+
+model EnvironmentTag {
+  environment_id BigInt
+  tag_id         BigInt
+
+  environment Environment @relation(fields: [environment_id], references: [id], onDelete: Cascade)
+  tag         Tag         @relation(fields: [tag_id], references: [id], onDelete: Cascade)
+
+  @@id([environment_id, tag_id])
+  @@index([environment_id])
+  @@index([tag_id])
+  @@map("environment_tags")
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -209,17 +224,23 @@ model Environment {
   root_path         String
   backup_path       String?  // Persistent remote path for backup storage (e.g. /home/user/backups)
   google_drive_folder_id String? // Optional Google Drive folder ID for backup storage override
+  protected_tables  String[] @default([]) // WP table names excluded from DB push/clone (data preserved on target)
+  is_baseline       Boolean  @default(false) // marked as the canonical reference env for drift detection
   created_at        DateTime @default(now()) @db.Timestamptz()
   updated_at        DateTime @updatedAt @db.Timestamptz()
 
   project            Project           @relation(fields: [project_id], references: [id], onDelete: Cascade)
   server             Server            @relation(fields: [server_id], references: [id])
-  backups            Backup[]
-  plugin_scans       PluginScan[]
-  monitors           Monitor[]
-  wp_db_credentials  WpDbCredentials?
-  job_executions     JobExecution[]
-  backup_schedule    BackupSchedule?
+  backups                Backup[]
+  plugin_scans           PluginScan[]
+  monitors               Monitor[]
+  wp_db_credentials      WpDbCredentials?
+  job_executions         JobExecution[]
+  backup_schedule        BackupSchedule?
+  plugin_update_schedule PluginUpdateSchedule?
+  cleanup_schedule       CleanupSchedule?
+  environment_tags       EnvironmentTag[]
+  custom_plugins         EnvironmentCustomPlugin[]
 
   @@index([project_id])
   @@index([server_id])
@@ -321,21 +342,31 @@ model Domain {
 }
 
 model Monitor {
-  id               BigInt   @id @default(autoincrement())
-  environment_id   BigInt
-  enabled          Boolean  @default(true)
-  interval_seconds Int      @default(600)
-  uptime_pct       Decimal  @db.Decimal(5, 2) @default(100.00)
+  id               BigInt    @id @default(autoincrement())
+  environment_id   BigInt    @unique
+  enabled          Boolean   @default(true)
+  interval_seconds Int       @default(600)
+  uptime_pct       Decimal   @db.Decimal(5, 2) @default(100.00)
   last_response_ms Int?
-  last_status      Int?     // HTTP status code
+  last_status      Int?      // HTTP status code
   last_checked_at  DateTime? @db.Timestamptz()
-  created_at       DateTime @default(now()) @db.Timestamptz()
+  // Advanced check configuration
+  check_ssl          Boolean   @default(false)
+  ssl_expires_at     DateTime? @db.Timestamptz()
+  ssl_issuer         String?
+  ssl_days_remaining Int?
+  ssl_alert_days     Int?      // null = no notification; N = alert when ≤N days remain
+  check_dns          Boolean   @default(false)
+  dns_resolves       Boolean?
+  check_keyword      Boolean   @default(false)
+  keyword            String?
+  keyword_found      Boolean?
+  created_at         DateTime  @default(now()) @db.Timestamptz()
 
   environment     Environment     @relation(fields: [environment_id], references: [id], onDelete: Cascade)
   monitor_results MonitorResult[]
   monitor_logs    MonitorLog[]
 
-  @@index([environment_id])
   @@map("monitors")
 }
 
@@ -343,6 +374,9 @@ enum MonitorLogEvent {
   down
   up
   degraded
+  ssl_expiry
+  dns_failed
+  keyword_missing
 }
 
 model MonitorLog {
@@ -365,18 +399,59 @@ model MonitorLog {
 }
 
 model MonitorResult {
-  id          BigInt   @id @default(autoincrement())
-  monitor_id  BigInt
-  status_code Int
-  response_ms Int
-  is_up       Boolean
-  checked_at  DateTime @default(now()) @db.Timestamptz()
+  id                 BigInt   @id @default(autoincrement())
+  monitor_id         BigInt
+  status_code        Int
+  response_ms        Int
+  is_up              Boolean
+  ssl_days_remaining Int?
+  dns_resolves       Boolean?
+  keyword_found      Boolean?
+  checked_at         DateTime @default(now()) @db.Timestamptz()
 
   monitor Monitor @relation(fields: [monitor_id], references: [id], onDelete: Cascade)
 
-  @@index([monitor_id])
   @@index([checked_at])
   @@map("monitor_results")
+}
+
+model PluginUpdateSchedule {
+  id             BigInt    @id @default(autoincrement())
+  environment_id BigInt    @unique
+  enabled        Boolean   @default(true)
+  frequency      String    @default("weekly") // 'daily' | 'weekly' | 'monthly'
+  hour           Int       @default(2)
+  minute         Int       @default(0)
+  day_of_week    Int?      // 0=Sun..6=Sat (weekly only)
+  day_of_month   Int?      // 1-28 (monthly only)
+  last_run_at    DateTime? @db.Timestamptz()
+  created_at     DateTime  @default(now()) @db.Timestamptz()
+  updated_at     DateTime  @updatedAt @db.Timestamptz()
+
+  environment Environment @relation(fields: [environment_id], references: [id], onDelete: Cascade)
+
+  @@index([enabled])
+  @@map("plugin_update_schedules")
+}
+
+model CleanupSchedule {
+  id             BigInt    @id @default(autoincrement())
+  environment_id BigInt    @unique
+  enabled        Boolean   @default(true)
+  frequency      String    @default("weekly") // 'daily' | 'weekly' | 'monthly'
+  hour           Int       @default(3)
+  minute         Int       @default(30)
+  day_of_week    Int?      // 0=Sun..6=Sat (weekly only)
+  day_of_month   Int?      // 1-28 (monthly only)
+  keep_revisions Int       @default(3)
+  last_run_at    DateTime? @db.Timestamptz()
+  created_at     DateTime  @default(now()) @db.Timestamptz()
+  updated_at     DateTime  @updatedAt @db.Timestamptz()
+
+  environment Environment @relation(fields: [environment_id], references: [id], onDelete: Cascade)
+
+  @@index([enabled])
+  @@map("cleanup_schedules")
 }
 
 model WpDbCredentials {
@@ -453,6 +528,44 @@ model AppSetting {
   updated_at DateTime @updatedAt @db.Timestamptz()
 
   @@map("app_settings")
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// CUSTOM GITHUB PLUGINS
+// ──────────────────────────────────────────────────────────────────────────────
+
+model CustomPlugin {
+  id          BigInt   @id @default(autoincrement())
+  name        String   @unique
+  slug        String   @unique // Directory name used by monorepo-fetcher
+  description String?
+  repo_url    String   // SSH (git@github.com:...) or HTTPS GitHub URL
+  repo_path   String   @default(".") // Subdirectory within repo; "." for single-plugin repos
+  type        String   @default("plugin") // plugin | theme
+  created_at  DateTime @default(now()) @db.Timestamptz()
+  updated_at  DateTime @updatedAt @db.Timestamptz()
+
+  environment_plugins EnvironmentCustomPlugin[]
+
+  @@map("custom_plugins")
+}
+
+model EnvironmentCustomPlugin {
+  id                 BigInt    @id @default(autoincrement())
+  environment_id     BigInt
+  custom_plugin_id   BigInt
+  installed_version  String?   // Git tag at time of install, null = dev/unknown
+  latest_version     String?   // Latest GitHub tag, populated by version-check
+  version_checked_at DateTime? @db.Timestamptz()
+  created_at         DateTime  @default(now()) @db.Timestamptz()
+
+  environment   Environment  @relation(fields: [environment_id], references: [id], onDelete: Cascade)
+  custom_plugin CustomPlugin @relation(fields: [custom_plugin_id], references: [id], onDelete: Cascade)
+
+  @@unique([environment_id, custom_plugin_id])
+  @@index([environment_id])
+  @@index([custom_plugin_id])
+  @@map("environment_custom_plugins")
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -536,6 +649,24 @@ model NotificationLog {
   @@index([status])
   @@index([created_at])
   @@map("notification_logs")
+}
+
+model UserNotification {
+  id         BigInt   @id @default(autoincrement())
+  user_id    BigInt
+  type       String
+  title      String
+  message    String
+  is_read    Boolean  @default(false)
+  action_url String?
+  created_at DateTime @default(now()) @db.Timestamptz()
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([is_read])
+  @@index([created_at])
+  @@map("user_notifications")
 }
 
 model AuditLog {
