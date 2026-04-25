@@ -7,6 +7,7 @@ import {
 	IsUrl,
 	IsIn,
 	ValidateNested,
+	IsArray,
 } from 'class-validator';
 import { PartialType } from '@nestjs/mapped-types';
 import { Type } from 'class-transformer';
@@ -36,6 +37,12 @@ export class CreateEnvironmentDto {
 	@ValidateNested()
 	@Type(() => UpsertDbCredentialsDto)
 	db_credentials?: UpsertDbCredentialsDto;
+	/**
+	 * WP table names on the TARGET that must not be overwritten during a DB push or clone.
+	 * The dump excludes these tables; all others are fully replaced (DROP TABLE in dump).
+	 */
+	@IsOptional() @IsArray() @IsString({ each: true }) @MaxLength(100, { each: true })
+	protected_tables?: string[];
 }
 
 export class UpdateEnvironmentDto extends PartialType(CreateEnvironmentDto) {}

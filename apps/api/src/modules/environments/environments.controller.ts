@@ -23,6 +23,7 @@ import {
 	UpsertDbCredentialsDto,
 } from './dto/environment.dto';
 import { ScanServerForEnvDto } from './dto/scan-server-for-env.dto';
+import { WpQuickLoginDto } from './dto/wp-quick-login.dto';
 
 @Controller('projects/:projectId/environments')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -92,5 +93,23 @@ export class EnvironmentsController {
 		@Body() dto: UpsertDbCredentialsDto,
 	) {
 		return this.svc.upsertDbCredentials(id, dto);
+	}
+
+	@Get(':id/db-tables')
+	listDbTables(@Param('id', ParseIntPipe) id: number) {
+		return this.svc.listDbTables(id);
+	}
+
+	@Get(':id/wp-users')
+	getWpUsers(@Param('id', ParseIntPipe) id: number) {
+		return this.svc.getWpUsers(id);
+	}
+
+	@Post(':id/wp-quick-login')
+	createWpQuickLogin(
+		@Param('id', ParseIntPipe) id: number,
+		@Body() dto: WpQuickLoginDto,
+	) {
+		return this.svc.createWpQuickLogin(id, dto);
 	}
 }
