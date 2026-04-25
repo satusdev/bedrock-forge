@@ -342,7 +342,28 @@ export class SyncProcessor extends WorkerHost {
 			),
 		});
 		await sourceExecutor.execute(`chmod 600 ${srcMycnf}`);
-		const maskedDump = `mysqldump --defaults-extra-file=*** --single-transaction --quick ${sourceCreds.dbName}`;
+
+		// Protected tables: sanitize names (only valid MySQL identifier chars) and build
+		// --ignore-table flags so these tables are excluded from the source dump entirely.
+		// Their existing data on the target survives the import untouched.
+		const cloneSafeProtected = (targetEnv.protected_tables ?? [])
+			.map(t => t.replace(/[^a-zA-Z0-9_$]/g, ''))
+			.filter(t => t.length > 0);
+		const cloneIgnoreFlags =
+			cloneSafeProtected.length > 0
+				? ' ' +
+					cloneSafeProtected
+						.map(t => `--ignore-table=${sourceCreds.dbName}.${t}`)
+						.join(' ')
+				: '';
+		if (cloneSafeProtected.length > 0) {
+			await tracker.track({
+				step: `Protected tables — excluding ${cloneSafeProtected.length} table(s) from dump`,
+				level: 'info',
+				detail: cloneSafeProtected.join(', '),
+			});
+		}
+		const maskedDump = `mysqldump --defaults-extra-file=*** --single-transaction --quick${cloneIgnoreFlags} ${sourceCreds.dbName}`;
 
 		await tracker.track({
 			step: 'Dumping source database',
@@ -351,7 +372,7 @@ export class SyncProcessor extends WorkerHost {
 		});
 		const dumpStart = Date.now();
 		const dumpResult = await sourceExecutor.execute(
-			`mysqldump --defaults-extra-file=${srcMycnf} --single-transaction --quick ${sourceCreds.dbName} > ${dumpRemote}`,
+			`mysqldump --defaults-extra-file=${srcMycnf} --single-transaction --quick${cloneIgnoreFlags} ${sourceCreds.dbName} > ${dumpRemote}`,
 			{ timeout: 10 * 60_000 },
 		);
 		await sourceExecutor.execute(`rm -f ${srcMycnf}`);
@@ -398,7 +419,7 @@ export class SyncProcessor extends WorkerHost {
 		}
 		await job.updateProgress({ value: 65, step: 'Dump transferred to target' });
 
-		// Import on target: DROP + CREATE first for a clean slate (removes orphan tables)
+		// Import on target: conditionally DROP+CREATE or preserve protected tables
 		const tgtMycnf = `/tmp/forge_sync_imp_${job.id}.cnf`;
 		await targetExecutor.pushFile({
 			remotePath: tgtMycnf,
@@ -408,26 +429,74 @@ export class SyncProcessor extends WorkerHost {
 		});
 		await targetExecutor.execute(`chmod 600 ${tgtMycnf}`);
 
-		await tracker.track({
-			step: 'Dropping and recreating target database (clean slate)',
-			level: 'info',
-			detail: targetCreds.dbName,
-		});
-		const dropCreateResult = await targetExecutor.execute(
-			`mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`DROP DATABASE IF EXISTS \`${targetCreds.dbName}\`; CREATE DATABASE \`${targetCreds.dbName}\`;`)}`,
-			{ timeout: 2 * 60_000 },
-		);
-		if (dropCreateResult.code !== 0) {
-			// Clean up temp files before failing so the target server is not littered.
-			await targetExecutor
-				.execute(`rm -f ${tgtMycnf} ${dumpRemote}`)
-				.catch(() => {});
-			throw new Error(
-				`Cannot reset target database for a clean-slate import. ` +
-					`DROP DATABASE / CREATE DATABASE failed for \`${targetCreds.dbName}\` — ` +
-					`ensure ${targetCreds.dbUser} has DROP and CREATE privileges then retry.\n` +
-					`Detail: ${dropCreateResult.stderr.trim()}`,
+		if (cloneSafeProtected.length > 0) {
+			// Protected tables configured — check if the target DB already exists.
+			// If it does: skip DROP/CREATE; the protected tables survive and mysqldump's
+			// per-table DROP TABLE IF EXISTS handles the unprotected ones automatically.
+			// If it doesn't: just CREATE (nothing to protect yet in an empty/new DB).
+			await tracker.track({
+				step: 'Protected tables — checking target database existence',
+				level: 'info',
+				detail: `Will preserve: ${cloneSafeProtected.join(', ')}`,
+			});
+			const dbExistsRes = await targetExecutor.execute(
+				`mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`SHOW DATABASES LIKE '${targetCreds.dbName}';`)}`,
+				{ timeout: 30_000 },
 			);
+			const dbExists =
+				dbExistsRes.code === 0 && dbExistsRes.stdout.trim().length > 0;
+
+			if (dbExists) {
+				await tracker.track({
+					step: 'Target database exists — skipping DROP/CREATE to preserve protected tables',
+					level: 'info',
+					detail:
+						'Unprotected tables replaced via DROP TABLE IF EXISTS in dump',
+				});
+			} else {
+				await tracker.track({
+					step: 'Target database does not exist — creating (no data at risk)',
+					level: 'info',
+					detail: targetCreds.dbName,
+				});
+				const createResult = await targetExecutor.execute(
+					`mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`CREATE DATABASE \`${targetCreds.dbName}\`;`)}`,
+					{ timeout: 2 * 60_000 },
+				);
+				if (createResult.code !== 0) {
+					await targetExecutor
+						.execute(`rm -f ${tgtMycnf} ${dumpRemote}`)
+						.catch(() => {});
+					throw new Error(
+						`Cannot create target database \`${targetCreds.dbName}\` — ` +
+							`ensure ${targetCreds.dbUser} has CREATE privilege then retry.\n` +
+							`Detail: ${createResult.stderr.trim()}`,
+					);
+				}
+			}
+		} else {
+			// No protected tables — clean slate: DROP + CREATE removes all orphan tables.
+			await tracker.track({
+				step: 'Dropping and recreating target database (clean slate)',
+				level: 'info',
+				detail: targetCreds.dbName,
+			});
+			const dropCreateResult = await targetExecutor.execute(
+				`mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`DROP DATABASE IF EXISTS \`${targetCreds.dbName}\`; CREATE DATABASE \`${targetCreds.dbName}\`;`)}`,
+				{ timeout: 2 * 60_000 },
+			);
+			if (dropCreateResult.code !== 0) {
+				// Clean up temp files before failing so the target server is not littered.
+				await targetExecutor
+					.execute(`rm -f ${tgtMycnf} ${dumpRemote}`)
+					.catch(() => {});
+				throw new Error(
+					`Cannot reset target database for a clean-slate import. ` +
+						`DROP DATABASE / CREATE DATABASE failed for \`${targetCreds.dbName}\` — ` +
+						`ensure ${targetCreds.dbUser} has DROP and CREATE privileges then retry.\n` +
+						`Detail: ${dropCreateResult.stderr.trim()}`,
+				);
+			}
 		}
 
 		const maskedImport = `mysql --defaults-extra-file=*** ${targetCreds.dbName}`;
@@ -789,6 +858,7 @@ export class SyncProcessor extends WorkerHost {
 			id: bigint;
 			root_path: string;
 			url?: string | null;
+			protected_tables?: string[];
 			server: { ip_address: string };
 		},
 		targetLayout: WpLayout,
@@ -845,7 +915,27 @@ export class SyncProcessor extends WorkerHost {
 			),
 		});
 		await sourceExecutor.execute(`chmod 600 ${srcMycnf}`);
-		const maskedDump = `mysqldump --defaults-extra-file=*** --single-transaction --quick ${sourceCreds.dbName}`;
+
+		// Protected tables: sanitize names and build --ignore-table flags so these
+		// tables are excluded from the source dump — their data survives on target.
+		const pushSafeProtected = (targetEnv.protected_tables ?? [])
+			.map(t => t.replace(/[^a-zA-Z0-9_$]/g, ''))
+			.filter(t => t.length > 0);
+		const pushIgnoreFlags =
+			pushSafeProtected.length > 0
+				? ' ' +
+					pushSafeProtected
+						.map(t => `--ignore-table=${sourceCreds.dbName}.${t}`)
+						.join(' ')
+				: '';
+		if (pushSafeProtected.length > 0) {
+			await tracker.track({
+				step: `Protected tables — excluding ${pushSafeProtected.length} table(s) from dump`,
+				level: 'info',
+				detail: pushSafeProtected.join(', '),
+			});
+		}
+		const maskedDump = `mysqldump --defaults-extra-file=*** --single-transaction --quick${pushIgnoreFlags} ${sourceCreds.dbName}`;
 
 		await tracker.track({
 			step: 'Dumping source database',
@@ -854,7 +944,7 @@ export class SyncProcessor extends WorkerHost {
 		});
 		const dumpStart = Date.now();
 		const dumpResult = await sourceExecutor.execute(
-			`mysqldump --defaults-extra-file=${srcMycnf} --single-transaction --quick ${sourceCreds.dbName} > ${dumpRemote}`,
+			`mysqldump --defaults-extra-file=${srcMycnf} --single-transaction --quick${pushIgnoreFlags} ${sourceCreds.dbName} > ${dumpRemote}`,
 			{ timeout: 10 * 60_000 },
 		);
 		await sourceExecutor.execute(`rm -f ${srcMycnf}`);
@@ -887,7 +977,7 @@ export class SyncProcessor extends WorkerHost {
 			await rm(localPushDir, { recursive: true, force: true });
 		}
 
-		// Import on target: DROP + CREATE first for a clean slate (removes orphan tables)
+		// Import on target: conditionally DROP+CREATE or preserve protected tables
 		const tgtMycnf = `/tmp/forge_push_imp_${job.id}.cnf`;
 		await targetExecutor.pushFile({
 			remotePath: tgtMycnf,
@@ -897,25 +987,73 @@ export class SyncProcessor extends WorkerHost {
 		});
 		await targetExecutor.execute(`chmod 600 ${tgtMycnf}`);
 
-		await tracker.track({
-			step: 'Dropping and recreating target database (clean slate)',
-			level: 'info',
-			detail: targetCreds.dbName,
-		});
-		const dropCreateResult = await targetExecutor.execute(
-			`mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`DROP DATABASE IF EXISTS \`${targetCreds.dbName}\`; CREATE DATABASE \`${targetCreds.dbName}\`;`)}`,
-			{ timeout: 2 * 60_000 },
-		);
-		if (dropCreateResult.code !== 0) {
-			await targetExecutor
-				.execute(`rm -f ${tgtMycnf} ${dumpRemote}`)
-				.catch(() => {});
-			throw new Error(
-				`Cannot reset target database for a clean-slate import. ` +
-					`DROP DATABASE / CREATE DATABASE failed for \`${targetCreds.dbName}\` — ` +
-					`ensure ${targetCreds.dbUser} has DROP and CREATE privileges then retry.\n` +
-					`Detail: ${dropCreateResult.stderr.trim()}`,
+		if (pushSafeProtected.length > 0) {
+			// Protected tables configured — check if the target DB already exists.
+			// If it does: skip DROP/CREATE; the protected tables survive and mysqldump's
+			// per-table DROP TABLE IF EXISTS handles the unprotected ones automatically.
+			// If it doesn't: just CREATE (nothing to protect yet in an empty/new DB).
+			await tracker.track({
+				step: 'Protected tables — checking target database existence',
+				level: 'info',
+				detail: `Will preserve: ${pushSafeProtected.join(', ')}`,
+			});
+			const dbExistsRes = await targetExecutor.execute(
+				`mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`SHOW DATABASES LIKE '${targetCreds.dbName}';`)}`,
+				{ timeout: 30_000 },
 			);
+			const dbExists =
+				dbExistsRes.code === 0 && dbExistsRes.stdout.trim().length > 0;
+
+			if (dbExists) {
+				await tracker.track({
+					step: 'Target database exists — skipping DROP/CREATE to preserve protected tables',
+					level: 'info',
+					detail:
+						'Unprotected tables replaced via DROP TABLE IF EXISTS in dump',
+				});
+			} else {
+				await tracker.track({
+					step: 'Target database does not exist — creating (no data at risk)',
+					level: 'info',
+					detail: targetCreds.dbName,
+				});
+				const createResult = await targetExecutor.execute(
+					`mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`CREATE DATABASE \`${targetCreds.dbName}\`;`)}`,
+					{ timeout: 2 * 60_000 },
+				);
+				if (createResult.code !== 0) {
+					await targetExecutor
+						.execute(`rm -f ${tgtMycnf} ${dumpRemote}`)
+						.catch(() => {});
+					throw new Error(
+						`Cannot create target database \`${targetCreds.dbName}\` — ` +
+							`ensure ${targetCreds.dbUser} has CREATE privilege then retry.\n` +
+							`Detail: ${createResult.stderr.trim()}`,
+					);
+				}
+			}
+		} else {
+			// No protected tables — clean slate: DROP + CREATE removes all orphan tables.
+			await tracker.track({
+				step: 'Dropping and recreating target database (clean slate)',
+				level: 'info',
+				detail: targetCreds.dbName,
+			});
+			const dropCreateResult = await targetExecutor.execute(
+				`mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`DROP DATABASE IF EXISTS \`${targetCreds.dbName}\`; CREATE DATABASE \`${targetCreds.dbName}\`;`)}`,
+				{ timeout: 2 * 60_000 },
+			);
+			if (dropCreateResult.code !== 0) {
+				await targetExecutor
+					.execute(`rm -f ${tgtMycnf} ${dumpRemote}`)
+					.catch(() => {});
+				throw new Error(
+					`Cannot reset target database for a clean-slate import. ` +
+						`DROP DATABASE / CREATE DATABASE failed for \`${targetCreds.dbName}\` — ` +
+						`ensure ${targetCreds.dbUser} has DROP and CREATE privileges then retry.\n` +
+						`Detail: ${dropCreateResult.stderr.trim()}`,
+				);
+			}
 		}
 
 		const maskedImport = `mysql --defaults-extra-file=*** ${targetCreds.dbName}`;
@@ -1779,10 +1917,108 @@ export class SyncProcessor extends WorkerHost {
 				step: `${label}: rewrite rules, OPcache, and Elementor CSS flushed (WP-CLI)`,
 				level: 'info',
 			});
+
+			// Always wipe disk caches after a WP-CLI flush. This catches Divi's
+			// et-cache and LiteSpeed's file cache, which WP-CLI does not clear by
+			// itself. Without this, Divi regenerates et-cache from stale
+			// gzip-compressed option blobs that WP-CLI's search-replace could not
+			// reach, re-introducing the old domain in CSS. Similarly, cached pages
+			// served by LiteSpeed would keep referencing the source domain.
+			// `uploads/elementor/css` is intentionally omitted here — it is
+			// handled by the Elementor flush block above.
+			const strategy1CacheDirs = [
+				`${shellQuote(contentPath)}/cache`,
+				`${shellQuote(contentPath)}/et-cache`,
+				`${shellQuote(contentPath)}/litespeed`,
+				...(isBedrock ? [`${shellQuote(contentPath)}/uploads/cache`] : []),
+			];
+			await executor
+				.execute(`rm -rf ${strategy1CacheDirs.join(' ')} 2>/dev/null; true`)
+				.catch(() => {});
+			await tracker.track({
+				step: `${label}: disk caches cleared (et-cache, cache, litespeed)`,
+				level: 'info',
+				detail: strategy1CacheDirs.join(', '),
+			});
+
+			// Clear Divi's compiled CSS DB cache options when URLs changed.
+			// Divi stores its final rendered CSS as gzip-compressed blobs in
+			// et_dynamic_css* options. WP-CLI search-replace --precise cannot
+			// reach inside compressed binary data, so these blobs still carry the
+			// old domain after a URL move. Deleting them forces Divi to rebuild
+			// from its theme/page settings (which WP-CLI already fixed), producing
+			// clean CSS on the next front-end request. When URLs are identical
+			// (skipElementorCssFlush=true) the blobs are untouched and correct.
+			if (!skipElementorCssFlush) {
+				try {
+					const diviMycnf = `/tmp/forge_divi_flush_${Date.now()}.cnf`;
+					await executor.pushFile({
+						remotePath: diviMycnf,
+						content: Buffer.from(
+							`[client]\nuser=${creds.dbUser}\npassword=${creds.dbPassword}\nhost=${creds.dbHost}\n`,
+						),
+					});
+					await executor.execute(`chmod 600 ${diviMycnf}`);
+					const pfxRes = await executor.execute(
+						`mysql --defaults-extra-file=${diviMycnf} ${creds.dbName} -sN -e ${shellQuote(
+							`SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${escapeMysql(creds.dbName)}' AND table_name LIKE '%options' LIMIT 1`,
+						)}`,
+					);
+					const diviPrefix =
+						pfxRes.code === 0 && pfxRes.stdout.trim()
+							? pfxRes.stdout.trim()
+							: 'wp_';
+					const diviDeleteSql =
+						`DELETE FROM \`${diviPrefix}options\` WHERE ` +
+						`option_name LIKE 'et\\_dynamic\\_css%' OR ` +
+						`option_name LIKE 'et\\_pb\\_dynamic\\_css%' OR ` +
+						`option_name LIKE 'et\\_core\\_bb\\_layout\\_css%' OR ` +
+						`option_name LIKE 'et\\_dynamic\\_css\\_cache\\_%'`;
+					const diviResult = await executor.execute(
+						`mysql --defaults-extra-file=${diviMycnf} ${creds.dbName} -e ${shellQuote(diviDeleteSql)}`,
+					);
+					await executor.execute(`rm -f ${diviMycnf}`).catch(() => {});
+					if (diviResult.code === 0) {
+						await tracker.track({
+							step: `${label}: Divi compiled CSS cache cleared (et_dynamic_css)`,
+							level: 'info',
+							detail: `Divi will regenerate CSS from theme settings on next page visit`,
+						});
+					} else {
+						await tracker.track({
+							step: `${label}: Divi CSS cache clear skipped — table not found or no Divi options`,
+							level: 'info',
+						});
+					}
+				} catch (e) {
+					await tracker.track({
+						step: `${label}: Divi CSS cache clear non-fatal error`,
+						level: 'warn',
+						detail: e instanceof Error ? e.message : String(e),
+					});
+				}
+			}
+
+			// Attempt WP-CLI LiteSpeed full-site purge (requires LiteSpeed Cache plugin)
+			await executor
+				.execute(
+					wp(
+						`litespeed-purge all --path=${shellQuote(corePath)} --skip-themes --skip-plugins`,
+					),
+				)
+				.catch(() => {});
+
 			if (siteUrl) {
+				// Standard LiteSpeed PURGE to root
 				await executor
 					.execute(
 						`curl -s -o /dev/null --max-time 5 -X PURGE ${shellQuote(siteUrl)}/ 2>/dev/null; true`,
+					)
+					.catch(() => {});
+				// Wildcard purge — clears all cached pages, not just the homepage
+				await executor
+					.execute(
+						`curl -s -o /dev/null --max-time 5 -H ${shellQuote('X-LiteSpeed-Purge: *')} ${shellQuote(siteUrl)}/ 2>/dev/null; true`,
 					)
 					.catch(() => {});
 				await tracker.track({
