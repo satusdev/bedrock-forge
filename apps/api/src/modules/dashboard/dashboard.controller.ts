@@ -11,4 +11,18 @@ export class DashboardController {
 	getSummary() {
 		return this.svc.getSummary();
 	}
-}
+
+	@Get('health-scores')
+	getHealthScores() {
+		return this.svc.getHealthScores();
+	}
+
+	@Get('attention')
+	getAttention() {
+		return this.svc.getAttentionItems();
+	}
+
+	@Get('summary-24h')
+	get24hSummary() {
+		return this.svc.get24hSummary();
+	}}
