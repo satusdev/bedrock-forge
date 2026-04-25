@@ -23,7 +23,12 @@ import { Switch } from '@/components/ui/switch';
 
 import { Separator } from '@/components/ui/separator';
 import { AlertDialog } from '@/components/ui/alert-dialog';
-import { PageHeader, DataTable, type Column } from '@/components/crud';
+import {
+	PageHeader,
+	DataTable,
+	Pagination,
+	type Column,
+} from '@/components/crud';
 import {
 	Dialog,
 	DialogContent,
@@ -47,8 +52,16 @@ const EVENT_GROUPS: Record<string, string[]> = {
 		'plugin-scan.completed',
 		'sync.completed',
 		'sync.failed',
+		'plugin-update.completed',
+		'plugin-update.failed',
 	],
-	Monitoring: ['monitor.down', 'monitor.up'],
+	Monitoring: [
+		'monitor.down',
+		'monitor.up',
+		'monitor.ssl_expiry',
+		'monitor.dns_failed',
+		'monitor.keyword_missing',
+	],
 	Billing: ['invoice.created', 'invoice.overdue'],
 	Users: ['user.registered', 'user.login'],
 	Servers: ['server.created', 'server.deleted'],
@@ -312,6 +325,8 @@ export function NotificationsPage() {
 		null,
 	);
 	const [testingId, setTestingId] = useState<number | null>(null);
+	const [logPage, setLogPage] = useState(1);
+	const LOG_PAGE_SIZE = 15;
 
 	const { data: channels = [], isLoading } = useQuery({
 		queryKey: ['notification-channels'],
@@ -477,34 +492,43 @@ export function NotificationsPage() {
 								</tr>
 							</thead>
 							<tbody>
-								{logs.map(log => (
-									<tr
-										key={log.id}
-										className='border-b last:border-0 hover:bg-muted/20'
-									>
-										<td className='px-4 py-2 text-muted-foreground'>
-											{log.channel?.name ?? '—'}
-										</td>
-										<td className='px-4 py-2 font-mono text-xs'>
-											{log.event_type}
-										</td>
-										<td className='px-4 py-2'>
-											{log.status === 'sent' ? (
-												<CheckCircle2 className='h-4 w-4 text-green-500' />
-											) : (
-												<XCircle className='h-4 w-4 text-destructive' />
-											)}
-										</td>
-										<td className='px-4 py-2 text-xs text-muted-foreground truncate max-w-xs'>
-											{log.error ?? '—'}
-										</td>
-										<td className='px-4 py-2 text-muted-foreground text-xs'>
-											{new Date(log.created_at).toLocaleString()}
-										</td>
-									</tr>
-								))}
+								{logs
+									.slice((logPage - 1) * LOG_PAGE_SIZE, logPage * LOG_PAGE_SIZE)
+									.map(log => (
+										<tr
+											key={log.id}
+											className='border-b last:border-0 hover:bg-muted/20'
+										>
+											<td className='px-4 py-2 text-muted-foreground'>
+												{log.channel?.name ?? '—'}
+											</td>
+											<td className='px-4 py-2 font-mono text-xs'>
+												{log.event_type}
+											</td>
+											<td className='px-4 py-2'>
+												{log.status === 'sent' ? (
+													<CheckCircle2 className='h-4 w-4 text-green-500' />
+												) : (
+													<XCircle className='h-4 w-4 text-destructive' />
+												)}
+											</td>
+											<td className='px-4 py-2 text-xs text-muted-foreground truncate max-w-xs'>
+												{log.error ?? '—'}
+											</td>
+											<td className='px-4 py-2 text-muted-foreground text-xs'>
+												{new Date(log.created_at).toLocaleString()}
+											</td>
+										</tr>
+									))}
 							</tbody>
 						</table>
+					</div>
+					<div className='mt-3'>
+						<Pagination
+							page={logPage}
+							totalPages={Math.ceil(logs.length / LOG_PAGE_SIZE)}
+							onPageChange={setLogPage}
+						/>
 					</div>
 				</div>
 			)}

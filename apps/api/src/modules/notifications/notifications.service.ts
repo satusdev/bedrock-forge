@@ -170,4 +170,32 @@ export class NotificationsService {
 			updated_at: ch.updated_at,
 		};
 	}
+
+        /* ── Inbox ─────────────────────────────────────────────────────────── */
+
+        async getUnreadCount(userId: number): Promise<{ count: number }> {
+                const count = await this.repo.countUnread(userId);
+                return { count };
+        }
+
+        async findInbox(userId: number, opts: { page: number; limit: number; unread?: boolean }) {
+                const [items, total] = await this.repo.findForUser(userId, opts);
+                return {
+                        data: items.map(n => ({ ...n, id: Number(n.id), user_id: Number(n.user_id) })),
+                        total,
+                        page: opts.page,
+                        limit: opts.limit,
+                        totalPages: Math.ceil(total / opts.limit),
+                };
+        }
+
+        async markRead(id: number, userId: number) {
+                await this.repo.markRead(id, userId);
+                return { ok: true };
+        }
+
+        async markAllRead(userId: number) {
+                await this.repo.markAllRead(userId);
+                return { ok: true };
+        }
 }

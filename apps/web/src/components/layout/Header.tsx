@@ -1,11 +1,21 @@
 import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { PanelLeftClose, PanelLeft, Menu, Search } from 'lucide-react';
+import { PanelLeftClose, PanelLeft, Menu, Search, Bell } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/store/auth.store';
 import { useUiStore } from '@/store/ui.store';
 import { api } from '@/lib/api-client';
 import { getSocket } from '@/lib/websocket';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuLabel,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
 	Sheet,
 	SheetContent,
@@ -30,6 +40,8 @@ const ROUTE_LABELS: Record<string, string> = {
 	invoices: 'Invoices',
 	activity: 'Activity',
 	notifications: 'Notifications',
+	problems: 'Problems',
+	reports: 'Reports',
 };
 
 type WsStatus = 'connected' | 'reconnecting' | 'disconnected';
@@ -103,6 +115,111 @@ function Breadcrumb() {
 	);
 }
 
+interface InboxItem {
+	id: number;
+	type: string;
+	title: string;
+	message: string;
+	is_read: boolean;
+	action_url?: string | null;
+	created_at: string;
+}
+
+function NotificationBell() {
+	const queryClient = useQueryClient();
+	const [open, setOpen] = useState(false);
+
+	const { data: unreadData } = useQuery<{ count: number }>({
+		queryKey: ['notifications-unread'],
+		queryFn: () => api.get('/notifications/inbox/unread-count'),
+		refetchInterval: 30_000,
+	});
+
+	const { data: inboxData } = useQuery<{ data: InboxItem[] }>({
+		queryKey: ['notifications-inbox-preview'],
+		queryFn: () => api.get('/notifications/inbox?limit=10'),
+		enabled: open,
+		staleTime: 10_000,
+	});
+
+	const markAllMutation = useMutation({
+		mutationFn: () => api.post('/notifications/inbox/read-all', {}),
+		onSuccess: () => {
+			void queryClient.invalidateQueries({ queryKey: ['notifications-unread'] });
+			void queryClient.invalidateQueries({ queryKey: ['notifications-inbox-preview'] });
+		},
+	});
+
+	const unread = unreadData?.count ?? 0;
+	const items = inboxData?.data ?? [];
+
+	const relTime = (iso: string) => {
+		const diff = Date.now() - new Date(iso).getTime();
+		if (diff < 60_000) return 'just now';
+		if (diff < 3600_000) return `${Math.floor(diff / 60_000)}m ago`;
+		if (diff < 86_400_000) return `${Math.floor(diff / 3600_000)}h ago`;
+		return `${Math.floor(diff / 86_400_000)}d ago`;
+	};
+
+	return (
+		<DropdownMenu open={open} onOpenChange={setOpen}>
+			<DropdownMenuTrigger asChild>
+				<Button variant='ghost' size='icon' className='h-8 w-8 relative'>
+					<Bell className='h-4 w-4' />
+					{unread > 0 && (
+						<Badge
+							variant='destructive'
+							className='absolute -top-1 -right-1 h-4 min-w-4 px-1 text-[10px] leading-none flex items-center justify-center rounded-full'
+						>
+							{unread > 99 ? '99+' : unread}
+						</Badge>
+					)}
+				</Button>
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align='end' className='w-80'>
+				<DropdownMenuLabel className='flex items-center justify-between'>
+					<span>Notifications</span>
+					{unread > 0 && (
+						<Button
+							variant='ghost'
+							size='sm'
+							className='h-6 text-xs text-muted-foreground'
+							onClick={() => markAllMutation.mutate()}
+							disabled={markAllMutation.isPending}
+						>
+							Mark all read
+						</Button>
+					)}
+				</DropdownMenuLabel>
+				<DropdownMenuSeparator />
+				{items.length === 0 ? (
+					<div className='py-6 text-center text-sm text-muted-foreground'>
+						No notifications
+					</div>
+				) : (
+					items.map(item => (
+						<DropdownMenuItem
+							key={item.id}
+							className={`flex flex-col items-start gap-0.5 py-2.5 cursor-default ${!item.is_read ? 'bg-muted/40' : ''}`}
+						>
+							<div className='flex items-center gap-1.5 w-full'>
+								{!item.is_read && (
+									<span className='h-1.5 w-1.5 rounded-full bg-primary shrink-0' />
+								)}
+								<span className={`text-sm font-medium truncate flex-1 ${!item.is_read ? '' : 'pl-3'}`}>
+									{item.title}
+								</span>
+								<span className='text-xs text-muted-foreground shrink-0'>{relTime(item.created_at)}</span>
+							</div>
+							<p className='text-xs text-muted-foreground line-clamp-2 pl-3'>{item.message}</p>
+						</DropdownMenuItem>
+					))
+				)}
+			</DropdownMenuContent>
+		</DropdownMenu>
+	);
+}
+
 export function Header({ onOpenSearch }: { onOpenSearch?: () => void }) {
 	const { user, logout } = useAuthStore();
 	const { sidebarCollapsed, toggleSidebar } = useUiStore();
@@ -156,6 +273,7 @@ export function Header({ onOpenSearch }: { onOpenSearch?: () => void }) {
 
 			<div className='flex items-center gap-3'>
 				<WsStatusDot />
+				<NotificationBell />
 				{onOpenSearch && (
 					<Button
 						variant='outline'

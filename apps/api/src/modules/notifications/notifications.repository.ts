@@ -101,4 +101,59 @@ export class NotificationsRepository {
 			},
 		});
 	}
+
+	/* ── Inbox ─────────────────────────────────────────────────────────────── */
+
+	countUnread(userId: number) {
+		return this.prisma.userNotification.count({
+			where: { user_id: BigInt(userId), is_read: false },
+		});
+	}
+
+	findForUser(userId: number, opts: { page: number; limit: number; unread?: boolean }) {
+		const skip = (opts.page - 1) * opts.limit;
+		const where = {
+			user_id: BigInt(userId),
+			...(opts.unread ? { is_read: false } : {}),
+		};
+		return Promise.all([
+			this.prisma.userNotification.findMany({
+				where,
+				orderBy: { created_at: 'desc' },
+				skip,
+				take: opts.limit,
+			}),
+			this.prisma.userNotification.count({ where }),
+		]);
+	}
+
+	markRead(id: number, userId: number) {
+		return this.prisma.userNotification.updateMany({
+			where: { id: BigInt(id), user_id: BigInt(userId) },
+			data: { is_read: true },
+		});
+	}
+
+	markAllRead(userId: number) {
+		return this.prisma.userNotification.updateMany({
+			where: { user_id: BigInt(userId), is_read: false },
+			data: { is_read: true },
+		});
+	}
+
+	createForUsers(
+		userIds: bigint[],
+		data: { type: string; title: string; message: string; action_url?: string | null },
+	) {
+		if (userIds.length === 0) return Promise.resolve({ count: 0 });
+		return this.prisma.userNotification.createMany({
+			data: userIds.map(id => ({
+				user_id: id,
+				type: data.type,
+				title: data.title,
+				message: data.message,
+				action_url: data.action_url ?? null,
+			})),
+		});
+	}
 }
