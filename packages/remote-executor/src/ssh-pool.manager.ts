@@ -122,6 +122,22 @@ export class SshPoolManager extends EventEmitter {
 		this.pools.delete(serverKey);
 	}
 
+	getPoolStats(serverKey: string): {
+		active: number;
+		idle: number;
+		total: number;
+		maxConnections: number;
+	} {
+		const pool = this.pools.get(serverKey) ?? [];
+		const active = pool.filter(c => c.inUse).length;
+		return {
+			active,
+			idle: pool.length - active,
+			total: pool.length,
+			maxConnections: MAX_POOL_SIZE,
+		};
+	}
+
 	destroy(): void {
 		clearInterval(this.gcInterval);
 		for (const serverKey of this.pools.keys()) {

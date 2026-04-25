@@ -41,10 +41,10 @@ export class ServersController {
 	@Get(':id') findOne(@Param('id', ParseIntPipe) id: number) {
 		return this.svc.findOne(id);
 	}
-	@Post() create(@Body() dto: CreateServerDto) {
+	@Post() @Roles(ROLES.ADMIN) create(@Body() dto: CreateServerDto) {
 		return this.svc.create(dto);
 	}
-	@Put(':id') update(
+	@Put(':id') @Roles(ROLES.ADMIN) update(
 		@Param('id', ParseIntPipe) id: number,
 		@Body() dto: UpdateServerDto,
 	) {
@@ -75,5 +75,8 @@ export class ServersController {
 		@Body() dto: ScanProjectsMultiDto,
 	) {
 		return this.svc.scanProjectsMulti(dto);
+	}
+	@Get(':id/ssh-health') getSshHealth(@Param('id', ParseIntPipe) id: number) {
+		return this.svc.getSshPoolHealth(id);
 	}
 }

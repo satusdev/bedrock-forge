@@ -89,10 +89,30 @@ export class ServersService {
 		);
 	}
 
+	/**
+	 * Return a ready-to-use SSH configuration for the given server.
+	 * Resolves the appropriate private key (per-server or global fallback).
+	 * Used by other services that need to open SSH connections.
+	 */
+	async getServerSshConfig(serverId: number): Promise<{
+		host: string;
+		port: number;
+		username: string;
+		privateKey: string;
+	}> {
+		const server = await this.repo.findByIdWithKey(BigInt(serverId));
+		if (!server) throw new NotFoundException(`Server ${serverId} not found`);
+		const privateKey = await this.resolvePrivateKey(server);
+		return {
+			host: server.ip_address,
+			port: server.ssh_port,
+			username: server.ssh_user,
+			privateKey,
+		};
+	}
+
 	/** Execute a quick `echo ok` to verify SSH connectivity, and probe CyberPanel version */
-	async testConnection(
-		id: number,
-	): Promise<{
+	async testConnection(id: number): Promise<{
 		success: boolean;
 		message: string;
 		cyberpanelVersion?: string;
@@ -493,5 +513,32 @@ export class ServersService {
 		const nextMarker = after.search(/===\w+===/);
 		const content = nextMarker >= 0 ? after.slice(0, nextMarker) : after;
 		return content.trim() || null;
+	}
+
+	// ── SSH Pool Health ───────────────────────────────────────────────────────
+
+	getSshPoolHealth(serverId: number): {
+		active: number;
+		idle: number;
+		total: number;
+		maxConnections: number;
+		status: 'healthy' | 'busy' | 'empty';
+	} {
+		// sshPoolManager is the process-global singleton in remote-executor
+		const { sshPoolManager } = require('@bedrock-forge/remote-executor') as {
+			sshPoolManager: {
+				getPoolStats: (key: string) => {
+					active: number;
+					idle: number;
+					total: number;
+					maxConnections: number;
+				};
+			};
+		};
+		const stats = sshPoolManager.getPoolStats(String(serverId));
+		let status: 'healthy' | 'busy' | 'empty' = 'healthy';
+		if (stats.total === 0) status = 'empty';
+		else if (stats.active >= stats.maxConnections) status = 'busy';
+		return { ...stats, status };
 	}
 }
