@@ -30,6 +30,11 @@ import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { GatewaysModule } from './gateways/gateways.module';
 import { EncryptionModule } from './common/encryption/encryption.module';
+import { PluginUpdateSchedulesModule } from './modules/plugin-update-schedules/plugin-update-schedules.module';
+import { WpActionsModule } from './modules/wp-actions/wp-actions.module';
+import { ConfigDriftModule } from './modules/config-drift/config-drift.module';
+import { CleanupSchedulesModule } from './modules/cleanup-schedules/cleanup-schedules.module';
+import { CustomPluginsModule } from './modules/custom-plugins/custom-plugins.module';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { QUEUES } from '@bedrock-forge/shared';
@@ -81,6 +86,9 @@ import appConfig from './config/app.config';
 			{ name: QUEUES.PROJECTS },
 			{ name: QUEUES.NOTIFICATIONS },
 			{ name: QUEUES.REPORTS },
+			{ name: QUEUES.PLUGIN_UPDATES },
+			{ name: QUEUES.WP_ACTIONS },
+			{ name: QUEUES.CUSTOM_PLUGINS },
 		),
 
 		// Infrastructure
@@ -112,6 +120,11 @@ import appConfig from './config/app.config';
 		AuditLogsModule,
 		DashboardModule,
 		GatewaysModule,
+		PluginUpdateSchedulesModule,
+		WpActionsModule,
+		ConfigDriftModule,
+		CleanupSchedulesModule,
+		CustomPluginsModule,
 	],
 	providers: [
 		// Global rate limiting — 100 req/min per IP (ThrottlerModule configured above)
