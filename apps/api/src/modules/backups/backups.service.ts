@@ -10,6 +10,7 @@ import {
 	QUEUES,
 	JOB_TYPES,
 	DEFAULT_JOB_OPTIONS,
+	BACKUP_JOB_OPTIONS,
 	PaginationQuery,
 } from '@bedrock-forge/shared';
 import { EnqueueBackupDto, RestoreBackupDto } from './dto/backup.dto';
@@ -72,7 +73,7 @@ export class BackupsService {
 				jobExecutionId: Number(exec.id),
 				backupId: Number(backup.id),
 			},
-			{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
+			{ ...BACKUP_JOB_OPTIONS, jobId: bullJobId },
 		);
 		return {
 			jobExecutionId: Number(exec.id),
@@ -101,7 +102,7 @@ export class BackupsService {
 				environmentId: Number(backup.environment_id),
 				jobExecutionId: Number(exec.id),
 			},
-			{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
+			{ ...BACKUP_JOB_OPTIONS, jobId: bullJobId },
 		);
 		return { jobExecutionId: exec.id, bullJobId: job.id };
 	}

@@ -36,13 +36,13 @@ export class ClientsController {
 	}
 
 	@Post()
-	@Roles(ROLES.MANAGER)
+	@Roles(ROLES.ADMIN)
 	create(@Body() dto: CreateClientDto) {
 		return this.svc.create(dto);
 	}
 
 	@Put(':id')
-	@Roles(ROLES.MANAGER)
+	@Roles(ROLES.ADMIN)
 	update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateClientDto) {
 		return this.svc.update(id, dto);
 	}
