@@ -170,8 +170,17 @@ export class RemoteExecutorService {
 		return new Promise((resolve, reject) => {
 			let stdout = '';
 			let stderr = '';
+			// Keep a reference so the timeout handler can close the channel.
+			let channelRef: Parameters<Parameters<Client['exec']>[1]>[1] | null =
+				null;
 
 			const timer = setTimeout(() => {
+				// Destroy the SSH channel so it doesn't hold a MaxSessions slot.
+				try {
+					channelRef?.destroy();
+				} catch (_) {
+					// ignore — channel may already be gone
+				}
 				reject(
 					new Error(
 						`Command timed out after ${timeout}ms: ${command.slice(0, 100)}`,
@@ -184,6 +193,7 @@ export class RemoteExecutorService {
 					clearTimeout(timer);
 					return reject(err);
 				}
+				channelRef = stream;
 
 				stream.on('data', (data: Buffer) => {
 					stdout += data.toString();
@@ -234,20 +244,61 @@ export class RemoteExecutorService {
 		});
 	}
 
-	private sftpGet(client: Client, remotePath: string): Promise<Buffer> {
+	private sftpGet(
+		client: Client,
+		remotePath: string,
+		timeoutMs: number = SFTP_STALL_TIMEOUT_MS,
+	): Promise<Buffer> {
 		return new Promise((resolve, reject) => {
+			let settled = false;
+			const settle = (fn: () => void) => {
+				if (!settled) {
+					settled = true;
+					clearTimeout(stallTimer);
+					fn();
+				}
+			};
+
+			const makeStallError = () =>
+				new Error(
+					`SFTP pull stalled — no data for ${timeoutMs / 1000}s on ${remotePath}`,
+				);
+
+			let stallTimer: ReturnType<typeof setTimeout> = setTimeout(
+				() => settle(() => reject(makeStallError())),
+				timeoutMs,
+			);
+
+			const resetStall = () => {
+				clearTimeout(stallTimer);
+				stallTimer = setTimeout(
+					() => settle(() => reject(makeStallError())),
+					timeoutMs,
+				);
+			};
+
 			client.sftp((err, sftp) => {
-				if (err) return reject(err);
+				if (err) return settle(() => reject(err));
 
 				const chunks: Buffer[] = [];
 				const readStream = sftp.createReadStream(remotePath);
 
-				readStream.on('data', (chunk: Buffer) => chunks.push(chunk));
-				readStream.on('end', () => {
-					sftp.end();
-					resolve(Buffer.concat(chunks));
+				readStream.on('data', (chunk: Buffer) => {
+					chunks.push(chunk);
+					resetStall();
 				});
-				readStream.on('error', reject);
+				readStream.on('end', () => {
+					settle(() => {
+						sftp.end();
+						resolve(Buffer.concat(chunks));
+					});
+				});
+				readStream.on('error', (e: Error) => {
+					settle(() => {
+						sftp.end();
+						reject(e);
+					});
+				});
 			});
 		});
 	}
