@@ -224,6 +224,9 @@ export class EnvironmentsService {
 	/**
 	 * SSH into the environment's server, deploy a PHP user-scanner script,
 	 * and return all WordPress users with their roles.
+	 *
+	 * Credential resolution mirrors listDbTables — TypeScript credentialParser
+	 * handles all real-world .env formats before falling back to PHP-side search.
 	 */
 	async getWpUsers(envId: number): Promise<WpUser[]> {
 		const env = await this.findOne(envId);
@@ -233,19 +236,67 @@ export class EnvironmentsService {
 		const executor = createRemoteExecutor(sshConfig);
 
 		const scriptsPath = join(__dirname, '../../../../worker/scripts');
-		const remoteScript = `/tmp/bf-wp-users-${Date.now()}.php`;
+		const ts = Date.now();
+		const remoteScript = `/tmp/bf-wp-users-${ts}.php`;
+		let remoteCredsFile = '';
 
 		try {
+			// ── Step 1: resolve DB credentials in TypeScript ─────────────────
+			let creds = await this.repo.getDbCredentials(BigInt(envId));
+
+			if (!creds && env.root_path) {
+				const rootPath = env.root_path.replace(/\/$/, '');
+				const envRes = await executor
+					.execute(`cat "${rootPath}/.env" 2>/dev/null || true`)
+					.catch(() => null);
+				if (envRes?.code === 0 && envRes.stdout.trim()) {
+					creds = credentialParser.parseEnvFile(envRes.stdout);
+				}
+			}
+
+			if (!creds && env.root_path) {
+				const rootPath = env.root_path.replace(/\/$/, '');
+				const appRes = await executor
+					.execute(
+						`cat "${rootPath}/config/application.php" 2>/dev/null || true`,
+					)
+					.catch(() => null);
+				if (appRes?.code === 0 && appRes.stdout.trim()) {
+					creds = credentialParser.parse(appRes.stdout);
+				}
+			}
+
+			// ── Step 2: push PHP script ───────────────────────────────────────
 			const scriptContent = readFileSync(join(scriptsPath, 'wp-users.php'));
 			await executor.pushFile({
 				remotePath: remoteScript,
 				content: scriptContent,
 			});
 
-			const result = await executor.execute(
-				`php ${remoteScript} --docroot=${shellEscape(env.root_path ?? '')}`,
-				{ timeout: 30_000 },
-			);
+			// ── Step 3: build command ─────────────────────────────────────────
+			let phpCmd: string;
+			if (creds) {
+				// Write creds to a temp file (600) so the password is never
+				// exposed in the process list via CLI args.
+				remoteCredsFile = `/tmp/bf-wp-creds-${ts}.json`;
+				const credsJson = JSON.stringify({
+					dbHost: creds.dbHost,
+					dbUser: creds.dbUser,
+					dbPassword: creds.dbPassword,
+					dbName: creds.dbName,
+				});
+				const credsB64 = Buffer.from(credsJson).toString('base64');
+				await executor.execute(
+					`echo ${shellEscape(credsB64)} | base64 -d > ${shellEscape(remoteCredsFile)} && chmod 600 ${shellEscape(remoteCredsFile)}`,
+				);
+				phpCmd = `php ${remoteScript} --creds-file=${shellEscape(remoteCredsFile)}`;
+			} else {
+				// Credentials not pre-resolved — let the PHP script search for
+				// .env / wp-config.php on the remote filesystem as a last resort.
+				phpCmd = `php ${remoteScript} --docroot=${shellEscape(env.root_path ?? '')}`;
+			}
+
+			const result = await executor.execute(phpCmd, { timeout: 30_000 });
 
 			if (result.code !== 0) {
 				throw new InternalServerErrorException(
@@ -262,7 +313,14 @@ export class EnvironmentsService {
 			}
 			return parsed.users ?? [];
 		} finally {
-			await executor.execute(`rm -f "${remoteScript}"`).catch(() => {});
+			await executor
+				.execute(`rm -f ${shellEscape(remoteScript)}`)
+				.catch(() => {});
+			if (remoteCredsFile) {
+				await executor
+					.execute(`rm -f ${shellEscape(remoteCredsFile)}`)
+					.catch(() => {});
+			}
 		}
 	}
 
@@ -287,14 +345,15 @@ export class EnvironmentsService {
 		const filename = `bf-login-${fileToken}.php`;
 
 		/* Determine web root:
-		 *   Bedrock: root_path/web
+		 *   Bedrock: root_path/web  (CyberPanel vhost root is public_html/web)
 		 *   Standard WP: root_path
-		 * We detect this by checking if root_path/web/wp-load.php exists on the server.
+		 * Indicator: web/wp-config.php exists in Bedrock (same check as detectBedrock).
+		 * NOTE: wp-load.php lives at web/wp/wp-load.php in Bedrock, NOT web/wp-load.php.
 		 */
 		const rootPath = env.root_path.replace(/\/$/, '');
 		const bedrockCheckResult = await executor
 			.execute(
-				`test -f "${rootPath}/web/wp-load.php" && echo "bedrock" || echo "standard"`,
+				`test -f "${rootPath}/web/wp-config.php" && echo "bedrock" || echo "standard"`,
 			)
 			.catch(() => null);
 		const isBedrock = bedrockCheckResult?.stdout?.trim() === 'bedrock';
@@ -308,14 +367,15 @@ export class EnvironmentsService {
 			'utf-8',
 		);
 		const phpContent = template
-			.replace('{TOKEN}', queryToken)
-			.replace('{EXPIRY_TS}', String(expiryTs))
-			.replace('{USER_ID}', String(dto.userId));
+			.replaceAll('{TOKEN}', queryToken)
+			.replaceAll('{EXPIRY_TS}', String(expiryTs))
+			.replaceAll('{USER_ID}', String(dto.userId));
 
 		await executor.pushFile({ remotePath, content: Buffer.from(phpContent) });
 
-		// Ensure the file is not world-readable (token is in the content)
-		await executor.execute(`chmod 600 "${remotePath}"`).catch(() => {});
+		// 644: owner write, web server (www-data/nobody) needs read to serve the file.
+		// Security comes from the unguessable filename + query token, not file perms.
+		await executor.execute(`chmod 644 "${remotePath}"`).catch(() => {});
 
 		const loginUrl = `${env.url.replace(/\/$/, '')}/${filename}?t=${queryToken}`;
 		const expiresAt = new Date(expiryTs * 1000).toISOString();

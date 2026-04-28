@@ -636,7 +636,7 @@ function WpUsersSection({
 		try {
 			const result = await api.post<QuickLoginResult>(
 				`/projects/${projectId}/environments/${envId}/wp-quick-login`,
-				{ user_id: userId },
+				{ userId },
 			);
 			setLoginResult(result);
 			setLoginDialogOpen(true);
