@@ -71,4 +71,18 @@ export class WpActionsController {
 	) {
 		return this.svc.enqueueCleanup(id, dryRun ?? false);
 	}
+
+	/** Enqueue a WP core version check (wp core version + wp core check-update) */
+	@Post('core/check')
+	@HttpCode(HttpStatus.ACCEPTED)
+	coreCheck(@Param('id', ParseIntPipe) id: number) {
+		return this.svc.enqueueCoreCheck(id);
+	}
+
+	/** Enqueue a WP core update (wp core update + wp core update-db) */
+	@Post('core/update')
+	@HttpCode(HttpStatus.ACCEPTED)
+	coreUpdate(@Param('id', ParseIntPipe) id: number) {
+		return this.svc.enqueueCoreUpdate(id);
+	}
 }

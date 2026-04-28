@@ -13,5 +13,6 @@ import { ServersModule } from '../servers/servers.module';
 	],
 	controllers: [WpActionsController],
 	providers: [WpActionsService, WpActionsRepository],
+	exports: [WpActionsService],
 })
 export class WpActionsModule {}

@@ -3,11 +3,12 @@
  * wp-cleanup.php — WordPress database cleanup
  *
  * Args:
- *   --docroot   Absolute path to WordPress root
- *   --dry-run   If present, only count — do NOT delete
+ *   --docroot        Absolute path to WordPress root
+ *   --dry-run        If present, only count — do NOT delete
+ *   --keep-revisions Number of post revisions to keep per post (default: 3)
  *
  * Cleans:
- *   - Post revisions (keep the most recent 3 per post)
+ *   - Post revisions (keep the most recent N per post)
  *   - Expired transients
  *   - Spam comments
  *   - Orphaned postmeta (meta for deleted posts)
@@ -15,9 +16,10 @@
  * Output: JSON { success, dry_run, counts: { revisions, transients, spam_comments, orphaned_postmeta } }
  */
 
-$args    = getopt('', ['docroot:', 'dry-run']);
-$docroot = rtrim($args['docroot'] ?? '', '/');
-$dryRun  = array_key_exists('dry-run', $args);
+$args         = getopt('', ['docroot:', 'dry-run', 'keep-revisions:']);
+$docroot      = rtrim($args['docroot'] ?? '', '/');
+$dryRun       = array_key_exists('dry-run', $args);
+$keepRevisions = max(1, (int)($args['keep-revisions'] ?? 3));
 
 if (!$docroot || !is_dir($docroot)) {
     echo json_encode(['success' => false, 'error' => 'Missing or invalid --docroot']);
@@ -35,8 +37,8 @@ try {
     $prefix = $db['prefix'];
     $counts = [];
 
-    // ── 1. Post revisions — keep the 3 most recent per post ─────────────────
-    // Count revisions excluding the 3 most recent per parent
+    // ── 1. Post revisions — keep the N most recent per post ─────────────────
+    // Count revisions excluding the N most recent per parent
     $revCount = (int)$pdo->query(
         "SELECT COUNT(*) FROM `{$prefix}posts` r
          WHERE r.post_type = 'revision'
@@ -47,7 +49,7 @@ try {
                    WHERE post_type = 'revision'
                      AND post_parent = r.post_parent
                    ORDER BY post_date DESC
-                   LIMIT 3
+                   LIMIT $keepRevisions
                ) sub
            )"
     )->fetchColumn();
@@ -63,7 +65,7 @@ try {
                        WHERE inner_r.post_type = 'revision'
                          AND inner_r.post_parent = r.post_parent
                        ORDER BY post_date DESC
-                       LIMIT 3
+                       LIMIT $keepRevisions
                    ) sub
                )"
         );

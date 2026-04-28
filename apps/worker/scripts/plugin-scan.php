@@ -9,7 +9,8 @@
  *
  * PluginInfo:
  *   slug, name, version, latest_version, update_available, author,
- *   plugin_uri, description, managed_by_composer, composer_constraint
+ *   plugin_uri, description, managed_by_composer, composer_constraint,
+ *   managed_by_monorepo, monorepo_repo_url, is_mu_plugin
  */
 
 // PHP 7.1+ required
@@ -50,6 +51,19 @@ if ($composerJsonPath !== null) {
             if (strpos($pkg, 'wpackagist-plugin/') === 0) {
                 $slug = substr($pkg, strlen('wpackagist-plugin/'));
                 $composerConstraints[$slug] = $constraint;
+            }
+        }
+    }
+}
+
+// Build monorepo-fetcher slug map from extra.monorepo-sources
+$monorepoSlugs = []; // slug => repo_url
+if ($composerJsonPath !== null && isset($composerData['extra']['monorepo-sources'])) {
+    foreach ((array) $composerData['extra']['monorepo-sources'] as $source) {
+        $sourceUrl = $source['url'] ?? '';
+        foreach ((array) ($source['require'] ?? []) as $repoSlug) {
+            if (is_string($repoSlug) && $repoSlug !== '') {
+                $monorepoSlugs[$repoSlug] = $sourceUrl;
             }
         }
     }
@@ -119,6 +133,8 @@ foreach (scandir($pluginsDir) as $entry) {
         'description'         => isset($headers['description']) ? substr($headers['description'], 0, 200) : null,
         'managed_by_composer' => array_key_exists($slug, $composerConstraints),
         'composer_constraint' => $composerConstraints[$slug] ?? null,
+        'managed_by_monorepo' => array_key_exists($slug, $monorepoSlugs),
+        'monorepo_repo_url'   => $monorepoSlugs[$slug] ?? null,
         'is_mu_plugin'        => false,
     ];
 }
@@ -187,6 +203,8 @@ if ($muPluginsDir) {
             'description'         => isset($headers['description']) ? substr($headers['description'], 0, 200) : null,
             'managed_by_composer' => false,
             'composer_constraint' => null,
+            'managed_by_monorepo' => false,
+            'monorepo_repo_url'   => null,
             'is_mu_plugin'        => true,
         ];
     }
