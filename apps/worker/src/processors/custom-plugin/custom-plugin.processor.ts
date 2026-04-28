@@ -5,6 +5,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SshKeyService } from '../../services/ssh-key.service';
+import { EncryptionService } from '../../encryption/encryption.service';
 import { StepTracker } from '../../services/step-tracker';
 import { createRemoteExecutor } from '@bedrock-forge/remote-executor';
 import {
@@ -27,6 +28,7 @@ export class CustomPluginProcessor extends WorkerHost {
 		private readonly prisma: PrismaService,
 		private readonly config: ConfigService,
 		private readonly sshKey: SshKeyService,
+		private readonly encryption: EncryptionService,
 	) {
 		super();
 	}
@@ -88,11 +90,20 @@ export class CustomPluginProcessor extends WorkerHost {
 
 			await job.updateProgress(10);
 
-			// Retrieve optional GitHub token from app settings
+			// Retrieve optional GitHub token from app settings (stored encrypted).
+			// Falls back gracefully for legacy plaintext values pre-dating encryption.
 			const tokenSetting = await this.prisma.appSetting.findUnique({
 				where: { key: 'GITHUB_API_TOKEN' },
 			});
-			const githubToken = tokenSetting?.value ?? null;
+			let githubToken: string | null = null;
+			if (tokenSetting?.value) {
+				try {
+					githubToken = this.encryption.decrypt(tokenSetting.value);
+				} catch {
+					// Legacy plaintext value (pre-encryption migration).
+					githubToken = tokenSetting.value;
+				}
+			}
 
 			const scriptsPath = this.config.get<string>('scriptsPath')!;
 			const remoteScript = `/tmp/custom_plugin_${job.id}.php`;

@@ -23,10 +23,6 @@ const schema = z.object({
 });
 type FormData = z.infer<typeof schema>;
 
-const DEV_EMAIL = import.meta.env.VITE_DEV_EMAIL as string | undefined;
-const DEV_PASSWORD = import.meta.env.VITE_DEV_PASSWORD as string | undefined;
-const hasDevCredentials = Boolean(DEV_EMAIL && DEV_PASSWORD);
-
 export function LoginPage() {
 	const navigate = useNavigate();
 	const { setTokens, setUser } = useAuthStore();
@@ -40,9 +36,11 @@ export function LoginPage() {
 		formState: { errors, isSubmitting },
 	} = useForm<FormData>({ resolver: zodResolver(schema) });
 
+	// Fill seed credentials in dev mode only. Values are hardcoded strings — never read
+	// from env vars — so they cannot leak into production bundles via VITE_* inlining.
 	const fillDevCredentials = () => {
-		setValue('email', DEV_EMAIL!);
-		setValue('password', DEV_PASSWORD!);
+		setValue('email', 'admin@example.com');
+		setValue('password', 'password');
 	};
 
 	const onSubmit = async (data: FormData) => {
@@ -84,7 +82,7 @@ export function LoginPage() {
 					</CardHeader>
 
 					<CardContent>
-						{hasDevCredentials && (
+						{import.meta.env.DEV && (
 							<button
 								type='button'
 								onClick={fillDevCredentials}

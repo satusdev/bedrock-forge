@@ -8,12 +8,19 @@ import {
 	IsIn,
 	ValidateNested,
 	IsArray,
+	Matches,
 } from 'class-validator';
 import { PartialType } from '@nestjs/mapped-types';
 import { Type } from 'class-transformer';
 
 const ENVIRONMENT_TYPES = ['production', 'staging', 'development'] as const;
 export type EnvironmentType = (typeof ENVIRONMENT_TYPES)[number];
+
+/**
+ * Allowlist for remote filesystem paths used in SSH commands.
+ * Prevents shell injection via path traversal or shell metacharacters.
+ */
+const ROOT_PATH_REGEX = /^[a-zA-Z0-9/_\-.]+$/;
 
 export class UpsertDbCredentialsDto {
 	@IsString() @MaxLength(100) dbName!: string;
@@ -27,7 +34,17 @@ export class CreateEnvironmentDto {
 	/** Environment type: production | staging | development */
 	@IsIn(ENVIRONMENT_TYPES) type!: EnvironmentType;
 	@IsUrl() url!: string;
-	@IsString() @MaxLength(500) root_path!: string;
+	/**
+	 * Absolute path to the WordPress root on the remote server.
+	 * Restricted to alphanumeric, `/`, `_`, `-`, `.` to prevent shell injection.
+	 */
+	@IsString()
+	@MaxLength(500)
+	@Matches(ROOT_PATH_REGEX, {
+		message:
+			'root_path may only contain letters, numbers, slashes, underscores, hyphens, and dots',
+	})
+	root_path!: string;
 	/** Persistent remote path on the server for backup storage */
 	@IsOptional() @IsString() @MaxLength(500) backup_path?: string;
 	/** Google Drive folder ID for backup destination override per environment */

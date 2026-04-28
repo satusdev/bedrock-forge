@@ -94,11 +94,15 @@ export class AuditInterceptor implements NestInterceptor {
 	}
 
 	private extractIp(req: Request): string {
-		const forwarded = req.headers['x-forwarded-for'];
-		if (forwarded) {
-			const first = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-			return first.split(',')[0].trim();
+		// X-Real-IP is set by nginx to $remote_addr (the actual connecting IP).
+		// It cannot be injected by the client when nginx sits in front.
+		// X-Forwarded-For is intentionally ignored here to prevent spoofing of
+		// audit log entries by clients that inject arbitrary header values.
+		const realIp = req.headers['x-real-ip'];
+		if (realIp && typeof realIp === 'string') {
+			return realIp.trim();
 		}
+		// Fallback for direct connections (dev / health checks without nginx).
 		return req.socket?.remoteAddress ?? 'unknown';
 	}
 }

@@ -115,8 +115,25 @@ export class CreateBedrockProcessor extends WorkerHost {
 					this.logger.warn(
 						`CyberPanel submitDBCreation failed (${dbApiErr instanceof Error ? dbApiErr.message : String(dbApiErr)}), falling back to MySQL CLI`,
 					);
-					const dbName = escapeMysql(cyberpanel.dbName);
-					const dbUser = escapeMysql(cyberpanel.dbUser);
+
+					// Validate identifiers before embedding in backtick-quoted SQL.
+					// MySQL identifiers are restricted to alphanumeric, underscore, hyphen.
+					// This prevents backtick injection: escapeMysql() does not escape backticks.
+					const safeIdentifier = /^[a-zA-Z0-9_-]{1,64}$/;
+					if (!safeIdentifier.test(cyberpanel.dbName)) {
+						throw new Error(
+							`Database name '${cyberpanel.dbName}' contains characters that are not safe for MySQL CLI. ` +
+								`Allowed: letters, numbers, underscores, hyphens.`,
+						);
+					}
+					if (!safeIdentifier.test(cyberpanel.dbUser)) {
+						throw new Error(
+							`Database user '${cyberpanel.dbUser}' contains characters that are not safe for MySQL CLI.`,
+						);
+					}
+
+					const dbName = cyberpanel.dbName; // validated above — safe for backtick quoting
+					const dbUser = cyberpanel.dbUser; // validated above
 					const dbPassword = escapeMysql(cyberpanel.dbPassword);
 					const mysqlResult = await executor.execute(
 						`mysql -e "CREATE DATABASE IF NOT EXISTS \`${dbName}\`; ` +

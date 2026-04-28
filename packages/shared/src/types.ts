@@ -1,5 +1,18 @@
 import { z } from 'zod';
 
+// ─── Shared Domain Types ─────────────────────────────────────────────────────
+
+/**
+ * WordPress database credentials extracted from wp-config.php or .env files.
+ * Used by CredentialParserService and callers in both api and worker.
+ */
+export interface WpDbCredentials {
+	dbName: string;
+	dbUser: string;
+	dbPassword: string;
+	dbHost: string;
+}
+
 // ─── Job Payload Types ────────────────────────────────────────────────────────
 // These schemas describe exactly what is enqueued — workers fetch server/path
 // details from Prisma directly, so payloads are minimal (IDs + type only).
@@ -199,6 +212,37 @@ export type CustomPluginManagePayload = z.infer<
 	typeof CustomPluginManagePayloadSchema
 >;
 
+// ─── Theme Scan Payload Types ─────────────────────────────────────────────────
+
+export const ThemeScanRunPayloadSchema = z.object({
+	environmentId: z.number().int().positive(),
+	jobExecutionId: z.number().int().positive(),
+});
+export type ThemeScanRunPayload = z.infer<typeof ThemeScanRunPayloadSchema>;
+
+export const ThemeManagePayloadSchema = z.object({
+	environmentId: z.number().int().positive(),
+	jobExecutionId: z.number().int().positive(),
+	action: z.enum(['activate', 'install', 'delete', 'update', 'update-all']),
+	/** Theme slug — required for all actions except update-all */
+	slug: z.string().optional(),
+});
+export type ThemeManagePayload = z.infer<typeof ThemeManagePayloadSchema>;
+
+// ─── WP Core Payload Types ────────────────────────────────────────────────────
+
+export const WpCoreCheckPayloadSchema = z.object({
+	environmentId: z.number().int().positive(),
+	jobExecutionId: z.number().int().positive(),
+});
+export type WpCoreCheckPayload = z.infer<typeof WpCoreCheckPayloadSchema>;
+
+export const WpCoreUpdatePayloadSchema = z.object({
+	environmentId: z.number().int().positive(),
+	jobExecutionId: z.number().int().positive(),
+});
+export type WpCoreUpdatePayload = z.infer<typeof WpCoreUpdatePayloadSchema>;
+
 // ─── Plugin Scan Types ────────────────────────────────────────────────────────
 
 /**
@@ -221,12 +265,31 @@ export interface PluginInfo {
 	composer_constraint: string | null;
 	/** True for must-use plugins (mu-plugins) — auto-loaded, cannot be managed via composer */
 	is_mu_plugin?: boolean;
+	/** True when the plugin is managed via satusdev/monorepo-fetcher (extra.monorepo-sources) */
+	managed_by_monorepo?: boolean;
+	/** GitHub repo URL for the monorepo source managing this plugin */
+	monorepo_repo_url?: string | null;
 }
 
 /** Top-level output from plugin-scan.php (new format) */
 export interface PluginScanOutput {
 	is_bedrock: boolean;
 	plugins: PluginInfo[];
+}
+
+// ─── Theme Types ──────────────────────────────────────────────────────────────
+
+/** Matches the JSON output of `wp theme list --format=json` */
+export interface ThemeInfo {
+	name: string;
+	slug: string;
+	status: 'active' | 'inactive';
+	version: string;
+	update_version: string | null;
+	update: 'available' | 'none' | 'none available';
+	title: string;
+	description: string | null;
+	author: string | null;
 }
 
 // ─── WP DB Credentials ───────────────────────────────────────────────────────
