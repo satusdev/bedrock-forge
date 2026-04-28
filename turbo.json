@@ -17,6 +17,13 @@
 		"lint": {
 			"outputs": []
 		},
+		"type-check": {
+			"dependsOn": ["^type-check"],
+			"outputs": []
+		},
+		"db:generate": {
+			"outputs": ["node_modules/.prisma/client/**"]
+		},
 		"clean": {
 			"cache": false
 		}
