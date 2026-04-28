@@ -55,6 +55,8 @@ interface BulkImportEntry {
 
 const PROJECT_LIST_INCLUDE = {
 	client: true,
+	hosting_package: { select: { id: true, name: true } },
+	support_package: { select: { id: true, name: true } },
 	_count: { select: { environments: true } },
 	environments: {
 		select: {

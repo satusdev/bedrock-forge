@@ -1,20 +1,46 @@
-import { Controller, Get, HttpException, HttpStatus } from '@nestjs/common';
+import {
+	Controller,
+	Get,
+	HttpException,
+	HttpStatus,
+	OnModuleInit,
+	OnModuleDestroy,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import Redis from 'ioredis';
 
 @Controller('health')
-export class HealthController {
+export class HealthController implements OnModuleInit, OnModuleDestroy {
+	private redisClient!: Redis;
+
 	constructor(
 		private readonly prisma: PrismaService,
 		private readonly config: ConfigService,
 	) {}
 
+	onModuleInit(): void {
+		const url =
+			this.config.get<string>('redis.url') ?? 'redis://localhost:6379';
+		this.redisClient = new Redis(url, {
+			connectTimeout: 4000,
+			commandTimeout: 4000,
+			maxRetriesPerRequest: 1,
+			enableReadyCheck: false,
+		});
+		// Suppress unhandled-error events; health check uses Promise.allSettled
+		this.redisClient.on('error', () => {});
+	}
+
+	async onModuleDestroy(): Promise<void> {
+		await this.redisClient.quit().catch(() => {});
+	}
+
 	@Get()
 	async check() {
 		const [dbResult, redisResult] = await Promise.allSettled([
 			this.prisma.$queryRaw`SELECT 1`,
-			this.pingRedis(),
+			this.redisClient.ping(),
 		]);
 
 		const db = dbResult.status === 'fulfilled' ? 'ok' : 'error';
@@ -29,16 +55,5 @@ export class HealthController {
 		}
 
 		return { status: 'ok' };
-	}
-
-	private async pingRedis(): Promise<void> {
-		const redisUrl =
-			this.config.get<string>('redis.url') ?? 'redis://localhost:6379';
-		const client = new Redis(redisUrl);
-		try {
-			await client.ping();
-		} finally {
-			client.disconnect();
-		}
 	}
 }
