@@ -35,6 +35,8 @@ import { WpActionsModule } from './modules/wp-actions/wp-actions.module';
 import { ConfigDriftModule } from './modules/config-drift/config-drift.module';
 import { CleanupSchedulesModule } from './modules/cleanup-schedules/cleanup-schedules.module';
 import { CustomPluginsModule } from './modules/custom-plugins/custom-plugins.module';
+import { SystemBackupsModule } from './modules/system-backups/system-backups.module';
+import { ThemeScansModule } from './modules/theme-scans/theme-scans.module';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { QUEUES } from '@bedrock-forge/shared';
@@ -89,6 +91,8 @@ import appConfig from './config/app.config';
 			{ name: QUEUES.PLUGIN_UPDATES },
 			{ name: QUEUES.WP_ACTIONS },
 			{ name: QUEUES.CUSTOM_PLUGINS },
+			{ name: QUEUES.SYSTEM_BACKUPS },
+			{ name: QUEUES.THEME_SCANS },
 		),
 
 		// Infrastructure
@@ -125,6 +129,8 @@ import appConfig from './config/app.config';
 		ConfigDriftModule,
 		CleanupSchedulesModule,
 		CustomPluginsModule,
+		SystemBackupsModule,
+		ThemeScansModule,
 	],
 	providers: [
 		// Global rate limiting — 100 req/min per IP (ThrottlerModule configured above)

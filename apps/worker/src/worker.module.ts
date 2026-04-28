@@ -15,6 +15,8 @@ import { ReportProcessorModule } from './processors/report/report-processor.modu
 import { PluginUpdateProcessorModule } from './processors/plugin-update/plugin-update-processor.module';
 import { WpActionsProcessorModule } from './processors/wp-actions/wp-actions-processor.module';
 import { CustomPluginProcessorModule } from './processors/custom-plugin/custom-plugin-processor.module';
+import { SystemBackupProcessorModule } from './processors/system-backup/system-backup-processor.module';
+import { ThemeScanProcessorModule } from './processors/theme-scan/theme-scan-processor.module';
 import { SshKeyModule } from './services/ssh-key.module';
 import workerConfig from './config/worker.config';
 
@@ -45,6 +47,8 @@ import workerConfig from './config/worker.config';
 			{ name: QUEUES.PLUGIN_UPDATES },
 			{ name: QUEUES.WP_ACTIONS },
 			{ name: QUEUES.CUSTOM_PLUGINS },
+			{ name: QUEUES.SYSTEM_BACKUPS },
+			{ name: QUEUES.THEME_SCANS },
 		),
 
 		PrismaModule,
@@ -62,6 +66,8 @@ import workerConfig from './config/worker.config';
 		PluginUpdateProcessorModule,
 		WpActionsProcessorModule,
 		CustomPluginProcessorModule,
+		SystemBackupProcessorModule,
+		ThemeScanProcessorModule,
 	],
 })
 export class WorkerModule {}
