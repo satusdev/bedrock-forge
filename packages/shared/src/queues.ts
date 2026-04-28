@@ -5,6 +5,7 @@ export const QUEUES = {
 	PLUGIN_SCANS: 'plugin-scans',
 	PLUGIN_UPDATES: 'plugin-updates',
 	CUSTOM_PLUGINS: 'custom-plugins',
+	THEME_SCANS: 'theme-scans',
 	SYNC: 'sync',
 	MONITORS: 'monitors',
 	DOMAINS: 'domains',
@@ -12,6 +13,7 @@ export const QUEUES = {
 	NOTIFICATIONS: 'notifications',
 	REPORTS: 'reports',
 	WP_ACTIONS: 'wp-actions',
+	SYSTEM_BACKUPS: 'system-backups',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
@@ -22,6 +24,7 @@ export const DLQ = {
 	PLUGIN_SCANS: 'plugin-scans-dlq',
 	PLUGIN_UPDATES: 'plugin-updates-dlq',
 	CUSTOM_PLUGINS: 'custom-plugins-dlq',
+	THEME_SCANS: 'theme-scans-dlq',
 	SYNC: 'sync-dlq',
 	MONITORS: 'monitors-dlq',
 	DOMAINS: 'domains-dlq',
@@ -29,6 +32,7 @@ export const DLQ = {
 	NOTIFICATIONS: 'notifications-dlq',
 	REPORTS: 'reports-dlq',
 	WP_ACTIONS: 'wp-actions-dlq',
+	SYSTEM_BACKUPS: 'system-backups-dlq',
 } as const;
 // ─── Job Types ────────────────────────────────────────────────────────────────
 
@@ -74,6 +78,15 @@ export const JOB_TYPES = {
 	WP_LOGS_FETCH: 'wp:logs-fetch',
 	WP_CRON_LIST: 'wp:cron-list',
 	WP_CLEANUP: 'wp:cleanup',
+	WP_CORE_CHECK: 'wp:core-check',
+	WP_CORE_UPDATE: 'wp:core-update',
+
+	// Theme scans
+	THEME_SCAN_RUN: 'theme-scan:run',
+	THEME_MANAGE: 'theme:manage',
+
+	// System (Forge self-backup)
+	SYSTEM_BACKUP_CREATE: 'system-backup:create',
 } as const;
 
 export type JobType = (typeof JOB_TYPES)[keyof typeof JOB_TYPES];

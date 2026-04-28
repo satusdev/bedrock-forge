@@ -8,6 +8,6 @@ import { EncryptionModule } from '../../common/encryption/encryption.module';
 	imports: [EncryptionModule],
 	controllers: [SettingsController],
 	providers: [SettingsService, SettingsRepository],
-	exports: [SettingsService],
+	exports: [SettingsService, SettingsRepository],
 })
 export class SettingsModule {}

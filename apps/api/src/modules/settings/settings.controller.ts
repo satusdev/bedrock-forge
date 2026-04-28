@@ -127,7 +127,9 @@ export class SettingsController {
 		const rcloneConf = buildRcloneConfig(remoteName, tokenOneLine);
 		await this.svc.setEncrypted('rclone_gdrive_config', rcloneConf);
 
-		this.logger.log('Google Drive configured via OAuth token (rclone authorize).');
+		this.logger.log(
+			'Google Drive configured via OAuth token (rclone authorize).',
+		);
 	}
 
 	/** Remove Google Drive configuration. */
@@ -173,6 +175,21 @@ export class SettingsController {
 		} finally {
 			await unlink(tmpConf).catch(() => undefined);
 		}
+	}
+
+	// ── System Backup Folder ID ─────────────────────────────────────────────
+
+	/** Returns { folder_id: string | null } — the Google Drive folder used for Forge self-backups. */
+	@Get('system-backup-folder') async getSystemBackupFolder() {
+		const result = await this.svc.get('forge_system_backup_folder_id');
+		return { folder_id: result?.value ?? null };
+	}
+
+	/** Save the Google Drive folder ID used for Forge system backups. */
+	@Put('system-backup-folder')
+	@HttpCode(HttpStatus.NO_CONTENT)
+	async setSystemBackupFolder(@Body() dto: SetSettingDto) {
+		await this.svc.set('forge_system_backup_folder_id', dto.value);
 	}
 
 	// ── Generic key/value settings ──────────────────────────────────────────
