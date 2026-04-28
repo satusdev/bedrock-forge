@@ -22,6 +22,8 @@ import { SyncTab } from './project-detail/SyncTab';
 import { RestoreTab } from './project-detail/RestoreTab';
 import { ToolsTab } from './project-detail/ToolsTab';
 import { DriftTab } from './project-detail/DriftTab';
+import { ThemesTab } from './project-detail/ThemesTab';
+import { WpCoreTab } from './project-detail/WpCoreTab';
 import { ProjectFormDialog } from './ProjectsPage';
 
 interface Server {
@@ -239,6 +241,8 @@ export function ProjectDetailPage() {
 					<TabsTrigger value='restore'>Restore</TabsTrigger>
 					<TabsTrigger value='tools'>Tools</TabsTrigger>
 					<TabsTrigger value='drift'>Drift</TabsTrigger>
+					<TabsTrigger value='themes'>Themes</TabsTrigger>
+					<TabsTrigger value='wp-core'>WP Core</TabsTrigger>
 				</TabsList>
 
 				<TabsContent value='environments'>
@@ -267,6 +271,14 @@ export function ProjectDetailPage() {
 
 				<TabsContent value='drift'>
 					<DriftTab projectId={projectId} environments={environments} />
+				</TabsContent>
+
+				<TabsContent value='themes'>
+					<ThemesTab projectId={projectId} environments={environments} />
+				</TabsContent>
+
+				<TabsContent value='wp-core'>
+					<WpCoreTab environments={environments} />
 				</TabsContent>
 			</Tabs>
 

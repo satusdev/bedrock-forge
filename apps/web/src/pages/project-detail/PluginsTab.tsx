@@ -18,6 +18,8 @@ import {
 	Github,
 	Download,
 	AlertTriangle,
+	GitBranch,
+	Search,
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
@@ -66,6 +68,8 @@ interface Plugin {
 	managed_by_composer: boolean;
 	composer_constraint: string | null;
 	is_mu_plugin?: boolean;
+	managed_by_monorepo?: boolean;
+	monorepo_repo_url?: string | null;
 }
 
 interface PluginScanOutput {
@@ -540,6 +544,9 @@ export function PluginsTab({
 		environments[0]?.id ?? null,
 	);
 	const [search, setSearch] = useState('');
+	const [pluginFilter, setPluginFilter] = useState<
+		'all' | 'wpackagist' | 'monorepo' | 'manual'
+	>('all');
 	const [scanning, setScanning] = useState(false);
 	const [managingJobId, setManagingJobId] = useState<string | null>(null);
 	const [showAddDialog, setShowAddDialog] = useState(false);
@@ -917,17 +924,31 @@ export function PluginsTab({
 	}
 
 	const { isBedrock, plugins, muPlugins } = parseScanPlugins(latestScan);
-	const filtered = search
-		? plugins.filter(
-				p =>
-					p.name.toLowerCase().includes(search.toLowerCase()) ||
-					p.author?.toLowerCase().includes(search.toLowerCase()) ||
-					p.slug.toLowerCase().includes(search.toLowerCase()),
-			)
-		: plugins;
-
-	const updatesAvailable = plugins.filter(p => p.update_available).length;
+	const scanPluginBySlug = new Map(plugins.map(p => [p.slug, p]));
 	const composerManaged = plugins.filter(p => p.managed_by_composer).length;
+	const monorepoManaged = plugins.filter(p => !!p.managed_by_monorepo).length;
+	const manualCount = plugins.filter(
+		p => !p.managed_by_composer && !p.managed_by_monorepo,
+	).length;
+	const updatesAvailable = plugins.filter(p => p.update_available).length;
+	const filtered = plugins.filter(p => {
+		if (pluginFilter === 'wpackagist' && !p.managed_by_composer) return false;
+		if (pluginFilter === 'monorepo' && !p.managed_by_monorepo) return false;
+		if (
+			pluginFilter === 'manual' &&
+			(p.managed_by_composer || p.managed_by_monorepo)
+		)
+			return false;
+		if (search) {
+			const q = search.toLowerCase();
+			return (
+				p.name.toLowerCase().includes(q) ||
+				(p.author?.toLowerCase().includes(q) ?? false) ||
+				p.slug.toLowerCase().includes(q)
+			);
+		}
+		return true;
+	});
 	const isBusy = scanMutation.isPending || scanning;
 	const isManaging =
 		!!managingJobId ||
@@ -1083,31 +1104,63 @@ export function PluginsTab({
 				</div>
 			) : (
 				<>
-					<div className='flex items-center gap-4 text-sm text-muted-foreground'>
-						<span>{plugins.length} plugins total</span>
+					<div className='flex flex-wrap items-center gap-3'>
+						<span className='text-sm text-muted-foreground'>
+							{plugins.length} plugins total
+						</span>
 						{updatesAvailable > 0 ? (
-							<span className='text-yellow-600 dark:text-yellow-400 font-medium'>
+							<span className='text-sm text-yellow-600 dark:text-yellow-400 font-medium'>
 								{updatesAvailable} update{updatesAvailable !== 1 ? 's' : ''}{' '}
 								available
 							</span>
-						) : (
-							<span className='text-green-600 dark:text-green-400'>
-								{plugins.length - updatesAvailable} up to date
+						) : plugins.length > 0 ? (
+							<span className='text-sm text-green-600 dark:text-green-400'>
+								All up to date
 							</span>
-						)}
+						) : null}
 						{scanning && (
-							<span className='flex items-center gap-1.5 text-blue-600 dark:text-blue-400'>
+							<span className='flex items-center gap-1.5 text-sm text-blue-600 dark:text-blue-400'>
 								<Loader2 className='h-3.5 w-3.5 animate-spin' />
-								Refreshing\u2026
+								Refreshing…
 							</span>
 						)}
-						<input
-							className='ml-auto border rounded px-2 py-1 text-xs bg-background'
-							placeholder='Filter plugins\u2026'
-							value={search}
-							onChange={e => setSearch(e.target.value)}
-						/>
+						<div className='relative ml-auto'>
+							<Search className='absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none' />
+							<Input
+								className='pl-8 h-8 text-xs w-48'
+								placeholder='Search plugins…'
+								value={search}
+								onChange={e => setSearch(e.target.value)}
+							/>
+						</div>
 					</div>
+
+					{isBedrock && (
+						<div className='flex items-center gap-1'>
+							{(
+								[
+									['all', 'All', plugins.length],
+									['wpackagist', 'Composer', composerManaged],
+									['monorepo', 'Monorepo', monorepoManaged],
+									['manual', 'Manual', manualCount],
+								] as [typeof pluginFilter, string, number][]
+							).map(([key, label, count]) => (
+								<button
+									key={key}
+									type='button'
+									onClick={() => setPluginFilter(key)}
+									className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+										pluginFilter === key
+											? 'bg-primary text-primary-foreground'
+											: 'text-muted-foreground hover:bg-muted'
+									}`}
+								>
+									{label}
+									<span className='ml-1.5 opacity-70'>{count}</span>
+								</button>
+							))}
+						</div>
+					)}
 
 					<div className='border rounded-lg overflow-hidden'>
 						<table className='w-full text-sm'>
@@ -1118,9 +1171,7 @@ export function PluginsTab({
 									<th className='text-left px-4 py-3 font-medium'>Author</th>
 									<th className='text-left px-4 py-3 font-medium'>Status</th>
 									{isBedrock && (
-										<th className='text-left px-4 py-3 font-medium'>
-											Composer
-										</th>
+										<th className='text-left px-4 py-3 font-medium'>Source</th>
 									)}
 									{isBedrock && <th className='w-24 px-4 py-3 font-medium' />}
 								</tr>
@@ -1185,6 +1236,14 @@ export function PluginsTab({
 															</span>
 														)}
 													</div>
+												) : p.managed_by_monorepo ? (
+													<Badge
+														variant='outline'
+														className='text-xs gap-1 w-fit bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/30 dark:text-purple-400 dark:border-purple-800'
+													>
+														<GitBranch className='h-2.5 w-2.5' />
+														monorepo
+													</Badge>
 												) : (
 													<span className='text-xs text-muted-foreground'>
 														manual
@@ -1289,7 +1348,7 @@ export function PluginsTab({
 									Plugin
 								</th>
 								<th className='text-left px-4 py-2.5 font-medium text-xs'>
-									Installed
+									On Disk
 								</th>
 								<th className='text-left px-4 py-2.5 font-medium text-xs'>
 									Latest
@@ -1303,10 +1362,13 @@ export function PluginsTab({
 									e => e.custom_plugin_id === cp.id,
 								);
 								const isInstalled = !!envEntry;
+								const scanPlugin = scanPluginBySlug.get(cp.slug);
+								const diskVersion =
+									scanPlugin?.version ?? envEntry?.installed_version;
 								const isOutdated =
-									envEntry?.installed_version != null &&
+									diskVersion != null &&
 									envEntry?.latest_version != null &&
-									envEntry.installed_version !== envEntry.latest_version;
+									diskVersion !== envEntry.latest_version;
 								const isThisJobPending = !!customJobId;
 								return (
 									<tr key={cp.id} className='hover:bg-muted/10'>
@@ -1328,9 +1390,7 @@ export function PluginsTab({
 											</p>
 										</td>
 										<td className='px-4 py-2.5 font-mono text-xs text-muted-foreground'>
-											{isInstalled
-												? (envEntry.installed_version ?? 'dev')
-												: '—'}
+											{isInstalled ? (diskVersion ?? 'dev') : '—'}
 										</td>
 										<td className='px-4 py-2.5 font-mono text-xs text-muted-foreground'>
 											{isInstalled ? (envEntry.latest_version ?? '—') : '—'}
