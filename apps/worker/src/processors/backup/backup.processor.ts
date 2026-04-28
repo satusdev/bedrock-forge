@@ -1,7 +1,7 @@
 import { Processor, WorkerHost, InjectQueue } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job, Queue } from 'bullmq';
-import { mkdir, rm, readFile, stat } from 'fs/promises';
+import { mkdir, rm, readFile, stat, statfs } from 'fs/promises';
 import { StepTracker } from '../../services/step-tracker';
 import { join } from 'path';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -299,6 +299,45 @@ export class BackupProcessor extends WorkerHost {
 				level: 'info',
 				detail: remoteOutput,
 			});
+
+			// Pre-flight disk space check: get remote file size via stat and compare
+			// against available /tmp space before committing to the SFTP download.
+			try {
+				const statResult = await executor.execute(`stat -c%s ${remoteOutput}`, {
+					timeout: 10_000,
+				});
+				const remoteFileBytes = parseInt(statResult.stdout.trim(), 10);
+				if (!isNaN(remoteFileBytes) && remoteFileBytes > 0) {
+					const fsInfo = await statfs('/tmp');
+					const availableBytes = fsInfo.bavail * fsInfo.bsize;
+					// Require 10% buffer above file size
+					const requiredBytes = Math.ceil(remoteFileBytes * 1.1);
+					if (availableBytes < requiredBytes) {
+						const availGb = (availableBytes / 1_073_741_824).toFixed(2);
+						const requiredGb = (requiredBytes / 1_073_741_824).toFixed(2);
+						throw new Error(
+							`Insufficient local disk space: ${availGb} GB available, ${requiredGb} GB required (file + 10% buffer). Free up space on the host and retry.`,
+						);
+					}
+					await tracker.track({
+						step: 'Disk space check passed',
+						level: 'info',
+						detail: `remote=${(remoteFileBytes / 1_048_576).toFixed(0)} MB, available=${(availableBytes / 1_073_741_824).toFixed(2)} GB`,
+					});
+				}
+			} catch (diskErr) {
+				// Re-throw space errors directly; log and continue for other stat failures
+				if (
+					diskErr instanceof Error &&
+					diskErr.message.startsWith('Insufficient local disk space')
+				) {
+					throw diskErr;
+				}
+				this.logger.warn(
+					`[${job.id}] Disk space pre-flight check failed (non-fatal): ${diskErr}`,
+				);
+			}
+
 			// Wipe any stale staging dir before creating fresh (covers BullMQ retries
 			// with the same job ID and leftover files from a previous failed attempt).
 			await rm(localStagingDir, { recursive: true, force: true }).catch(
@@ -397,6 +436,15 @@ export class BackupProcessor extends WorkerHost {
 
 			await job.updateProgress({ value: 100, step: 'Backup complete' });
 		} catch (err) {
+			// Produce a clean, actionable message for ENOSPC errors
+			const isEnospc =
+				err instanceof Error &&
+				(err.message.includes('ENOSPC') ||
+					err.message.includes('no space left on device'));
+			if (isEnospc) {
+				(err as Error).message =
+					'Backup failed: no space left on device on the Forge host. Free up disk space under /tmp and retry.';
+			}
 			// Attempt remote cleanup even on failure so temp files do not accumulate
 			await executor
 				.execute(`rm -f ${remoteScript} ${remoteOutput}`)
