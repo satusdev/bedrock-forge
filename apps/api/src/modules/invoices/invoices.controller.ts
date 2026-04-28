@@ -66,6 +66,11 @@ export class InvoicesController {
 		return this.invoicesService.markAsPaid(id);
 	}
 
+	@Put(':id/mark-sent')
+	markAsSent(@Param('id', ParseIntPipe) id: number) {
+		return this.invoicesService.markAsSent(id);
+	}
+
 	@Delete(':id')
 	@HttpCode(HttpStatus.NO_CONTENT)
 	remove(@Param('id', ParseIntPipe) id: number) {

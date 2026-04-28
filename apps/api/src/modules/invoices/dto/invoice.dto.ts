@@ -24,14 +24,44 @@ export class GenerateInvoiceDto {
 	@IsInt()
 	@Min(2020)
 	@Max(2100)
-	year!: number;
+	fromYear!: number;
+
+	@IsInt()
+	@Min(1)
+	@Max(12)
+	fromMonth!: number;
+
+	@IsInt()
+	@Min(2020)
+	@Max(2100)
+	toYear!: number;
+
+	@IsInt()
+	@Min(1)
+	@Max(12)
+	toMonth!: number;
 }
 
 export class GenerateBulkInvoiceDto {
 	@IsInt()
 	@Min(2020)
 	@Max(2100)
-	year!: number;
+	fromYear!: number;
+
+	@IsInt()
+	@Min(1)
+	@Max(12)
+	fromMonth!: number;
+
+	@IsInt()
+	@Min(2020)
+	@Max(2100)
+	toYear!: number;
+
+	@IsInt()
+	@Min(1)
+	@Max(12)
+	toMonth!: number;
 }
 
 export class GenerateClientInvoiceDto {
@@ -50,7 +80,22 @@ export class GenerateClientInvoiceDto {
 	@IsInt()
 	@Min(2020)
 	@Max(2100)
-	year!: number;
+	fromYear!: number;
+
+	@IsInt()
+	@Min(1)
+	@Max(12)
+	fromMonth!: number;
+
+	@IsInt()
+	@Min(2020)
+	@Max(2100)
+	toYear!: number;
+
+	@IsInt()
+	@Min(1)
+	@Max(12)
+	toMonth!: number;
 }
 
 export class UpdateInvoiceDto {

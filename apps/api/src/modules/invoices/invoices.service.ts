@@ -16,6 +16,37 @@ import {
 	QueryInvoicesDto,
 } from './dto/invoice.dto';
 
+function buildPeriodStart(year: number, month: number): Date {
+	return new Date(Date.UTC(year, month - 1, 1));
+}
+
+function buildPeriodEnd(year: number, month: number): Date {
+	// Day 0 of the following month = last day of target month
+	return new Date(Date.UTC(year, month, 0, 23, 59, 59));
+}
+
+function countMonths(
+	fromYear: number,
+	fromMonth: number,
+	toYear: number,
+	toMonth: number,
+): number {
+	return (toYear - fromYear) * 12 + (toMonth - fromMonth) + 1;
+}
+
+function assertValidPeriod(
+	fromYear: number,
+	fromMonth: number,
+	toYear: number,
+	toMonth: number,
+): void {
+	if (toYear * 12 + toMonth < fromYear * 12 + fromMonth) {
+		throw new BadRequestException(
+			'"To" period must be on or after "From" period',
+		);
+	}
+}
+
 @Injectable()
 export class InvoicesService {
 	private readonly logger = new Logger(InvoicesService.name);
@@ -39,7 +70,7 @@ export class InvoicesService {
 		const limit = filters.limit ?? 20;
 
 		return {
-			data: data.map(this.serialise),
+			items: data.map(this.serialise),
 			total,
 			page,
 			limit,
@@ -54,6 +85,8 @@ export class InvoicesService {
 	}
 
 	async generate(dto: GenerateInvoiceDto) {
+		assertValidPeriod(dto.fromYear, dto.fromMonth, dto.toYear, dto.toMonth);
+
 		const project = await this.repo.findProjectWithPackages(dto.projectId);
 
 		if (!project)
@@ -65,27 +98,35 @@ export class InvoicesService {
 			);
 		}
 
-		const alreadyExists = await this.repo.existsForProjectAndYear(
+		const periodStart = buildPeriodStart(dto.fromYear, dto.fromMonth);
+		const periodEnd = buildPeriodEnd(dto.toYear, dto.toMonth);
+
+		const alreadyExists = await this.repo.existsForProjectAndPeriodOverlap(
 			dto.projectId,
-			dto.year,
+			periodStart,
+			periodEnd,
 		);
 		if (alreadyExists) {
 			throw new ConflictException(
-				`Invoice for project #${dto.projectId} year ${dto.year} already exists`,
+				`An invoice already exists for project #${dto.projectId} that overlaps this period`,
 			);
 		}
 
+		const months = countMonths(
+			dto.fromYear,
+			dto.fromMonth,
+			dto.toYear,
+			dto.toMonth,
+		);
 		const hostingAmount = project.hosting_package
-			? Number(project.hosting_package.price_monthly) * 12
+			? Number(project.hosting_package.price_monthly) * months
 			: 0;
 		const supportAmount = project.support_package
-			? Number(project.support_package.price_monthly) * 12
+			? Number(project.support_package.price_monthly) * months
 			: 0;
 		const totalAmount = hostingAmount + supportAmount;
 
-		const periodStart = new Date(`${dto.year}-01-01T00:00:00Z`);
-		const periodEnd = new Date(`${dto.year}-12-31T23:59:59Z`);
-		const dueDate = new Date(`${dto.year}-01-31T23:59:59Z`);
+		const dueDate = new Date(periodStart.getTime() + 30 * 24 * 60 * 60 * 1000);
 
 		const inv = await this.repo.createSerialized(
 			{
@@ -103,7 +144,7 @@ export class InvoicesService {
 				due_date: dueDate,
 				status: 'draft',
 			},
-			dto.year,
+			dto.fromYear,
 		);
 
 		this.notifications.dispatch('invoice.created', {
@@ -111,13 +152,15 @@ export class InvoicesService {
 			projectName: project.name,
 			clientName: project.client.name,
 			totalAmount,
-			year: dto.year,
+			year: dto.fromYear,
 		});
 
 		return this.serialise(inv);
 	}
 
 	async generateBulk(dto: GenerateBulkInvoiceDto) {
+		assertValidPeriod(dto.fromYear, dto.fromMonth, dto.toYear, dto.toMonth);
+
 		const projects = await this.repo.findActiveProjectsWithPackages();
 
 		const results: {
@@ -126,10 +169,21 @@ export class InvoicesService {
 			skipped?: string;
 		}[] = [];
 
+		const periodStart = buildPeriodStart(dto.fromYear, dto.fromMonth);
+		const periodEnd = buildPeriodEnd(dto.toYear, dto.toMonth);
+		const months = countMonths(
+			dto.fromYear,
+			dto.fromMonth,
+			dto.toYear,
+			dto.toMonth,
+		);
+		const dueDate = new Date(periodStart.getTime() + 30 * 24 * 60 * 60 * 1000);
+
 		for (const project of projects) {
-			const alreadyExists = await this.repo.existsForProjectAndYear(
+			const alreadyExists = await this.repo.existsForProjectAndPeriodOverlap(
 				Number(project.id),
-				dto.year,
+				periodStart,
+				periodEnd,
 			);
 			if (alreadyExists) {
 				results.push({
@@ -140,16 +194,12 @@ export class InvoicesService {
 			}
 
 			const hostingAmount = project.hosting_package
-				? Number(project.hosting_package.price_monthly) * 12
+				? Number(project.hosting_package.price_monthly) * months
 				: 0;
 			const supportAmount = project.support_package
-				? Number(project.support_package.price_monthly) * 12
+				? Number(project.support_package.price_monthly) * months
 				: 0;
 			const totalAmount = hostingAmount + supportAmount;
-
-			const periodStart = new Date(`${dto.year}-01-01T00:00:00Z`);
-			const periodEnd = new Date(`${dto.year}-12-31T23:59:59Z`);
-			const dueDate = new Date(`${dto.year}-01-31T23:59:59Z`);
 
 			const inv = await this.repo.createSerialized(
 				{
@@ -167,7 +217,7 @@ export class InvoicesService {
 					due_date: dueDate,
 					status: 'draft',
 				},
-				dto.year,
+				dto.fromYear,
 			);
 
 			this.notifications.dispatch('invoice.created', {
@@ -175,7 +225,7 @@ export class InvoicesService {
 				projectName: project.name,
 				clientName: project.client.name,
 				totalAmount,
-				year: dto.year,
+				year: dto.fromYear,
 			});
 
 			results.push({
@@ -197,6 +247,8 @@ export class InvoicesService {
 	): Promise<
 		{ projectId: number; invoiceNumber?: string; skipped?: string }[]
 	> {
+		assertValidPeriod(dto.fromYear, dto.fromMonth, dto.toYear, dto.toMonth);
+
 		const projects = await this.repo.findActiveProjectsWithPackages(
 			dto.clientId,
 			dto.projectIds,
@@ -214,10 +266,21 @@ export class InvoicesService {
 			skipped?: string;
 		}[] = [];
 
+		const periodStart = buildPeriodStart(dto.fromYear, dto.fromMonth);
+		const periodEnd = buildPeriodEnd(dto.toYear, dto.toMonth);
+		const months = countMonths(
+			dto.fromYear,
+			dto.fromMonth,
+			dto.toYear,
+			dto.toMonth,
+		);
+		const dueDate = new Date(periodStart.getTime() + 30 * 24 * 60 * 60 * 1000);
+
 		for (const project of projects) {
-			const alreadyExists = await this.repo.existsForProjectAndYear(
+			const alreadyExists = await this.repo.existsForProjectAndPeriodOverlap(
 				Number(project.id),
-				dto.year,
+				periodStart,
+				periodEnd,
 			);
 			if (alreadyExists) {
 				results.push({
@@ -228,16 +291,12 @@ export class InvoicesService {
 			}
 
 			const hostingAmount = project.hosting_package
-				? Number(project.hosting_package.price_monthly) * 12
+				? Number(project.hosting_package.price_monthly) * months
 				: 0;
 			const supportAmount = project.support_package
-				? Number(project.support_package.price_monthly) * 12
+				? Number(project.support_package.price_monthly) * months
 				: 0;
 			const totalAmount = hostingAmount + supportAmount;
-
-			const periodStart = new Date(`${dto.year}-01-01T00:00:00Z`);
-			const periodEnd = new Date(`${dto.year}-12-31T23:59:59Z`);
-			const dueDate = new Date(`${dto.year}-01-31T23:59:59Z`);
 
 			const inv = await this.repo.createSerialized(
 				{
@@ -255,7 +314,7 @@ export class InvoicesService {
 					due_date: dueDate,
 					status: 'draft',
 				},
-				dto.year,
+				dto.fromYear,
 			);
 
 			this.notifications.dispatch('invoice.created', {
@@ -263,7 +322,7 @@ export class InvoicesService {
 				projectName: project.name,
 				clientName: project.client.name,
 				totalAmount,
-				year: dto.year,
+				year: dto.fromYear,
 			});
 
 			results.push({
@@ -297,6 +356,20 @@ export class InvoicesService {
 			paid_at: new Date(),
 		});
 
+		return this.serialise(updated);
+	}
+
+	async markAsSent(id: number) {
+		const inv = await this.repo.findById(id);
+		if (!inv) throw new NotFoundException(`Invoice #${id} not found`);
+
+		if (inv.status !== 'draft') {
+			throw new BadRequestException(
+				'Only draft invoices can be marked as sent',
+			);
+		}
+
+		const updated = await this.repo.update(id, { status: 'sent' });
 		return this.serialise(updated);
 	}
 

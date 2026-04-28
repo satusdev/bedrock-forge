@@ -93,17 +93,16 @@ export class InvoicesRepository {
 		);
 	}
 
-	async existsForProjectAndYear(
+	async existsForProjectAndPeriodOverlap(
 		projectId: number,
-		year: number,
+		periodStart: Date,
+		periodEnd: Date,
 	): Promise<boolean> {
-		const start = new Date(`${year}-01-01T00:00:00Z`);
-		const end = new Date(`${year}-12-31T23:59:59Z`);
 		const count = await this.prisma.invoice.count({
 			where: {
 				project_id: BigInt(projectId),
-				period_start: { gte: start },
-				period_end: { lte: end },
+				period_start: { lte: periodEnd },
+				period_end: { gte: periodStart },
 			},
 		});
 		return count > 0;
