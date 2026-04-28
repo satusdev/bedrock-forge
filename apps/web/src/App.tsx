@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useEffect, lazy, Suspense } from 'react';
 import { useAuthStore } from '@/store/auth.store';
+import { api } from '@/lib/api-client';
 import { destroySocket } from '@/lib/websocket';
 import { AppLayout } from '@/components/layout/AppLayout';
 
@@ -144,6 +145,18 @@ function ManagerRoute({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+	// Re-validate user roles on mount to pick up server-side permission changes
+	useEffect(() => {
+		const { accessToken, setUser, logout } = useAuthStore.getState();
+		if (!accessToken) return;
+		api
+			.get<{ id: number; email: string; name: string; roles: string[] }>(
+				'/auth/me',
+			)
+			.then(setUser)
+			.catch(() => logout());
+	}, []);
+
 	// Disconnect WebSocket when the user logs out
 	useEffect(() => {
 		return useAuthStore.subscribe((state, prev) => {
