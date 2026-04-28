@@ -123,7 +123,7 @@ Three Docker services. Minimal footprint — runs on a 4 GB RAM VPS.
 │  ├─ NestJS 11 API  :3000                                  │
 │  │   REST routes, JWT auth, rate limiting, WebSocket GW   │
 │  └─ BullMQ Worker (no HTTP port)                          │
-│      ├─ 8 processor modules                               │
+│      ├─ 13 processor modules                              │
 │      ├─ SSH connection pool (ssh2, max 15/server)         │
 │      ├─ rclone → Google Drive                             │
 │      └─ whois (system command)                            │
@@ -132,7 +132,7 @@ Three Docker services. Minimal footprint — runs on a 4 GB RAM VPS.
     ┌────▼──────┐   ┌──────────────────────────┐
     │ postgres  │   │ redis 7                  │
     │ :5432     │   │ BullMQ queues            │
-    │ 31 tables │   │ WebSocket pub/sub        │
+    │ 35 tables │   │ WebSocket pub/sub        │
     └───────────┘   │ Rate limiting            │
                     └──────────────────────────┘
 
@@ -169,16 +169,21 @@ Every long-running operation is a BullMQ job. Controllers enqueue; the worker
 executes. Real-time progress streams to the frontend via WebSocket + Redis
 pub/sub.
 
-| Queue           | Job Types                                                                   | Retries | Timeout |
-| --------------- | --------------------------------------------------------------------------- | ------- | ------- |
-| `backups`       | `backup:create`, `backup:restore`, `backup:scheduled`, `backup:delete-file` | 3       | 30 min  |
-| `plugin-scans`  | `plugin-scan:run`, `plugin:manage`                                          | 3       | 5 min   |
-| `sync`          | `sync:clone`, `sync:push`                                                   | 3       | 15 min  |
-| `monitors`      | `monitor:check` (repeatable)                                                | 2       | 30 s    |
-| `domains`       | `domain:whois`                                                              | 3       | 30 s    |
-| `projects`      | `project:create-bedrock`                                                    | 2       | 20 min  |
-| `notifications` | `notification:send`                                                         | 3       | 30 s    |
-| `reports`       | `report:generate`                                                           | 3       | 5 min   |
+| Queue            | Job Types                                                                                                                    | Retries | Timeout |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------- | ------- |
+| `backups`        | `backup:create`, `backup:restore`, `backup:scheduled`, `backup:delete-file`                                                  | 3       | 30 min  |
+| `plugin-scans`   | `plugin-scan:run`, `plugin:manage`                                                                                           | 3       | 5 min   |
+| `plugin-updates` | `plugin:scheduled-update`                                                                                                    | 3       | 10 min  |
+| `custom-plugins` | `custom-plugin:manage`                                                                                                       | 3       | 10 min  |
+| `theme-scans`    | `theme-scan:run`, `theme:manage`                                                                                             | 3       | 5 min   |
+| `sync`           | `sync:clone`, `sync:push`                                                                                                    | 3       | 30 min  |
+| `monitors`       | `monitor:check` (repeatable)                                                                                                 | 2       | 30 s    |
+| `domains`        | `domain:whois`, `domain:ssl-check`                                                                                           | 3       | 30 s    |
+| `projects`       | `project:create-bedrock`                                                                                                     | 2       | 20 min  |
+| `notifications`  | `notification:send`                                                                                                          | 3       | 30 s    |
+| `reports`        | `report:generate`                                                                                                            | 3       | 2 min   |
+| `wp-actions`     | `wp:fix-action`, `wp:debug-toggle`, `wp:debug-revert`, `wp:logs-fetch`, `wp:cron-list`, `wp:cleanup`, `wp:core-check/update` | 3       | 5 min   |
+| `system-backups` | `system-backup:create`                                                                                                       | 3       | 30 min  |
 
 All queues use exponential backoff (base 1 s) and a dead-letter queue
 (`<name>-dlq`).
@@ -192,7 +197,7 @@ All queues use exponential backoff (base 1 s) and a dead-letter queue
 | Runtime          | Node.js 22                                   |
 | Backend          | NestJS 11, TypeScript 5, REST API            |
 | ORM              | Prisma 7                                     |
-| Database         | PostgreSQL 16 (31 tables, 7 enums)           |
+| Database         | PostgreSQL 16 (35 tables, 7 enums)           |
 | Queue            | BullMQ 5 + Redis 7                           |
 | Remote execution | `ssh2` connection pool (no wp-cli, no agent) |
 | Frontend         | React 19 + Vite 5                            |
@@ -215,19 +220,28 @@ All queues use exponential backoff (base 1 s) and a dead-letter queue
   only — never sourced, never eval'd, never passed to a shell.
 - **JWT:** 15-minute access tokens + 7-day refresh tokens. Refresh tokens stored
   as bcrypt hashes with rotation on every use.
-- **Rate limiting:** 5 login attempts per 15 minutes (Redis-backed); 100
-  requests per minute globally.
+- **Rate limiting:** 5 login attempts per 15 minutes (Redis-backed); API
+  endpoints rate-limited at 30 req/s with burst 60 at the nginx layer.
 - **RBAC:** 4-tier role hierarchy: `admin` > `manager` > `maintainer` >
   `client`. Guards on both API routes and frontend navigation. `admin` is
   required for all create/update operations on servers, clients, users, and
   settings. `manager` can view all data and trigger operational actions
   (backups, scans, monitors). `maintainer` can view all operational data and
   change their own password. `client` is a soft permission tier — no
-  database-level row isolation per client user.
+  database-level row isolation per client user. User roles are re-validated from
+  the server on every app mount to prevent stale localStorage grants.
 - **Input validation:** Global `ValidationPipe` with `whitelist: true` and
   `forbidNonWhitelisted: true`. All inputs validated via `class-validator` DTOs.
-- **HTTP headers:** Helmet + custom CSP, X-Frame-Options, X-Content-Type-Options
-  applied by nginx.
+  `root_path` enforces a strict allowlist regex to prevent path traversal.
+- **Encrypted settings:** Sensitive `AppSetting` values (SSH keys, GitHub
+  tokens, Slack tokens) are AES-256-GCM encrypted at write time via
+  `SettingsService` and transparently decrypted on read.
+- **Audit IP accuracy:** Nginx passes `$remote_addr` as `X-Real-IP`; the audit
+  interceptor reads that header only — `X-Forwarded-For` is ignored to prevent
+  client IP spoofing in logs.
+- **HTTP headers:** `server_tokens off`, Helmet, custom CSP, `X-Frame-Options`,
+  `X-Content-Type-Options` — all headers applied consistently across static
+  assets and API proxy locations.
 - **Remote execution:** All SSH operations route through `RemoteExecutorService`
   — no `child_process.exec`, no shell spawning, no `eval`.
 
@@ -336,7 +350,7 @@ Auto-generated by `install.sh`. Only needed for manual setup.
 bedrock-forge/
 ├── apps/
 │   ├── api/                    # NestJS 11 REST API + WebSocket gateway
-│   │   └── src/modules/        # 22 feature modules (controller → service → repository)
+│   │   └── src/modules/        # 30 feature modules (controller → service → repository)
 │   │   └── scripts/            # backup.php, plugin-scan.php (pushed on-demand)
 │   └── web/                    # React 19 SPA (21 pages, all lazy-loaded)
 │       └── src/features/       # Feature-scoped components and hooks
@@ -344,7 +358,7 @@ bedrock-forge/
 │   ├── shared/                 # Queue names, roles, Zod schemas
 │   └── remote-executor/        # SSH pool + credential parser
 ├── prisma/
-│   ├── schema.prisma           # 27-model schema
+│   ├── schema.prisma           # 35-model schema
 │   └── migrations/
 ├── docs/
 │   ├── getting-started/
@@ -357,6 +371,51 @@ bedrock-forge/
 ├── update.sh                   # Rolling update
 └── reset.sh                    # Destructive reset
 ```
+
+---
+
+## Security & Reliability Audit
+
+A full system audit was performed on 2026-04-28. The table below tracks every
+finding and its current resolution status.
+
+### ✅ Addressed
+
+| ID  | Area        | Finding                                                                                                                                       | Resolution                                                                                    |
+| --- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| S1  | Security    | `root_path` DTO had no regex validator — path traversal / shell injection possible                                                            | Added `@Matches(/^[a-zA-Z0-9\/_\-.]+$/)` to `EnvironmentDto`                                  |
+| S2  | Security    | MySQL CLI fallback in `CreateBedrockProcessor` vulnerable to backtick injection                                                               | Strict `safeIdentifier` regex validation before any CLI use                                   |
+| S3  | Security    | GitHub API token stored in plaintext in `app_settings`                                                                                        | Added to `SENSITIVE_KEYS`; auto-encrypt on write, decrypt on read; worker decrypts before use |
+| S5  | Security    | Dev seed credentials baked into Vite production bundle via `VITE_DEV_*` env vars                                                              | Hardcoded strings gated on `import.meta.env.DEV` only — never in production bundle            |
+| R1  | Reliability | System backup staging area had no persistent Docker volume                                                                                    | `forge-system-backups` named volume added to `docker-compose.yml`                             |
+| R2  | Reliability | Worker SSH pool never destroyed on `SIGTERM` — connections leaked on deploy/restart                                                           | `sshPoolManager.destroy()` registered on `SIGTERM` and `SIGINT`                               |
+| R3  | Reliability | `runCommand()` timeout did not call `stream.destroy()` — SSH channels leaked                                                                  | `channelRef?.destroy()` added before reject in timeout handler                                |
+| R4  | Reliability | `sftpGet()` (in-memory pull) had no stall timeout                                                                                             | Activity-based stall timer added — identical pattern to `sftpGetToFile`                       |
+| A2  | DB          | 5 missing indexes: `MonitorResult(monitor_id)`, `Domain(expires_at, ssl_expires_at)`, `JobExecution(bull_job_id)`, `RefreshToken(revoked_at)` | Indexes added in schema + migration `20260428100000_add_missing_indexes`                      |
+| A3  | Frontend    | Roles cached in `localStorage` never refreshed — stale grants possible after a role change                                                    | `App.tsx` calls `GET /auth/me` on mount and updates the Zustand store (or logs out)           |
+| A4  | RBAC        | `ROLE_HIERARCHY` had `manager` and `maintainer` both at level 2 — comparison was wrong                                                        | Fixed: `admin=4`, `manager=3`, `maintainer=2`, `client=1`                                     |
+| A5  | Types       | `WpDbCredentials` interface not exported from `@bedrock-forge/shared`                                                                         | Added to `packages/shared/src/types.ts`                                                       |
+| A10 | Security    | `AuditInterceptor` read `X-Forwarded-For` (client-injectable) for IP logging                                                                  | Switched to `X-Real-IP` (set by nginx from `$remote_addr`)                                    |
+| D1  | DX          | `db:generate` not in Turborepo pipeline — manual step required after schema changes                                                           | Added `db:generate` task with correct output caching                                          |
+| D2  | DX          | No `type-check` task in Turborepo — CI had no incremental TS checking                                                                         | Added `type-check` task with `^type-check` dependency                                         |
+| D4  | Ops         | Dev Redis had no password — `docker-compose.dev.yml` ran an open Redis instance                                                               | Added `--requirepass ${REDIS_PASSWORD:?required}` to dev Redis command                        |
+| D5  | Nginx       | Security headers applied only at server level — nginx does not inherit `add_header` into nested `location` blocks                             | Headers repeated explicitly in `/api/` and static assets `location ~*` blocks                 |
+| D6  | Nginx       | Missing `server_tokens off` and API-level rate limiting                                                                                       | Added `server_tokens off` and `limit_req zone=api burst=60 nodelay`                           |
+| D7  | Docs        | `ARCHITECTURE.md` had stale counts (27 models, 8 processors, 8 queues, 3-tier RBAC, missing models)                                           | Fully updated to match current codebase                                                       |
+
+### ⏳ Still Pending
+
+| ID  | Area         | Finding                                                                                                | Notes                                                            |
+| --- | ------------ | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| S4  | Security     | Refresh tokens returned in JSON response body — XSS can steal them from JS memory                      | httpOnly cookie delivery requires schema + frontend changes      |
+| S6  | Security     | SSH host keys not verified on new connections — no TOFU / known_hosts tracking                         | Requires schema column, UI to trust/reject on first connect      |
+| A1  | Architecture | `EncryptionService` is duplicated — API and Worker maintain separate implementations                   | Extract to `@bedrock-forge/shared` or a dedicated crypto package |
+| A6  | Architecture | `DomainWhoisProcessor` does not create `JobExecution` records — inconsistent with all other processors | Low-effort; requires adding `JobExecutionsService` to the module |
+| A7  | Architecture | `QueueEvents` listeners registered per-processor rather than via a shared factory                      | Refactor opportunity — reduces boilerplate across 13 processors  |
+| A8  | Architecture | Several repositories call `findMany({})` with no row cap — unbounded result sets                       | Add max-row guard (e.g. 10 000) to all bare `findAll` calls      |
+| A9  | Architecture | Pagination `take` param is not clamped — callers can request arbitrarily large pages                   | Clamp to a configured max (e.g. 200) in query DTOs               |
+| D3  | DX           | No Jest coverage thresholds configured — coverage can silently drop                                    | Add `coverageThreshold` to `jest.config.js`                      |
+| D8  | DX           | Test coverage thin for worker processors, settings encryption, and role guard                          | Expand unit test suite                                           |
 
 ---
 
