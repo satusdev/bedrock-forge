@@ -62,6 +62,7 @@ model RefreshToken {
 
   @@index([user_id])
   @@index([expires_at])
+  @@index([revoked_at])
   @@map("refresh_tokens")
 }
 
@@ -233,6 +234,7 @@ model Environment {
   server             Server            @relation(fields: [server_id], references: [id])
   backups                Backup[]
   plugin_scans           PluginScan[]
+  theme_scans            ThemeScan[]
   monitors               Monitor[]
   wp_db_credentials      WpDbCredentials?
   job_executions         JobExecution[]
@@ -325,6 +327,20 @@ model PluginScan {
   @@map("plugin_scans")
 }
 
+model ThemeScan {
+  id             BigInt   @id @default(autoincrement())
+  environment_id BigInt
+  themes         Json     // ThemeInfo[] — output of `wp theme list --format=json`
+  scanned_at     DateTime @default(now()) @db.Timestamptz()
+  created_at     DateTime @default(now()) @db.Timestamptz()
+
+  environment Environment @relation(fields: [environment_id], references: [id], onDelete: Cascade)
+
+  @@index([environment_id])
+  @@index([scanned_at])
+  @@map("theme_scans")
+}
+
 model Domain {
   id              BigInt    @id @default(autoincrement())
   name            String    @unique
@@ -338,6 +354,8 @@ model Domain {
   created_at      DateTime  @default(now()) @db.Timestamptz()
 
   @@index([name])
+  @@index([expires_at])
+  @@index([ssl_expires_at])
   @@map("domains")
 }
 
@@ -411,6 +429,7 @@ model MonitorResult {
 
   monitor Monitor @relation(fields: [monitor_id], references: [id], onDelete: Cascade)
 
+  @@index([monitor_id])
   @@index([checked_at])
   @@map("monitor_results")
 }
@@ -501,12 +520,14 @@ model JobExecution {
   completed_at   DateTime?        @db.Timestamptz()
   created_at     DateTime         @default(now()) @db.Timestamptz()
 
-  environment Environment? @relation(fields: [environment_id], references: [id])
-  server      Server?      @relation(fields: [server_id], references: [id])
-  backups     Backup[]
+  environment    Environment?   @relation(fields: [environment_id], references: [id])
+  server         Server?        @relation(fields: [server_id], references: [id])
+  backups        Backup[]
+  system_backups SystemBackup[]
 
   @@index([environment_id])
   @@index([server_id])
+  @@index([bull_job_id])
   @@index([status])
   @@index([created_at])
   @@index([queue_name, status])
@@ -528,6 +549,25 @@ model AppSetting {
   updated_at DateTime @updatedAt @db.Timestamptz()
 
   @@map("app_settings")
+}
+
+// Forge self-backup: pg_dump of the Forge PostgreSQL DB uploaded to Google Drive
+model SystemBackup {
+  id               BigInt       @id @default(autoincrement())
+  job_execution_id BigInt?
+  status           BackupStatus @default(pending)
+  file_path        String?      // gdrive:{folderId}/{filename} once uploaded
+  size_bytes       BigInt?
+  error_message    String?
+  started_at       DateTime?    @db.Timestamptz()
+  completed_at     DateTime?    @db.Timestamptz()
+  created_at       DateTime     @default(now()) @db.Timestamptz()
+
+  jobExecution JobExecution? @relation(fields: [job_execution_id], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([created_at])
+  @@map("system_backups")
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
