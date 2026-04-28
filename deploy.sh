@@ -110,7 +110,11 @@ if [[ ! -f .env ]] || [[ "${FORCE_INSTALL}" == "true" ]]; then
   # Pull/build and bring everything up
   docker compose pull postgres redis || true
   docker compose build forge web
-  docker compose up -d
+  if ! docker compose up -d --remove-orphans; then
+    echo "ERROR: docker compose up failed. Forge logs:"
+    docker compose logs --tail=100 forge
+    exit 1
+  fi
 
 else
   echo ">>> Incremental update"
@@ -126,10 +130,19 @@ else
   docker compose up -d postgres redis
 
   # Rebuild application images then bring up ALL services.
-  # Using plain `up -d` (without --no-deps) ensures web is always created/started
-  # and respects the depends_on:service_healthy chain (web waits for forge).
+  # --force-recreate ensures forge/web containers always restart with the new image
+  # even if compose detects no change in the service config.
   docker compose build forge web
-  docker compose up -d
+  if ! docker compose up -d --force-recreate --no-deps forge; then
+    echo "ERROR: forge failed to start. Logs:"
+    docker compose logs --tail=100 forge
+    exit 1
+  fi
+  if ! docker compose up -d --remove-orphans; then
+    echo "ERROR: docker compose up (all services) failed. Forge logs:"
+    docker compose logs --tail=100 forge
+    exit 1
+  fi
 fi
 
 # ── Wait for the API to report healthy ───────────────────────────────────────
@@ -139,7 +152,10 @@ until curl -sf http://localhost:3001/health > /dev/null 2>&1; do
   RETRIES=\$((RETRIES - 1))
   if [ "\${RETRIES}" -le 0 ]; then
     echo "ERROR: Forge API did not become healthy in time."
-    echo "Check logs: docker compose logs forge"
+    echo "=== forge container logs (last 80 lines) ==="
+    docker compose logs --tail=80 forge
+    echo "=== forge container status ==="
+    docker compose ps forge
     exit 1
   fi
   sleep 3

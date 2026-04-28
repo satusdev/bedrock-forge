@@ -47,12 +47,13 @@ RUN pnpm prune --prod
 FROM node:22-alpine AS runtime
 RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
 
-# Install rclone for Google Drive backup uploads; whois for domain WHOIS lookups
-RUN apk add --no-cache rclone whois && \
+# Install rclone for Google Drive backup uploads; whois for domain WHOIS lookups;
+# postgresql-client provides pg_dump for Forge self-backup
+RUN apk add --no-cache rclone whois postgresql-client && \
     mkdir -p /home/node/.config/rclone && \
     chown -R node:node /home/node/.config && \
-    mkdir -p /tmp/forge-backups && \
-    chown node:node /tmp/forge-backups
+    mkdir -p /tmp/forge-backups /tmp/forge-system-backups && \
+    chown node:node /tmp/forge-backups /tmp/forge-system-backups
 
 WORKDIR /app
 

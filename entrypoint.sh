@@ -35,8 +35,24 @@ echo "[forge] Starting Worker…"
 node apps/worker/dist/main.js &
 WORKER_PID=$!
 
-# Forward SIGTERM/SIGINT to children
-trap 'kill $API_PID $WORKER_PID 2>/dev/null; exit 0' TERM INT
+# Graceful shutdown on SIGTERM/SIGINT
+trap 'echo "[forge] Shutting down…"; kill $API_PID $WORKER_PID 2>/dev/null || true; exit 0' TERM INT
 
 echo "[forge] All services started. API_PID=$API_PID WORKER_PID=$WORKER_PID"
-wait $API_PID $WORKER_PID
+
+# Monitor both children. If either process dies, exit the container so Docker's
+# restart policy can recover — a dead API must not leave the container "running"
+# while health checks fail indefinitely.
+while true; do
+  sleep 5
+  if ! kill -0 $API_PID 2>/dev/null; then
+    echo "[forge] API process (PID $API_PID) has exited — shutting down container for restart"
+    kill $WORKER_PID 2>/dev/null || true
+    exit 1
+  fi
+  if ! kill -0 $WORKER_PID 2>/dev/null; then
+    echo "[forge] Worker process (PID $WORKER_PID) has exited — shutting down container for restart"
+    kill $API_PID 2>/dev/null || true
+    exit 1
+  fi
+done

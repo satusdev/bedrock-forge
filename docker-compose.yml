@@ -41,29 +41,39 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '50m'
+        max-file: '3'
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
     command:
       redis-server --save 60 1 --loglevel warning --requirepass
-      ${REDIS_PASSWORD:?required} --maxmemory 128mb --maxmemory-policy
-      allkeys-lru
+      ${REDIS_PASSWORD:?required} --maxmemory 256mb --maxmemory-policy
+      noeviction
     volumes:
       - redis_data:/data
     deploy:
       resources:
         limits:
           cpus: '0.25'
-          memory: 192M
+          memory: 320M
         reservations:
           cpus: '0.05'
-          memory: 64M
+          memory: 128M
     healthcheck:
       test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD}', 'ping']
       interval: 10s
       timeout: 5s
       retries: 5
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '50m'
+        max-file: '3'
 
   forge:
     build:
@@ -74,6 +84,7 @@ services:
     env_file: .env
     volumes:
       - forge-backups:/tmp/forge-backups
+      - forge-system-backups:/tmp/forge-system-backups
     environment:
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8080}
       DATABASE_URL: postgresql://${POSTGRES_USER:-forge}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-bedrock_forge}
@@ -101,6 +112,11 @@ services:
       timeout: 5s
       retries: 8
       start_period: 45s
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '50m'
+        max-file: '3'
 
   web:
     build:
@@ -126,8 +142,14 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '50m'
+        max-file: '3'
 
 volumes:
   postgres_data:
   redis_data:
   forge-backups:
+  forge-system-backups:
