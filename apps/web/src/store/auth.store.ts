@@ -11,6 +11,7 @@ interface User {
 interface AuthState {
 	user: User | null;
 	accessToken: string | null;
+	/** Refresh token is kept in-memory only — never written to localStorage. */
 	refreshToken: string | null;
 	setTokens: (access: string, refresh: string) => void;
 	setUser: (user: User) => void;
@@ -30,9 +31,11 @@ export const useAuthStore = create<AuthState>()(
 		}),
 		{
 			name: 'auth-storage',
+			// Only persist the short-lived access token and user profile.
+			// The refresh token is intentionally excluded: storing it in localStorage
+			// would allow any XSS payload to silently steal a long-lived credential.
 			partialize: s => ({
 				accessToken: s.accessToken,
-				refreshToken: s.refreshToken,
 				user: s.user,
 			}),
 		},

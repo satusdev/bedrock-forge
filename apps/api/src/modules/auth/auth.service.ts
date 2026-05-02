@@ -1,7 +1,6 @@
 import {
 	Injectable,
 	UnauthorizedException,
-	ConflictException,
 	NotFoundException,
 	BadRequestException,
 } from '@nestjs/common';
@@ -25,20 +24,12 @@ export class AuthService {
 		private readonly config: ConfigService,
 	) {}
 
-	async register(email: string, name: string, password: string) {
-		const existing = await this.repo.findUserByEmail(email);
-		if (existing) {
-			throw new ConflictException('Email already registered');
-		}
-
-		const passwordHash = await bcrypt.hash(password, 12);
-		const user = await this.repo.createUser(email, name, passwordHash);
-		const roles = user.user_roles.map((ur: any) => ur.role.name);
-
-		return this.issueTokens(Number(user.id), user.email, user.name, roles);
-	}
-
-	async login(email: string, password: string): Promise<TokenPair> {
+	async login(
+		email: string,
+		password: string,
+		userAgent?: string,
+		ipAddress?: string,
+	): Promise<TokenPair> {
 		const user = await this.repo.findUserByEmail(email);
 		if (!user) {
 			throw new UnauthorizedException('Invalid credentials');
@@ -50,10 +41,21 @@ export class AuthService {
 		}
 
 		const roles = user.user_roles.map((ur: any) => ur.role.name);
-		return this.issueTokens(Number(user.id), user.email, user.name, roles);
+		return this.issueTokens(
+			Number(user.id),
+			user.email,
+			user.name,
+			roles,
+			userAgent,
+			ipAddress,
+		);
 	}
 
-	async refresh(refreshToken: string): Promise<TokenPair> {
+	async refresh(
+		refreshToken: string,
+		userAgent?: string,
+		ipAddress?: string,
+	): Promise<TokenPair> {
 		const tokenHash = this.hashToken(refreshToken);
 		const stored = await this.repo.findValidRefreshToken(tokenHash);
 
@@ -70,7 +72,14 @@ export class AuthService {
 		}
 
 		const roles = user.user_roles.map((ur: any) => ur.role.name);
-		return this.issueTokens(Number(user.id), user.email, user.name, roles);
+		return this.issueTokens(
+			Number(user.id),
+			user.email,
+			user.name,
+			roles,
+			userAgent,
+			ipAddress,
+		);
 	}
 
 	async logout(refreshToken: string): Promise<void> {
@@ -83,6 +92,25 @@ export class AuthService {
 
 	async logoutAll(userId: number): Promise<void> {
 		await this.repo.revokeAllUserRefreshTokens(BigInt(userId));
+	}
+
+	async getSessions(userId: number) {
+		const sessions = await this.repo.findActiveSessionsByUserId(BigInt(userId));
+		return sessions.map(s => ({
+			id: Number(s.id),
+			created_at: s.created_at,
+			expires_at: s.expires_at,
+			user_agent: s.user_agent,
+			ip_address: s.ip_address,
+		}));
+	}
+
+	async revokeSession(userId: number, sessionId: number): Promise<void> {
+		const revoked = await this.repo.revokeSessionById(
+			BigInt(sessionId),
+			BigInt(userId),
+		);
+		if (!revoked) throw new NotFoundException(`Session ${sessionId} not found`);
 	}
 
 	async changePassword(
@@ -109,11 +137,28 @@ export class AuthService {
 		await this.repo.revokeAllUserRefreshTokens(BigInt(userId));
 	}
 
+	private refreshExpiresMs(): number {
+		const raw = this.config.get<string>('jwt.refreshExpiresIn') ?? '7d';
+		// Parse simple duration strings: Nd, Nh, Nm, Ns
+		const match = /^(\d+)([dhms])$/.exec(raw);
+		if (!match) return 7 * 24 * 60 * 60 * 1_000;
+		const n = parseInt(match[1], 10);
+		const multipliers: Record<string, number> = {
+			d: 24 * 60 * 60 * 1_000,
+			h: 60 * 60 * 1_000,
+			m: 60 * 1_000,
+			s: 1_000,
+		};
+		return n * multipliers[match[2]];
+	}
+
 	private async issueTokens(
 		userId: number,
 		email: string,
 		name: string,
 		roles: string[],
+		userAgent?: string,
+		ipAddress?: string,
 	): Promise<TokenPair> {
 		const payload = { sub: userId, email, roles };
 
@@ -125,13 +170,14 @@ export class AuthService {
 		const rawRefreshToken = crypto.randomBytes(64).toString('hex');
 		const refreshTokenHash = this.hashToken(rawRefreshToken);
 
-		const expiresAt = new Date();
-		expiresAt.setDate(expiresAt.getDate() + 7);
+		const expiresAt = new Date(Date.now() + this.refreshExpiresMs());
 
 		await this.repo.storeRefreshToken(
 			BigInt(userId),
 			refreshTokenHash,
 			expiresAt,
+			userAgent,
+			ipAddress,
 		);
 
 		return {

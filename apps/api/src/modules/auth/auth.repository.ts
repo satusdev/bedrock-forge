@@ -46,13 +46,50 @@ export class AuthRepository {
 		});
 	}
 
-	async storeRefreshToken(userId: bigint, tokenHash: string, expiresAt: Date) {
+	async storeRefreshToken(
+		userId: bigint,
+		tokenHash: string,
+		expiresAt: Date,
+		userAgent?: string,
+		ipAddress?: string,
+	) {
 		return this.prisma.refreshToken.create({
 			data: {
 				user_id: userId,
 				token_hash: tokenHash,
 				expires_at: expiresAt,
+				user_agent: userAgent ?? null,
+				ip_address: ipAddress ?? null,
 			},
+		});
+	}
+
+	async findActiveSessionsByUserId(userId: bigint) {
+		return this.prisma.refreshToken.findMany({
+			where: {
+				user_id: userId,
+				revoked_at: null,
+				expires_at: { gt: new Date() },
+			},
+			select: {
+				id: true,
+				created_at: true,
+				expires_at: true,
+				user_agent: true,
+				ip_address: true,
+			},
+			orderBy: { created_at: 'desc' },
+		});
+	}
+
+	async revokeSessionById(id: bigint, userId: bigint) {
+		const session = await this.prisma.refreshToken.findFirst({
+			where: { id, user_id: userId, revoked_at: null },
+		});
+		if (!session) return null;
+		return this.prisma.refreshToken.update({
+			where: { id },
+			data: { revoked_at: new Date() },
 		});
 	}
 
@@ -88,7 +125,7 @@ export class AuthRepository {
 	}
 
 	async ensureDefaultRolesExist() {
-		const roles = ['admin', 'manager', 'client'];
+		const roles = ['admin', 'manager', 'maintainer', 'client'];
 		for (const name of roles) {
 			await this.prisma.role.upsert({
 				where: { name },

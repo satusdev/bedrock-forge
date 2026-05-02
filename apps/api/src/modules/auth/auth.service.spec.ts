@@ -1,7 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { UnauthorizedException, ConflictException } from '@nestjs/common';
+import { UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { AuthService } from './auth.service';
 import { AuthRepository } from './auth.repository';
@@ -25,7 +25,9 @@ const makeRepo = () => ({
 	updatePassword: jest.fn(),
 });
 
-const makeJwt = () => ({ sign: jest.fn().mockReturnValue('signed-access-token') });
+const makeJwt = () => ({
+	sign: jest.fn().mockReturnValue('signed-access-token'),
+});
 
 const makeConfig = () => ({
 	get: jest.fn().mockImplementation((key: string) => {
@@ -73,36 +75,16 @@ describe('AuthService', () => {
 
 		it('returns token pair on valid credentials', async () => {
 			const hash = await bcrypt.hash('secret', 12);
-			repo.findUserByEmail.mockResolvedValue({ ...mockUser, password_hash: hash });
+			repo.findUserByEmail.mockResolvedValue({
+				...mockUser,
+				password_hash: hash,
+			});
 			repo.storeRefreshToken.mockResolvedValue(undefined);
 
 			const result = await service.login('test@forge.local', 'secret');
 			expect(result.accessToken).toBe('signed-access-token');
 			expect(result.refreshToken).toBeDefined();
 			expect(result.user.email).toBe('test@forge.local');
-		});
-	});
-
-	describe('register', () => {
-		it('throws ConflictException if email already exists', async () => {
-			repo.findUserByEmail.mockResolvedValue(mockUser);
-			await expect(
-				service.register('test@forge.local', 'Name', 'pass'),
-			).rejects.toThrow(ConflictException);
-		});
-
-		it('creates user and returns tokens on fresh email', async () => {
-			repo.findUserByEmail.mockResolvedValue(null);
-			repo.createUser.mockResolvedValue({ ...mockUser });
-			repo.storeRefreshToken.mockResolvedValue(undefined);
-
-			const result = await service.register('new@forge.local', 'New', 'pw');
-			expect(repo.createUser).toHaveBeenCalledWith(
-				'new@forge.local',
-				'New',
-				expect.any(String),
-			);
-			expect(result.user.roles).toContain('admin');
 		});
 	});
 

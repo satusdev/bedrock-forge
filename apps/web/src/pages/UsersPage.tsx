@@ -66,8 +66,12 @@ const userSchema = z.object({
 	email: z.string().email('Invalid email'),
 	password: z
 		.string()
-		.min(8, 'Min 8 chars')
+		.min(12, 'Min 12 characters')
 		.max(128)
+		.regex(/[A-Z]/, 'Must contain an uppercase letter')
+		.regex(/[a-z]/, 'Must contain a lowercase letter')
+		.regex(/[0-9]/, 'Must contain a digit')
+		.regex(/[^A-Za-z0-9]/, 'Must contain a special character')
 		.optional()
 		.or(z.literal('')),
 	roles: z.array(z.string()).min(1, 'Pick at least one role'),

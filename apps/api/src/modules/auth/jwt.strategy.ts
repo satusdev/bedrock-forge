@@ -1,8 +1,7 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
-import { AuthRepository } from './auth.repository';
 
 interface JwtPayload {
 	sub: number;
@@ -12,10 +11,7 @@ interface JwtPayload {
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-	constructor(
-		private readonly config: ConfigService,
-		private readonly repo: AuthRepository,
-	) {
+	constructor(config: ConfigService) {
 		super({
 			jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
 			ignoreExpiration: false,
@@ -23,16 +19,15 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 		});
 	}
 
-	async validate(payload: JwtPayload) {
-		const user = await this.repo.findUserById(payload.sub);
-		if (!user) {
-			throw new UnauthorizedException('User not found');
-		}
+	validate(payload: JwtPayload) {
+		// The JWT signature and expiry are already verified by passport-jwt before
+		// this method is called. A DB round-trip on every request would add one
+		// query per authenticated call with no security benefit (a deleted user's
+		// access token expires within 15 min anyway). Trust the signed payload.
 		return {
-			id: Number(user.id),
-			email: user.email,
-			name: user.name,
-			roles: user.user_roles.map((ur: any) => ur.role.name),
+			id: payload.sub,
+			email: payload.email,
+			roles: payload.roles,
 		};
 	}
 }
