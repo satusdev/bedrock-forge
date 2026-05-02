@@ -22,7 +22,11 @@ export const useUiStore = create<UiState>()(
 	persist(
 		(set, get) => ({
 			sidebarCollapsed: false,
-			darkMode: false,
+			darkMode:
+				typeof window !== 'undefined'
+					? (window.matchMedia?.('(prefers-color-scheme: dark)').matches ??
+						false)
+					: false,
 			setSidebarCollapsed: v => set({ sidebarCollapsed: v }),
 			toggleSidebar: () =>
 				set(s => ({ sidebarCollapsed: !s.sidebarCollapsed })),

@@ -1,5 +1,5 @@
+import React, { Component, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { useEffect, lazy, Suspense } from 'react';
 import { useAuthStore } from '@/store/auth.store';
 import { api } from '@/lib/api-client';
 import { destroySocket } from '@/lib/websocket';
@@ -74,11 +74,12 @@ const ProblemsPage = lazy(() =>
 const AuditLogsPage = lazy(() =>
 	import('@/pages/AuditLogsPage').then(m => ({ default: m.AuditLogsPage })),
 );
+const SecurityPage = lazy(() =>
+	import('@/pages/SecurityPage').then(m => ({ default: m.SecurityPage })),
+);
 const NotFoundPage = lazy(() =>
 	import('@/pages/NotFoundPage').then(m => ({ default: m.NotFoundPage })),
 );
-
-import React, { Component } from 'react';
 
 class ErrorBoundary extends Component<
 	React.PropsWithChildren,
@@ -96,7 +97,8 @@ class ErrorBoundary extends Component<
 						<h2 className='text-xl font-semibold mb-2'>Something went wrong</h2>
 						{import.meta.env.DEV && this.state.error && (
 							<pre className='text-left text-xs bg-muted p-4 rounded mb-4 overflow-auto max-h-64'>
-								{(this.state.error as Error).message}\n
+								{(this.state.error as Error).message}
+								{'\n'}
 								{(this.state.error as Error).stack}
 							</pre>
 						)}
@@ -138,6 +140,18 @@ function ManagerRoute({ children }: { children: React.ReactNode }) {
 	const user = useAuthStore(s => s.user);
 	if (!user) return <Navigate to='/login' replace />;
 	return user.roles.includes('admin') || user.roles.includes('manager') ? (
+		<>{children}</>
+	) : (
+		<Navigate to='/dashboard' replace />
+	);
+}
+
+function MaintainerRoute({ children }: { children: React.ReactNode }) {
+	const user = useAuthStore(s => s.user);
+	if (!user) return <Navigate to='/login' replace />;
+	return user.roles.includes('admin') ||
+		user.roles.includes('manager') ||
+		user.roles.includes('maintainer') ? (
 		<>{children}</>
 	) : (
 		<Navigate to='/dashboard' replace />
@@ -197,7 +211,14 @@ export default function App() {
 							<Route path='monitors' element={<MonitorsPage />} />
 							<Route path='monitors/:id' element={<MonitorDetailPage />} />
 							<Route path='activity' element={<ActivityPage />} />
-							<Route path='problems' element={<ProblemsPage />} />
+							<Route
+								path='problems'
+								element={
+									<MaintainerRoute>
+										<ProblemsPage />
+									</MaintainerRoute>
+								}
+							/>
 							<Route path='settings' element={<SettingsPage />} />{' '}
 							<Route
 								path='users'
@@ -240,6 +261,14 @@ export default function App() {
 								}
 							/>
 							<Route path='domains' element={<DomainsPage />} />
+							<Route
+								path='security'
+								element={
+									<ManagerRoute>
+										<SecurityPage />
+									</ManagerRoute>
+								}
+							/>
 							<Route
 								path='audit-logs'
 								element={

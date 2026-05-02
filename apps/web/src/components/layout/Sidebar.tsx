@@ -23,6 +23,7 @@ import {
 	Moon,
 	Sun,
 	Shield,
+	ShieldAlert,
 	Package,
 	FileText,
 	Bell,
@@ -62,6 +63,12 @@ const NAV_GROUPS: NavGroup[] = [
 			{ to: '/backups', label: 'Backups', icon: HardDrive },
 			{ to: '/monitors', label: 'Monitors', icon: Activity },
 			{ to: '/domains', label: 'Domains', icon: Globe },
+			{
+				to: '/security',
+				label: 'Security',
+				icon: ShieldAlert,
+				minRole: 'manager',
+			},
 			{ to: '/activity', label: 'Activity', icon: ClipboardList },
 			{
 				to: '/problems',
@@ -310,6 +317,11 @@ export function SidebarInner({ collapsed = false }: SidebarInnerProps) {
 						</div>
 					)}
 				</div>
+				{!collapsed && (
+					<p className='px-4 pb-3 text-[10px] text-muted-foreground/40 select-none'>
+						v{__APP_VERSION__}
+					</p>
+				)}
 			</div>
 		</TooltipProvider>
 	);

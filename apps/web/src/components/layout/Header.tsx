@@ -42,6 +42,7 @@ const ROUTE_LABELS: Record<string, string> = {
 	notifications: 'Notifications',
 	problems: 'Problems',
 	reports: 'Reports',
+	security: 'Security',
 };
 
 type WsStatus = 'connected' | 'reconnecting' | 'disconnected';
@@ -145,8 +146,12 @@ function NotificationBell() {
 	const markAllMutation = useMutation({
 		mutationFn: () => api.post('/notifications/inbox/read-all', {}),
 		onSuccess: () => {
-			void queryClient.invalidateQueries({ queryKey: ['notifications-unread'] });
-			void queryClient.invalidateQueries({ queryKey: ['notifications-inbox-preview'] });
+			void queryClient.invalidateQueries({
+				queryKey: ['notifications-unread'],
+			});
+			void queryClient.invalidateQueries({
+				queryKey: ['notifications-inbox-preview'],
+			});
 		},
 	});
 
@@ -206,12 +211,18 @@ function NotificationBell() {
 								{!item.is_read && (
 									<span className='h-1.5 w-1.5 rounded-full bg-primary shrink-0' />
 								)}
-								<span className={`text-sm font-medium truncate flex-1 ${!item.is_read ? '' : 'pl-3'}`}>
+								<span
+									className={`text-sm font-medium truncate flex-1 ${!item.is_read ? '' : 'pl-3'}`}
+								>
 									{item.title}
 								</span>
-								<span className='text-xs text-muted-foreground shrink-0'>{relTime(item.created_at)}</span>
+								<span className='text-xs text-muted-foreground shrink-0'>
+									{relTime(item.created_at)}
+								</span>
 							</div>
-							<p className='text-xs text-muted-foreground line-clamp-2 pl-3'>{item.message}</p>
+							<p className='text-xs text-muted-foreground line-clamp-2 pl-3'>
+								{item.message}
+							</p>
 						</DropdownMenuItem>
 					))
 				)}
