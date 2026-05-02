@@ -11,7 +11,10 @@ import { EncryptionService } from '../../encryption/encryption.service';
 import { createRemoteExecutor } from '@bedrock-forge/remote-executor';
 import { QUEUES, JOB_TYPES, DEFAULT_JOB_OPTIONS } from '@bedrock-forge/shared';
 import { ConfigService } from '@nestjs/config';
-import { fixCyberPanelOwnership } from '../../utils/processor-utils';
+import {
+	fixCyberPanelOwnership,
+	shellQuote,
+} from '../../utils/processor-utils';
 
 const STAGING_DIR = '/tmp/forge-backups';
 
@@ -29,14 +32,6 @@ function slugify(s: string): string {
 function formatTimestamp(d: Date): string {
 	const pad = (n: number) => String(n).padStart(2, '0');
 	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
-}
-
-/**
- * Wrap a string in single quotes for safe shell embedding.
- * Single quotes inside the value are escaped as: ' -> '\''
- */
-function shellQuote(value: string): string {
-	return "'" + value.replace(/'/g, "'\\''") + "'";
 }
 
 /**
@@ -236,6 +231,9 @@ export class BackupProcessor extends WorkerHost {
 			// Attempt to retrieve stored DB credentials to pass as fallback CLI args.
 			// backup.php will prefer on-disk credentials (wp-config.php / .env) and
 			// only use these when filesystem parsing is incomplete.
+			// DB password is passed via FORGE_DB_PASS env var (not argv) to prevent
+			// exposure in `ps aux` output on the managed server.
+			let storedCredsEnv = '';
 			let storedCredsArgs = '';
 			try {
 				const storedCreds = await this.prisma.wpDbCredentials.findUnique({
@@ -248,11 +246,11 @@ export class BackupProcessor extends WorkerHost {
 						storedCreds.db_password_encrypted,
 					);
 					const dbHost = this.encryption.decrypt(storedCreds.db_host_encrypted);
-					// Shell-quote each value to handle special characters safely
+					// Pass password via env var — not visible in ps aux argv.
+					storedCredsEnv = `FORGE_DB_PASS=${shellQuote(dbPass)} `;
 					storedCredsArgs = [
 						`--db-name=${shellQuote(dbName)}`,
 						`--db-user=${shellQuote(dbUser)}`,
-						`--db-pass=${shellQuote(dbPass)}`,
 						`--db-host=${shellQuote(dbHost)}`,
 					].join(' ');
 				}
@@ -262,9 +260,12 @@ export class BackupProcessor extends WorkerHost {
 				);
 			}
 
-			const phpCmd = `php ${remoteScript} --docroot=${env.root_path} --type=${type} --output=${remoteOutput}${storedCredsArgs ? ' ' + storedCredsArgs : ''}`;
-			// Mask password in logs — never expose credentials in execution log
-			const maskedCmd = phpCmd.replace(/--db-pass='[^']*'/, "--db-pass='***'");
+			const phpCmd = `${storedCredsEnv}php ${remoteScript} --docroot=${env.root_path} --type=${type} --output=${remoteOutput}${storedCredsArgs ? ' ' + storedCredsArgs : ''}`;
+			// Mask the env var value in logs — never expose credentials in execution log
+			const maskedCmd = phpCmd.replace(
+				/FORGE_DB_PASS='[^']*'/,
+				"FORGE_DB_PASS='***'",
+			);
 			await tracker.track({
 				step: 'Executing backup script',
 				level: 'info',
@@ -517,6 +518,9 @@ export class BackupProcessor extends WorkerHost {
 		});
 
 		// ── Retrieve stored DB credentials (fallback for backup.php --restore) ──
+		// DB password is passed via FORGE_DB_PASS env var (not argv) to prevent
+		// exposure in `ps aux` output on the managed server.
+		let storedCredsEnv = '';
 		let storedCredsArgs = '';
 		try {
 			const storedCreds = await this.prisma.wpDbCredentials.findUnique({
@@ -529,10 +533,10 @@ export class BackupProcessor extends WorkerHost {
 					storedCreds.db_password_encrypted,
 				);
 				const dbHost = this.encryption.decrypt(storedCreds.db_host_encrypted);
+				storedCredsEnv = `FORGE_DB_PASS=${shellQuote(dbPass)} `;
 				storedCredsArgs = [
 					`--db-name=${shellQuote(dbName)}`,
 					`--db-user=${shellQuote(dbUser)}`,
-					`--db-pass=${shellQuote(dbPass)}`,
 					`--db-host=${shellQuote(dbHost)}`,
 				].join(' ');
 			}
@@ -680,10 +684,10 @@ export class BackupProcessor extends WorkerHost {
 				}
 			}
 
-			const restoreCmd = `php ${remoteScript} --restore --file=${remoteBackupPath} --docroot=${env.root_path}${storedCredsArgs ? ' ' + storedCredsArgs : ''}`;
+			const restoreCmd = `${storedCredsEnv}php ${remoteScript} --restore --file=${remoteBackupPath} --docroot=${env.root_path}${storedCredsArgs ? ' ' + storedCredsArgs : ''}`;
 			const maskedCmd = restoreCmd.replace(
-				/--db-pass='[^']*'/,
-				"--db-pass='***'",
+				/FORGE_DB_PASS='[^']*'/,
+				"FORGE_DB_PASS='***'",
 			);
 
 			await tracker.track({

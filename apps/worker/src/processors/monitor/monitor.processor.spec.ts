@@ -103,10 +103,9 @@ describe('MonitorProcessor', () => {
 		expect(prisma.monitorResult.create).not.toHaveBeenCalled();
 	});
 
-	it('creates a JobExecution at the start of every check', async () => {
+	it('does NOT create a JobExecution row (monitors run too frequently)', async () => {
 		prisma.monitor.findUnique.mockResolvedValue(baseMonitor());
 		const job = { id: 'j1', data: { monitorId: 1 } } as any;
-		// Fail both attempts immediately (skip real network + 5 s retry delay)
 		jest
 			.spyOn(processor as any, 'checkHttp')
 			.mockRejectedValue(new Error('ECONNREFUSED'));
@@ -115,15 +114,7 @@ describe('MonitorProcessor', () => {
 			return 0 as unknown as ReturnType<typeof setTimeout>;
 		});
 		await processor.process(job).catch(() => {});
-		expect(prisma.jobExecution.create).toHaveBeenCalledWith(
-			expect.objectContaining({
-				data: expect.objectContaining({
-					queue_name: QUEUES.MONITORS,
-					bull_job_id: 'j1',
-					status: 'active',
-				}),
-			}),
-		);
+		expect(prisma.jobExecution.create).not.toHaveBeenCalled();
 	});
 
 	it('does NOT fire notification when there is no previous state', async () => {
@@ -238,7 +229,7 @@ describe('MonitorProcessor', () => {
 		);
 	});
 
-	it('marks execution completed when site is up', async () => {
+	it('does not update JobExecution when site is up (no tracking in monitor processor)', async () => {
 		const monitor = baseMonitor();
 		prisma.monitor.findUnique.mockResolvedValue(monitor);
 		jest
@@ -248,14 +239,10 @@ describe('MonitorProcessor', () => {
 		const job = { id: 'j5', data: { monitorId: 1 } } as any;
 		await processor.process(job);
 
-		expect(prisma.jobExecution.update).toHaveBeenCalledWith(
-			expect.objectContaining({
-				data: expect.objectContaining({ status: 'completed', progress: 100 }),
-			}),
-		);
+		expect(prisma.jobExecution.update).not.toHaveBeenCalled();
 	});
 
-	it('marks execution failed when site is down', async () => {
+	it('does not update JobExecution when site is down (no tracking in monitor processor)', async () => {
 		const monitor = baseMonitor();
 		prisma.monitor.findUnique.mockResolvedValue(monitor);
 		jest
@@ -265,10 +252,6 @@ describe('MonitorProcessor', () => {
 		const job = { id: 'j6', data: { monitorId: 1 } } as any;
 		await processor.process(job);
 
-		expect(prisma.jobExecution.update).toHaveBeenCalledWith(
-			expect.objectContaining({
-				data: expect.objectContaining({ status: 'failed' }),
-			}),
-		);
+		expect(prisma.jobExecution.update).not.toHaveBeenCalled();
 	});
 });

@@ -42,50 +42,65 @@ export class NotificationProcessor extends WorkerHost {
 
 		const { WebClient } = await import('@slack/web-api');
 
-		for (const channel of channels) {
-			let status: 'sent' | 'failed' = 'failed';
-			let error: string | undefined;
+		await Promise.allSettled(
+			channels.map(channel =>
+				this.sendToChannel(channel, eventType, payload, WebClient),
+			),
+		);
+	}
 
-			try {
-				if (!channel.slack_bot_token_enc || !channel.slack_channel_id) {
-					throw new Error('Missing bot token or channel ID');
-				}
+	private async sendToChannel(
+		channel: {
+			id: bigint;
+			name: string;
+			slack_bot_token_enc: string | null;
+			slack_channel_id: string | null;
+		},
+		eventType: string,
+		payload: Record<string, unknown>,
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		WebClient: any,
+	): Promise<void> {
+		let status: 'sent' | 'failed' = 'failed';
+		let error: string | undefined;
 
-				const token = this.encryption.decrypt(channel.slack_bot_token_enc);
-				const slack = new WebClient(token);
-
-				const text = this.buildMessage(eventType, payload);
-
-				await slack.chat.postMessage({
-					channel: channel.slack_channel_id,
-					text,
-				});
-
-				status = 'sent';
-				this.logger.log(
-					`Slack notification sent to channel ${channel.name} for ${eventType}`,
-				);
-			} catch (err: unknown) {
-				const raw = err instanceof Error ? err.message : String(err);
-				error = raw.includes('channel_not_found')
-					? `channel_not_found: Bot is not a member of the private channel "${channel.slack_channel_id}". Invite the bot via /invite @BotName in Slack.`
-					: raw;
-				this.logger.error(
-					`Failed to send Slack notification to channel ${channel.name}: ${error}`,
-				);
+		try {
+			if (!channel.slack_bot_token_enc || !channel.slack_channel_id) {
+				throw new Error('Missing bot token or channel ID');
 			}
 
-			// Always log result regardless of success/failure
-			await this.prisma.notificationLog.create({
-				data: {
-					channel_id: channel.id,
-					event_type: eventType,
-					payload: payload as Record<string, never>,
-					status,
-					error: error ?? null,
-				},
+			const token = this.encryption.decrypt(channel.slack_bot_token_enc);
+			const slack = new WebClient(token);
+			const text = this.buildMessage(eventType, payload);
+
+			await slack.chat.postMessage({
+				channel: channel.slack_channel_id,
+				text,
 			});
+
+			status = 'sent';
+			this.logger.log(
+				`Slack notification sent to channel ${channel.name} for ${eventType}`,
+			);
+		} catch (err: unknown) {
+			const raw = err instanceof Error ? err.message : String(err);
+			error = raw.includes('channel_not_found')
+				? `channel_not_found: Bot is not a member of the private channel "${channel.slack_channel_id}". Invite the bot via /invite @BotName in Slack.`
+				: raw;
+			this.logger.error(
+				`Failed to send Slack notification to channel ${channel.name}: ${error}`,
+			);
 		}
+
+		await this.prisma.notificationLog.create({
+			data: {
+				channel_id: channel.id,
+				event_type: eventType,
+				payload: payload as Record<string, never>,
+				status,
+				error: error ?? null,
+			},
+		});
 	}
 
 	private async createInAppNotification(
@@ -100,6 +115,8 @@ export class NotificationProcessor extends WorkerHost {
 			'monitor.ssl_expiry',
 			'monitor.dns_failed',
 			'invoice.overdue',
+			'security.critical_found',
+			'security.high_found',
 		]);
 
 		if (!ALERT_EVENTS.has(eventType)) return;
@@ -128,7 +145,9 @@ export class NotificationProcessor extends WorkerHost {
 				})),
 			});
 		} catch (err: unknown) {
-			this.logger.error(`Failed to create in-app notification: ${err instanceof Error ? err.message : String(err)}`);
+			this.logger.error(
+				`Failed to create in-app notification: ${err instanceof Error ? err.message : String(err)}`,
+			);
 		}
 	}
 
@@ -172,8 +191,21 @@ export class NotificationProcessor extends WorkerHost {
 					title: 'Invoice overdue',
 					message: `Invoice ${payload.invoiceNumber ?? '?'} is overdue (€${payload.totalAmount ?? '?'})`,
 				};
+			case 'security.critical_found':
+				return {
+					title: 'Security: Critical findings',
+					message: `Security scan found ${(payload.summary as Record<string, number>)?.critical ?? '?'} critical issue(s) — score: ${payload.score ?? '?'}`,
+				};
+			case 'security.high_found':
+				return {
+					title: 'Security: High severity findings',
+					message: `Security scan found high severity issues — score: ${payload.score ?? '?'}`,
+				};
 			default:
-				return { title: eventType, message: JSON.stringify(payload).slice(0, 200) };
+				return {
+					title: eventType,
+					message: JSON.stringify(payload).slice(0, 200),
+				};
 		}
 	}
 
@@ -239,6 +271,36 @@ export class NotificationProcessor extends WorkerHost {
 					`Client: ${payload.clientName ?? '?'} | Amount: €${payload.totalAmount ?? '?'}`,
 				);
 				break;
+			case 'security.critical_found': {
+				const s = payload.summary as Record<string, number> | undefined;
+				lines.push(
+					`🚨 Security scan: CRITICAL findings detected`,
+					`Critical: ${s?.critical ?? 0} | High: ${s?.high ?? 0} | Medium: ${s?.medium ?? 0} | Score: ${payload.score ?? '?'}`,
+					payload.serverId
+						? `Server ID: ${payload.serverId}`
+						: `Environment ID: ${payload.environmentId}`,
+				);
+				break;
+			}
+			case 'security.high_found': {
+				const s = payload.summary as Record<string, number> | undefined;
+				lines.push(
+					`⚠️ Security scan: High severity findings`,
+					`High: ${s?.high ?? 0} | Medium: ${s?.medium ?? 0} | Score: ${payload.score ?? '?'}`,
+					payload.serverId
+						? `Server ID: ${payload.serverId}`
+						: `Environment ID: ${payload.environmentId}`,
+				);
+				break;
+			}
+			case 'security.scan_completed': {
+				const s = payload.summary as Record<string, number> | undefined;
+				lines.push(
+					`✅ Security scan completed`,
+					`Score: ${payload.score ?? '?'} | Info: ${s?.info ?? 0}`,
+				);
+				break;
+			}
 			case 'user.registered':
 				lines.push(`👤 New user registered: ${payload.email ?? '?'}`);
 				break;

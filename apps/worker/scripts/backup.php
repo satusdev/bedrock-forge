@@ -22,7 +22,10 @@ $file    = $opts['file'] ?? null;
 // Stored credential overrides — used as fallback when on-disk parsing fails
 $cliDbName = $opts['db-name'] ?? null;
 $cliDbUser = $opts['db-user'] ?? null;
-$cliDbPass = $opts['db-pass'] ?? null;
+// db-pass is read from the FORGE_DB_PASS environment variable (set by the worker
+// as a shell env var prefix, not as argv) to prevent exposure in `ps aux` output.
+// Fall back to --db-pass CLI arg for backward compatibility only.
+$cliDbPass = (getenv('FORGE_DB_PASS') !== false ? getenv('FORGE_DB_PASS') : null) ?? ($opts['db-pass'] ?? null);
 $cliDbHost = $opts['db-host'] ?? null;
 
 if (!$docroot || !is_dir($docroot)) {

@@ -49,19 +49,6 @@ export class MonitorProcessor extends WorkerHost {
 		});
 		if (!monitor) return;
 
-		// Create a JobExecution row so monitor checks appear in the activity feed
-		const execution = await this.prisma.jobExecution.create({
-			data: {
-				queue_name: QUEUES.MONITORS,
-				bull_job_id: String(job.id),
-				job_type: JOB_TYPES.MONITOR_CHECK,
-				environment_id: monitor.environment_id,
-				status: 'active',
-				started_at: checkedAt,
-				payload: { monitorId },
-			},
-		});
-
 		// Capture previous state before running the check
 		const prevIsUp =
 			monitor.last_checked_at !== null && monitor.last_status !== null
@@ -336,16 +323,7 @@ export class MonitorProcessor extends WorkerHost {
 			});
 		}
 
-		// Mark JobExecution as completed
-		await this.prisma.jobExecution.update({
-			where: { id: execution.id },
-			data: {
-				status: isUp ? 'completed' : 'failed',
-				last_error: isUp ? null : `HTTP ${statusCode ?? 0} — site unreachable`,
-				progress: 100,
-				completed_at: new Date(),
-			},
-		});
+		// ── Notifications: status transitions ───────────────────────────────────────
 	}
 
 	// ── Private helpers ───────────────────────────────────────────────────────
