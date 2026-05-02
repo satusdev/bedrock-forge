@@ -57,42 +57,41 @@ export class EnvironmentsService {
 		return env;
 	}
 
-	create(projectId: number, dto: CreateEnvironmentDto) {
-		return this.repo.create(BigInt(projectId), dto).then(async env => {
-			// Store DB credentials extracted during server scan (if provided)
-			if (dto.db_credentials) {
-				try {
-					await this.repo.upsertDbCredentials(env.id, dto.db_credentials);
-				} catch (err) {
-					this.logger.warn(
-						`Failed to store DB credentials for env ${env.id}: ${err}`,
-					);
-				}
-			}
-			// Auto-create a monitor for the new environment
+	async create(projectId: number, dto: CreateEnvironmentDto) {
+		const env = await this.repo.create(BigInt(projectId), dto);
+		// Store DB credentials extracted during server scan (if provided)
+		if (dto.db_credentials) {
 			try {
-				await this.monitorsService.create({
-					environment_id: Number(env.id),
-					interval_seconds: 600,
-					enabled: true,
-				});
+				await this.repo.upsertDbCredentials(env.id, dto.db_credentials);
 			} catch (err) {
 				this.logger.warn(
-					`Failed to auto-create monitor for env ${env.id}: ${err}`,
+					`Failed to store DB credentials for env ${env.id}: ${err}`,
 				);
 			}
-			// Auto-create a domain record from the registrable root domain
-			try {
-				const hostname = new URL(dto.url).hostname;
-				const domain = this.extractRegistrableDomain(hostname);
-				await this.domainsService.findOrCreate(domain);
-			} catch (err) {
-				this.logger.warn(
-					`Failed to auto-create domain for env ${env.id}: ${err}`,
-				);
-			}
-			return env;
-		});
+		}
+		// Auto-create a monitor for the new environment
+		try {
+			await this.monitorsService.create({
+				environment_id: Number(env.id),
+				interval_seconds: 600,
+				enabled: true,
+			});
+		} catch (err) {
+			this.logger.warn(
+				`Failed to auto-create monitor for env ${env.id}: ${err}`,
+			);
+		}
+		// Auto-create a domain record from the registrable root domain
+		try {
+			const hostname = new URL(dto.url).hostname;
+			const domain = this.extractRegistrableDomain(hostname);
+			await this.domainsService.findOrCreate(domain);
+		} catch (err) {
+			this.logger.warn(
+				`Failed to auto-create domain for env ${env.id}: ${err}`,
+			);
+		}
+		return env;
 	}
 
 	async update(id: number, dto: UpdateEnvironmentDto) {

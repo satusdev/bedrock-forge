@@ -162,7 +162,10 @@ export class CyberpanelService {
 						'Content-Type': 'application/json',
 						'Content-Length': Buffer.byteLength(serialized),
 					},
-					rejectUnauthorized: false,
+					// Default: verify TLS certificates. Set CYBERPANEL_TLS_VERIFY=false only
+					// when the CyberPanel instance uses a self-signed cert that cannot be
+					// replaced — understand that this opens the connection to MITM attacks.
+					rejectUnauthorized: process.env['CYBERPANEL_TLS_VERIFY'] !== 'false',
 				};
 				const req = isHttps
 					? httpsRequest(opts, handler)

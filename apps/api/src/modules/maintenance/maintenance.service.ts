@@ -118,6 +118,10 @@ export class MaintenanceService implements OnApplicationBootstrap {
 					completed_at: { lt: days90 },
 				},
 			}),
+			// In-app user notifications — unbounded without a TTL
+			this.prisma.userNotification.deleteMany({
+				where: { created_at: { lt: days90 } },
+			}),
 		]);
 
 		const labels = [
@@ -125,6 +129,7 @@ export class MaintenanceService implements OnApplicationBootstrap {
 			'notification logs',
 			'audit logs',
 			'job executions',
+			'user notifications',
 		];
 		results.forEach((r, i) => {
 			if (r.status === 'fulfilled') {
@@ -175,6 +180,7 @@ export class MaintenanceService implements OnApplicationBootstrap {
 		schedule: {
 			frequency: string;
 			hour: number;
+			minute: number;
 			day_of_week: number | null;
 			day_of_month: number | null;
 			last_run_at: Date | null;
@@ -182,6 +188,7 @@ export class MaintenanceService implements OnApplicationBootstrap {
 		now: Date,
 	): boolean {
 		if (schedule.hour !== now.getUTCHours()) return false;
+		if (schedule.minute !== now.getUTCMinutes()) return false;
 
 		const elapsed = schedule.last_run_at
 			? now.getTime() - schedule.last_run_at.getTime()

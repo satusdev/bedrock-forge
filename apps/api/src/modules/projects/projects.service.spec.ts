@@ -130,9 +130,7 @@ describe('ProjectsService', () => {
 			expect(monitorsService.create).toHaveBeenCalledWith(
 				expect.objectContaining({ environment_id: 10, enabled: true }),
 			);
-			expect(domainsService.findOrCreate).toHaveBeenCalledWith(
-				expect.objectContaining({ name: 'mysite.com', project_id: 1 }),
-			);
+			expect(domainsService.findOrCreate).toHaveBeenCalledWith('mysite.com');
 			expect(result).toEqual({ project, environment });
 		});
 
@@ -228,9 +226,7 @@ describe('ProjectsService', () => {
 
 			// domain.findOrCreate called once with mainDomain (subdomain is skipped in favour of apex)
 			expect(domainsService.findOrCreate).toHaveBeenCalledTimes(1);
-			expect(domainsService.findOrCreate).toHaveBeenCalledWith(
-				expect.objectContaining({ name: 'mysite.com', project_id: 1 }),
-			);
+			expect(domainsService.findOrCreate).toHaveBeenCalledWith('mysite.com');
 		});
 
 		it('still completes when monitor/domain creation fails for one entry', async () => {

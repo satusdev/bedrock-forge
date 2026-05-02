@@ -9,10 +9,7 @@ import {
 	ArrayNotEmpty,
 } from 'class-validator';
 import { PartialType } from '@nestjs/mapped-types';
-import {
-	ALL_NOTIFICATION_EVENTS,
-	NotificationEventType,
-} from '@bedrock-forge/shared';
+import type { NotificationEventType } from '@bedrock-forge/shared';
 
 export class CreateChannelDto {
 	@IsString()

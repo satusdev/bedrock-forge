@@ -17,9 +17,13 @@ export class DashboardService {
 			failedJobs24h,
 		} = await this.repo.getSummaryData();
 
-		const monitorsUp = monitors.filter(m => m.last_status === 200).length;
+		const monitorsUp = monitors.filter(
+			m =>
+				m.last_status !== null && m.last_status >= 200 && m.last_status < 400,
+		).length;
 		const monitorsDown = monitors.filter(
-			m => m.last_status !== null && m.last_status !== 200,
+			m =>
+				m.last_status !== null && (m.last_status < 200 || m.last_status >= 400),
 		).length;
 		const avgUptime =
 			monitors.length > 0
@@ -29,17 +33,35 @@ export class DashboardService {
 					) / monitors.length
 				: null;
 
-		const mapJob = (j: { id: bigint; queue_name: string; job_type: string | null; status: string; progress: number; last_error?: string | null; payload?: unknown; created_at: Date; environment?: { id?: bigint; url: string; project?: { id: bigint; name: string } } | null }) => ({
+		const mapJob = (j: {
+			id: bigint;
+			queue_name: string;
+			job_type: string | null;
+			status: string;
+			progress: number;
+			last_error?: string | null;
+			payload?: unknown;
+			created_at: Date;
+			environment?: {
+				id?: bigint;
+				url: string;
+				project?: { id: bigint; name: string };
+			} | null;
+		}) => ({
 			...j,
 			id: Number(j.id),
-			environment: j.environment ? {
-				...j.environment,
-				id: j.environment.id ? Number(j.environment.id) : undefined,
-				project: j.environment.project ? {
-					...j.environment.project,
-					id: Number(j.environment.project.id),
-				} : undefined,
-			} : null,
+			environment: j.environment
+				? {
+						...j.environment,
+						id: j.environment.id ? Number(j.environment.id) : undefined,
+						project: j.environment.project
+							? {
+									...j.environment.project,
+									id: Number(j.environment.project.id),
+								}
+							: undefined,
+					}
+				: null,
 		});
 
 		return {
@@ -71,4 +93,3 @@ export class DashboardService {
 		return this.repo.get24hSummary();
 	}
 }
-

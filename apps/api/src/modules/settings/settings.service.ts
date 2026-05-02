@@ -24,22 +24,17 @@ export class SettingsService {
 	async get(key: string) {
 		const s = await this.repo.findByKey(key);
 		if (!s) return null;
+		// Never return plaintext for sensitive keys via the generic get() accessor.
+		// Use getDecrypted() internally or hasEncrypted() for UI existence checks.
 		if (SENSITIVE_KEYS.has(key)) {
-			try {
-				return { key: s.key, value: this.enc.decrypt(s.value) };
-			} catch {
-				// Backward-compat: legacy plaintext value (pre-encryption migration).
-				return { key: s.key, value: s.value };
-			}
+			return { key: s.key, has_value: true };
 		}
 		return { key: s.key, value: s.value };
 	}
 
 	async set(key: string, value: string) {
 		// Auto-encrypt sensitive values so callers don't need to know about encryption.
-		const stored = SENSITIVE_KEYS.has(key)
-			? this.enc.encrypt(value)
-			: value;
+		const stored = SENSITIVE_KEYS.has(key) ? this.enc.encrypt(value) : value;
 		return this.repo.upsert(key, stored);
 	}
 

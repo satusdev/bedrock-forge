@@ -123,9 +123,7 @@ describe('EnvironmentsService', () => {
 
 			await svc.create(10, { ...baseDto, url: 'https://mysite.com/wp-admin' });
 
-			expect(domainsService.findOrCreate).toHaveBeenCalledWith(
-				expect.objectContaining({ name: 'mysite.com', project_id: 10 }),
-			);
+			expect(domainsService.findOrCreate).toHaveBeenCalledWith('mysite.com');
 		});
 
 		it('stores DB credentials when provided', async () => {

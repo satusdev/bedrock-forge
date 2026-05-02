@@ -29,7 +29,7 @@ export class ReportsService implements OnModuleInit {
 		// Re-register repeatable job if schedule was previously configured
 		try {
 			const stored = await this.settings.get(SCHEDULE_KEY);
-			if (stored) {
+			if (stored && stored.value) {
 				const config = JSON.parse(stored.value) as ReportScheduleConfig;
 				if (config.enabled) {
 					await this.registerRepeatableJob(config);
@@ -45,7 +45,7 @@ export class ReportsService implements OnModuleInit {
 
 	async getConfig(): Promise<ReportScheduleConfig | null> {
 		const s = await this.settings.get(SCHEDULE_KEY);
-		return s ? (JSON.parse(s.value) as ReportScheduleConfig) : null;
+		return s?.value ? (JSON.parse(s.value) as ReportScheduleConfig) : null;
 	}
 
 	async updateConfig(
