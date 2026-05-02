@@ -33,15 +33,27 @@ export class AuditInterceptor implements NestInterceptor {
 		if (req.method === 'GET') return next.handle();
 
 		return next.handle().pipe(
-			tap(() => {
-				this.writeLog(req).catch(err =>
-					this.logger.warn(`Audit log write failed: ${err?.message}`),
-				);
+			tap({
+				next: () => {
+					this.writeLog(req, 'success').catch(err =>
+						this.logger.warn(`Audit log write failed: ${err?.message}`),
+					);
+				},
+				error: (err: unknown) => {
+					const errMsg = err instanceof Error ? err.message : String(err);
+					this.writeLog(req, 'failure', errMsg).catch(e =>
+						this.logger.warn(`Audit log write failed: ${e?.message}`),
+					);
+				},
 			}),
 		);
 	}
 
-	private async writeLog(req: Request): Promise<void> {
+	private async writeLog(
+		req: Request,
+		outcome: 'success' | 'failure' = 'success',
+		errorMsg?: string,
+	): Promise<void> {
 		const user = (req as Request & { user?: { id: number; email: string } })
 			.user;
 
@@ -60,6 +72,8 @@ export class AuditInterceptor implements NestInterceptor {
 					method: req.method,
 					path: req.path,
 					userEmail: user?.email ?? null,
+					outcome,
+					...(errorMsg ? { error: errorMsg } : {}),
 				},
 			},
 		});
