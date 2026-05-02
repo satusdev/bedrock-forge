@@ -20,10 +20,11 @@ model User {
   created_at    DateTime  @default(now()) @db.Timestamptz()
   updated_at    DateTime  @updatedAt @db.Timestamptz()
 
-  user_roles     UserRole[]
-  refresh_tokens RefreshToken[]
-  audit_logs     AuditLog[]
-  notifications  UserNotification[]
+  user_roles          UserRole[]
+  refresh_tokens      RefreshToken[]
+  audit_logs          AuditLog[]
+  notifications       UserNotification[]
+  finding_acks        SecurityFindingAck[]
 
   @@map("users")
 }
@@ -57,6 +58,8 @@ model RefreshToken {
   expires_at  DateTime  @db.Timestamptz()
   revoked_at  DateTime? @db.Timestamptz()
   created_at  DateTime  @default(now()) @db.Timestamptz()
+  user_agent  String?   @db.Text
+  ip_address  String?   @db.VarChar(45)
 
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
@@ -176,8 +179,11 @@ model Server {
   created_at              DateTime @default(now()) @db.Timestamptz()
   updated_at              DateTime @updatedAt @db.Timestamptz()
 
-  environments   Environment[]
-  job_executions JobExecution[]
+  environments             Environment[]
+  job_executions           JobExecution[]
+  security_scans           SecurityScan[]
+  security_scan_schedules  SecurityScanSchedule[]
+  finding_acks             SecurityFindingAck[]
 
   @@map("servers")
 }
@@ -241,8 +247,11 @@ model Environment {
   backup_schedule        BackupSchedule?
   plugin_update_schedule PluginUpdateSchedule?
   cleanup_schedule       CleanupSchedule?
-  environment_tags       EnvironmentTag[]
-  custom_plugins         EnvironmentCustomPlugin[]
+  environment_tags          EnvironmentTag[]
+  custom_plugins            EnvironmentCustomPlugin[]
+  security_scans            SecurityScan[]
+  security_scan_schedules   SecurityScanSchedule?
+  finding_acks              SecurityFindingAck[]
 
   @@index([project_id])
   @@index([server_id])
@@ -726,4 +735,104 @@ model AuditLog {
   @@index([resource_type, resource_id])
   @@index([created_at])
   @@map("audit_logs")
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// SECURITY
+// ──────────────────────────────────────────────────────────────────────────────
+
+enum SecurityScanType {
+  SSH_AUDIT
+  SERVER_HARDENING
+  MALWARE_SCAN
+  WP_AUDIT
+  PROJECT_MALWARE
+}
+
+enum SecurityScanStatus {
+  pending
+  running
+  completed
+  failed
+}
+
+model SecurityScan {
+  id               BigInt             @id @default(autoincrement())
+  scan_type        SecurityScanType
+  status           SecurityScanStatus @default(pending)
+  server_id        BigInt?
+  environment_id   BigInt?
+  job_execution_id BigInt?
+  score            Int?               // 0-100, null until scan completes
+  summary          Json?              // { critical: N, high: N, medium: N, low: N, info: N }
+  findings         Json?              // SecurityFinding[]
+  error            String?
+  started_at       DateTime?          @db.Timestamptz()
+  completed_at     DateTime?          @db.Timestamptz()
+  created_at       DateTime           @default(now()) @db.Timestamptz()
+  updated_at       DateTime           @updatedAt @db.Timestamptz()
+
+  server      Server?      @relation(fields: [server_id], references: [id], onDelete: Cascade)
+  environment Environment? @relation(fields: [environment_id], references: [id], onDelete: Cascade)
+
+  @@index([server_id])
+  @@index([environment_id])
+  @@index([scan_type])
+  @@index([status])
+  @@index([created_at])
+  @@map("security_scans")
+}
+
+enum SecuritySeverity {
+  critical
+  high
+  medium
+  low
+  info
+}
+
+model SecurityScanSchedule {
+  id               BigInt            @id @default(autoincrement())
+  server_id        BigInt?           @unique
+  environment_id   BigInt?           @unique
+  scan_types       String[]          // SecurityScanType[]
+  frequency        String            // 'daily' | 'weekly' | 'monthly'
+  hour             Int               @default(2)
+  minute           Int               @default(0)
+  day_of_week      Int?              // 0=Sun..6=Sat (weekly only)
+  day_of_month     Int?              // 1-28 (monthly only)
+  enabled          Boolean           @default(true)
+  last_run_at      DateTime?         @db.Timestamptz()
+  notify_enabled   Boolean           @default(false)
+  notify_threshold SecuritySeverity  @default(critical)
+  created_at       DateTime          @default(now()) @db.Timestamptz()
+  updated_at       DateTime          @updatedAt @db.Timestamptz()
+
+  server      Server?      @relation(fields: [server_id], references: [id], onDelete: Cascade)
+  environment Environment? @relation(fields: [environment_id], references: [id], onDelete: Cascade)
+
+  @@index([enabled])
+  @@map("security_scan_schedules")
+}
+
+// Acknowledged (reviewed/accepted-risk) security findings.
+// Keyed by scope_key + category + title — persists across rescans.
+model SecurityFindingAck {
+  id               BigInt   @id @default(autoincrement())
+  scope_key        String   @db.VarChar(64)  // "server:123" or "environment:456"
+  category         String   @db.VarChar(64)
+  title            String   @db.VarChar(256)
+  server_id        BigInt?
+  environment_id   BigInt?
+  acknowledged_by  BigInt
+  note             String?  @db.Text
+  created_at       DateTime @default(now()) @db.Timestamptz()
+
+  user        User         @relation(fields: [acknowledged_by], references: [id], onDelete: Cascade)
+  server      Server?      @relation(fields: [server_id], references: [id], onDelete: Cascade)
+  environment Environment? @relation(fields: [environment_id], references: [id], onDelete: Cascade)
+
+  @@unique([scope_key, category, title])
+  @@index([scope_key])
+  @@map("security_finding_acks")
 }

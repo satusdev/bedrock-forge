@@ -3,7 +3,9 @@ import { APP_GUARD, APP_INTERCEPTOR, APP_FILTER } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis';
 import { ScheduleModule } from '@nestjs/schedule';
+import { MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
@@ -37,6 +39,9 @@ import { CleanupSchedulesModule } from './modules/cleanup-schedules/cleanup-sche
 import { CustomPluginsModule } from './modules/custom-plugins/custom-plugins.module';
 import { SystemBackupsModule } from './modules/system-backups/system-backups.module';
 import { ThemeScansModule } from './modules/theme-scans/theme-scans.module';
+import { SecurityModule } from './modules/security/security.module';
+import { IpAllowlistMiddleware } from './common/middleware/ip-allowlist.middleware';
+import { SettingsRepository } from './modules/settings/settings.repository';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { QUEUES } from '@bedrock-forge/shared';
@@ -51,11 +56,14 @@ import appConfig from './config/app.config';
 			envFilePath: ['.env'],
 		}),
 
-		// Redis-backed rate limiting
+		// Redis-backed rate limiting (counter state survives restarts / scales horizontally)
 		ThrottlerModule.forRootAsync({
 			inject: [ConfigService],
-			useFactory: () => ({
+			useFactory: (config: ConfigService) => ({
 				throttlers: [{ ttl: 60_000, limit: 100 }],
+				storage: new ThrottlerStorageRedisService(
+					config.get<string>('redis.url')!,
+				),
 			}),
 		}),
 
@@ -93,6 +101,7 @@ import appConfig from './config/app.config';
 			{ name: QUEUES.CUSTOM_PLUGINS },
 			{ name: QUEUES.SYSTEM_BACKUPS },
 			{ name: QUEUES.THEME_SCANS },
+			{ name: QUEUES.SECURITY },
 		),
 
 		// Infrastructure
@@ -131,6 +140,7 @@ import appConfig from './config/app.config';
 		CustomPluginsModule,
 		SystemBackupsModule,
 		ThemeScansModule,
+		SecurityModule,
 	],
 	providers: [
 		// Global rate limiting — 100 req/min per IP (ThrottlerModule configured above)
@@ -139,6 +149,14 @@ import appConfig from './config/app.config';
 		{ provide: APP_FILTER, useClass: HttpExceptionFilter },
 		// Global audit trail — logs all non-GET requests to audit_logs
 		{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
+		IpAllowlistMiddleware,
+		SettingsRepository,
 	],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+	configure(consumer: MiddlewareConsumer) {
+		// Health endpoint sits outside the /api prefix (excluded in main.ts via setGlobalPrefix).
+		// The exclusion pattern must match the actual path — NOT the prefixed path.
+		consumer.apply(IpAllowlistMiddleware).exclude('/health').forRoutes('*');
+	}
+}

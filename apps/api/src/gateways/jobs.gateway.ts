@@ -54,6 +54,15 @@ export class JobsGateway
 	private pluginScansQueueEvents!: QueueEvents;
 	private syncQueueEvents!: QueueEvents;
 	private monitorsQueueEvents!: QueueEvents;
+	private securityQueueEvents!: QueueEvents;
+	private themeScansQueueEvents!: QueueEvents;
+	private wpActionsQueueEvents!: QueueEvents;
+	private customPluginsQueueEvents!: QueueEvents;
+	private systemBackupsQueueEvents!: QueueEvents;
+	private pluginUpdatesQueueEvents!: QueueEvents;
+	private notificationsQueueEvents!: QueueEvents;
+	private domainsQueueEvents!: QueueEvents;
+	private reportsQueueEvents!: QueueEvents;
 
 	constructor(
 		private readonly jwtService: JwtService,
@@ -284,9 +293,460 @@ export class JobsGateway
 			this.emitMonitorResult({ environmentId: envId });
 		});
 
-		this.logger.log(
-			'BullMQ QueueEvents bridge initialised for backups, projects, plugin-scans, sync, monitors queues',
+		// ── Security queue bridge ─────────────────────────────────────────────
+		this.securityQueueEvents = new QueueEvents(QUEUES.SECURITY, {
+			connection: { url: redisUrl },
+		});
+		this.securityQueueEvents.on('progress', async ({ jobId, data }) => {
+			const isObj = typeof data === 'object' && data !== null;
+			const progress =
+				typeof data === 'number'
+					? data
+					: ((data as { value?: number })?.value ?? 0);
+			const step = isObj ? (data as { step?: string })?.step : undefined;
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobProgress({
+				jobId,
+				queueName: QUEUES.SECURITY,
+				progress,
+				step,
+				environmentId: envId,
+			});
+		});
+		this.securityQueueEvents.on('completed', async ({ jobId }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobCompleted({
+				jobId,
+				queueName: QUEUES.SECURITY,
+				environmentId: envId,
+			});
+		});
+		this.securityQueueEvents.on('failed', async ({ jobId, failedReason }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobFailed({
+				jobId,
+				queueName: QUEUES.SECURITY,
+				error: failedReason,
+				attempt: 1,
+				environmentId: envId,
+			});
+		});
+		this.securityQueueEvents.on('stalled', async ({ jobId }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobFailed({
+				jobId,
+				queueName: QUEUES.SECURITY,
+				error: 'Job stalled — worker may have crashed',
+				attempt: 1,
+				environmentId: envId,
+			});
+		});
+
+		// ── Theme scans queue bridge ──────────────────────────────────────────
+		this.themeScansQueueEvents = new QueueEvents(QUEUES.THEME_SCANS, {
+			connection: { url: redisUrl },
+		});
+		this.themeScansQueueEvents.on('progress', async ({ jobId, data }) => {
+			const isObj = typeof data === 'object' && data !== null;
+			const progress =
+				typeof data === 'number'
+					? data
+					: ((data as { value?: number })?.value ?? 0);
+			const step = isObj ? (data as { step?: string })?.step : undefined;
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobProgress({
+				jobId,
+				queueName: QUEUES.THEME_SCANS,
+				progress,
+				step,
+				environmentId: envId,
+			});
+		});
+		this.themeScansQueueEvents.on('completed', async ({ jobId }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobCompleted({
+				jobId,
+				queueName: QUEUES.THEME_SCANS,
+				environmentId: envId,
+			});
+		});
+		this.themeScansQueueEvents.on('failed', async ({ jobId, failedReason }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobFailed({
+				jobId,
+				queueName: QUEUES.THEME_SCANS,
+				error: failedReason,
+				attempt: 1,
+				environmentId: envId,
+			});
+		});
+		this.themeScansQueueEvents.on('stalled', async ({ jobId }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobFailed({
+				jobId,
+				queueName: QUEUES.THEME_SCANS,
+				error: 'Job stalled — worker may have crashed',
+				attempt: 1,
+				environmentId: envId,
+			});
+		});
+
+		// ── WP actions queue bridge ───────────────────────────────────────────
+		this.wpActionsQueueEvents = new QueueEvents(QUEUES.WP_ACTIONS, {
+			connection: { url: redisUrl },
+		});
+		this.wpActionsQueueEvents.on('progress', async ({ jobId, data }) => {
+			const isObj = typeof data === 'object' && data !== null;
+			const progress =
+				typeof data === 'number'
+					? data
+					: ((data as { value?: number })?.value ?? 0);
+			const step = isObj ? (data as { step?: string })?.step : undefined;
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobProgress({
+				jobId,
+				queueName: QUEUES.WP_ACTIONS,
+				progress,
+				step,
+				environmentId: envId,
+			});
+		});
+		this.wpActionsQueueEvents.on('completed', async ({ jobId }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobCompleted({
+				jobId,
+				queueName: QUEUES.WP_ACTIONS,
+				environmentId: envId,
+			});
+		});
+		this.wpActionsQueueEvents.on('failed', async ({ jobId, failedReason }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobFailed({
+				jobId,
+				queueName: QUEUES.WP_ACTIONS,
+				error: failedReason,
+				attempt: 1,
+				environmentId: envId,
+			});
+		});
+		this.wpActionsQueueEvents.on('stalled', async ({ jobId }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobFailed({
+				jobId,
+				queueName: QUEUES.WP_ACTIONS,
+				error: 'Job stalled — worker may have crashed',
+				attempt: 1,
+				environmentId: envId,
+			});
+		});
+
+		// ── Custom plugins queue bridge ───────────────────────────────────────
+		this.customPluginsQueueEvents = new QueueEvents(QUEUES.CUSTOM_PLUGINS, {
+			connection: { url: redisUrl },
+		});
+		this.customPluginsQueueEvents.on('progress', async ({ jobId, data }) => {
+			const isObj = typeof data === 'object' && data !== null;
+			const progress =
+				typeof data === 'number'
+					? data
+					: ((data as { value?: number })?.value ?? 0);
+			const step = isObj ? (data as { step?: string })?.step : undefined;
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobProgress({
+				jobId,
+				queueName: QUEUES.CUSTOM_PLUGINS,
+				progress,
+				step,
+				environmentId: envId,
+			});
+		});
+		this.customPluginsQueueEvents.on('completed', async ({ jobId }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobCompleted({
+				jobId,
+				queueName: QUEUES.CUSTOM_PLUGINS,
+				environmentId: envId,
+			});
+		});
+		this.customPluginsQueueEvents.on(
+			'failed',
+			async ({ jobId, failedReason }) => {
+				const envId = await this.resolveEnvId(jobId);
+				this.emitJobFailed({
+					jobId,
+					queueName: QUEUES.CUSTOM_PLUGINS,
+					error: failedReason,
+					attempt: 1,
+					environmentId: envId,
+				});
+			},
 		);
+		this.customPluginsQueueEvents.on('stalled', async ({ jobId }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobFailed({
+				jobId,
+				queueName: QUEUES.CUSTOM_PLUGINS,
+				error: 'Job stalled — worker may have crashed',
+				attempt: 1,
+				environmentId: envId,
+			});
+		});
+
+		// ── System backups queue bridge ───────────────────────────────────────
+		this.systemBackupsQueueEvents = new QueueEvents(QUEUES.SYSTEM_BACKUPS, {
+			connection: { url: redisUrl },
+		});
+		this.systemBackupsQueueEvents.on('progress', async ({ jobId, data }) => {
+			const isObj = typeof data === 'object' && data !== null;
+			const progress =
+				typeof data === 'number'
+					? data
+					: ((data as { value?: number })?.value ?? 0);
+			const step = isObj ? (data as { step?: string })?.step : undefined;
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobProgress({
+				jobId,
+				queueName: QUEUES.SYSTEM_BACKUPS,
+				progress,
+				step,
+				environmentId: envId,
+			});
+		});
+		this.systemBackupsQueueEvents.on('completed', async ({ jobId }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobCompleted({
+				jobId,
+				queueName: QUEUES.SYSTEM_BACKUPS,
+				environmentId: envId,
+			});
+		});
+		this.systemBackupsQueueEvents.on(
+			'failed',
+			async ({ jobId, failedReason }) => {
+				const envId = await this.resolveEnvId(jobId);
+				this.emitJobFailed({
+					jobId,
+					queueName: QUEUES.SYSTEM_BACKUPS,
+					error: failedReason,
+					attempt: 1,
+					environmentId: envId,
+				});
+			},
+		);
+		this.systemBackupsQueueEvents.on('stalled', async ({ jobId }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobFailed({
+				jobId,
+				queueName: QUEUES.SYSTEM_BACKUPS,
+				error: 'Job stalled — worker may have crashed',
+				attempt: 1,
+				environmentId: envId,
+			});
+		});
+
+		// ── Plugin updates queue bridge ───────────────────────────────────────
+		this.pluginUpdatesQueueEvents = new QueueEvents(QUEUES.PLUGIN_UPDATES, {
+			connection: { url: redisUrl },
+		});
+		this.pluginUpdatesQueueEvents.on('progress', async ({ jobId, data }) => {
+			const isObj = typeof data === 'object' && data !== null;
+			const progress =
+				typeof data === 'number'
+					? data
+					: ((data as { value?: number })?.value ?? 0);
+			const step = isObj ? (data as { step?: string })?.step : undefined;
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobProgress({
+				jobId,
+				queueName: QUEUES.PLUGIN_UPDATES,
+				progress,
+				step,
+				environmentId: envId,
+			});
+		});
+		this.pluginUpdatesQueueEvents.on('completed', async ({ jobId }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobCompleted({
+				jobId,
+				queueName: QUEUES.PLUGIN_UPDATES,
+				environmentId: envId,
+			});
+		});
+		this.pluginUpdatesQueueEvents.on(
+			'failed',
+			async ({ jobId, failedReason }) => {
+				const envId = await this.resolveEnvId(jobId);
+				this.emitJobFailed({
+					jobId,
+					queueName: QUEUES.PLUGIN_UPDATES,
+					error: failedReason,
+					attempt: 1,
+					environmentId: envId,
+				});
+			},
+		);
+		this.pluginUpdatesQueueEvents.on('stalled', async ({ jobId }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobFailed({
+				jobId,
+				queueName: QUEUES.PLUGIN_UPDATES,
+				error: 'Job stalled — worker may have crashed',
+				attempt: 1,
+				environmentId: envId,
+			});
+		});
+
+		// ── Notifications queue bridge ────────────────────────────────────────
+		this.notificationsQueueEvents = new QueueEvents(QUEUES.NOTIFICATIONS, {
+			connection: { url: redisUrl },
+		});
+		this.notificationsQueueEvents.on('progress', async ({ jobId, data }) => {
+			const isObj = typeof data === 'object' && data !== null;
+			const progress =
+				typeof data === 'number'
+					? data
+					: ((data as { value?: number })?.value ?? 0);
+			const step = isObj ? (data as { step?: string })?.step : undefined;
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobProgress({
+				jobId,
+				queueName: QUEUES.NOTIFICATIONS,
+				progress,
+				step,
+				environmentId: envId,
+			});
+		});
+		this.notificationsQueueEvents.on('completed', async ({ jobId }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobCompleted({
+				jobId,
+				queueName: QUEUES.NOTIFICATIONS,
+				environmentId: envId,
+			});
+		});
+		this.notificationsQueueEvents.on(
+			'failed',
+			async ({ jobId, failedReason }) => {
+				const envId = await this.resolveEnvId(jobId);
+				this.emitJobFailed({
+					jobId,
+					queueName: QUEUES.NOTIFICATIONS,
+					error: failedReason,
+					attempt: 1,
+					environmentId: envId,
+				});
+			},
+		);
+		this.notificationsQueueEvents.on('stalled', async ({ jobId }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobFailed({
+				jobId,
+				queueName: QUEUES.NOTIFICATIONS,
+				error: 'Job stalled — worker may have crashed',
+				attempt: 1,
+				environmentId: envId,
+			});
+		});
+
+		// ── Domains queue bridge ──────────────────────────────────────────────
+		this.domainsQueueEvents = new QueueEvents(QUEUES.DOMAINS, {
+			connection: { url: redisUrl },
+		});
+		this.domainsQueueEvents.on('progress', async ({ jobId, data }) => {
+			const isObj = typeof data === 'object' && data !== null;
+			const progress =
+				typeof data === 'number'
+					? data
+					: ((data as { value?: number })?.value ?? 0);
+			const step = isObj ? (data as { step?: string })?.step : undefined;
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobProgress({
+				jobId,
+				queueName: QUEUES.DOMAINS,
+				progress,
+				step,
+				environmentId: envId,
+			});
+		});
+		this.domainsQueueEvents.on('completed', async ({ jobId }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobCompleted({
+				jobId,
+				queueName: QUEUES.DOMAINS,
+				environmentId: envId,
+			});
+		});
+		this.domainsQueueEvents.on('failed', async ({ jobId, failedReason }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobFailed({
+				jobId,
+				queueName: QUEUES.DOMAINS,
+				error: failedReason,
+				attempt: 1,
+				environmentId: envId,
+			});
+		});
+		this.domainsQueueEvents.on('stalled', async ({ jobId }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobFailed({
+				jobId,
+				queueName: QUEUES.DOMAINS,
+				error: 'Job stalled — worker may have crashed',
+				attempt: 1,
+				environmentId: envId,
+			});
+		});
+
+		// ── Reports queue bridge ──────────────────────────────────────────────
+		this.reportsQueueEvents = new QueueEvents(QUEUES.REPORTS, {
+			connection: { url: redisUrl },
+		});
+		this.reportsQueueEvents.on('progress', async ({ jobId, data }) => {
+			const isObj = typeof data === 'object' && data !== null;
+			const progress =
+				typeof data === 'number'
+					? data
+					: ((data as { value?: number })?.value ?? 0);
+			const step = isObj ? (data as { step?: string })?.step : undefined;
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobProgress({
+				jobId,
+				queueName: QUEUES.REPORTS,
+				progress,
+				step,
+				environmentId: envId,
+			});
+		});
+		this.reportsQueueEvents.on('completed', async ({ jobId }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobCompleted({
+				jobId,
+				queueName: QUEUES.REPORTS,
+				environmentId: envId,
+			});
+		});
+		this.reportsQueueEvents.on('failed', async ({ jobId, failedReason }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobFailed({
+				jobId,
+				queueName: QUEUES.REPORTS,
+				error: failedReason,
+				attempt: 1,
+				environmentId: envId,
+			});
+		});
+		this.reportsQueueEvents.on('stalled', async ({ jobId }) => {
+			const envId = await this.resolveEnvId(jobId);
+			this.emitJobFailed({
+				jobId,
+				queueName: QUEUES.REPORTS,
+				error: 'Job stalled — worker may have crashed',
+				attempt: 1,
+				environmentId: envId,
+			});
+		});
+
+		this.logger.log('BullMQ QueueEvents bridge initialised for all 14 queues');
 	}
 
 	async onModuleDestroy() {
@@ -295,6 +755,15 @@ export class JobsGateway
 		await this.pluginScansQueueEvents?.close();
 		await this.syncQueueEvents?.close();
 		await this.monitorsQueueEvents?.close();
+		await this.securityQueueEvents?.close();
+		await this.themeScansQueueEvents?.close();
+		await this.wpActionsQueueEvents?.close();
+		await this.customPluginsQueueEvents?.close();
+		await this.systemBackupsQueueEvents?.close();
+		await this.pluginUpdatesQueueEvents?.close();
+		await this.notificationsQueueEvents?.close();
+		await this.domainsQueueEvents?.close();
+		await this.reportsQueueEvents?.close();
 	}
 
 	/** Look up the environmentId for a monitor check job via matching JobExecution rows.

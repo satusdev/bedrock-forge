@@ -14,26 +14,15 @@ export const QUEUES = {
 	REPORTS: 'reports',
 	WP_ACTIONS: 'wp-actions',
 	SYSTEM_BACKUPS: 'system-backups',
+	SECURITY: 'security',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
 
-// Dead-letter queue names
-export const DLQ = {
-	BACKUPS: 'backups-dlq',
-	PLUGIN_SCANS: 'plugin-scans-dlq',
-	PLUGIN_UPDATES: 'plugin-updates-dlq',
-	CUSTOM_PLUGINS: 'custom-plugins-dlq',
-	THEME_SCANS: 'theme-scans-dlq',
-	SYNC: 'sync-dlq',
-	MONITORS: 'monitors-dlq',
-	DOMAINS: 'domains-dlq',
-	PROJECTS: 'projects-dlq',
-	NOTIFICATIONS: 'notifications-dlq',
-	REPORTS: 'reports-dlq',
-	WP_ACTIONS: 'wp-actions-dlq',
-	SYSTEM_BACKUPS: 'system-backups-dlq',
-} as const;
+// NOTE: BullMQ does not use separate queue names for dead-lettered jobs —
+// failed jobs are accessible via queue.getFailed(). The DLQ pattern here
+// would require custom consumer code; until that is implemented these names
+// are removed to prevent misleading dead references in the codebase.
 // ─── Job Types ────────────────────────────────────────────────────────────────
 
 export const JOB_TYPES = {
@@ -87,9 +76,12 @@ export const JOB_TYPES = {
 
 	// System (Forge self-backup)
 	SYSTEM_BACKUP_CREATE: 'system-backup:create',
-} as const;
 
-export type JobType = (typeof JOB_TYPES)[keyof typeof JOB_TYPES];
+	// Security
+	SECURITY_SERVER_SCAN: 'security:server-scan',
+	SECURITY_ENVIRONMENT_SCAN: 'security:environment-scan',
+	SECURITY_SCHEDULED_SCAN: 'security:scheduled-scan',
+} as const;
 
 // ─── Default Job Options ──────────────────────────────────────────────────────
 

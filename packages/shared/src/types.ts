@@ -96,11 +96,21 @@ export const PluginManagePayloadSchema = z.object({
 });
 export type PluginManagePayload = z.infer<typeof PluginManagePayloadSchema>;
 
+export const PluginScheduledUpdatePayloadSchema = z.object({
+	scheduleId: z.number().int().positive(),
+	environmentId: z.number().int().positive(),
+});
+export type PluginScheduledUpdatePayload = z.infer<
+	typeof PluginScheduledUpdatePayloadSchema
+>;
+
 export const SyncClonePayloadSchema = z.object({
 	sourceEnvironmentId: z.number().int().positive(),
 	targetEnvironmentId: z.number().int().positive(),
 	includeDatabase: z.boolean().default(false),
 	includeFiles: z.boolean().default(true),
+	jobExecutionId: z.number().int().positive(),
+	skipSafetyBackup: z.boolean().default(false),
 });
 export type SyncClonePayload = z.infer<typeof SyncClonePayloadSchema>;
 
@@ -325,6 +335,11 @@ export const NOTIFICATION_EVENTS = {
 	users: ['user.registered', 'user.login'],
 	servers: ['server.created', 'server.deleted'],
 	reports: ['report.weekly'],
+	security: [
+		'security.critical_found',
+		'security.high_found',
+		'security.scan_completed',
+	],
 } as const;
 
 export type NotificationEventType =
@@ -347,50 +362,10 @@ export type NotificationEventType =
 	| 'user.login'
 	| 'server.created'
 	| 'server.deleted'
-	| 'report.weekly';
-
-export const ALL_NOTIFICATION_EVENTS: NotificationEventType[] = [
-	'backup.completed',
-	'backup.failed',
-	'plugin-scan.completed',
-	'plugin-update.completed',
-	'plugin-update.failed',
-	'sync.completed',
-	'sync.failed',
-	'monitor.down',
-	'monitor.up',
-	'monitor.degraded',
-	'monitor.ssl_expiry',
-	'monitor.dns_failed',
-	'monitor.keyword_missing',
-	'invoice.created',
-	'invoice.overdue',
-	'user.registered',
-	'user.login',
-	'server.created',
-	'server.deleted',
-	'report.weekly',
-];
-
-// ─── Plugin Scheduled Update Payload ─────────────────────────────────────────
-
-export const PluginScheduledUpdatePayloadSchema = z.object({
-	scheduleId: z.number().int().positive(),
-	environmentId: z.number().int().positive(),
-});
-export type PluginScheduledUpdatePayload = z.infer<
-	typeof PluginScheduledUpdatePayloadSchema
->;
-
-// ─── Notification Send Job Payload ────────────────────────────────────────────
-
-export const NotificationSendPayloadSchema = z.object({
-	eventType: z.string().min(1),
-	payload: z.record(z.unknown()),
-});
-export type NotificationSendPayload = z.infer<
-	typeof NotificationSendPayloadSchema
->;
+	| 'report.weekly'
+	| 'security.critical_found'
+	| 'security.high_found'
+	| 'security.scan_completed';
 
 // ─── Pagination ───────────────────────────────────────────────────────────────
 
