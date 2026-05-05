@@ -1,4 +1,4 @@
-import { useAuthStore } from '@/store/auth.store';
+import { isTokenExpired, useAuthStore } from '@/store/auth.store';
 import { updateSocketToken } from './websocket';
 
 const BASE = '/api';
@@ -46,7 +46,16 @@ export async function apiFetch<T>(
 	path: string,
 	init: RequestInit = {},
 ): Promise<T> {
-	const { accessToken } = useAuthStore.getState();
+	let { accessToken } = useAuthStore.getState();
+
+	// Pre-flight: if the access token is already expired and we still have a
+	// refresh token, attempt a silent refresh before the first network call.
+	// This avoids an unnecessary round-trip that would just receive a 401.
+	if (isTokenExpired(accessToken)) {
+		const newToken = await refreshTokens();
+		if (!newToken) throw new Error('Unauthorized');
+		accessToken = newToken;
+	}
 
 	const doFetch = (token: string | null) =>
 		fetch(`${BASE}${path}`, {

@@ -1,5 +1,11 @@
 import React, { Component, useEffect, lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import {
+	BrowserRouter,
+	Routes,
+	Route,
+	Navigate,
+	useNavigate,
+} from 'react-router-dom';
 import { useAuthStore } from '@/store/auth.store';
 import { api } from '@/lib/api-client';
 import { destroySocket } from '@/lib/websocket';
@@ -158,6 +164,23 @@ function MaintainerRoute({ children }: { children: React.ReactNode }) {
 	);
 }
 
+/**
+ * Watches the auth store and navigates to /login whenever the access token is
+ * cleared (by logout(), the proactive expiry timer, or rehydration cleanup).
+ * Must render inside <BrowserRouter> so useNavigate is available.
+ */
+function SessionGuard() {
+	const navigate = useNavigate();
+	useEffect(() => {
+		return useAuthStore.subscribe((state, prev) => {
+			if (!state.accessToken && prev.accessToken) {
+				navigate('/login', { replace: true });
+			}
+		});
+	}, [navigate]);
+	return null;
+}
+
 export default function App() {
 	// Re-validate user roles on mount to pick up server-side permission changes
 	useEffect(() => {
@@ -183,6 +206,7 @@ export default function App() {
 	return (
 		<ErrorBoundary>
 			<BrowserRouter>
+				<SessionGuard />
 				<Suspense
 					fallback={
 						<div className='flex h-screen items-center justify-center'>
