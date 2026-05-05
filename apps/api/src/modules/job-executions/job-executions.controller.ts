@@ -7,11 +7,15 @@ import {
 	UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { ROLES } from '@bedrock-forge/shared';
 import { JobExecutionsService } from './job-executions.service';
 import { QueryJobExecutionDto } from './dto/query-job-execution.dto';
 
 @Controller('job-executions')
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), RolesGuard)
+@Roles(ROLES.MAINTAINER)
 export class JobExecutionsController {
 	constructor(private readonly svc: JobExecutionsService) {}
 
