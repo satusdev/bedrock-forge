@@ -1,3 +1,4 @@
+import { Throttle } from '@nestjs/throttler';
 import {
 	Controller,
 	Get,
@@ -31,6 +32,8 @@ import { UpsertSecurityScheduleDto } from './dto/security-schedule.dto';
 import { UpdateSecuritySettingsDto } from './dto/update-security-settings.dto';
 import { FindingsQueryDto } from './dto/findings-query.dto';
 import { AckFindingDto, RemoveAckDto } from './dto/ack-finding.dto';
+import { GenerateSecurityReportDto } from './dto/generate-security-report.dto';
+import { HardenServerDto, HardenEnvironmentDto } from './dto/harden-target.dto';
 
 @Controller('security')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -68,6 +71,7 @@ export class SecurityController {
 
 	/** POST /security/servers/:id/scan — trigger one or more scan types on a server */
 	@Post('servers/:id/scan')
+	@Throttle({ default: { ttl: 60_000, limit: 3 } })
 	triggerServerScan(
 		@Param('id', ParseIntPipe) id: number,
 		@Body() dto: TriggerServerScanDto,
@@ -90,6 +94,7 @@ export class SecurityController {
 
 	/** POST /security/environments/:id/scan */
 	@Post('environments/:id/scan')
+	@Throttle({ default: { ttl: 60_000, limit: 3 } })
 	triggerEnvironmentScan(
 		@Param('id', ParseIntPipe) id: number,
 		@Body() dto: TriggerEnvironmentScanDto,
@@ -220,5 +225,43 @@ export class SecurityController {
 	@HttpCode(HttpStatus.NO_CONTENT)
 	removeAcknowledgement(@Body() dto: RemoveAckDto) {
 		return this.svc.removeAcknowledgement(dto);
+	}
+
+	/** POST /security/report — queue a security PDF report */
+	@Post('report')
+	@HttpCode(HttpStatus.ACCEPTED)
+	@Throttle({ default: { ttl: 300_000, limit: 2 } })
+	generateReport(@Body() dto: GenerateSecurityReportDto) {
+		return this.svc.generateSecurityReport(dto);
+	}
+
+	/** GET /security/report/history — last 20 security report jobs */
+	@Get('report/history')
+	getReportHistory() {
+		return this.svc.getSecurityReportHistory();
+	}
+
+	// ─── Hardening ───────────────────────────────────────────────────────────────
+
+	/** POST /security/servers/:id/harden — apply server hardening actions */
+	@Post('servers/:id/harden')
+	@HttpCode(HttpStatus.ACCEPTED)
+	@Throttle({ default: { ttl: 60_000, limit: 2 } })
+	hardenServer(
+		@Param('id', ParseIntPipe) id: number,
+		@Body() dto: HardenServerDto,
+	) {
+		return this.svc.applyServerHardening(id, dto.actions);
+	}
+
+	/** POST /security/environments/:id/harden — apply environment hardening actions */
+	@Post('environments/:id/harden')
+	@HttpCode(HttpStatus.ACCEPTED)
+	@Throttle({ default: { ttl: 60_000, limit: 2 } })
+	hardenEnvironment(
+		@Param('id', ParseIntPipe) id: number,
+		@Body() dto: HardenEnvironmentDto,
+	) {
+		return this.svc.applyEnvironmentHardening(id, dto.actions);
 	}
 }

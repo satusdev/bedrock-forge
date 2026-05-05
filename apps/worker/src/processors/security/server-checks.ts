@@ -229,8 +229,13 @@ export async function runSshAudit(exec: Executor): Promise<SecurityFinding[]> {
 
 	// 4. .ssh directory permissions for root and home users — should be 700
 	const dirsToCheck: string[] = ['/root/.ssh'];
-	const { stdout: homeDirs } = await exec.execute(`ls /home 2>/dev/null || true`);
-	for (const u of homeDirs.split('\n').map(l => l.trim()).filter(Boolean)) {
+	const { stdout: homeDirs } = await exec.execute(
+		`ls /home 2>/dev/null || true`,
+	);
+	for (const u of homeDirs
+		.split('\n')
+		.map(l => l.trim())
+		.filter(Boolean)) {
 		dirsToCheck.push(`/home/${u}/.ssh`);
 	}
 	for (const dir of dirsToCheck) {
@@ -269,20 +274,51 @@ export async function runSshAudit(exec: Executor): Promise<SecurityFinding[]> {
 			const line = configLines.find(l =>
 				l.toLowerCase().startsWith(key.toLowerCase()),
 			);
-			return line ? line.split(/\s+/)[1] ?? null : null;
+			return line ? (line.split(/\s+/)[1] ?? null) : null;
 		};
 
 		const permitRootLogin = getValue('PermitRootLogin');
-		if (permitRootLogin !== 'no') {
+		if (permitRootLogin === 'yes') {
 			findings.push(
 				makeFinding(
 					'critical',
 					'SSH_CONFIG',
-					'PermitRootLogin is enabled',
-					`sshd_config allows direct root login${permitRootLogin === null ? ' (not explicitly disabled)' : ''}.`,
+					'Root password login enabled',
+					'sshd_config allows direct root login with a password. This is a prime target for brute-force and credential-stuffing attacks.',
 					{
 						remediation:
-							'Set "PermitRootLogin no" in /etc/ssh/sshd_config and reload: systemctl reload sshd',
+							'Manually set "PermitRootLogin prohibit-password" in /etc/ssh/sshd_config to block password-based root login while keeping SSH key access. Then reload: systemctl reload sshd',
+						resource: '/etc/ssh/sshd_config',
+					},
+				),
+			);
+		} else if (permitRootLogin === null) {
+			findings.push(
+				makeFinding(
+					'high',
+					'SSH_CONFIG',
+					'PermitRootLogin not explicitly configured',
+					'PermitRootLogin is absent from sshd_config. The default value may allow root login depending on the distro and sshd version.',
+					{
+						remediation:
+							'Manually add "PermitRootLogin prohibit-password" to /etc/ssh/sshd_config to explicitly disable password-based root login while preserving SSH key access. Then reload: systemctl reload sshd',
+						resource: '/etc/ssh/sshd_config',
+					},
+				),
+			);
+		} else if (
+			permitRootLogin === 'prohibit-password' ||
+			permitRootLogin === 'without-password'
+		) {
+			findings.push(
+				makeFinding(
+					'info',
+					'SSH_CONFIG',
+					'Root SSH key access permitted',
+					'PermitRootLogin is set to prohibit-password — password-based root login is blocked, but root can still authenticate via SSH key. This is acceptable when key-based access is required for management.',
+					{
+						remediation:
+							'Periodically audit /root/.ssh/authorized_keys to ensure only known and current keys are present. Set "PermitRootLogin no" only if a non-root sudo user is configured for all management access.',
 						resource: '/etc/ssh/sshd_config',
 					},
 				),
@@ -290,7 +326,13 @@ export async function runSshAudit(exec: Executor): Promise<SecurityFinding[]> {
 		}
 
 		const passwordAuth = getValue('PasswordAuthentication');
-		if (passwordAuth === 'yes' || passwordAuth === null) {
+		// Read AuthenticationMethods early — if set to publickey it fully overrides
+		// PasswordAuthentication regardless of its value, so skip that finding.
+		const authMethodsVal = getValue('AuthenticationMethods');
+		if (
+			authMethodsVal !== 'publickey' &&
+			(passwordAuth === 'yes' || passwordAuth === null)
+		) {
 			findings.push(
 				makeFinding(
 					'high',
@@ -358,8 +400,8 @@ export async function runSshAudit(exec: Executor): Promise<SecurityFinding[]> {
 			);
 		}
 
-		// AuthenticationMethods should be publickey only
-		const authMethods = getValue('AuthenticationMethods');
+		// AuthenticationMethods should be publickey only (reuse value read above)
+		const authMethods = authMethodsVal;
 		if (authMethods && authMethods !== 'publickey') {
 			findings.push(
 				makeFinding(
@@ -386,7 +428,11 @@ export async function runSshAudit(exec: Executor): Promise<SecurityFinding[]> {
 			{ timeout: 10000 },
 		);
 
-		const knownPorts = new Set([22, 80, 443, 3306, 5432, 6379, 8080, 8443, 8888]);
+		// Standard ports + CyberPanel/OpenLiteSpeed admin + common mail ports
+		const knownPorts = new Set([
+			22, 25, 80, 443, 587, 993, 995, 3306, 5432, 6379, 7080, 8080, 8090, 8443,
+			8888,
+		]);
 		const openPorts: number[] = [];
 
 		for (const line of netstatOut.split('\n').filter(Boolean)) {
@@ -690,8 +736,8 @@ export async function runMalwareScan(
 	);
 	if (clamavCheck.includes('found')) {
 		const { stdout: clamScan } = await exec.execute(
-			`clamscan --infected --recursive --no-summary /home/*/public_html 2>/dev/null | head -100 || true`,
-			{ timeout: 300000 },
+			`timeout 180 clamscan --infected --no-summary --include="*.php" --recursive --max-dir-recursion=10 --max-filesize=5M --max-files=500 /home/*/public_html 2>/dev/null | head -100 || true`,
+			{ timeout: 200000 },
 		);
 		const infected = clamScan.split('\n').filter(l => l.includes('FOUND'));
 		if (infected.length > 0) {
@@ -718,8 +764,8 @@ export async function runMalwareScan(
 	);
 	if (maldetCheck.includes('found')) {
 		const { stdout: maldetScan } = await exec.execute(
-			`maldet --scan-all /home/*/public_html 2>/dev/null | tail -30 || true`,
-			{ timeout: 300000 },
+			`timeout 180 maldet --scan-all /home/*/public_html 2>/dev/null | tail -30 || true`,
+			{ timeout: 200000 },
 		);
 		const hitLines = maldetScan
 			.split('\n')
@@ -845,26 +891,53 @@ export async function runMalwareScan(
 		);
 	}
 
-	// 6. .htaccess injection — attackers inject redirects and eval chains
-	const { stdout: htaccessScan } = await exec.execute(
-		`grep -rl --include=".htaccess" -E "eval|base64_decode|RewriteRule.*https?://" /home 2>/dev/null | head -20 || true`,
+	// 6a. .htaccess code-execution injection (eval / base64_decode) — definitively malicious
+	const { stdout: htaccessCodeScan } = await exec.execute(
+		`grep -rl --include=".htaccess" -E "eval|base64_decode" /home 2>/dev/null | head -20 || true`,
 		{ timeout: 60000 },
 	);
-	const htaccessFiles = htaccessScan
+	const htaccessCodeFiles = htaccessCodeScan
 		.split('\n')
 		.map(l => l.trim())
 		.filter(Boolean);
-	if (htaccessFiles.length > 0) {
+	if (htaccessCodeFiles.length > 0) {
 		findings.push(
 			makeFinding(
 				'critical',
 				'HTACCESS',
-				`Malicious .htaccess file(s) detected: ${htaccessFiles.length} file(s)`,
-				'.htaccess files containing eval/base64 or external rewrites indicate malware injection.',
+				`Malicious .htaccess file(s) detected: ${htaccessCodeFiles.length} file(s)`,
+				'.htaccess files containing eval or base64_decode are a strong indicator of PHP code injection.',
 				{
 					remediation:
-						'Inspect each .htaccess file manually. Remove injected lines and harden the site.',
-					metadata: { files: htaccessFiles },
+						'Inspect each .htaccess file manually. Remove injected eval/base64 lines and harden the site.',
+					metadata: { files: htaccessCodeFiles },
+				},
+			),
+		);
+	}
+
+	// 6b. .htaccess external redirect injection — RewriteRule pointing to a hardcoded
+	// external domain. Self-referential %{HTTP_HOST} / %{SERVER_NAME} rewrites (standard
+	// WordPress HTTPS rules) are intentionally excluded to avoid false positives.
+	const { stdout: htaccessRedirectScan } = await exec.execute(
+		`grep -rl --include=".htaccess" -E "RewriteRule[[:space:]]+\\S+[[:space:]]+https?://[^%]" /home 2>/dev/null | head -20 || true`,
+		{ timeout: 60000 },
+	);
+	const htaccessRedirectFiles = htaccessRedirectScan
+		.split('\n')
+		.map(l => l.trim())
+		.filter(Boolean);
+	if (htaccessRedirectFiles.length > 0) {
+		findings.push(
+			makeFinding(
+				'high',
+				'HTACCESS',
+				`Suspicious .htaccess redirect to hardcoded external domain: ${htaccessRedirectFiles.length} file(s)`,
+				'.htaccess RewriteRules redirecting to a fixed external URL may indicate traffic-hijacking malware. Standard %{HTTP_HOST} self-referential redirects are excluded.',
+				{
+					remediation:
+						'Review the flagged .htaccess files. If the destination domain is not one you own, remove the rule.',
+					metadata: { files: htaccessRedirectFiles },
 				},
 			),
 		);

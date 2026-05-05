@@ -12,6 +12,11 @@ import type {
 import type { SecuritySeverity } from '@prisma/client';
 import type { UpsertSecurityScheduleDto } from './dto/security-schedule.dto';
 import type { AckFindingDto, RemoveAckDto } from './dto/ack-finding.dto';
+import type { GenerateSecurityReportDto } from './dto/generate-security-report.dto';
+import type {
+	ServerHardeningActionType,
+	EnvironmentHardeningActionType,
+} from '@bedrock-forge/shared';
 
 const SEVERITY_ORDER: Record<string, number> = {
 	critical: 0,
@@ -29,6 +34,7 @@ export class SecurityService {
 		private readonly repo: SecurityRepository,
 		private readonly prisma: PrismaService,
 		@InjectQueue(QUEUES.SECURITY) private readonly securityQueue: Queue,
+		@InjectQueue(QUEUES.REPORTS) private readonly reportsQueue: Queue,
 	) {}
 
 	// ─── Trigger scans ──────────────────────────────────────────────────────────
@@ -150,6 +156,68 @@ export class SecurityService {
 		return { jobExecutionId: Number(execution.id), scanIds };
 	}
 
+	// ─── Hardening ───────────────────────────────────────────────────────────────
+
+	async applyServerHardening(
+		serverId: number,
+		actions: ServerHardeningActionType[],
+	) {
+		const server = await this.repo.findServerById(BigInt(serverId));
+		if (!server) throw new NotFoundException(`Server ${serverId} not found`);
+
+		const execution = await this.repo.createJobExecution({
+			queue_name: QUEUES.SECURITY,
+			job_type: JOB_TYPES.SECURITY_SERVER_HARDEN,
+			server_id: BigInt(serverId),
+			status: 'queued',
+			payload: { serverId, actions },
+		});
+
+		const bullJob = await this.securityQueue.add(
+			JOB_TYPES.SECURITY_SERVER_HARDEN,
+			{ serverId, jobExecutionId: Number(execution.id), actions },
+			{
+				...DEFAULT_JOB_OPTIONS,
+				jobId: `security-harden-server-${serverId}-${Date.now()}`,
+			},
+		);
+
+		await this.repo.updateJobExecutionBullId(execution.id, String(bullJob.id));
+
+		return { jobExecutionId: Number(execution.id) };
+	}
+
+	async applyEnvironmentHardening(
+		environmentId: number,
+		actions: EnvironmentHardeningActionType[],
+	) {
+		const env = await this.repo.findEnvironmentById(BigInt(environmentId));
+		if (!env)
+			throw new NotFoundException(`Environment ${environmentId} not found`);
+
+		const execution = await this.repo.createJobExecution({
+			queue_name: QUEUES.SECURITY,
+			job_type: JOB_TYPES.SECURITY_ENVIRONMENT_HARDEN,
+			environment_id: BigInt(environmentId),
+			server_id: env.server_id,
+			status: 'queued',
+			payload: { environmentId, actions },
+		});
+
+		const bullJob = await this.securityQueue.add(
+			JOB_TYPES.SECURITY_ENVIRONMENT_HARDEN,
+			{ environmentId, jobExecutionId: Number(execution.id), actions },
+			{
+				...DEFAULT_JOB_OPTIONS,
+				jobId: `security-harden-env-${environmentId}-${Date.now()}`,
+			},
+		);
+
+		await this.repo.updateJobExecutionBullId(execution.id, String(bullJob.id));
+
+		return { jobExecutionId: Number(execution.id) };
+	}
+
 	// ─── Read ────────────────────────────────────────────────────────────────────
 
 	async getScanById(id: number) {
@@ -192,7 +260,7 @@ export class SecurityService {
 		let totalLow = 0;
 
 		for (const server of servers) {
-			for (const scan of server.security_scans) {
+			for (const scan of this.dedupeLatestPerType(server.security_scans)) {
 				const s = scan.summary as SecurityScanSummary | null;
 				if (s) {
 					totalCritical += s.critical ?? 0;
@@ -203,14 +271,17 @@ export class SecurityService {
 			}
 		}
 
-		// Build per-server aggregated score
+		// Build per-server aggregated score — deduplicate to one scan per type
+		// so older scans of the same type don't drag down the score or count twice.
 		const serverSummaries = servers.map(s => ({
 			id: Number(s.id),
 			name: s.name,
 			ip_address: s.ip_address,
 			status: s.status,
-			score: this.aggregateScore(s.security_scans),
-			findings_summary: this.aggregateSummary(s.security_scans),
+			score: this.aggregateScore(this.dedupeLatestPerType(s.security_scans)),
+			findings_summary: this.aggregateSummary(
+				this.dedupeLatestPerType(s.security_scans),
+			),
 			last_scanned_at: s.security_scans[0]?.completed_at ?? null,
 			scans: s.security_scans.map(sc => ({
 				id: Number(sc.id),
@@ -227,8 +298,10 @@ export class SecurityService {
 			url: e.url,
 			project: e.project,
 			server: e.server,
-			score: this.aggregateScore(e.security_scans),
-			findings_summary: this.aggregateSummary(e.security_scans),
+			score: this.aggregateScore(this.dedupeLatestPerType(e.security_scans)),
+			findings_summary: this.aggregateSummary(
+				this.dedupeLatestPerType(e.security_scans),
+			),
 			last_scanned_at: e.security_scans[0]?.completed_at ?? null,
 		}));
 
@@ -256,8 +329,10 @@ export class SecurityService {
 			name: s.name,
 			ip_address: s.ip_address,
 			status: s.status,
-			score: this.aggregateScore(s.security_scans),
-			findings_summary: this.aggregateSummary(s.security_scans),
+			score: this.aggregateScore(this.dedupeLatestPerType(s.security_scans)),
+			findings_summary: this.aggregateSummary(
+				this.dedupeLatestPerType(s.security_scans),
+			),
 			last_scanned_at: s.security_scans[0]?.completed_at ?? null,
 		}));
 	}
@@ -357,6 +432,27 @@ export class SecurityService {
 			}
 		}
 		return agg;
+	}
+
+	/**
+	 * Returns only the most recently completed scan per scan_type, eliminating
+	 * duplicate scoring from older scans of the same type.
+	 */
+	private dedupeLatestPerType<
+		T extends { scan_type: string; completed_at: Date | null },
+	>(scans: T[]): T[] {
+		const map = new Map<string, T>();
+		for (const s of scans) {
+			const existing = map.get(s.scan_type);
+			if (
+				!existing ||
+				(s.completed_at &&
+					(!existing.completed_at || s.completed_at > existing.completed_at))
+			) {
+				map.set(s.scan_type, s);
+			}
+		}
+		return [...map.values()];
 	}
 
 	// ─── Schedules ───────────────────────────────────────────────────────────────
@@ -590,5 +686,44 @@ export class SecurityService {
 
 	async removeAcknowledgement(dto: RemoveAckDto) {
 		await this.repo.deleteAck(dto.scope_key, dto.category, dto.title);
+	}
+
+	// ─── Security Reports ────────────────────────────────────────────────────
+
+	async generateSecurityReport(dto: GenerateSecurityReportDto) {
+		const execution = await this.repo.createJobExecution({
+			queue_name: QUEUES.REPORTS,
+			job_type: JOB_TYPES.SECURITY_REPORT_GENERATE,
+			status: 'queued',
+			payload: {
+				serverIds: dto.serverIds ?? null,
+				environmentIds: dto.environmentIds ?? null,
+				channelIds: dto.channelIds ?? null,
+			},
+		});
+
+		const bullJob = await this.reportsQueue.add(
+			JOB_TYPES.SECURITY_REPORT_GENERATE,
+			{
+				jobExecutionId: Number(execution.id),
+				serverIds: dto.serverIds ?? null,
+				environmentIds: dto.environmentIds ?? null,
+				channelIds: dto.channelIds ?? null,
+			},
+			{
+				...DEFAULT_JOB_OPTIONS,
+				attempts: 1,
+				jobId: `security-report-${Date.now()}`,
+			},
+		);
+
+		await this.repo.updateJobExecutionBullId(execution.id, String(bullJob.id));
+
+		return { jobExecutionId: Number(execution.id) };
+	}
+
+	async getSecurityReportHistory() {
+		const rows = await this.repo.findSecurityReportHistory();
+		return rows.map(r => ({ ...r, id: String(r.id) }));
 	}
 }

@@ -130,6 +130,30 @@ export async function runWpAudit(
 		);
 	}
 
+	// 4b. WP_DISALLOW_FILE_EDIT — check both wp-config.php and Bedrock's config/application.php
+	const { stdout: bedrockAppConfig } = await exec.execute(
+		`cat ${q(rootPath + '/config/application.php')} 2>/dev/null | head -300 || true`,
+	);
+	const combinedWpConfig = wpConfigContent + '\n' + bedrockAppConfig;
+	if (
+		!/define\s*\(\s*['"]WP_DISALLOW_FILE_EDIT['"]\s*,\s*true/i.test(
+			combinedWpConfig,
+		)
+	) {
+		findings.push(
+			makeFinding(
+				'medium',
+				'WP_CONFIG',
+				'WordPress file editor is enabled',
+				'The built-in theme/plugin file editor in wp-admin allows arbitrary PHP to be written to the server. A compromised admin account gives instant RCE.',
+				{
+					remediation: `Add to ${wpConfigPath ?? 'wp-config.php'}: define('WP_DISALLOW_FILE_EDIT', true);`,
+					resource: wpConfigPath ?? undefined,
+				},
+			),
+		);
+	}
+
 	// 5. PHP version check
 	const { stdout: phpVersion } = await exec.execute(
 		`php -r "echo PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;" 2>/dev/null || true`,
@@ -395,6 +419,75 @@ export async function runWpAudit(
 					},
 				),
 			);
+		}
+
+		// wp-content/debug.log accessible — may expose credentials and stack traces
+		const { stdout: debugLogCode } = await exec.execute(
+			`curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${cleanUrl}/wp-content/debug.log" 2>/dev/null || echo 000`,
+			{ timeout: 15000 },
+		);
+		if (debugLogCode.trim() === '200') {
+			findings.push(
+				makeFinding(
+					'high',
+					'VERSION_DISCLOSURE',
+					'WordPress debug.log is publicly accessible',
+					'The debug log is accessible over HTTP and may contain database credentials, file paths, API keys, and detailed error traces.',
+					{
+						remediation:
+							'Block access via .htaccess: <Files "debug.log"> Order Deny,Allow Deny from all </Files>. Also set WP_DEBUG_LOG to false in wp-config.php.',
+						resource: `${cleanUrl}/wp-content/debug.log`,
+					},
+				),
+			);
+		}
+
+		// .env accessible — critical credential exposure (common in misconfigured Bedrock installs)
+		const { stdout: envFileCode } = await exec.execute(
+			`curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${cleanUrl}/.env" 2>/dev/null || echo 000`,
+			{ timeout: 15000 },
+		);
+		if (envFileCode.trim() === '200') {
+			findings.push(
+				makeFinding(
+					'critical',
+					'VERSION_DISCLOSURE',
+					'.env file is publicly accessible',
+					'The .env file is accessible over HTTP and contains database credentials, API keys, and other secrets.',
+					{
+						remediation:
+							'For Bedrock: ensure the web root is /web, not the project root. Block via .htaccess: <Files ".env"> deny from all </Files>.',
+						resource: `${cleanUrl}/.env`,
+					},
+				),
+			);
+		}
+
+		// User enumeration via ?author= redirect — leaks WordPress usernames
+		const { stdout: authorStatus } = await exec.execute(
+			`curl -s -o /dev/null -w "%{http_code}" --max-time 10 --max-redirs 0 "${cleanUrl}/?author=1" 2>/dev/null || echo 000`,
+			{ timeout: 15000 },
+		);
+		if (['301', '302'].includes(authorStatus.trim())) {
+			const { stdout: authorLocation } = await exec.execute(
+				`curl -sI --max-time 10 "${cleanUrl}/?author=1" 2>/dev/null | grep -i "^location:" | head -1 || true`,
+				{ timeout: 15000 },
+			);
+			if (authorLocation.toLowerCase().includes('/author/')) {
+				findings.push(
+					makeFinding(
+						'medium',
+						'VERSION_DISCLOSURE',
+						'WordPress user enumeration via ?author= is possible',
+						'The ?author=N redirect reveals WordPress usernames publicly, enabling targeted brute-force attacks.',
+						{
+							remediation:
+								'Add to .htaccess: RewriteCond %{QUERY_STRING} ^author=\\d RewriteRule ^ /? [L,R=301]',
+							resource: `${cleanUrl}/?author=1`,
+						},
+					),
+				);
+			}
 		}
 	}
 

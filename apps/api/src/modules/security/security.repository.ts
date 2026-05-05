@@ -455,4 +455,65 @@ export class SecurityRepository {
 			data: { last_run_at: lastRunAt },
 		});
 	}
+
+	// ─── Job Execution helpers ───────────────────────────────────────────────────
+
+	createJobExecution(data: {
+		queue_name: string;
+		job_type: string;
+		status: string;
+		server_id?: bigint | null;
+		environment_id?: bigint | null;
+		payload?: Record<string, unknown>;
+	}) {
+		return this.prisma.jobExecution.create({
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			data: {
+				queue_name: data.queue_name,
+				bull_job_id: 'pending',
+				job_type: data.job_type,
+				status: data.status as any,
+				server_id: data.server_id ?? null,
+				environment_id: data.environment_id ?? null,
+				payload: (data.payload ?? {}) as any,
+			},
+		});
+	}
+
+	updateJobExecutionBullId(id: bigint, bullJobId: string) {
+		return this.prisma.jobExecution.update({
+			where: { id },
+			data: { bull_job_id: bullJobId },
+		});
+	}
+
+	findSecurityReportHistory() {
+		return this.prisma.jobExecution.findMany({
+			where: {
+				queue_name: 'reports',
+				job_type: 'security:report-generate',
+			},
+			orderBy: { created_at: 'desc' },
+			take: 20,
+			select: {
+				id: true,
+				status: true,
+				progress: true,
+				last_error: true,
+				payload: true,
+				execution_log: true,
+				started_at: true,
+				completed_at: true,
+				created_at: true,
+			},
+		});
+	}
+
+	findServerById(id: bigint) {
+		return this.prisma.server.findUnique({ where: { id } });
+	}
+
+	findEnvironmentById(id: bigint) {
+		return this.prisma.environment.findUnique({ where: { id } });
+	}
 }

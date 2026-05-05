@@ -8,6 +8,8 @@ import { QUEUES, JOB_TYPES, DEFAULT_JOB_OPTIONS } from '@bedrock-forge/shared';
 import type {
 	SecurityServerScanPayload,
 	SecurityEnvironmentScanPayload,
+	SecurityServerHardeningPayload,
+	SecurityEnvironmentHardeningPayload,
 	SecurityScanType,
 	SecurityScanSummary,
 } from '@bedrock-forge/shared';
@@ -18,6 +20,10 @@ import {
 	runMalwareScan,
 } from './server-checks';
 import { runWpAudit, runProjectMalware } from './environment-checks';
+import {
+	applyServerHardeningActions,
+	applyEnvironmentHardeningActions,
+} from './hardening-actions';
 
 /** Fires every 15 minutes to check which security schedules are due. */
 const TICK_JOB_ID = 'security-schedule-tick';
@@ -30,7 +36,7 @@ const TICK_EVERY_MS = 15 * 60 * 1_000;
  * BullMQ workers compete for every job regardless of type, and a worker returning
  * undefined on a mismatched job silently marks it as completed without executing it.
  */
-@Processor(QUEUES.SECURITY, { concurrency: 2, lockDuration: 20 * 60 * 1_000 })
+@Processor(QUEUES.SECURITY, { concurrency: 4, lockDuration: 20 * 60 * 1_000 })
 export class SecurityScanProcessor
 	extends WorkerHost
 	implements OnApplicationBootstrap
@@ -71,6 +77,10 @@ export class SecurityScanProcessor
 				return this.processEnvironmentScan(job);
 			case JOB_TYPES.SECURITY_SCHEDULED_SCAN:
 				return this.processScheduleTick();
+			case JOB_TYPES.SECURITY_SERVER_HARDEN:
+				return this.processServerHardening(job);
+			case JOB_TYPES.SECURITY_ENVIRONMENT_HARDEN:
+				return this.processEnvironmentHardening(job);
 			default:
 				this.logger.warn(`Unknown security job type: ${job.name}`);
 		}
@@ -599,6 +609,138 @@ export class SecurityScanProcessor
 			where: { id: BigInt(jobExecutionId) },
 			data: { status: 'failed', last_error: error, completed_at: new Date() },
 		});
+	}
+
+	// ─── Server Hardening ────────────────────────────────────────────────────
+
+	private async processServerHardening(job: Job) {
+		const payload = job.data as SecurityServerHardeningPayload;
+		const { serverId, jobExecutionId, actions } = payload;
+
+		await this.prisma.jobExecution.update({
+			where: { id: BigInt(jobExecutionId) },
+			data: { status: 'active', started_at: new Date() },
+		});
+
+		try {
+			const server = await this.prisma.server.findUnique({
+				where: { id: BigInt(serverId) },
+			});
+			if (!server) throw new Error(`Server ${serverId} not found`);
+
+			const privateKey = await this.sshKey.resolvePrivateKey(server);
+			const executor = createRemoteExecutor({
+				host: server.ip_address,
+				port: server.ssh_port,
+				username: server.ssh_user,
+				privateKey,
+			});
+
+			const results = await applyServerHardeningActions(executor, actions);
+
+			const logEntries = results.map(r => ({
+				ts: new Date().toISOString(),
+				step: r.action,
+				level:
+					r.status === 'failed'
+						? 'error'
+						: r.status === 'skipped'
+							? 'warn'
+							: 'info',
+				detail: r.detail,
+				hardenStatus: r.status,
+			}));
+
+			await this.prisma.jobExecution.update({
+				where: { id: BigInt(jobExecutionId) },
+				data: {
+					status: 'completed',
+					completed_at: new Date(),
+					execution_log: logEntries as object[],
+				},
+			});
+
+			this.logger.log(
+				`Server hardening ${jobExecutionId} completed — ${results.length} action(s)`,
+			);
+			return results;
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			this.logger.error(
+				`Server hardening ${jobExecutionId} failed: ${message}`,
+			);
+			await this.failExecution(jobExecutionId, message);
+			throw err;
+		}
+	}
+
+	// ─── Environment Hardening ───────────────────────────────────────────────
+
+	private async processEnvironmentHardening(job: Job) {
+		const payload = job.data as SecurityEnvironmentHardeningPayload;
+		const { environmentId, jobExecutionId, actions } = payload;
+
+		await this.prisma.jobExecution.update({
+			where: { id: BigInt(jobExecutionId) },
+			data: { status: 'active', started_at: new Date() },
+		});
+
+		try {
+			const env = await this.prisma.environment.findUnique({
+				where: { id: BigInt(environmentId) },
+				include: { server: true },
+			});
+			if (!env) throw new Error(`Environment ${environmentId} not found`);
+
+			const privateKey = await this.sshKey.resolvePrivateKey(env.server);
+			const executor = createRemoteExecutor({
+				host: env.server.ip_address,
+				port: env.server.ssh_port,
+				username: env.server.ssh_user,
+				privateKey,
+			});
+
+			const rootPath = env.root_path;
+			const results = await applyEnvironmentHardeningActions(
+				executor,
+				rootPath,
+				actions,
+			);
+
+			const logEntries = results.map(r => ({
+				ts: new Date().toISOString(),
+				step: r.action,
+				level:
+					r.status === 'failed'
+						? 'error'
+						: r.status === 'skipped'
+							? 'warn'
+							: 'info',
+				detail: r.detail,
+				hardenStatus: r.status,
+			}));
+
+			await this.prisma.jobExecution.update({
+				where: { id: BigInt(jobExecutionId) },
+				data: {
+					status: 'completed',
+					completed_at: new Date(),
+					execution_log: logEntries as object[],
+				},
+			});
+
+			this.logger.log(
+				`Environment hardening ${jobExecutionId} completed — ${results.length} action(s)`,
+			);
+			return results;
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			this.logger.error(
+				`Environment hardening ${jobExecutionId} failed: ${message}`,
+			);
+			await this.failExecution(jobExecutionId, message);
+			throw err;
+		}
 	}
 }
 

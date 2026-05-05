@@ -9,6 +9,7 @@ import { SettingsModule } from '../settings/settings.module';
 @Module({
 	imports: [
 		BullModule.registerQueue({ name: QUEUES.SECURITY }),
+		BullModule.registerQueue({ name: QUEUES.REPORTS }),
 		SettingsModule,
 	],
 	controllers: [SecurityController],
