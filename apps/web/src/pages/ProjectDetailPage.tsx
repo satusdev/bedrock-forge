@@ -158,6 +158,9 @@ export function ProjectDetailPage() {
 	const projectId = Number(id);
 	const qc = useQueryClient();
 	const [editOpen, setEditOpen] = useState(false);
+	const [activatedTabs, setActivatedTabs] = useState<Set<string>>(
+		new Set(['environments']),
+	);
 
 	const {
 		data: project,
@@ -225,7 +228,11 @@ export function ProjectDetailPage() {
 		<div className='container mx-auto py-8 px-4 max-w-6xl space-y-6'>
 			<ProjectHeader project={project} onEdit={() => setEditOpen(true)} />
 
-			<Tabs defaultValue='environments' className='space-y-6'>
+			<Tabs
+				defaultValue='environments'
+				className='space-y-6'
+				onValueChange={v => setActivatedTabs(prev => new Set([...prev, v]))}
+			>
 				<TabsList className='flex-wrap h-auto gap-1'>
 					<TabsTrigger value='environments'>
 						Environments
@@ -246,39 +253,57 @@ export function ProjectDetailPage() {
 				</TabsList>
 
 				<TabsContent value='environments'>
-					<EnvironmentsTab projectId={projectId} />
+					{activatedTabs.has('environments') && (
+						<EnvironmentsTab projectId={projectId} />
+					)}
 				</TabsContent>
 
 				<TabsContent value='backups'>
-					<BackupsTab projectId={projectId} environments={environments} />
+					{activatedTabs.has('backups') && (
+						<BackupsTab projectId={projectId} environments={environments} />
+					)}
 				</TabsContent>
 
 				<TabsContent value='plugins'>
-					<PluginsTab projectId={projectId} environments={environments} />
+					{activatedTabs.has('plugins') && (
+						<PluginsTab projectId={projectId} environments={environments} />
+					)}
 				</TabsContent>
 
 				<TabsContent value='sync'>
-					<SyncTab projectId={projectId} environments={environments} />
+					{activatedTabs.has('sync') && (
+						<SyncTab projectId={projectId} environments={environments} />
+					)}
 				</TabsContent>
 
 				<TabsContent value='restore'>
-					<RestoreTab projectId={projectId} environments={environments} />
+					{activatedTabs.has('restore') && (
+						<RestoreTab projectId={projectId} environments={environments} />
+					)}
 				</TabsContent>
 
 				<TabsContent value='tools'>
-					<ToolsTab environments={environments} />
+					{activatedTabs.has('tools') && (
+						<ToolsTab environments={environments} />
+					)}
 				</TabsContent>
 
 				<TabsContent value='drift'>
-					<DriftTab projectId={projectId} environments={environments} />
+					{activatedTabs.has('drift') && (
+						<DriftTab projectId={projectId} environments={environments} />
+					)}
 				</TabsContent>
 
 				<TabsContent value='themes'>
-					<ThemesTab projectId={projectId} environments={environments} />
+					{activatedTabs.has('themes') && (
+						<ThemesTab projectId={projectId} environments={environments} />
+					)}
 				</TabsContent>
 
 				<TabsContent value='wp-core'>
-					<WpCoreTab environments={environments} />
+					{activatedTabs.has('wp-core') && (
+						<WpCoreTab environments={environments} />
+					)}
 				</TabsContent>
 			</Tabs>
 
