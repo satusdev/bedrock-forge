@@ -6,7 +6,9 @@
 	"scripts": {
 		"dev": "vite",
 		"build": "tsc && vite build",
-		"preview": "vite preview"
+		"preview": "vite preview",
+		"lint": "tsc --noEmit",
+		"type-check": "tsc --noEmit"
 	},
 	"dependencies": {
 		"@bedrock-forge/shared": "workspace:*",
