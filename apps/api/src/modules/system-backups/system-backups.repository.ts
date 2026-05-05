@@ -15,6 +15,17 @@ export interface UpdateSystemBackupData {
 	completed_at?: Date;
 }
 
+export interface UpsertScheduleData {
+	frequency: string;
+	hour: number;
+	minute: number;
+	day_of_week?: number | null;
+	day_of_month?: number | null;
+	enabled: boolean;
+	retention_count?: number | null;
+	retention_days?: number | null;
+}
+
 /**
  * SystemBackupsRepository
  *
@@ -68,5 +79,41 @@ export class SystemBackupsRepository {
 		payload: Record<string, string | number>;
 	}) {
 		return this.prisma.jobExecution.create({ data });
+	}
+
+	// ── Schedule CRUD ────────────────────────────────────────────────────────
+
+	/** Returns the single system-backup schedule row, or null. */
+	findSchedule() {
+		return this.prisma.systemBackupSchedule.findFirst();
+	}
+
+	/** Upsert the single-row system backup schedule. */
+	async upsertSchedule(data: UpsertScheduleData) {
+		const existing = await this.prisma.systemBackupSchedule.findFirst();
+		if (existing) {
+			return this.prisma.systemBackupSchedule.update({
+				where: { id: existing.id },
+				data,
+			});
+		}
+		return this.prisma.systemBackupSchedule.create({ data });
+	}
+
+	/** Delete the system backup schedule row (if it exists). */
+	async deleteSchedule() {
+		const existing = await this.prisma.systemBackupSchedule.findFirst();
+		if (!existing) return;
+		await this.prisma.systemBackupSchedule.delete({
+			where: { id: existing.id },
+		});
+	}
+
+	/** Stamp `last_run_at` after a scheduled backup completes. */
+	async updateScheduleLastRun(scheduleId: bigint) {
+		return this.prisma.systemBackupSchedule.update({
+			where: { id: scheduleId },
+			data: { last_run_at: new Date() },
+		});
 	}
 }

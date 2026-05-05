@@ -4,6 +4,7 @@ import { QUEUES } from '@bedrock-forge/shared';
 import { SystemBackupsController } from './system-backups.controller';
 import { SystemBackupsService } from './system-backups.service';
 import { SystemBackupsRepository } from './system-backups.repository';
+import { SystemBackupScheduleService } from './system-backup-schedule.service';
 import { SettingsModule } from '../settings/settings.module';
 
 @Module({
@@ -12,6 +13,10 @@ import { SettingsModule } from '../settings/settings.module';
 		SettingsModule,
 	],
 	controllers: [SystemBackupsController],
-	providers: [SystemBackupsService, SystemBackupsRepository],
+	providers: [
+		SystemBackupsService,
+		SystemBackupsRepository,
+		SystemBackupScheduleService,
+	],
 })
 export class SystemBackupsModule {}
