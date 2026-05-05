@@ -20,8 +20,8 @@ one command.
 - Zero `.env` sourcing. Credential extraction is regex-only via
   `CredentialParserService`.
 - AES-256-GCM encryption for all credentials at rest
-- 3 Docker Compose services: `postgres`, `redis`, `forge` (API + Worker + static
-  web in one container)
+- 4 Docker Compose services: `postgres`, `redis`, `forge` (API + Worker), `web`
+  (Nginx + static React)
 
 ---
 
@@ -233,6 +233,13 @@ src/modules/<feature>/
 - `app_settings` — key-value config store
 - `audit_logs` — user action audit trail (actor, action, resource)
 - `backup_schedules` — cron-based backup scheduling per environment
+- `system_backups` — Forge DB backups (pg_dump + rclone to Google Drive)
+- `system_backup_schedules` — repeatable schedule config for system backups
+- `security_scans` — scan results (SSH_AUDIT, SERVER_HARDENING, WP_AUDIT,
+  PROJECT_MALWARE, MALWARE_SCAN)
+- `security_scan_schedules` — cron-based scan scheduling per server/environment
+- `security_finding_acks` — acknowledged/accepted findings with notes
+- `ssh_keys` — server SSH private keys (encrypted at rest)
 
 ### Billing & Notifications
 
@@ -244,16 +251,19 @@ src/modules/<feature>/
 
 ## BullMQ Queue Registry
 
-| Queue           | Job Types           | Concurrency | Retries | Timeout |
-| --------------- | ------------------- | ----------- | ------- | ------- |
-| `backups`       | `create`, `restore` | 3/server    | 3       | 30min   |
-| `plugin-scans`  | `run`               | 5           | 3       | 5min    |
-| `sync`          | `clone`, `push`     | 2/server    | 3       | 15min   |
-| `monitors`      | `check`             | 10          | 2       | 30s     |
-| `domains`       | `whois`             | 10          | 3       | 30s     |
-| `projects`      | `create-bedrock`    | 2/server    | 2       | 20min   |
-| `notifications` | `send`              | 20          | 3       | 30s     |
-| `reports`       | `weekly-report`     | 1           | 3       | 5min    |
+| Queue            | Job Types                                                                | Concurrency | Retries | Timeout |
+| ---------------- | ------------------------------------------------------------------------ | ----------- | ------- | ------- |
+| `backups`        | `create`, `restore`                                                      | 3/server    | 3       | 30min   |
+| `plugin-scans`   | `run`                                                                    | 5           | 3       | 5min    |
+| `sync`           | `clone`, `push`                                                          | 2/server    | 3       | 15min   |
+| `monitors`       | `check`                                                                  | 10          | 2       | 30s     |
+| `domains`        | `whois`                                                                  | 10          | 3       | 30s     |
+| `projects`       | `create-bedrock`                                                         | 2/server    | 2       | 20min   |
+| `notifications`  | `send`                                                                   | 20          | 3       | 30s     |
+| `reports`        | `weekly-report`, `security:report-generate`                              | 1           | 3       | 5min    |
+| `security`       | `server-scan`, `environment-scan`, `server-harden`, `environment-harden` | 4           | 3       | 15min   |
+| `system-backups` | `system-backup:create`, `system-backup:scheduled`                        | 1           | 2       | 20min   |
+| `theme-scans`    | `theme-scan:run`, `theme-scan:manage`                                    | 3           | 3       | 10min   |
 
 All queues: exponential backoff (base 1s), dead-letter queue (`<name>-dlq`),
 `removeOnComplete: 1000`, `removeOnFail: 5000`.
@@ -278,11 +288,12 @@ All queues: exponential backoff (base 1s), dead-letter queue (`<name>-dlq`),
 
 ## Docker Compose Services
 
-| Service    | Image               | Purpose                                           |
-| ---------- | ------------------- | ------------------------------------------------- |
-| `postgres` | postgres:16-alpine  | Primary database                                  |
-| `redis`    | redis:7-alpine      | BullMQ + WebSocket pub/sub + rate limiting        |
-| `forge`    | (multi-stage build) | NestJS API + NestJS Worker + static React web app |
+| Service    | Image               | Purpose                                             | External Port        |
+| ---------- | ------------------- | --------------------------------------------------- | -------------------- |
+| `postgres` | postgres:16-alpine  | Primary database                                    | 5432 (internal only) |
+| `redis`    | redis:7-alpine      | BullMQ + WebSocket pub/sub + rate limiting          | 6379 (internal only) |
+| `forge`    | (multi-stage build) | NestJS API + NestJS Worker (two parallel processes) | 3001 → 3000          |
+| `web`      | nginx:alpine        | Static React build served by Nginx + reverse proxy  | 3002 → 80            |
 
 `forge` container entrypoint: runs `prisma migrate deploy`, then starts API
 (`apps/api`) and Worker (`apps/worker`) as parallel Node processes via
@@ -295,7 +306,7 @@ All queues: exponential backoff (base 1s), dead-letter queue (`<name>-dlq`),
 **Layout:** Fixed left sidebar (240px) + main content area. Sidebar collapses to
 icon-only on md breakpoint.
 
-**Sidebar navigation (13 items — role-gated):**
+**Sidebar navigation (16 items — role-gated):**
 
 1. Dashboard
 2. Clients
@@ -305,11 +316,14 @@ icon-only on md breakpoint.
 6. Domains
 7. Monitors
 8. Activity _(job execution feed)_
-9. Settings
-10. Packages _(manager+)_
-11. Invoices _(manager+)_
-12. Users & Roles _(admin only)_
-13. Notifications _(admin only)_
+9. Security _(manager+)_
+10. Settings
+11. Packages _(manager+)_
+12. Invoices _(manager+)_
+13. Reports _(admin only)_
+14. Notifications _(admin only)_
+15. Users & Roles _(admin only)_
+16. Audit Logs _(admin only)_
 
 **Dashboard home:** 4 big stat cards (active projects, recent backups, average
 uptime, server count) + quick action buttons + recent job activity feed (live
