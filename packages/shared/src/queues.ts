@@ -76,11 +76,15 @@ export const JOB_TYPES = {
 
 	// System (Forge self-backup)
 	SYSTEM_BACKUP_CREATE: 'system-backup:create',
+	SYSTEM_BACKUP_SCHEDULED: 'system-backup:scheduled',
 
 	// Security
 	SECURITY_SERVER_SCAN: 'security:server-scan',
 	SECURITY_ENVIRONMENT_SCAN: 'security:environment-scan',
 	SECURITY_SCHEDULED_SCAN: 'security:scheduled-scan',
+	SECURITY_REPORT_GENERATE: 'security:report-generate',
+	SECURITY_SERVER_HARDEN: 'security:server-harden',
+	SECURITY_ENVIRONMENT_HARDEN: 'security:environment-harden',
 } as const;
 
 // ─── Default Job Options ──────────────────────────────────────────────────────
