@@ -13,6 +13,7 @@ import {
 	ThemeScanRunPayload,
 } from '@bedrock-forge/shared';
 import { ConfigService } from '@nestjs/config';
+import { buildWpCliPrefix } from '../../utils/processor-utils';
 
 /** Wrap a string in single quotes for safe shell embedding on the remote host. */
 function shellQuote(value: string): string {
@@ -104,9 +105,32 @@ export class ThemeScanProcessor extends WorkerHost {
 				detail: `${isBedrockLayout ? 'Bedrock (web/wp)' : 'Standard'} at ${wpPath}`,
 			});
 
+			const {
+				prefix: wpPrefix,
+				allowRootFlag,
+				lsphpBin,
+				wpBin,
+			} = await buildWpCliPrefix(executor, wpPath);
+
+			const buildWpCmd = (args: string): string => {
+				let phpAndWp: string;
+				if (lsphpBin && wpBin) {
+					phpAndWp = `${shellQuote(lsphpBin)} ${shellQuote(wpBin)}`;
+				} else if (lsphpBin) {
+					phpAndWp = `env WP_CLI_PHP=${shellQuote(lsphpBin)} wp`;
+				} else {
+					phpAndWp = 'wp';
+				}
+				return [wpPrefix, phpAndWp, args.trim(), allowRootFlag]
+					.filter(Boolean)
+					.join(' ');
+			};
+
 			const fields =
 				'name,slug,status,version,update_version,update,title,description,author';
-			const cmd = `wp theme list --format=json --fields=${fields} --path=${shellQuote(wpPath)}`;
+			const cmd = buildWpCmd(
+				`theme list --format=json --fields=${fields} --path=${shellQuote(wpPath)}`,
+			);
 
 			await tracker.track({
 				step: 'Running wp theme list',
@@ -131,6 +155,25 @@ export class ThemeScanProcessor extends WorkerHost {
 
 			await tracker.track({ step: 'Parsing theme results', level: 'info' });
 			const themes: ThemeInfo[] = JSON.parse(result.stdout);
+
+			// Fetch WP version — best-effort, does not fail the scan
+			let wpVersion = '';
+			try {
+				const versionResult = await executor.execute(
+					buildWpCmd(`core version --path=${shellQuote(wpPath)}`),
+					{ timeout: 15_000 },
+				);
+				wpVersion = versionResult.stdout.trim();
+				if (wpVersion) {
+					await tracker.track({
+						step: 'WP version',
+						level: 'info',
+						detail: wpVersion,
+					});
+				}
+			} catch {
+				// non-fatal — continue without version
+			}
 
 			await job.updateProgress(80);
 
@@ -158,7 +201,9 @@ export class ThemeScanProcessor extends WorkerHost {
 			await tracker.track({
 				step: 'Theme scan complete',
 				level: 'info',
-				detail: `${themes.length} themes`,
+				detail: wpVersion
+					? `${themes.length} themes · WP ${wpVersion}`
+					: `${themes.length} themes`,
 			});
 
 			this.logger.log(
@@ -236,26 +281,55 @@ export class ThemeScanProcessor extends WorkerHost {
 				? `${env.root_path}/web/wp`
 				: env.root_path;
 
+			const {
+				prefix: wpPrefix,
+				allowRootFlag,
+				lsphpBin,
+				wpBin,
+			} = await buildWpCliPrefix(executor, wpPath);
+
+			const buildWpCmd = (args: string): string => {
+				let phpAndWp: string;
+				if (lsphpBin && wpBin) {
+					phpAndWp = `${shellQuote(lsphpBin)} ${shellQuote(wpBin)}`;
+				} else if (lsphpBin) {
+					phpAndWp = `env WP_CLI_PHP=${shellQuote(lsphpBin)} wp`;
+				} else {
+					phpAndWp = 'wp';
+				}
+				return [wpPrefix, phpAndWp, args.trim(), allowRootFlag]
+					.filter(Boolean)
+					.join(' ');
+			};
+
 			let cmd: string;
 			switch (action) {
 				case 'activate':
 					if (!slug) throw new Error('slug required for theme activate');
-					cmd = `wp theme activate ${shellQuote(slug)} --path=${shellQuote(wpPath)}`;
+					cmd = buildWpCmd(
+						`theme activate ${shellQuote(slug)} --path=${shellQuote(wpPath)}`,
+					);
 					break;
 				case 'install':
 					if (!slug) throw new Error('slug required for theme install');
-					cmd = `wp theme install ${shellQuote(slug)} --path=${shellQuote(wpPath)}`;
+					cmd = buildWpCmd(
+						`theme install ${shellQuote(slug)} --path=${shellQuote(wpPath)}`,
+					);
 					break;
 				case 'delete':
 					if (!slug) throw new Error('slug required for theme delete');
-					cmd = `wp theme delete ${shellQuote(slug)} --path=${shellQuote(wpPath)}`;
+					cmd = buildWpCmd(
+						`theme delete ${shellQuote(slug)} --path=${shellQuote(wpPath)}`,
+					);
 					break;
 				case 'update':
 					if (!slug) throw new Error('slug required for theme update');
-					cmd = `wp theme update ${shellQuote(slug)} --path=${shellQuote(wpPath)}`;
+					cmd = buildWpCmd(
+						`theme update ${shellQuote(slug)} --path=${shellQuote(wpPath)}`,
+					);
 					break;
 				case 'update-all':
-					cmd = `wp theme update --all --path=${shellQuote(wpPath)}`;
+					cmd = buildWpCmd(`theme update --all --path=${shellQuote(wpPath)}`);
 					break;
 				default:
 					throw new Error(`Unknown theme action: ${String(action)}`);
