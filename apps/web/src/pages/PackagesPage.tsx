@@ -98,6 +98,7 @@ function HostingFormDialog({
 		watch,
 		setValue,
 		reset,
+		setError,
 		formState: { errors, isSubmitting },
 	} = useForm<HostingForm>({
 		resolver: zodResolver(hostingSchema),
@@ -123,8 +124,9 @@ function HostingFormDialog({
 			reset();
 			onSuccess();
 			onOpenChange(false);
-		} catch {
-			toast({ title: 'Save failed', variant: 'destructive' });
+		} catch (err) {
+			const message = err instanceof Error ? err.message : 'Save failed';
+			setError('root', { message });
 		}
 	}
 
@@ -204,6 +206,11 @@ function HostingFormDialog({
 					</div>
 
 					<DialogFooter>
+						{errors.root && (
+							<p className='text-xs text-destructive w-full text-left'>
+								{errors.root.message}
+							</p>
+						)}
 						<Button
 							type='button'
 							variant='outline'
@@ -240,6 +247,7 @@ function SupportFormDialog({
 		watch,
 		setValue,
 		reset,
+		setError,
 		formState: { errors, isSubmitting },
 	} = useForm<SupportForm>({
 		resolver: zodResolver(supportSchema),
@@ -264,8 +272,9 @@ function SupportFormDialog({
 			reset();
 			onSuccess();
 			onOpenChange(false);
-		} catch {
-			toast({ title: 'Save failed', variant: 'destructive' });
+		} catch (err) {
+			const message = err instanceof Error ? err.message : 'Save failed';
+			setError('root', { message });
 		}
 	}
 
@@ -334,6 +343,11 @@ function SupportFormDialog({
 					</div>
 
 					<DialogFooter>
+						{errors.root && (
+							<p className='text-xs text-destructive w-full text-left'>
+								{errors.root.message}
+							</p>
+						)}
 						<Button
 							type='button'
 							variant='outline'
@@ -361,7 +375,12 @@ function HostingTab() {
 	const [page, setPage] = useState(1);
 	const PAGE_SIZE = 10;
 
-	const { data = [], isLoading } = useQuery({
+	const {
+		data = [],
+		isLoading,
+		isError,
+		refetch,
+	} = useQuery({
 		queryKey: ['hosting-packages'],
 		queryFn: () => api.get<HostingPackage[]>('/packages/hosting'),
 	});
@@ -432,6 +451,8 @@ function HostingTab() {
 				columns={columns}
 				data={data.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)}
 				isLoading={isLoading}
+				isError={isError}
+				onRetry={refetch}
 				rowKey={p => p.id}
 				emptyMessage='No hosting packages yet.'
 				renderActions={pkg => (
@@ -498,7 +519,12 @@ function SupportTab() {
 	const [page, setPage] = useState(1);
 	const PAGE_SIZE = 10;
 
-	const { data = [], isLoading } = useQuery({
+	const {
+		data = [],
+		isLoading,
+		isError,
+		refetch,
+	} = useQuery({
 		queryKey: ['support-packages'],
 		queryFn: () => api.get<SupportPackage[]>('/packages/support'),
 	});
@@ -564,6 +590,8 @@ function SupportTab() {
 				columns={columns}
 				data={data.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)}
 				isLoading={isLoading}
+				isError={isError}
+				onRetry={refetch}
 				rowKey={p => p.id}
 				emptyMessage='No support packages yet.'
 				renderActions={pkg => (

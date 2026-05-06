@@ -97,6 +97,7 @@ function ServerFormDialog({
 		register,
 		handleSubmit,
 		reset,
+		setError,
 		formState: { errors, isSubmitting },
 	} = useForm<ServerForm>({
 		resolver: zodResolver(serverSchema),
@@ -188,8 +189,10 @@ function ServerFormDialog({
 			reset();
 			onSuccess();
 			onOpenChange(false);
-		} catch {
-			toast({ title: 'Save failed', variant: 'destructive' });
+		} catch (err) {
+			const message =
+				err instanceof Error ? err.message : 'Save failed. Please try again.';
+			setError('root', { message });
 		}
 	}
 
@@ -406,7 +409,7 @@ export function ServersPage() {
 	const [search, setSearch] = useState('');
 	const [searchInput, setSearchInput] = useState('');
 
-	const { data, isLoading } = useQuery({
+	const { data, isLoading, isError, refetch } = useQuery({
 		queryKey: ['servers', page, search],
 		queryFn: () =>
 			api.get<{ items: Server[]; total: number }>(
@@ -556,6 +559,8 @@ export function ServersPage() {
 				columns={columns}
 				data={servers}
 				isLoading={isLoading}
+				isError={isError}
+				onRetry={refetch}
 				rowKey={s => s.id}
 				emptyMessage={search ? 'No results.' : 'No servers yet.'}
 				renderActions={s => (

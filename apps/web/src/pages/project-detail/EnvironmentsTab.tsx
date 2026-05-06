@@ -369,6 +369,7 @@ function EnvironmentFormDialog({
 		handleSubmit,
 		setValue,
 		reset,
+		setError,
 		formState: { errors, isSubmitting },
 	} = useForm<EnvForm>({
 		resolver: zodResolver(envSchema),
@@ -410,8 +411,10 @@ function EnvironmentFormDialog({
 			reset();
 			onSuccess();
 			onOpenChange(false);
-		} catch {
-			toast({ title: 'Save failed', variant: 'destructive' });
+		} catch (err) {
+			const message =
+				err instanceof Error ? err.message : 'Save failed. Please try again.';
+			setError('root', { message });
 		}
 	}
 
@@ -564,6 +567,11 @@ function EnvironmentFormDialog({
 					</div>
 
 					<DialogFooter>
+						{errors.root && (
+							<p className='text-xs text-destructive w-full text-left'>
+								{errors.root.message}
+							</p>
+						)}
 						<Button
 							type='button'
 							variant='outline'
@@ -848,6 +856,7 @@ function DbCredentialsSection({
 		register,
 		handleSubmit,
 		reset: resetForm,
+		setError: setCredsError,
 		formState: { errors, isSubmitting },
 	} = useForm<DbCredsForm>({
 		resolver: zodResolver(dbCredsSchema),
@@ -876,8 +885,10 @@ function DbCredentialsSection({
 			qc.invalidateQueries({ queryKey: ['db-credentials', envId] });
 			toast({ title: 'DB credentials saved' });
 			setEditing(false);
-		} catch {
-			toast({ title: 'Save failed', variant: 'destructive' });
+		} catch (err) {
+			const message =
+				err instanceof Error ? err.message : 'Save failed. Please try again.';
+			setCredsError('root', { message });
 		}
 	}
 
@@ -984,27 +995,34 @@ function DbCredentialsSection({
 									)}
 								</div>
 							</div>
-							<div className='flex gap-2 pt-1'>
-								<Button
-									type='submit'
-									size='sm'
-									className='h-6 text-xs flex-1'
-									disabled={isSubmitting}
-								>
-									{isSubmitting ? 'Saving…' : 'Save'}
-								</Button>
-								<Button
-									type='button'
-									size='sm'
-									variant='outline'
-									className='h-6 text-xs'
-									onClick={() => {
-										setEditing(false);
-										resetForm();
-									}}
-								>
-									Cancel
-								</Button>
+							<div className='flex gap-2 pt-1 flex-col'>
+								{errors.root && (
+									<p className='text-xs text-destructive'>
+										{errors.root.message}
+									</p>
+								)}
+								<div className='flex gap-2'>
+									<Button
+										type='submit'
+										size='sm'
+										className='h-6 text-xs flex-1'
+										disabled={isSubmitting}
+									>
+										{isSubmitting ? 'Saving…' : 'Save'}
+									</Button>
+									<Button
+										type='button'
+										size='sm'
+										variant='outline'
+										className='h-6 text-xs'
+										onClick={() => {
+											setEditing(false);
+											resetForm();
+										}}
+									>
+										Cancel
+									</Button>
+								</div>
 							</div>
 						</form>
 					) : (

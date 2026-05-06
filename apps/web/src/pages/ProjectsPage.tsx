@@ -120,6 +120,7 @@ export function ProjectFormDialog({
 		handleSubmit,
 		setValue,
 		reset,
+		setError,
 		formState: { errors, isSubmitting },
 	} = useForm<ProjectForm>({
 		resolver: zodResolver(projectSchema),
@@ -151,8 +152,10 @@ export function ProjectFormDialog({
 			reset();
 			onSuccess();
 			onOpenChange(false);
-		} catch {
-			toast({ title: 'Save failed', variant: 'destructive' });
+		} catch (err) {
+			const message =
+				err instanceof Error ? err.message : 'Save failed. Please try again.';
+			setError('root', { message });
 		}
 	}
 
@@ -263,6 +266,11 @@ export function ProjectFormDialog({
 					)}
 
 					<DialogFooter>
+						{errors.root && (
+							<p className='text-xs text-destructive w-full text-left'>
+								{errors.root.message}
+							</p>
+						)}
 						<Button
 							type='button'
 							variant='outline'

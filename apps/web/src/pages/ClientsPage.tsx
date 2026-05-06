@@ -88,6 +88,7 @@ function ClientFormDialog({
 		register,
 		handleSubmit,
 		reset,
+		setError,
 		formState: { errors, isSubmitting },
 	} = useForm<ClientForm>({
 		resolver: zodResolver(clientSchema),
@@ -125,8 +126,10 @@ function ClientFormDialog({
 			setSelectedTagIds([]);
 			onSuccess();
 			onOpenChange(false);
-		} catch {
-			toast({ title: 'Save failed', variant: 'destructive' });
+		} catch (err) {
+			const message =
+				err instanceof Error ? err.message : 'Save failed. Please try again.';
+			setError('root', { message });
 		}
 	}
 
@@ -203,6 +206,11 @@ function ClientFormDialog({
 					)}
 
 					<DialogFooter>
+						{errors.root && (
+							<p className='text-xs text-destructive w-full text-left'>
+								{errors.root.message}
+							</p>
+						)}
 						<Button
 							type='button'
 							variant='outline'
@@ -231,7 +239,7 @@ export function ClientsPage() {
 	const [editTarget, setEditTarget] = useState<Client | null>(null);
 	const [deleteTarget, setDeleteTarget] = useState<Client | null>(null);
 
-	const { data, isLoading } = useQuery({
+	const { data, isLoading, isError, refetch } = useQuery({
 		queryKey: ['clients', page, search],
 		queryFn: () =>
 			api.get<PaginatedClients>(
@@ -325,6 +333,8 @@ export function ClientsPage() {
 				columns={columns}
 				data={data?.items ?? []}
 				isLoading={isLoading}
+				isError={isError}
+				onRetry={refetch}
 				rowKey={c => c.id}
 				emptyMessage={
 					search ? 'No results for that search.' : 'No clients yet.'

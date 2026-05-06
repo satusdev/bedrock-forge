@@ -120,6 +120,7 @@ function ChannelFormDialog({
 		watch,
 		setValue,
 		reset,
+		setError,
 		formState: { errors, isSubmitting },
 	} = useForm<ChannelForm>({
 		resolver: zodResolver(channelSchema),
@@ -184,8 +185,9 @@ function ChannelFormDialog({
 			reset();
 			onSuccess();
 			onOpenChange(false);
-		} catch {
-			toast({ title: 'Save failed', variant: 'destructive' });
+		} catch (err) {
+			const message = err instanceof Error ? err.message : 'Save failed';
+			setError('root', { message });
 		}
 	}
 
@@ -296,6 +298,11 @@ function ChannelFormDialog({
 					</div>
 
 					<DialogFooter>
+						{errors.root && (
+							<p className='text-xs text-destructive w-full text-left'>
+								{errors.root.message}
+							</p>
+						)}
 						<Button
 							type='button'
 							variant='outline'
@@ -328,7 +335,12 @@ export function NotificationsPage() {
 	const [logPage, setLogPage] = useState(1);
 	const LOG_PAGE_SIZE = 15;
 
-	const { data: channels = [], isLoading } = useQuery({
+	const {
+		data: channels = [],
+		isLoading,
+		isError,
+		refetch,
+	} = useQuery({
 		queryKey: ['notification-channels'],
 		queryFn: () => api.get<NotificationChannel[]>('/notifications/channels'),
 	});
@@ -442,6 +454,8 @@ export function NotificationsPage() {
 				columns={columns}
 				data={channels}
 				isLoading={isLoading}
+				isError={isError}
+				onRetry={refetch}
 				rowKey={c => c.id}
 				emptyMessage='No channels configured yet.'
 				renderActions={channel => (

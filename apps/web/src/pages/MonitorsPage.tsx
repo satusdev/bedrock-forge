@@ -299,6 +299,7 @@ function CreateMonitorDialog({
 		setValue,
 		watch,
 		reset,
+		setError,
 		formState: { errors, isSubmitting },
 	} = useForm<MonitorForm>({
 		resolver: zodResolver(monitorSchema),
@@ -318,8 +319,10 @@ function CreateMonitorDialog({
 			reset();
 			onSuccess();
 			onOpenChange(false);
-		} catch {
-			toast({ title: 'Create failed', variant: 'destructive' });
+		} catch (err) {
+			const message =
+				err instanceof Error ? err.message : 'Create failed. Please try again.';
+			setError('root', { message });
 		}
 	}
 
@@ -378,6 +381,11 @@ function CreateMonitorDialog({
 						<p className='text-xs text-destructive'>{errors.keyword.message}</p>
 					)}
 					<DialogFooter>
+						{errors.root && (
+							<p className='text-xs text-destructive w-full text-left'>
+								{errors.root.message}
+							</p>
+						)}
 						<Button
 							type='button'
 							variant='outline'
@@ -543,7 +551,7 @@ export function MonitorsPage() {
 	const [deleteTarget, setDeleteTarget] = useState<Monitor | null>(null);
 	const [editTarget, setEditTarget] = useState<Monitor | null>(null);
 
-	const { data, isLoading } = useQuery({
+	const { data, isLoading, isError, refetch } = useQuery({
 		queryKey: ['monitors', page, search],
 		queryFn: () => {
 			const params = new URLSearchParams({
@@ -732,6 +740,8 @@ export function MonitorsPage() {
 				columns={columns}
 				data={data?.items ?? []}
 				isLoading={isLoading}
+				isError={isError}
+				onRetry={refetch}
 				rowKey={m => m.id}
 				emptyMessage='No monitors yet.'
 				renderActions={m => (

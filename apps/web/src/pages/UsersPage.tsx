@@ -98,6 +98,7 @@ function UserFormDialog({
 		setValue,
 		watch,
 		reset,
+		setError,
 		formState: { errors, isSubmitting },
 	} = useForm<UserForm>({
 		resolver: zodResolver(userSchema),
@@ -145,8 +146,10 @@ function UserFormDialog({
 			reset();
 			onSuccess();
 			onOpenChange(false);
-		} catch {
-			toast({ title: 'Save failed', variant: 'destructive' });
+		} catch (err) {
+			const message =
+				err instanceof Error ? err.message : 'Save failed. Please try again.';
+			setError('root', { message });
 		}
 	}
 
@@ -247,7 +250,7 @@ export function UsersPage() {
 	const [editTarget, setEditTarget] = useState<User | null>(null);
 	const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
 
-	const { data, isLoading } = useQuery({
+	const { data, isLoading, isError, refetch } = useQuery({
 		queryKey: ['users', page, search],
 		queryFn: () =>
 			api.get<PaginatedUsers>(
@@ -359,6 +362,8 @@ export function UsersPage() {
 				columns={columns}
 				data={data?.data ?? []}
 				isLoading={isLoading}
+				isError={isError}
+				onRetry={refetch}
 				rowKey={u => u.id}
 				emptyMessage={search ? 'No results for that search.' : 'No users yet.'}
 				renderActions={user => (

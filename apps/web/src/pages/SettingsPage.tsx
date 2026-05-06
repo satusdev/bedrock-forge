@@ -383,6 +383,7 @@ export function SettingsPage() {
 		register: regNew,
 		handleSubmit: handleNew,
 		reset: resetNew,
+		setError: setNewError,
 		formState: { errors: newErrors, isSubmitting: isCreating },
 	} = useForm<NewSettingForm>({ resolver: zodResolver(newSettingSchema) });
 
@@ -392,8 +393,10 @@ export function SettingsPage() {
 			qc.invalidateQueries({ queryKey: ['settings'] });
 			resetNew();
 			toast({ title: 'Setting created' });
-		} catch {
-			toast({ title: 'Create failed', variant: 'destructive' });
+		} catch (err) {
+			const message =
+				err instanceof Error ? err.message : 'Create failed. Please try again.';
+			setNewError('root', { message });
 		}
 	}
 
@@ -1176,6 +1179,11 @@ export function SettingsPage() {
 								)}
 							</div>
 							<div className='col-span-2'>
+								{newErrors.root && (
+									<p className='text-xs text-destructive mb-2'>
+										{newErrors.root.message}
+									</p>
+								)}
 								<Button type='submit' size='sm' disabled={isCreating}>
 									{isCreating ? 'Saving\u2026' : 'Add Setting'}
 								</Button>
