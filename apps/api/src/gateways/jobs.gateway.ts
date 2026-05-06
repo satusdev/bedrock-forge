@@ -12,7 +12,8 @@ import { Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { QueueEvents } from 'bullmq';
-import { PrismaService } from '../prisma/prisma.service';
+import { JobExecutionsService } from '../modules/job-executions/job-executions.service';
+import { EnvironmentsService } from '../modules/environments/environments.service';
 import {
 	WS_EVENTS,
 	QUEUES,
@@ -67,7 +68,8 @@ export class JobsGateway
 	constructor(
 		private readonly jwtService: JwtService,
 		private readonly config: ConfigService,
-		private readonly prisma: PrismaService,
+		private readonly jobExecutions: JobExecutionsService,
+		private readonly envService: EnvironmentsService,
 	) {}
 
 	// ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -773,29 +775,12 @@ export class JobsGateway
 	private async resolveMonitorEnvId(
 		bullJobId: string,
 	): Promise<number | undefined> {
-		try {
-			const exec = await this.prisma.jobExecution.findFirst({
-				where: { bull_job_id: bullJobId, queue_name: 'monitors' },
-				select: { environment_id: true },
-				orderBy: { created_at: 'desc' },
-			});
-			return exec?.environment_id ? Number(exec.environment_id) : undefined;
-		} catch {
-			return undefined;
-		}
+		return this.jobExecutions.findEnvIdByBullJobId(bullJobId, 'monitors');
 	}
 
 	/** Look up the environmentId for a bull_job_id from the JobExecution table. */
 	private async resolveEnvId(bullJobId: string): Promise<number | undefined> {
-		try {
-			const exec = await this.prisma.jobExecution.findFirst({
-				where: { bull_job_id: bullJobId },
-				select: { environment_id: true },
-			});
-			return exec?.environment_id ? Number(exec.environment_id) : undefined;
-		} catch {
-			return undefined;
-		}
+		return this.jobExecutions.findEnvIdByBullJobId(bullJobId);
 	}
 
 	// ── WebSocket connection handling ─────────────────────────────────────────
@@ -834,11 +819,8 @@ export class JobsGateway
 		@MessageBody() data: { environmentId: number },
 		@ConnectedSocket() socket: Socket,
 	) {
-		const env = await this.prisma.environment.findUnique({
-			where: { id: BigInt(data.environmentId) },
-			select: { id: true },
-		});
-		if (!env) return;
+		const exists = await this.envService.existsById(BigInt(data.environmentId));
+		if (!exists) return;
 		socket.join(`env:${data.environmentId}`);
 	}
 

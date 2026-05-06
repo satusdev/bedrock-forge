@@ -4,7 +4,7 @@ import { Queue } from 'bullmq';
 import { QUEUES, JOB_TYPES } from '@bedrock-forge/shared';
 import { PluginUpdateSchedulesRepository } from './plugin-update-schedules.repository';
 import { UpsertPluginUpdateScheduleDto } from './dto/plugin-update-schedule.dto';
-import { PrismaService } from '../../prisma/prisma.service';
+import { EnvironmentsService } from '../environments/environments.service';
 
 @Injectable()
 export class PluginUpdateSchedulesService {
@@ -12,7 +12,7 @@ export class PluginUpdateSchedulesService {
 
 	constructor(
 		private readonly repo: PluginUpdateSchedulesRepository,
-		private readonly prisma: PrismaService,
+		private readonly envService: EnvironmentsService,
 		@InjectQueue(QUEUES.PLUGIN_UPDATES)
 		private readonly pluginUpdatesQueue: Queue,
 	) {}
@@ -22,11 +22,8 @@ export class PluginUpdateSchedulesService {
 	}
 
 	async upsert(envId: number, dto: UpsertPluginUpdateScheduleDto) {
-		const env = await this.prisma.environment.findUnique({
-			where: { id: BigInt(envId) },
-			select: { id: true },
-		});
-		if (!env) throw new NotFoundException(`Environment ${envId} not found`);
+		const exists = await this.envService.existsById(BigInt(envId));
+		if (!exists) throw new NotFoundException(`Environment ${envId} not found`);
 
 		const schedule = await this.repo.upsert(BigInt(envId), {
 			frequency: dto.frequency,

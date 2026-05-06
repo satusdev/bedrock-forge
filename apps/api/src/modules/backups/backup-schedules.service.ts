@@ -4,7 +4,7 @@ import { Queue } from 'bullmq';
 import { QUEUES, JOB_TYPES } from '@bedrock-forge/shared';
 import { BackupSchedulesRepository } from './backup-schedules.repository';
 import { UpsertBackupScheduleDto } from './dto/backup-schedule.dto';
-import { PrismaService } from '../../prisma/prisma.service';
+import { EnvironmentsService } from '../environments/environments.service';
 
 @Injectable()
 export class BackupSchedulesService {
@@ -12,7 +12,7 @@ export class BackupSchedulesService {
 
 	constructor(
 		private readonly repo: BackupSchedulesRepository,
-		private readonly prisma: PrismaService,
+		private readonly envService: EnvironmentsService,
 		@InjectQueue(QUEUES.BACKUPS) private readonly backupsQueue: Queue,
 	) {}
 
@@ -22,11 +22,8 @@ export class BackupSchedulesService {
 
 	async upsert(envId: number, dto: UpsertBackupScheduleDto) {
 		// Ensure the environment exists
-		const env = await this.prisma.environment.findUnique({
-			where: { id: BigInt(envId) },
-			select: { id: true },
-		});
-		if (!env) throw new NotFoundException(`Environment ${envId} not found`);
+		const exists = await this.envService.existsById(BigInt(envId));
+		if (!exists) throw new NotFoundException(`Environment ${envId} not found`);
 
 		const schedule = await this.repo.upsert(BigInt(envId), {
 			type: dto.type,

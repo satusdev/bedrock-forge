@@ -7,9 +7,13 @@ import { BackupsRepository } from './backups.repository';
 import { BackupSchedulesController } from './backup-schedules.controller';
 import { BackupSchedulesService } from './backup-schedules.service';
 import { BackupSchedulesRepository } from './backup-schedules.repository';
+import { EnvironmentsModule } from '../environments/environments.module';
 
 @Module({
-	imports: [BullModule.registerQueue({ name: QUEUES.BACKUPS })],
+	imports: [
+		BullModule.registerQueue({ name: QUEUES.BACKUPS }),
+		EnvironmentsModule,
+	],
 	controllers: [BackupsController, BackupSchedulesController],
 	providers: [
 		BackupsService,
