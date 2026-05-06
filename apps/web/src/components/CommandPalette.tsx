@@ -157,7 +157,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
 
 	const debouncedQuery = useDebounce(query, 250);
 
-	const { data: clients = [] } = useQuery({
+	const { data: clients = [], isFetching: fetchingClients } = useQuery({
 		queryKey: ['cmd-clients', debouncedQuery],
 		queryFn: async () => {
 			if (!debouncedQuery) return [];
@@ -169,7 +169,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
 		enabled: open && debouncedQuery.length > 0,
 	});
 
-	const { data: servers = [] } = useQuery({
+	const { data: servers = [], isFetching: fetchingServers } = useQuery({
 		queryKey: ['cmd-servers', debouncedQuery],
 		queryFn: async () => {
 			if (!debouncedQuery) return [];
@@ -181,7 +181,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
 		enabled: open && debouncedQuery.length > 0,
 	});
 
-	const { data: projects = [] } = useQuery({
+	const { data: projects = [], isFetching: fetchingProjects } = useQuery({
 		queryKey: ['cmd-projects', debouncedQuery],
 		queryFn: async () => {
 			if (!debouncedQuery) return [];
@@ -192,6 +192,10 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
 		},
 		enabled: open && debouncedQuery.length > 0,
 	});
+
+	const isFetchingDynamic =
+		debouncedQuery.length > 0 &&
+		(fetchingClients || fetchingServers || fetchingProjects);
 
 	const filteredPages = debouncedQuery
 		? STATIC_PAGES.filter(
@@ -297,11 +301,16 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
 
 				{/* Results */}
 				<div ref={listRef} className='max-h-80 overflow-y-auto py-2'>
-					{allItems.length === 0 && (
+					{isFetchingDynamic && allItems.length === 0 ? (
+						<div className='flex items-center justify-center py-8 gap-2 text-sm text-muted-foreground'>
+							<span className='h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent' />
+							Searching…
+						</div>
+					) : allItems.length === 0 ? (
 						<p className='py-8 text-center text-sm text-muted-foreground'>
 							No results found.
 						</p>
-					)}
+					) : null}
 
 					{allItems.map((item, i) => {
 						const prevItem = allItems[i - 1];
