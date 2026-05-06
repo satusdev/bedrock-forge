@@ -47,34 +47,50 @@ export class BackupsService {
 		}
 
 		const bullJobId = randomUUID();
-		const exec = await this.repo.createJobExecution({
-			queue_name: QUEUES.BACKUPS,
-			job_type: JOB_TYPES.BACKUP_CREATE,
-			bull_job_id: bullJobId,
-			environment_id: BigInt(dto.environmentId),
-			payload: { environmentId: dto.environmentId, type: dto.type } as Record<
-				string,
-				string | number
-			>,
-		});
-		// Create the Backup row immediately so the UI can show pending state.
-		// The worker updates this row to running → completed | failed.
-		const backup = await this.repo.create({
-			environment_id: BigInt(dto.environmentId),
-			job_execution_id: exec.id,
-			type: dto.type as 'full' | 'db_only' | 'files_only',
-			status: 'pending',
-		});
-		const job = await this.backupsQueue.add(
-			JOB_TYPES.BACKUP_CREATE,
+		// Atomically create both rows so a queue.add() failure leaves no orphans.
+		const { exec, backup } = await this.repo.createJobExecutionAndBackup(
 			{
-				environmentId: dto.environmentId,
-				type: dto.type,
-				jobExecutionId: Number(exec.id),
-				backupId: Number(backup.id),
+				queue_name: QUEUES.BACKUPS,
+				job_type: JOB_TYPES.BACKUP_CREATE,
+				bull_job_id: bullJobId,
+				environment_id: BigInt(dto.environmentId),
+				payload: { environmentId: dto.environmentId, type: dto.type } as Record<
+					string,
+					string | number
+				>,
 			},
-			{ ...BACKUP_JOB_OPTIONS, jobId: bullJobId },
+			{
+				environment_id: BigInt(dto.environmentId),
+				type: dto.type as 'full' | 'db_only' | 'files_only',
+				status: 'pending',
+			},
 		);
+		let job;
+		try {
+			job = await this.backupsQueue.add(
+				JOB_TYPES.BACKUP_CREATE,
+				{
+					environmentId: dto.environmentId,
+					type: dto.type,
+					jobExecutionId: Number(exec.id),
+					backupId: Number(backup.id),
+				},
+				{ ...BACKUP_JOB_OPTIONS, jobId: bullJobId },
+			);
+		} catch (err) {
+			const errMsg = err instanceof Error ? err.message : String(err);
+			await Promise.allSettled([
+				this.repo.updateJobExecution(exec.id, {
+					status: 'failed',
+					last_error: errMsg,
+				}),
+				this.repo.updateStatus(backup.id, {
+					status: 'failed',
+					error_message: errMsg,
+				}),
+			]);
+			throw err;
+		}
 		return {
 			jobExecutionId: Number(exec.id),
 			bullJobId: job.id,
@@ -95,15 +111,25 @@ export class BackupsService {
 				environmentId: Number(backup.environment_id),
 			} as Record<string, number>,
 		});
-		const job = await this.backupsQueue.add(
-			JOB_TYPES.BACKUP_RESTORE,
-			{
-				backupId: dto.backupId,
-				environmentId: Number(backup.environment_id),
-				jobExecutionId: Number(exec.id),
-			},
-			{ ...BACKUP_JOB_OPTIONS, jobId: bullJobId },
-		);
+		let job;
+		try {
+			job = await this.backupsQueue.add(
+				JOB_TYPES.BACKUP_RESTORE,
+				{
+					backupId: dto.backupId,
+					environmentId: Number(backup.environment_id),
+					jobExecutionId: Number(exec.id),
+				},
+				{ ...BACKUP_JOB_OPTIONS, jobId: bullJobId },
+			);
+		} catch (err) {
+			const errMsg = err instanceof Error ? err.message : String(err);
+			await this.repo.updateJobExecution(exec.id, {
+				status: 'failed',
+				last_error: errMsg,
+			});
+			throw err;
+		}
 		return { jobExecutionId: exec.id, bullJobId: job.id };
 	}
 

@@ -98,6 +98,34 @@ export class BackupsRepository {
 		return this.prisma.jobExecution.create({ data });
 	}
 
+	/**
+	 * Atomically create both a JobExecution and a Backup row in a single
+	 * interactive transaction.  If either insert fails the whole operation
+	 * rolls back, preventing orphaned records in pending state.
+	 */
+	async createJobExecutionAndBackup(
+		execData: {
+			queue_name: string;
+			job_type?: string;
+			bull_job_id: string;
+			environment_id: bigint;
+			payload?: Prisma.InputJsonObject;
+		},
+		backupData: {
+			environment_id: bigint;
+			type: 'full' | 'db_only' | 'files_only';
+			status: 'pending' | 'running' | 'completed' | 'failed';
+		},
+	) {
+		return this.prisma.$transaction(async tx => {
+			const exec = await tx.jobExecution.create({ data: execData });
+			const backup = await tx.backup.create({
+				data: { ...backupData, job_execution_id: exec.id },
+			});
+			return { exec, backup };
+		});
+	}
+
 	findJobExecutionById(id: bigint) {
 		return this.prisma.jobExecution.findUnique({ where: { id } });
 	}

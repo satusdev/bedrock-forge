@@ -16,6 +16,7 @@ function makeRepo() {
 		updateStatus: jest.fn(),
 		delete: jest.fn(),
 		createJobExecution: jest.fn(),
+		createJobExecutionAndBackup: jest.fn(),
 		findJobExecutionById: jest.fn(),
 		updateJobExecution: jest.fn(),
 		findJobExecutionLog: jest.fn(),
@@ -106,7 +107,7 @@ describe('BackupsService', () => {
 			await expect(
 				svc.enqueueCreate({ environmentId: 5, type: 'full' }),
 			).rejects.toThrow(NotFoundException);
-			expect(repo.createJobExecution).not.toHaveBeenCalled();
+			expect(repo.createJobExecutionAndBackup).not.toHaveBeenCalled();
 		});
 
 		it('throws BadRequestException when environment has no GDrive folder', async () => {
@@ -116,13 +117,15 @@ describe('BackupsService', () => {
 			await expect(
 				svc.enqueueCreate({ environmentId: 1, type: 'full' }),
 			).rejects.toThrow(BadRequestException);
-			expect(repo.createJobExecution).not.toHaveBeenCalled();
+			expect(repo.createJobExecutionAndBackup).not.toHaveBeenCalled();
 		});
 
 		it('creates job execution, backup row, and enqueues job on success', async () => {
 			repo.findEnvironment.mockResolvedValue(makeEnv());
-			repo.createJobExecution.mockResolvedValue({ id: BigInt(55) });
-			repo.create.mockResolvedValue({ id: BigInt(20) });
+			repo.createJobExecutionAndBackup.mockResolvedValue({
+				exec: { id: BigInt(55) },
+				backup: { id: BigInt(20) },
+			});
 			queue.add.mockResolvedValue({ id: 'bull-uuid-123' });
 
 			const result = await svc.enqueueCreate({
@@ -130,14 +133,12 @@ describe('BackupsService', () => {
 				type: 'db_only',
 			});
 
-			expect(repo.createJobExecution).toHaveBeenCalledWith(
+			expect(repo.createJobExecutionAndBackup).toHaveBeenCalledWith(
 				expect.objectContaining({
 					queue_name: QUEUES.BACKUPS,
 					job_type: JOB_TYPES.BACKUP_CREATE,
 					environment_id: BigInt(1),
 				}),
-			);
-			expect(repo.create).toHaveBeenCalledWith(
 				expect.objectContaining({
 					environment_id: BigInt(1),
 					type: 'db_only',
