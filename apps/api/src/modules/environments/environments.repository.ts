@@ -14,6 +14,13 @@ export class EnvironmentsRepository {
 		private readonly enc: EncryptionService,
 	) {}
 
+	/** Check whether an environment row exists without fetching full data. */
+	existsById(id: bigint): Promise<boolean> {
+		return this.prisma.environment
+			.findUnique({ where: { id }, select: { id: true } })
+			.then(r => r !== null);
+	}
+
 	findAll() {
 		return this.prisma.environment.findMany({
 			include: {

@@ -43,6 +43,10 @@ export class EnvironmentsService {
 		private readonly domainsService: DomainsService,
 	) {}
 
+	existsById(id: bigint): Promise<boolean> {
+		return this.repo.existsById(id);
+	}
+
 	findAll() {
 		return this.repo.findAll();
 	}
@@ -55,6 +59,15 @@ export class EnvironmentsService {
 		const env = await this.repo.findById(BigInt(id));
 		if (!env) throw new NotFoundException(`Environment ${id} not found`);
 		return env;
+	}
+
+	async assertBelongsToProject(
+		envId: number,
+		projectId: number,
+	): Promise<void> {
+		const env = await this.repo.findById(BigInt(envId));
+		if (!env || env.project_id !== BigInt(projectId))
+			throw new NotFoundException(`Environment ${envId} not found`);
 	}
 
 	async create(projectId: number, dto: CreateEnvironmentDto) {

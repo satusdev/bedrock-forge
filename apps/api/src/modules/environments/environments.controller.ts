@@ -50,7 +50,11 @@ export class EnvironmentsController {
 	}
 
 	@Get(':id')
-	findOne(@Param('id', ParseIntPipe) id: number) {
+	async findOne(
+		@Param('projectId', ParseIntPipe) projectId: number,
+		@Param('id', ParseIntPipe) id: number,
+	) {
+		await this.svc.assertBelongsToProject(id, projectId);
 		return this.svc.findOne(id);
 	}
 
@@ -63,22 +67,32 @@ export class EnvironmentsController {
 	}
 
 	@Put(':id')
-	update(
+	async update(
+		@Param('projectId', ParseIntPipe) projectId: number,
 		@Param('id', ParseIntPipe) id: number,
 		@Body() dto: UpdateEnvironmentDto,
 	) {
+		await this.svc.assertBelongsToProject(id, projectId);
 		return this.svc.update(id, dto);
 	}
 
 	@Delete(':id')
 	@Roles(ROLES.ADMIN)
 	@HttpCode(HttpStatus.NO_CONTENT)
-	remove(@Param('id', ParseIntPipe) id: number) {
+	async remove(
+		@Param('projectId', ParseIntPipe) projectId: number,
+		@Param('id', ParseIntPipe) id: number,
+	) {
+		await this.svc.assertBelongsToProject(id, projectId);
 		return this.svc.remove(id);
 	}
 
 	@Get(':id/db-credentials')
-	async getDbCredentials(@Param('id', ParseIntPipe) id: number) {
+	async getDbCredentials(
+		@Param('projectId', ParseIntPipe) projectId: number,
+		@Param('id', ParseIntPipe) id: number,
+	) {
+		await this.svc.assertBelongsToProject(id, projectId);
 		const creds = await this.svc.getDbCredentials(id);
 		if (!creds)
 			throw new NotFoundException(
@@ -88,28 +102,40 @@ export class EnvironmentsController {
 	}
 
 	@Put(':id/db-credentials')
-	upsertDbCredentials(
+	async upsertDbCredentials(
+		@Param('projectId', ParseIntPipe) projectId: number,
 		@Param('id', ParseIntPipe) id: number,
 		@Body() dto: UpsertDbCredentialsDto,
 	) {
+		await this.svc.assertBelongsToProject(id, projectId);
 		return this.svc.upsertDbCredentials(id, dto);
 	}
 
 	@Get(':id/db-tables')
-	listDbTables(@Param('id', ParseIntPipe) id: number) {
+	async listDbTables(
+		@Param('projectId', ParseIntPipe) projectId: number,
+		@Param('id', ParseIntPipe) id: number,
+	) {
+		await this.svc.assertBelongsToProject(id, projectId);
 		return this.svc.listDbTables(id);
 	}
 
 	@Get(':id/wp-users')
-	getWpUsers(@Param('id', ParseIntPipe) id: number) {
+	async getWpUsers(
+		@Param('projectId', ParseIntPipe) projectId: number,
+		@Param('id', ParseIntPipe) id: number,
+	) {
+		await this.svc.assertBelongsToProject(id, projectId);
 		return this.svc.getWpUsers(id);
 	}
 
 	@Post(':id/wp-quick-login')
-	createWpQuickLogin(
+	async createWpQuickLogin(
+		@Param('projectId', ParseIntPipe) projectId: number,
 		@Param('id', ParseIntPipe) id: number,
 		@Body() dto: WpQuickLoginDto,
 	) {
+		await this.svc.assertBelongsToProject(id, projectId);
 		return this.svc.createWpQuickLogin(id, dto);
 	}
 }

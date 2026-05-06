@@ -19,4 +19,8 @@ export class JobExecutionsService {
 	findLog(id: number) {
 		return this.repo.findLog(id);
 	}
+
+	findEnvIdByBullJobId(bullJobId: string, queueName?: string) {
+		return this.repo.findEnvIdByBullJobId(bullJobId, queueName);
+	}
 }

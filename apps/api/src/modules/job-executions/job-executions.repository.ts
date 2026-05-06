@@ -145,4 +145,27 @@ export class JobExecutionsRepository {
 			select: { id: true, status: true, execution_log: true },
 		});
 	}
+
+	/**
+	 * Resolve the environment_id for a given bull_job_id.
+	 * Optionally filter by queue_name (e.g. 'monitors') to avoid false positives.
+	 */
+	async findEnvIdByBullJobId(
+		bullJobId: string,
+		queueName?: string,
+	): Promise<number | undefined> {
+		try {
+			const exec = await this.prisma.jobExecution.findFirst({
+				where: {
+					bull_job_id: bullJobId,
+					...(queueName ? { queue_name: queueName } : {}),
+				},
+				select: { environment_id: true },
+				orderBy: { created_at: 'desc' },
+			});
+			return exec?.environment_id ? Number(exec.environment_id) : undefined;
+		} catch {
+			return undefined;
+		}
+	}
 }
