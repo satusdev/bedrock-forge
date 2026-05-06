@@ -110,6 +110,7 @@ class ErrorBoundary extends Component<
 						)}
 						<div className='flex gap-3 justify-center'>
 							<button
+								type='button'
 								className='text-sm underline'
 								onClick={() => window.location.reload()}
 							>

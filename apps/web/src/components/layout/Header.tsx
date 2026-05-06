@@ -97,22 +97,29 @@ function Breadcrumb() {
 	const segments = location.pathname.split('/').filter(Boolean);
 	const crumbs = segments.map(s => ROUTE_LABELS[s] ?? s);
 	return (
-		<div className='flex items-center gap-1.5 text-sm'>
-			{crumbs.map((crumb, i) => (
-				<span key={i} className='flex items-center gap-1.5'>
-					{i > 0 && <span className='text-muted-foreground/60'>/</span>}
-					<span
-						className={
-							i === crumbs.length - 1
-								? 'font-semibold text-foreground'
-								: 'text-muted-foreground'
-						}
-					>
-						{crumb}
-					</span>
-				</span>
-			))}
-		</div>
+		<nav aria-label='Breadcrumb'>
+			<ol className='flex items-center gap-1.5 text-sm list-none m-0 p-0'>
+				{crumbs.map((crumb, i) => (
+					<li key={i} className='flex items-center gap-1.5'>
+						{i > 0 && (
+							<span className='text-muted-foreground/60' aria-hidden='true'>
+								/
+							</span>
+						)}
+						<span
+							aria-current={i === crumbs.length - 1 ? 'page' : undefined}
+							className={
+								i === crumbs.length - 1
+									? 'font-semibold text-foreground'
+									: 'text-muted-foreground'
+							}
+						>
+							{crumb}
+						</span>
+					</li>
+				))}
+			</ol>
+		</nav>
 	);
 }
 
@@ -169,11 +176,19 @@ function NotificationBell() {
 	return (
 		<DropdownMenu open={open} onOpenChange={setOpen}>
 			<DropdownMenuTrigger asChild>
-				<Button variant='ghost' size='icon' className='h-8 w-8 relative'>
-					<Bell className='h-4 w-4' />
+				<Button
+					variant='ghost'
+					size='icon'
+					className='h-8 w-8 relative'
+					aria-label={
+						unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'
+					}
+				>
+					<Bell className='h-4 w-4' aria-hidden='true' />
 					{unread > 0 && (
 						<Badge
 							variant='destructive'
+							aria-hidden='true'
 							className='absolute -top-1 -right-1 h-4 min-w-4 px-1 text-[10px] leading-none flex items-center justify-center rounded-full'
 						>
 							{unread > 99 ? '99+' : unread}
@@ -270,12 +285,12 @@ export function Header({ onOpenSearch }: { onOpenSearch?: () => void }) {
 					size='icon'
 					className='h-8 w-8 hidden lg:flex'
 					onClick={toggleSidebar}
-					title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+					aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
 				>
 					{sidebarCollapsed ? (
-						<PanelLeft className='h-4 w-4' />
+						<PanelLeft className='h-4 w-4' aria-hidden='true' />
 					) : (
-						<PanelLeftClose className='h-4 w-4' />
+						<PanelLeftClose className='h-4 w-4' aria-hidden='true' />
 					)}
 				</Button>
 

@@ -203,6 +203,7 @@ export function SidebarInner({ collapsed = false }: SidebarInnerProps) {
 
 				{/* Nav */}
 				<nav
+					aria-label='Main navigation'
 					className={cn(
 						'flex-1 py-3 overflow-y-auto',
 						collapsed ? 'px-2' : 'px-3',
