@@ -1,5 +1,6 @@
 import React from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { ErrorState } from './StateViews';
 
 export interface Column<T> {
 	header: string;
@@ -24,6 +25,10 @@ interface DataTableProps<T> {
 	renderExpandedRow?: (row: T) => React.ReactNode;
 	/** Key of the currently expanded row (matches rowKey output) */
 	expandedRowKey?: string | number | null;
+	/** Show an error state instead of table content */
+	isError?: boolean;
+	/** Callback for the Retry button shown in the error state */
+	onRetry?: () => void;
 }
 
 export function DataTable<T>({
@@ -38,18 +43,29 @@ export function DataTable<T>({
 	actionsHeader,
 	renderExpandedRow,
 	expandedRowKey,
+	isError = false,
+	onRetry,
 }: DataTableProps<T>) {
 	const colCount = columns.length + (renderActions ? 1 : 0);
 
+	if (isError && !isLoading) {
+		return (
+			<div className='bg-card border rounded-lg overflow-hidden'>
+				<ErrorState onRetry={onRetry} />
+			</div>
+		);
+	}
+
 	return (
 		<div className='bg-card border rounded-lg overflow-hidden'>
-			<div className='overflow-x-auto'>
+			<div className='overflow-x-auto' aria-busy={isLoading} aria-live='polite'>
 				<table className='w-full text-sm'>
 					<thead className='border-b bg-muted/40'>
 						<tr>
 							{columns.map((col, i) => (
 								<th
 									key={i}
+									scope='col'
 									className={
 										col.headerClassName ?? 'text-left px-4 py-3 font-medium'
 									}
@@ -58,7 +74,10 @@ export function DataTable<T>({
 								</th>
 							))}
 							{renderActions && (
-								<th className='w-10 text-left px-4 py-3 font-medium'>
+								<th
+									scope='col'
+									className='w-10 text-left px-4 py-3 font-medium'
+								>
 									{actionsHeader ?? ''}
 								</th>
 							)}

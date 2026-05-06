@@ -170,7 +170,7 @@ export function AuditLogsPage() {
 		dateTo: '',
 	});
 
-	const { data, isLoading } = useQuery({
+	const { data, isLoading, isError, refetch } = useQuery({
 		queryKey: ['audit-logs', page, filters],
 		queryFn: () => {
 			const params = new URLSearchParams({
@@ -272,6 +272,8 @@ export function AuditLogsPage() {
 				columns={columns}
 				data={data?.data ?? []}
 				isLoading={isLoading}
+				isError={isError}
+				onRetry={refetch}
 				emptyMessage='No audit log entries match your filters.'
 				rowKey={row => row.id}
 			/>

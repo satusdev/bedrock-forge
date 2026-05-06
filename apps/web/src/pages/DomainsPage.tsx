@@ -176,7 +176,7 @@ export function DomainsPage() {
 
 	const limit = 20;
 
-	const { data, isLoading } = useQuery<PaginatedDomains>({
+	const { data, isLoading, isError, refetch } = useQuery<PaginatedDomains>({
 		queryKey: ['domains', page, search],
 		queryFn: () => {
 			const params = new URLSearchParams({
@@ -358,6 +358,8 @@ export function DomainsPage() {
 				data={data?.items ?? []}
 				columns={columns}
 				isLoading={isLoading}
+				isError={isError}
+				onRetry={refetch}
 				rowKey={d => d.id}
 				renderActions={d => (
 					<DropdownMenu>

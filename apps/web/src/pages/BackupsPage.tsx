@@ -77,13 +77,22 @@ export function BackupsPage() {
 	const [jobProgress, setJobProgress] = useState<Record<string, number>>({});
 
 	// GET /environments — flat endpoint added by our backend fix
-	const { data: envs } = useQuery({
+	const {
+		data: envs,
+		isError: envsError,
+		refetch: refetchEnvs,
+	} = useQuery({
 		queryKey: ['environments-all'],
 		queryFn: () => api.get<Environment[]>('/environments'),
 	});
 
 	// GET /backups/environment/:envId — correct nested route
-	const { data: backupsData, isLoading } = useQuery({
+	const {
+		data: backupsData,
+		isLoading,
+		isError: backupsError,
+		refetch: refetchBackups,
+	} = useQuery({
 		queryKey: ['backups', envId, page],
 		queryFn: () =>
 			api.get<PaginatedBackups>(
@@ -164,6 +173,24 @@ export function BackupsPage() {
 	const missingFolderId = !!selectedEnv && !selectedEnv.google_drive_folder_id;
 	const totalPages = backupsData ? Math.ceil(backupsData.total / 20) : 1;
 	const [expandedLogId, setExpandedLogId] = useState<number | null>(null);
+
+	if (envsError) {
+		return (
+			<div className='space-y-4'>
+				<h1 className='text-2xl font-bold'>Backups</h1>
+				<div className='flex flex-col items-center justify-center gap-3 py-16 text-center'>
+					<AlertCircle className='h-8 w-8 text-destructive' />
+					<p className='text-sm font-medium'>Failed to load environments</p>
+					<button
+						onClick={() => refetchEnvs()}
+						className='text-xs text-primary underline underline-offset-2'
+					>
+						Retry
+					</button>
+				</div>
+			</div>
+		);
+	}
 
 	return (
 		<div className='space-y-4'>
@@ -274,140 +301,154 @@ export function BackupsPage() {
 							</span>
 						</p>
 					)}
-
-					<div className='border rounded-lg overflow-hidden'>
-						<table className='w-full text-sm'>
-							<thead className='border-b bg-muted/40'>
-								<tr>
-									<th className='text-left px-4 py-3 font-medium'>Type</th>
-									<th className='text-left px-4 py-3 font-medium'>Size</th>
-									<th className='text-left px-4 py-3 font-medium'>Status</th>
-									<th className='text-left px-4 py-3 font-medium'>Created</th>
-									<th className='w-44' />
-								</tr>
-							</thead>
-							<tbody className='divide-y'>
-								{isLoading &&
-									[1, 2, 3].map(i => (
-										<tr key={i}>
-											<td colSpan={5} className='px-4 py-3'>
-												<Skeleton className='h-5 w-full' />
-											</td>
-										</tr>
-									))}
-								{!isLoading &&
-									backupsData?.items.map(b => (
-										<Fragment key={b.id}>
-											<tr>
-												<td className='px-4 py-3 capitalize'>{b.type}</td>
-												<td className='px-4 py-3 font-mono text-muted-foreground'>
-													{fmt(b.size_bytes)}
-												</td>
-												<td className='px-4 py-3'>
-													<Badge
-														variant={
-															b.status === 'completed'
-																? 'success'
-																: b.status === 'failed'
-																	? 'destructive'
-																	: 'warning'
-														}
-													>
-														{b.status}
-													</Badge>
-													{b.status === 'failed' &&
-														(b.error_message ?? b.jobExecution?.last_error) && (
-															<p
-																className='text-xs text-destructive mt-0.5 max-w-xs truncate'
-																title={
-																	b.error_message ??
-																	b.jobExecution?.last_error ??
-																	undefined
-																}
-															>
-																{b.error_message ?? b.jobExecution?.last_error}
-															</p>
-														)}
-												</td>
-												<td className='px-4 py-3 text-muted-foreground text-xs'>
-													{new Date(b.created_at).toLocaleString()}
-												</td>
-												<td className='px-2 py-3'>
-													<div className='flex items-center gap-1 justify-end'>
-														<ExpandLogButton
-															expanded={expandedLogId === b.jobExecution?.id}
-															onToggle={() =>
-																setExpandedLogId(prev =>
-																	prev === b.jobExecution?.id
-																		? null
-																		: (b.jobExecution?.id ?? null),
-																)
-															}
-															disabled={!b.jobExecution?.id}
-														/>
-														{b.status === 'completed' && (
-															<Button
-																variant='outline'
-																size='sm'
-																className='h-7 text-xs'
-																onClick={() => setRestoreTarget(b)}
-																disabled={restoreBackup.isPending}
-															>
-																<RotateCcw className='h-3 w-3 mr-1' />
-																Restore
-															</Button>
-														)}
-														{b.status === 'completed' && (
-															<Button
-																variant='ghost'
-																size='icon'
-																className='h-7 w-7 text-muted-foreground hover:text-foreground'
-																title='Download backup'
-																onClick={() =>
-																	window.open(
-																		`/api/backups/${b.id}/download`,
-																		'_blank',
-																	)
-																}
-															>
-																<Download className='h-3.5 w-3.5' />
-															</Button>
-														)}
-														{isAdmin && (
-															<Button
-																variant='ghost'
-																size='icon'
-																className='h-7 w-7 text-muted-foreground hover:text-destructive'
-																onClick={() => setDeleteTarget(b)}
-																disabled={deleteBackup.isPending}
-																title='Delete backup'
-															>
-																<Trash2 className='h-3.5 w-3.5' />
-															</Button>
-														)}
-													</div>
+					{backupsError ? (
+						<div className='flex flex-col items-center justify-center gap-3 py-12 text-center border rounded-lg bg-card'>
+							<AlertCircle className='h-6 w-6 text-destructive' />
+							<p className='text-sm font-medium'>Failed to load backups</p>
+							<button
+								onClick={() => refetchBackups()}
+								className='text-xs text-primary underline underline-offset-2'
+							>
+								Retry
+							</button>
+						</div>
+					) : (
+						<div className='border rounded-lg overflow-hidden'>
+							<table className='w-full text-sm'>
+								<thead className='border-b bg-muted/40'>
+									<tr>
+										<th className='text-left px-4 py-3 font-medium'>Type</th>
+										<th className='text-left px-4 py-3 font-medium'>Size</th>
+										<th className='text-left px-4 py-3 font-medium'>Status</th>
+										<th className='text-left px-4 py-3 font-medium'>Created</th>
+										<th className='w-44' />
+									</tr>
+								</thead>
+								<tbody className='divide-y'>
+									{isLoading &&
+										[1, 2, 3].map(i => (
+											<tr key={i}>
+												<td colSpan={5} className='px-4 py-3'>
+													<Skeleton className='h-5 w-full' />
 												</td>
 											</tr>
-											{expandedLogId === b.jobExecution?.id && (
+										))}
+									{!isLoading &&
+										backupsData?.items.map(b => (
+											<Fragment key={b.id}>
 												<tr>
-													<td colSpan={5} className='px-4 pb-3 bg-muted/30'>
-														<ExecutionLogPanel
-															jobExecutionId={b.jobExecution?.id ?? null}
-														/>
+													<td className='px-4 py-3 capitalize'>{b.type}</td>
+													<td className='px-4 py-3 font-mono text-muted-foreground'>
+														{fmt(b.size_bytes)}
+													</td>
+													<td className='px-4 py-3'>
+														<Badge
+															variant={
+																b.status === 'completed'
+																	? 'success'
+																	: b.status === 'failed'
+																		? 'destructive'
+																		: 'warning'
+															}
+														>
+															{b.status}
+														</Badge>
+														{b.status === 'failed' &&
+															(b.error_message ??
+																b.jobExecution?.last_error) && (
+																<p
+																	className='text-xs text-destructive mt-0.5 max-w-xs truncate'
+																	title={
+																		b.error_message ??
+																		b.jobExecution?.last_error ??
+																		undefined
+																	}
+																>
+																	{b.error_message ??
+																		b.jobExecution?.last_error}
+																</p>
+															)}
+													</td>
+													<td className='px-4 py-3 text-muted-foreground text-xs'>
+														{new Date(b.created_at).toLocaleString()}
+													</td>
+													<td className='px-2 py-3'>
+														<div className='flex items-center gap-1 justify-end'>
+															<ExpandLogButton
+																expanded={expandedLogId === b.jobExecution?.id}
+																onToggle={() =>
+																	setExpandedLogId(prev =>
+																		prev === b.jobExecution?.id
+																			? null
+																			: (b.jobExecution?.id ?? null),
+																	)
+																}
+																disabled={!b.jobExecution?.id}
+															/>
+															{b.status === 'completed' && (
+																<Button
+																	variant='outline'
+																	size='sm'
+																	className='h-7 text-xs'
+																	onClick={() => setRestoreTarget(b)}
+																	disabled={restoreBackup.isPending}
+																>
+																	<RotateCcw className='h-3 w-3 mr-1' />
+																	Restore
+																</Button>
+															)}
+															{b.status === 'completed' && (
+																<Button
+																	variant='ghost'
+																	size='icon'
+																	className='h-7 w-7 text-muted-foreground hover:text-foreground'
+																	title='Download backup'
+																	onClick={() =>
+																		window.open(
+																			`/api/backups/${b.id}/download`,
+																			'_blank',
+																		)
+																	}
+																>
+																	<Download className='h-3.5 w-3.5' />
+																</Button>
+															)}
+															{isAdmin && (
+																<Button
+																	variant='ghost'
+																	size='icon'
+																	className='h-7 w-7 text-muted-foreground hover:text-destructive'
+																	onClick={() => setDeleteTarget(b)}
+																	disabled={deleteBackup.isPending}
+																	title='Delete backup'
+																>
+																	<Trash2 className='h-3.5 w-3.5' />
+																</Button>
+															)}
+														</div>
 													</td>
 												</tr>
-											)}
-										</Fragment>
-									))}
-							</tbody>
-						</table>
-						{!isLoading && !backupsData?.items.length && (
-							<p className='text-center text-muted-foreground py-10 text-sm'>
-								No backups yet for this environment.
-							</p>
-						)}
-					</div>
-
+												{expandedLogId === b.jobExecution?.id && (
+													<tr>
+														<td colSpan={5} className='px-4 pb-3 bg-muted/30'>
+															<ExecutionLogPanel
+																jobExecutionId={b.jobExecution?.id ?? null}
+															/>
+														</td>
+													</tr>
+												)}
+											</Fragment>
+										))}
+								</tbody>
+							</table>
+							{!isLoading && !backupsData?.items.length && (
+								<p className='text-center text-muted-foreground py-10 text-sm'>
+									No backups yet for this environment.
+								</p>
+							)}
+						</div>
+					)}{' '}
+					{/* end backupsError ternary */}
 					<Pagination
 						page={page}
 						totalPages={totalPages}

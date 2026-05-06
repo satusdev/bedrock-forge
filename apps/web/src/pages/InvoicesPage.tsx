@@ -650,7 +650,7 @@ export function InvoicesPage() {
 		staleTime: 120_000,
 	});
 
-	const { data, isLoading } = useQuery({
+	const { data, isLoading, isError, refetch } = useQuery({
 		queryKey: ['invoices', page, statusFilter, yearFilter, clientFilter],
 		queryFn: () => api.get<PaginatedInvoices>(`/invoices?${params}`),
 	});
@@ -861,6 +861,8 @@ export function InvoicesPage() {
 				columns={columns}
 				data={data?.items ?? []}
 				isLoading={isLoading}
+				isError={isError}
+				onRetry={refetch}
 				rowKey={inv => inv.id}
 				emptyMessage='No invoices found.'
 				onRowClick={toggleExpand}
