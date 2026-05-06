@@ -61,15 +61,31 @@ export class SystemBackupsService {
 			status: 'pending',
 		});
 
-		const job = await this.queue.add(
-			JOB_TYPES.SYSTEM_BACKUP_CREATE,
-			{
-				systemBackupId: Number(backup.id),
-				jobExecutionId: Number(exec.id),
-				folderId,
-			},
-			{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId, attempts: 1 },
-		);
+		let job;
+		try {
+			job = await this.queue.add(
+				JOB_TYPES.SYSTEM_BACKUP_CREATE,
+				{
+					systemBackupId: Number(backup.id),
+					jobExecutionId: Number(exec.id),
+					folderId,
+				},
+				{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId, attempts: 1 },
+			);
+		} catch (err) {
+			const errMsg = err instanceof Error ? err.message : String(err);
+			await Promise.all([
+				this.repo.update(backup.id, {
+					status: 'failed',
+					error_message: errMsg,
+				}),
+				this.repo.updateJobExecution(exec.id, {
+					status: 'failed',
+					last_error: errMsg,
+				}),
+			]);
+			throw err;
+		}
 
 		return {
 			systemBackupId: Number(backup.id),

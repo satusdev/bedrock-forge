@@ -81,6 +81,17 @@ export class SystemBackupsRepository {
 		return this.prisma.jobExecution.create({ data });
 	}
 
+	updateJobExecution(
+		id: bigint,
+		data: {
+			status?: 'queued' | 'active' | 'completed' | 'failed' | 'dead_letter';
+			last_error?: string;
+			completed_at?: Date;
+		},
+	) {
+		return this.prisma.jobExecution.update({ where: { id }, data });
+	}
+
 	// ── Schedule CRUD ────────────────────────────────────────────────────────
 
 	/** Returns the single system-backup schedule row, or null. */

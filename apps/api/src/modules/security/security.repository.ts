@@ -487,6 +487,24 @@ export class SecurityRepository {
 		});
 	}
 
+	updateJobExecution(
+		id: bigint,
+		data: {
+			status?: 'queued' | 'active' | 'completed' | 'failed' | 'dead_letter';
+			last_error?: string;
+			completed_at?: Date;
+		},
+	) {
+		return this.prisma.jobExecution.update({ where: { id }, data });
+	}
+
+	failSecurityScans(ids: bigint[]) {
+		return this.prisma.securityScan.updateMany({
+			where: { id: { in: ids } },
+			data: { status: 'failed' },
+		});
+	}
+
 	findSecurityReportHistory() {
 		return this.prisma.jobExecution.findMany({
 			where: {
@@ -515,5 +533,43 @@ export class SecurityRepository {
 
 	findEnvironmentById(id: bigint) {
 		return this.prisma.environment.findUnique({ where: { id } });
+	}
+
+	createServerScansTransaction(
+		serverId: bigint,
+		executionId: bigint,
+		types: string[],
+	) {
+		return this.prisma.$transaction(
+			types.map(scanType =>
+				this.prisma.securityScan.create({
+					// eslint-disable-next-line @typescript-eslint/no-explicit-any
+					data: {
+						scan_type: scanType as SecurityScanType,
+						server_id: serverId,
+						job_execution_id: executionId,
+					} as any,
+				}),
+			),
+		);
+	}
+
+	createEnvironmentScansTransaction(
+		environmentId: bigint,
+		executionId: bigint,
+		types: string[],
+	) {
+		return this.prisma.$transaction(
+			types.map(scanType =>
+				this.prisma.securityScan.create({
+					// eslint-disable-next-line @typescript-eslint/no-explicit-any
+					data: {
+						scan_type: scanType as SecurityScanType,
+						environment_id: environmentId,
+						job_execution_id: executionId,
+					} as any,
+				}),
+			),
+		);
 	}
 }

@@ -38,15 +38,24 @@ export class WpActionsService {
 			environment_id: env.id,
 			payload: { environmentId: envId, action: dto.action },
 		});
-		await this.wpActionsQueue.add(
-			JOB_TYPES.WP_FIX_ACTION,
-			{
-				environmentId: envId,
-				action: dto.action,
-				jobExecutionId: Number(exec.id),
-			},
-			{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
-		);
+		try {
+			await this.wpActionsQueue.add(
+				JOB_TYPES.WP_FIX_ACTION,
+				{
+					environmentId: envId,
+					action: dto.action,
+					jobExecutionId: Number(exec.id),
+				},
+				{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
+			);
+		} catch (err) {
+			const errMsg = err instanceof Error ? err.message : String(err);
+			await this.repo.updateJobExecution(exec.id, {
+				status: 'failed',
+				last_error: errMsg,
+			});
+			throw err;
+		}
 		return { jobExecutionId: Number(exec.id), bullJobId };
 	}
 
@@ -64,16 +73,25 @@ export class WpActionsService {
 				revertAfterMinutes: dto.revert_after_minutes,
 			},
 		});
-		await this.wpActionsQueue.add(
-			JOB_TYPES.WP_DEBUG_TOGGLE,
-			{
-				environmentId: envId,
-				enabled: dto.enabled,
-				revertAfterMinutes: dto.revert_after_minutes,
-				jobExecutionId: Number(exec.id),
-			},
-			{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
-		);
+		try {
+			await this.wpActionsQueue.add(
+				JOB_TYPES.WP_DEBUG_TOGGLE,
+				{
+					environmentId: envId,
+					enabled: dto.enabled,
+					revertAfterMinutes: dto.revert_after_minutes,
+					jobExecutionId: Number(exec.id),
+				},
+				{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
+			);
+		} catch (err) {
+			const errMsg = err instanceof Error ? err.message : String(err);
+			await this.repo.updateJobExecution(exec.id, {
+				status: 'failed',
+				last_error: errMsg,
+			});
+			throw err;
+		}
 		return { jobExecutionId: Number(exec.id), bullJobId };
 	}
 
@@ -87,16 +105,25 @@ export class WpActionsService {
 			environment_id: env.id,
 			payload: { environmentId: envId, dryRun, keepRevisions },
 		});
-		await this.wpActionsQueue.add(
-			JOB_TYPES.WP_CLEANUP,
-			{
-				environmentId: envId,
-				dryRun,
-				keepRevisions,
-				jobExecutionId: Number(exec.id),
-			},
-			{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
-		);
+		try {
+			await this.wpActionsQueue.add(
+				JOB_TYPES.WP_CLEANUP,
+				{
+					environmentId: envId,
+					dryRun,
+					keepRevisions,
+					jobExecutionId: Number(exec.id),
+				},
+				{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
+			);
+		} catch (err) {
+			const errMsg = err instanceof Error ? err.message : String(err);
+			await this.repo.updateJobExecution(exec.id, {
+				status: 'failed',
+				last_error: errMsg,
+			});
+			throw err;
+		}
 		return { jobExecutionId: Number(exec.id), bullJobId };
 	}
 
@@ -110,11 +137,20 @@ export class WpActionsService {
 			environment_id: env.id,
 			payload: { environmentId: envId },
 		});
-		await this.wpActionsQueue.add(
-			JOB_TYPES.WP_CORE_CHECK,
-			{ environmentId: envId, jobExecutionId: Number(exec.id) },
-			{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
-		);
+		try {
+			await this.wpActionsQueue.add(
+				JOB_TYPES.WP_CORE_CHECK,
+				{ environmentId: envId, jobExecutionId: Number(exec.id) },
+				{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
+			);
+		} catch (err) {
+			const errMsg = err instanceof Error ? err.message : String(err);
+			await this.repo.updateJobExecution(exec.id, {
+				status: 'failed',
+				last_error: errMsg,
+			});
+			throw err;
+		}
 		return { jobExecutionId: Number(exec.id), bullJobId };
 	}
 
@@ -128,11 +164,20 @@ export class WpActionsService {
 			environment_id: env.id,
 			payload: { environmentId: envId },
 		});
-		await this.wpActionsQueue.add(
-			JOB_TYPES.WP_CORE_UPDATE,
-			{ environmentId: envId, jobExecutionId: Number(exec.id) },
-			{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
-		);
+		try {
+			await this.wpActionsQueue.add(
+				JOB_TYPES.WP_CORE_UPDATE,
+				{ environmentId: envId, jobExecutionId: Number(exec.id) },
+				{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
+			);
+		} catch (err) {
+			const errMsg = err instanceof Error ? err.message : String(err);
+			await this.repo.updateJobExecution(exec.id, {
+				status: 'failed',
+				last_error: errMsg,
+			});
+			throw err;
+		}
 		return { jobExecutionId: Number(exec.id), bullJobId };
 	}
 

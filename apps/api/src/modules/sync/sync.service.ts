@@ -46,11 +46,21 @@ export class SyncService {
 			bull_job_id: bullJobId,
 			environment_id: BigInt(dto.targetEnvironmentId),
 		});
-		const job = await this.queue.add(
-			JOB_TYPES.SYNC_CLONE,
-			{ ...dto, jobExecutionId: Number(exec.id) },
-			{ ...SYNC_JOB_OPTIONS, jobId: bullJobId },
-		);
+		let job;
+		try {
+			job = await this.queue.add(
+				JOB_TYPES.SYNC_CLONE,
+				{ ...dto, jobExecutionId: Number(exec.id) },
+				{ ...SYNC_JOB_OPTIONS, jobId: bullJobId },
+			);
+		} catch (err) {
+			const errMsg = err instanceof Error ? err.message : String(err);
+			await this.repo.updateJobExecution(exec.id, {
+				status: 'failed',
+				last_error: errMsg,
+			});
+			throw err;
+		}
 		return { jobExecutionId: Number(exec.id), jobId: job.id };
 	}
 
@@ -62,11 +72,21 @@ export class SyncService {
 			bull_job_id: bullJobId,
 			environment_id: BigInt(dto.targetEnvironmentId),
 		});
-		const job = await this.queue.add(
-			JOB_TYPES.SYNC_PUSH,
-			{ ...dto, jobExecutionId: Number(exec.id) },
-			{ ...SYNC_JOB_OPTIONS, jobId: bullJobId },
-		);
+		let job;
+		try {
+			job = await this.queue.add(
+				JOB_TYPES.SYNC_PUSH,
+				{ ...dto, jobExecutionId: Number(exec.id) },
+				{ ...SYNC_JOB_OPTIONS, jobId: bullJobId },
+			);
+		} catch (err) {
+			const errMsg = err instanceof Error ? err.message : String(err);
+			await this.repo.updateJobExecution(exec.id, {
+				status: 'failed',
+				last_error: errMsg,
+			});
+			throw err;
+		}
 		return { jobExecutionId: Number(exec.id), jobId: job.id };
 	}
 
