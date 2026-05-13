@@ -93,6 +93,8 @@ export const PluginManagePayloadSchema = z.object({
 	version: z.string().optional(),
 	/** New version constraint — only for change-constraint action */
 	constraint: z.string().optional(),
+	/** Skip safety backup before making changes */
+	skipSafetyBackup: z.boolean().default(false),
 });
 export type PluginManagePayload = z.infer<typeof PluginManagePayloadSchema>;
 
@@ -128,6 +130,30 @@ export const MonitorCheckPayloadSchema = z.object({
 	url: z.string().url(),
 });
 export type MonitorCheckPayload = z.infer<typeof MonitorCheckPayloadSchema>;
+
+// ─── Monitor HTTP Status Classification ─────────────────────────────────────
+
+export function isHttpStatusWorking(
+	statusCode: number | null | undefined,
+): boolean {
+	return (
+		statusCode !== null &&
+		statusCode !== undefined &&
+		statusCode >= 200 &&
+		statusCode < 400
+	);
+}
+
+export function isHttpStatusFailure(
+	statusCode: number | null | undefined,
+): boolean {
+	return (
+		statusCode !== null &&
+		statusCode !== undefined &&
+		statusCode >= 400 &&
+		statusCode < 600
+	);
+}
 
 export const DomainWhoisPayloadSchema = z.object({
 	domainId: z.number().int().positive(),
@@ -292,6 +318,7 @@ export interface PluginScanOutput {
 /** Matches the JSON output of `wp theme list --format=json` */
 export interface ThemeInfo {
 	name: string;
+	/** Normalized internal identifier. WP-CLI theme list exposes this as `name`. */
 	slug: string;
 	status: 'active' | 'inactive';
 	version: string;

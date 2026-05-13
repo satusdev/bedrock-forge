@@ -7,7 +7,7 @@ import * as http from 'http';
 import * as tls from 'tls';
 import * as dns from 'dns';
 import { PrismaService } from '../../prisma/prisma.service';
-import { JOB_TYPES, QUEUES } from '@bedrock-forge/shared';
+import { isHttpStatusWorking, JOB_TYPES, QUEUES } from '@bedrock-forge/shared';
 
 interface HttpCheckResult {
 	statusCode: number;
@@ -52,7 +52,7 @@ export class MonitorProcessor extends WorkerHost {
 		// Capture previous state before running the check
 		const prevIsUp =
 			monitor.last_checked_at !== null && monitor.last_status !== null
-				? monitor.last_status >= 200 && monitor.last_status < 400
+				? isHttpStatusWorking(monitor.last_status)
 				: null;
 
 		const url = monitor.environment.url;
@@ -63,7 +63,7 @@ export class MonitorProcessor extends WorkerHost {
 			statusCode = result.statusCode;
 			responseTimeMs = result.responseMs;
 			responseBody = result.body;
-			isUp = result.statusCode >= 200 && result.statusCode < 400;
+			isUp = isHttpStatusWorking(result.statusCode);
 		} catch {
 			isUp = false;
 			responseTimeMs = Date.now() - start;
@@ -81,7 +81,7 @@ export class MonitorProcessor extends WorkerHost {
 				statusCode = retryResult.statusCode;
 				responseTimeMs = retryResult.responseMs;
 				responseBody = retryResult.body;
-				isUp = retryResult.statusCode >= 200 && retryResult.statusCode < 400;
+				isUp = isHttpStatusWorking(retryResult.statusCode);
 				if (isUp) {
 					this.logger.log(
 						`Monitor ${monitorId}: retry succeeded (HTTP ${statusCode}) — not marking as down`,

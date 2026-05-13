@@ -96,6 +96,86 @@ export class PluginUpdateProcessor extends WorkerHost {
 				return;
 			}
 
+			// PRE-FLIGHT BACKUP LOGIC
+			if (!env.google_drive_folder_id) {
+				await tracker.track({
+					step: 'Skipping pre-flight backup',
+					level: 'warn',
+					detail: 'Google Drive not configured for this environment. Proceeding without backup.',
+				});
+			} else {
+				await tracker.track({
+					step: 'Queueing pre-flight backup',
+					level: 'info',
+				});
+
+				const backupExec = await this.prisma.jobExecution.create({
+					data: {
+						environment_id: BigInt(environmentId),
+						queue_name: QUEUES.BACKUPS,
+						job_type: JOB_TYPES.BACKUP_CREATE,
+						bull_job_id: '',
+						status: 'queued',
+					},
+				});
+
+				const backup = await this.prisma.backup.create({
+					data: {
+						environment_id: BigInt(environmentId),
+						type: 'db_only',
+						status: 'in_progress',
+						size_bytes: 0,
+						file_path: 'temp',
+						job_execution_id: backupExec.id,
+					},
+				});
+
+				const { Queue } = await import('bullmq');
+				const redisUrl = this.config.get<string>('redis.url')!;
+				const backupQueue = new Queue(QUEUES.BACKUPS, { connection: { url: redisUrl } });
+				const { randomUUID } = await import('crypto');
+				const backupBullJobId = randomUUID();
+
+				await backupQueue.add(
+					JOB_TYPES.BACKUP_CREATE,
+					{
+						environmentId,
+						type: 'db_only',
+						jobExecutionId: Number(backupExec.id),
+						backupId: Number(backup.id),
+					},
+					{ jobId: backupBullJobId },
+				);
+				await backupQueue.close();
+
+				await this.prisma.jobExecution.update({
+					where: { id: backupExec.id },
+					data: { bull_job_id: backupBullJobId },
+				});
+
+				let attempts = 0;
+				let backupFailed = false;
+				while (attempts < 120) { // wait up to 20 minutes (10s intervals)
+					const exec = await this.prisma.jobExecution.findUnique({ where: { id: backupExec.id } });
+					if (exec?.status === 'completed') break;
+					if (exec?.status === 'failed') {
+						backupFailed = true;
+						throw new Error('Pre-flight backup failed: ' + exec.last_error);
+					}
+					await new Promise(r => setTimeout(r, 10000));
+					attempts++;
+				}
+				if (attempts >= 120 && !backupFailed) {
+					throw new Error('Pre-flight backup timed out after 20 minutes');
+				}
+
+				await tracker.track({
+					step: 'Pre-flight backup completed successfully',
+					level: 'info',
+				});
+				await job.updateProgress(5);
+			}
+
 			const server = env.server;
 			await tracker.track({
 				step: 'Connecting to server',

@@ -1236,6 +1236,7 @@ export class SyncProcessor extends WorkerHost {
 			'--delete',
 			'--no-owner',
 			'--no-group',
+			'--ignore-errors', // don't abort if a root-owned file can't have attrs set
 			'--timeout=300',
 			excludeFlags,
 			`-e "ssh -i ${keyPath} -p ${targetEnv.server.ssh_port} -o StrictHostKeyChecking=no -o ConnectTimeout=30"`,
@@ -1264,17 +1265,40 @@ export class SyncProcessor extends WorkerHost {
 			Date.now() - rsyncStart,
 		);
 
-		if (rsyncResult.code !== 0) {
+		// rsync exit 23 = "some files/attrs were not transferred" — this is expected
+		// when security-hardened files (e.g. wp-config.php owned by root) exist on
+		// the target and rsync can't set their permissions. Those files are already
+		// excluded from the transfer itself; rsync is only failing to reconcile
+		// metadata on the destination copy. Treat as a non-fatal warning.
+		const RSYNC_PARTIAL = 23; // partial transfer / some attrs not set
+		if (rsyncResult.code !== 0 && rsyncResult.code !== RSYNC_PARTIAL) {
 			throw new Error(
 				`rsync failed (exit ${rsyncResult.code}): ${rsyncResult.stderr || rsyncResult.stdout}`,
 			);
 		}
 
-		await tracker.track({
-			step: 'File sync complete (rsync)',
-			level: 'info',
-			detail: rsyncResult.stdout.trim() || 'Done',
-		});
+		if (rsyncResult.code === RSYNC_PARTIAL) {
+			// Extract the permission-error lines for the warning detail so the user
+			// knows exactly which root-owned files were skipped.
+			const permLines = (rsyncResult.stderr || rsyncResult.stdout || '')
+				.split('\n')
+				.filter(l => l.includes('Operation not permitted') || l.includes('failed to set permissions'))
+				.join(' | ')
+				.slice(0, 400);
+			await tracker.track({
+				step: 'File sync complete (rsync) — some attrs skipped (root-owned files)',
+				level: 'warn',
+				detail:
+					(permLines || rsyncResult.stderr || 'Some file attributes could not be set') +
+					' — this is expected for intentionally root-owned files (e.g. wp-config.php) and does NOT affect the sync.',
+			});
+		} else {
+			await tracker.track({
+				step: 'File sync complete (rsync)',
+				level: 'info',
+				detail: rsyncResult.stdout.trim() || 'Done',
+			});
+		}
 	}
 
 	/**

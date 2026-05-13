@@ -96,6 +96,10 @@ describe('MonitorProcessor', () => {
 		processor = module.get(MonitorProcessor);
 	});
 
+	afterEach(() => {
+		jest.restoreAllMocks();
+	});
+
 	it('exits early if monitor not found', async () => {
 		prisma.monitor.findUnique.mockResolvedValue(null);
 		const job = { id: '1', data: { monitorId: 999 } } as any;
@@ -133,6 +137,102 @@ describe('MonitorProcessor', () => {
 
 		expect(notifQueue.add).not.toHaveBeenCalled();
 	});
+
+	it.each([301, 302, 304])(
+		'treats HTTP %i redirect responses as working',
+		async statusCode => {
+			const monitor = baseMonitor({
+				last_checked_at: new Date(Date.now() - 300_000),
+				last_status: 200,
+			});
+			prisma.monitor.findUnique.mockResolvedValue(monitor);
+			prisma.monitorResult.count.mockResolvedValue(5);
+
+			const checkHttpSpy = jest
+				.spyOn(processor as any, 'checkHttp')
+				.mockResolvedValue({ statusCode, body: '', responseMs: 123 });
+
+			const job = {
+				id: `redirect-${statusCode}`,
+				data: { monitorId: 1 },
+			} as any;
+			await processor.process(job);
+
+			expect(checkHttpSpy).toHaveBeenCalledTimes(1);
+			expect(prisma.monitorResult.create).toHaveBeenCalledWith(
+				expect.objectContaining({
+					data: expect.objectContaining({
+						is_up: true,
+						status_code: statusCode,
+					}),
+				}),
+			);
+			expect(notifQueue.add).not.toHaveBeenCalledWith(
+				expect.any(String),
+				expect.objectContaining({ eventType: 'monitor.down' }),
+				expect.any(Object),
+			);
+			expect(prisma.monitorLog.create).not.toHaveBeenCalledWith(
+				expect.objectContaining({
+					data: expect.objectContaining({ event_type: 'down' }),
+				}),
+			);
+		},
+	);
+
+	it.each([404, 500])(
+		'treats HTTP %i responses as down after confirmation retry',
+		async statusCode => {
+			const monitor = baseMonitor({
+				last_checked_at: new Date(Date.now() - 300_000),
+				last_status: 200,
+			});
+			prisma.monitor.findUnique.mockResolvedValue(monitor);
+			prisma.monitorResult.count.mockResolvedValue(5);
+			jest
+				.spyOn(global, 'setTimeout')
+				.mockImplementation((fn: TimerHandler) => {
+					if (typeof fn === 'function') fn();
+					return 0 as unknown as ReturnType<typeof setTimeout>;
+				});
+
+			const checkHttpSpy = jest
+				.spyOn(processor as any, 'checkHttp')
+				.mockResolvedValue({ statusCode, body: '', responseMs: 456 });
+
+			const job = {
+				id: `failure-${statusCode}`,
+				data: { monitorId: 1 },
+			} as any;
+			await processor.process(job);
+
+			expect(checkHttpSpy).toHaveBeenCalledTimes(2);
+			expect(prisma.monitorResult.create).toHaveBeenCalledWith(
+				expect.objectContaining({
+					data: expect.objectContaining({
+						is_up: false,
+						status_code: statusCode,
+					}),
+				}),
+			);
+			expect(prisma.monitorLog.create).toHaveBeenCalledWith(
+				expect.objectContaining({
+					data: expect.objectContaining({
+						event_type: 'down',
+						status_code: statusCode,
+					}),
+				}),
+			);
+			expect(notifQueue.add).toHaveBeenCalledWith(
+				expect.any(String),
+				expect.objectContaining({
+					eventType: 'monitor.down',
+					payload: expect.objectContaining({ transition: 'went_down' }),
+				}),
+				expect.any(Object),
+			);
+		},
+	);
 
 	it('fires monitor.down notification on up→down transition', async () => {
 		// Previously up: last_status=200, last_checked_at set
@@ -248,6 +348,10 @@ describe('MonitorProcessor', () => {
 		jest
 			.spyOn(processor as any, 'checkHttp')
 			.mockResolvedValue({ statusCode: 503, body: '' });
+		jest.spyOn(global, 'setTimeout').mockImplementation((fn: TimerHandler) => {
+			if (typeof fn === 'function') fn();
+			return 0 as unknown as ReturnType<typeof setTimeout>;
+		});
 
 		const job = { id: 'j6', data: { monitorId: 1 } } as any;
 		await processor.process(job);

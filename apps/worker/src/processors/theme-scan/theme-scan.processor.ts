@@ -20,6 +20,69 @@ function shellQuote(value: string): string {
 	return "'" + value.replace(/'/g, "'\\''") + "'";
 }
 
+type RawThemeInfo = Record<string, unknown>;
+
+function isInvalidWpCliFieldError(result: {
+	stderr?: string;
+	stdout?: string;
+}) {
+	const output = `${result.stderr ?? ''}\n${result.stdout ?? ''}`.toLowerCase();
+	return output.includes('invalid field') || output.includes('unknown field');
+}
+
+export function normalizeThemeInfo(raw: RawThemeInfo): ThemeInfo | null {
+	const name = typeof raw.name === 'string' ? raw.name.trim() : '';
+	if (!name) return null;
+
+	const rawStatus = typeof raw.status === 'string' ? raw.status : 'inactive';
+	const status: ThemeInfo['status'] =
+		rawStatus === 'active' ? 'active' : 'inactive';
+	const update =
+		raw.update === 'available'
+			? 'available'
+			: raw.update === 'none available'
+				? 'none available'
+				: 'none';
+	const updateVersion =
+		typeof raw.update_version === 'string' && raw.update_version.trim()
+			? raw.update_version.trim()
+			: null;
+
+	return {
+		name,
+		slug: name,
+		status,
+		version: typeof raw.version === 'string' ? raw.version : '',
+		update_version: updateVersion,
+		update,
+		title: typeof raw.title === 'string' && raw.title.trim() ? raw.title : name,
+		description:
+			typeof raw.description === 'string' && raw.description.trim()
+				? raw.description
+				: null,
+		author:
+			typeof raw.author === 'string' && raw.author.trim() ? raw.author : null,
+	};
+}
+
+export function parseThemeListJson(stdout: string): ThemeInfo[] {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(stdout);
+	} catch (err) {
+		const detail = err instanceof Error ? err.message : String(err);
+		throw new Error(`wp theme list returned invalid JSON: ${detail}`);
+	}
+
+	if (!Array.isArray(parsed)) {
+		throw new Error('wp theme list returned invalid JSON: expected an array');
+	}
+
+	return parsed
+		.map(row => normalizeThemeInfo(row as RawThemeInfo))
+		.filter((theme): theme is ThemeInfo => theme !== null);
+}
+
 // concurrency=2: theme scans are SSH+wp-cli — moderate I/O, two at a time is safe.
 @Processor(QUEUES.THEME_SCANS, { concurrency: 2 })
 export class ThemeScanProcessor extends WorkerHost {
@@ -127,8 +190,8 @@ export class ThemeScanProcessor extends WorkerHost {
 			};
 
 			const fields =
-				'name,slug,status,version,update_version,update,title,description,author';
-			const cmd = buildWpCmd(
+				'name,status,version,update_version,update,title,description,author';
+			let cmd = buildWpCmd(
 				`theme list --format=json --fields=${fields} --path=${shellQuote(wpPath)}`,
 			);
 
@@ -138,14 +201,33 @@ export class ThemeScanProcessor extends WorkerHost {
 				detail: `path=${wpPath}`,
 			});
 
-			const scanStart = Date.now();
-			const result = await executor.execute(cmd, { timeout: 3 * 60 * 1_000 });
+			let scanStart = Date.now();
+			let result = await executor.execute(cmd, { timeout: 3 * 60 * 1_000 });
 			await tracker.trackCommand(
 				'wp theme list',
 				cmd,
 				result,
 				Date.now() - scanStart,
 			);
+
+			if (result.code !== 0 && isInvalidWpCliFieldError(result)) {
+				await tracker.track({
+					step: 'Retrying wp theme list without field filter',
+					level: 'warn',
+					detail: 'WP-CLI rejected one or more requested fields',
+				});
+				cmd = buildWpCmd(
+					`theme list --format=json --path=${shellQuote(wpPath)}`,
+				);
+				scanStart = Date.now();
+				result = await executor.execute(cmd, { timeout: 3 * 60 * 1_000 });
+				await tracker.trackCommand(
+					'wp theme list fallback',
+					cmd,
+					result,
+					Date.now() - scanStart,
+				);
+			}
 
 			if (result.code !== 0) {
 				throw new Error(
@@ -154,7 +236,7 @@ export class ThemeScanProcessor extends WorkerHost {
 			}
 
 			await tracker.track({ step: 'Parsing theme results', level: 'info' });
-			const themes: ThemeInfo[] = JSON.parse(result.stdout);
+			const themes = parseThemeListJson(result.stdout);
 
 			// Fetch WP version — best-effort, does not fail the scan
 			let wpVersion = '';
