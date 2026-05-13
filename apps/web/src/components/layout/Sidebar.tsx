@@ -30,6 +30,7 @@ import {
 	ClipboardCheck,
 	FileBarChart,
 	AlertTriangle,
+	Tag,
 } from 'lucide-react';
 
 interface NavItemDef {
@@ -88,6 +89,7 @@ const NAV_GROUPS: NavGroup[] = [
 				icon: FileText,
 				minRole: 'manager',
 			},
+			{ to: '/tags', label: 'Tags', icon: Tag, minRole: 'manager' },
 		],
 	},
 	{

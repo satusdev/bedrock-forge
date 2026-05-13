@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, Link } from 'react-router-dom';
 import { PanelLeftClose, PanelLeft, Menu, Search, Bell } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/store/auth.store';
@@ -241,6 +241,10 @@ function NotificationBell() {
 						</DropdownMenuItem>
 					))
 				)}
+				<DropdownMenuSeparator />
+				<DropdownMenuItem asChild className='justify-center text-xs font-medium text-primary py-2.5 cursor-pointer'>
+					<Link to='/notifications'>View All Notifications</Link>
+				</DropdownMenuItem>
 			</DropdownMenuContent>
 		</DropdownMenu>
 	);

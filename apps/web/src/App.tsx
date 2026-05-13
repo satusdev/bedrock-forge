@@ -83,6 +83,15 @@ const AuditLogsPage = lazy(() =>
 const SecurityPage = lazy(() =>
 	import('@/pages/SecurityPage').then(m => ({ default: m.SecurityPage })),
 );
+const ServerDetailPage = lazy(() =>
+	import('@/pages/ServerDetailPage').then(m => ({ default: m.ServerDetailPage })),
+);
+const InvoiceDetailPage = lazy(() =>
+	import('@/pages/InvoiceDetailPage').then(m => ({ default: m.InvoiceDetailPage })),
+);
+const TagsPage = lazy(() =>
+	import('@/pages/TagsPage').then(m => ({ default: m.TagsPage })),
+);
 const NotFoundPage = lazy(() =>
 	import('@/pages/NotFoundPage').then(m => ({ default: m.NotFoundPage })),
 );
@@ -92,15 +101,37 @@ class ErrorBoundary extends Component<
 	{ hasError: boolean; error: Error | null }
 > {
 	state = { hasError: false, error: null };
+
 	static getDerivedStateFromError(error: Error) {
 		return { hasError: true, error };
 	}
+
+	componentDidCatch(error: Error, info: React.ErrorInfo) {
+		console.error('Unhandled React error boundary failure', {
+			message: error.message,
+			stack: error.stack,
+			componentStack: info.componentStack,
+		});
+	}
+
+	private reset = () => {
+		this.setState({ hasError: false, error: null });
+	};
+
 	render() {
 		if (this.state.hasError) {
 			return (
-				<div className='flex h-screen items-center justify-center text-center p-8'>
+				<div
+					className='flex h-screen items-center justify-center text-center p-8'
+					role='alert'
+					aria-live='assertive'
+				>
 					<div className='max-w-lg'>
 						<h2 className='text-xl font-semibold mb-2'>Something went wrong</h2>
+						<p className='text-sm text-muted-foreground mb-4'>
+							The page failed to render. Retry the current view or reload the
+							application.
+						</p>
 						{import.meta.env.DEV && this.state.error && (
 							<pre className='text-left text-xs bg-muted p-4 rounded mb-4 overflow-auto max-h-64'>
 								{(this.state.error as Error).message}
@@ -109,6 +140,13 @@ class ErrorBoundary extends Component<
 							</pre>
 						)}
 						<div className='flex gap-3 justify-center'>
+							<button
+								type='button'
+								className='text-sm underline'
+								onClick={this.reset}
+							>
+								Retry
+							</button>
 							<button
 								type='button'
 								className='text-sm underline'
@@ -167,7 +205,7 @@ function MaintainerRoute({ children }: { children: React.ReactNode }) {
 
 /**
  * Watches the auth store and navigates to /login whenever the access token is
- * cleared (by logout(), the proactive expiry timer, or rehydration cleanup).
+ * cleared (by logout(), failed refresh, or rehydration cleanup).
  * Must render inside <BrowserRouter> so useNavigate is available.
  */
 function SessionGuard() {
@@ -230,6 +268,7 @@ export default function App() {
 							<Route path='clients' element={<ClientsPage />} />
 							<Route path='clients/:id' element={<ClientDetailPage />} />
 							<Route path='servers' element={<ServersPage />} />
+							<Route path='servers/:id' element={<ServerDetailPage />} />
 							<Route path='projects' element={<ProjectsPage />} />
 							<Route path='projects/:id' element={<ProjectDetailPage />} />
 							<Route path='backups' element={<BackupsPage />} />
@@ -266,6 +305,22 @@ export default function App() {
 								element={
 									<ManagerRoute>
 										<InvoicesPage />
+									</ManagerRoute>
+								}
+							/>
+							<Route
+								path='invoices/:id'
+								element={
+									<ManagerRoute>
+										<InvoiceDetailPage />
+									</ManagerRoute>
+								}
+							/>
+							<Route
+								path='tags'
+								element={
+									<ManagerRoute>
+										<TagsPage />
 									</ManagerRoute>
 								}
 							/>
