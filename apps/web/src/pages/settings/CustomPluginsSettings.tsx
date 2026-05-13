@@ -1,6 +1,6 @@
-import { useState, FormEvent } from 'react';
+import { useId, useState, FormEvent } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Pencil, Trash2, Loader2, Github, Package } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Github, Package, ExternalLink, ShieldCheck } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 	DialogFooter,
+	DialogDescription,
 } from '@/components/ui/dialog';
 import { AlertDialog } from '@/components/ui/alert-dialog';
 import {
@@ -21,6 +22,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from '@/components/ui/select';
+import { EmptyState } from '@/components/crud/StateViews';
 
 export interface CustomPlugin {
 	id: number;
@@ -64,7 +66,14 @@ function PluginFormDialog({
 	isPending: boolean;
 }) {
 	const [form, setForm] = useState<PluginFormData>(initial);
+	const fieldIdPrefix = useId();
 	const isEdit = !!initial.name;
+	const nameId = `${fieldIdPrefix}-custom-plugin-name`;
+	const slugId = `${fieldIdPrefix}-custom-plugin-slug`;
+	const typeId = `${fieldIdPrefix}-custom-plugin-type`;
+	const repoUrlId = `${fieldIdPrefix}-custom-plugin-repo-url`;
+	const repoPathId = `${fieldIdPrefix}-custom-plugin-repo-path`;
+	const descriptionId = `${fieldIdPrefix}-custom-plugin-description`;
 
 	function set(field: keyof PluginFormData, value: string) {
 		setForm(prev => ({ ...prev, [field]: value }));
@@ -97,36 +106,45 @@ function PluginFormDialog({
 					<DialogTitle>
 						{isEdit ? 'Edit Custom Plugin' : 'Register Custom Plugin'}
 					</DialogTitle>
+					<DialogDescription>
+						Provide the repository details for your custom Bedrock-compatible plugin.
+					</DialogDescription>
 				</DialogHeader>
 				<form onSubmit={handleSubmit} className='space-y-4 py-2'>
-					<div className='grid grid-cols-2 gap-3'>
+					<div className='grid grid-cols-2 gap-4'>
 						<div className='space-y-1.5 col-span-2'>
-							<label className='text-sm font-medium'>Display Name</label>
+							<label htmlFor={nameId} className='text-sm font-bold'>
+								Display Name
+							</label>
 							<Input
+								id={nameId}
 								value={form.name}
 								onChange={e => handleNameChange(e.target.value)}
 								placeholder='WP Secure Guard'
 								disabled={isPending}
+								className='bg-muted/20'
 								autoFocus
 							/>
 						</div>
 						<div className='space-y-1.5'>
-							<label className='text-sm font-medium'>Slug</label>
+							<label htmlFor={slugId} className='text-sm font-bold'>
+								Slug
+							</label>
 							<Input
+								id={slugId}
 								value={form.slug}
 								onChange={e => set('slug', e.target.value.toLowerCase())}
 								placeholder='wp-secure-guard'
 								disabled={isPending}
-								className='font-mono text-sm'
+								className='font-mono text-xs bg-muted/20'
 							/>
-							<p className='text-xs text-muted-foreground'>
-								Lowercase letters, numbers, hyphens
-							</p>
 						</div>
 						<div className='space-y-1.5'>
-							<label className='text-sm font-medium'>Type</label>
+							<label htmlFor={typeId} className='text-sm font-bold'>
+								Type
+							</label>
 							<Select value={form.type} onValueChange={v => set('type', v)}>
-								<SelectTrigger>
+								<SelectTrigger id={typeId} className='bg-muted/20'>
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -137,55 +155,57 @@ function PluginFormDialog({
 						</div>
 					</div>
 					<div className='space-y-1.5'>
-						<label className='text-sm font-medium'>Repository URL</label>
+						<label htmlFor={repoUrlId} className='text-sm font-bold'>
+							Repository URL
+						</label>
 						<Input
+							id={repoUrlId}
 							value={form.repo_url}
 							onChange={e => set('repo_url', e.target.value.trim())}
 							placeholder='git@github.com:satusdev/wp-secure-guard.git'
 							disabled={isPending}
-							className='font-mono text-sm'
+							className='font-mono text-xs bg-muted/20'
 						/>
-						<p className='text-xs text-muted-foreground'>
-							SSH (<code>git@github.com:org/repo.git</code>) or HTTPS URL
+						<p className='text-[10px] text-muted-foreground italic'>
+							Use SSH (<code>git@github.com:org/repo.git</code>) for private repos.
 						</p>
 					</div>
 					<div className='space-y-1.5'>
-						<label className='text-sm font-medium'>
+						<label htmlFor={repoPathId} className='text-sm font-bold'>
 							Repository Path{' '}
 							<span className='text-muted-foreground font-normal'>
 								(optional)
 							</span>
 						</label>
 						<Input
+							id={repoPathId}
 							value={form.repo_path}
 							onChange={e => set('repo_path', e.target.value)}
 							placeholder='.'
 							disabled={isPending}
-							className='font-mono text-sm'
+							className='font-mono text-xs bg-muted/20'
 						/>
-						<p className='text-xs text-muted-foreground'>
-							<code>.</code> for single-plugin repos; subdirectory path for
-							monorepos (e.g. <code>wp-plugins/plugins</code>)
+						<p className='text-[10px] text-muted-foreground italic'>
+							Subdirectory path if this is a monorepo.
 						</p>
 					</div>
 					<div className='space-y-1.5'>
-						<label className='text-sm font-medium'>
-							Description{' '}
-							<span className='text-muted-foreground font-normal'>
-								(optional)
-							</span>
+						<label htmlFor={descriptionId} className='text-sm font-bold'>
+							Description
 						</label>
 						<Input
+							id={descriptionId}
 							value={form.description}
 							onChange={e => set('description', e.target.value)}
-							placeholder='Short description…'
+							placeholder='A short description for the plugin catalog…'
 							disabled={isPending}
+							className='bg-muted/20'
 						/>
 					</div>
-					<DialogFooter>
+					<DialogFooter className='pt-4'>
 						<Button
 							type='button'
-							variant='outline'
+							variant='ghost'
 							onClick={onClose}
 							disabled={isPending}
 						>
@@ -199,11 +219,12 @@ function PluginFormDialog({
 								!form.repo_url.trim() ||
 								isPending
 							}
+							className='bg-primary shadow-lg shadow-primary/20'
 						>
 							{isPending ? (
 								<Loader2 className='h-4 w-4 mr-1.5 animate-spin' />
 							) : null}
-							{isEdit ? 'Save changes' : 'Register plugin'}
+							{isEdit ? 'Update Plugin' : 'Register Plugin'}
 						</Button>
 					</DialogFooter>
 				</form>
@@ -271,116 +292,128 @@ export function CustomPluginsSettings() {
 	});
 
 	return (
-		<div className='space-y-4'>
+		<div className='space-y-6'>
 			<div className='flex items-center justify-between'>
-				<div>
-					<h2 className='text-base font-semibold flex items-center gap-2'>
-						<Github className='h-4 w-4' />
-						Custom GitHub Plugins
+				<div className='space-y-1'>
+					<h2 className='text-xl font-bold flex items-center gap-2'>
+						<Github className='h-5 w-5 text-indigo-500' />
+						Plugin Catalog
 					</h2>
-					<p className='text-xs text-muted-foreground mt-0.5'>
-						Register GitHub-hosted plugins once, then install them on any
-						Bedrock environment via{' '}
-						<code className='bg-muted px-1 rounded'>monorepo-fetcher</code>.
+					<p className='text-sm text-muted-foreground'>
+						Manage GitHub-hosted plugins available for installation across your environments.
 					</p>
 				</div>
-				<Button size='sm' onClick={() => setDialogForm(EMPTY_FORM)}>
-					<Plus className='h-4 w-4 mr-1.5' />
+				<Button 
+					size='sm' 
+					onClick={() => setDialogForm(EMPTY_FORM)}
+					className='shadow-md'
+				>
+					<Plus className='h-4 w-4 mr-2' />
 					Register Plugin
 				</Button>
 			</div>
 
 			{isLoading ? (
-				<div className='space-y-2'>
+				<div className='space-y-3'>
 					{[1, 2, 3].map(i => (
-						<div key={i} className='h-14 bg-muted animate-pulse rounded-lg' />
+						<div key={i} className='h-16 bg-muted/40 animate-pulse rounded-xl' />
 					))}
 				</div>
 			) : plugins.length === 0 ? (
-				<div className='border rounded-lg p-8 text-center text-muted-foreground'>
-					<Package className='h-8 w-8 mx-auto mb-2 opacity-40' />
-					<p className='font-medium text-sm'>
-						No custom plugins registered yet
-					</p>
-					<p className='text-xs mt-1'>
-						Register your GitHub-hosted plugins to install them on managed
-						sites.
-					</p>
-				</div>
+				<EmptyState
+					icon={Package}
+					title='Empty Catalog'
+					description='You haven&apos;t registered any custom plugins yet. Register your GitHub repos to start deploying them.'
+					action={
+						<Button variant='outline' onClick={() => setDialogForm(EMPTY_FORM)}>
+							Add First Plugin
+						</Button>
+					}
+				/>
 			) : (
-				<div className='border rounded-lg overflow-hidden'>
-					<table className='w-full text-sm'>
-						<thead className='border-b bg-muted/40'>
-							<tr>
-								<th className='text-left px-4 py-2.5 font-medium'>Name</th>
-								<th className='text-left px-4 py-2.5 font-medium'>
-									Repository
-								</th>
-								<th className='text-left px-4 py-2.5 font-medium'>Path</th>
-								<th className='text-left px-4 py-2.5 font-medium'>Sites</th>
-								<th className='w-20 px-4 py-2.5' />
-							</tr>
-						</thead>
-						<tbody className='divide-y'>
-							{plugins.map(p => (
-								<tr key={p.id} className='hover:bg-muted/20'>
-									<td className='px-4 py-3'>
-										<div className='flex items-center gap-2'>
-											<span className='font-medium'>{p.name}</span>
-											<Badge variant='outline' className='text-xs capitalize'>
-												{p.type}
-											</Badge>
-										</div>
-										<p className='text-xs text-muted-foreground font-mono mt-0.5'>
-											{p.slug}
-										</p>
-										{p.description && (
-											<p className='text-xs text-muted-foreground mt-0.5'>
-												{p.description}
-											</p>
-										)}
-									</td>
-									<td className='px-4 py-3 font-mono text-xs text-muted-foreground max-w-xs truncate'>
-										{p.repo_url}
-									</td>
-									<td className='px-4 py-3 font-mono text-xs text-muted-foreground'>
-										{p.repo_path}
-									</td>
-									<td className='px-4 py-3 text-xs text-muted-foreground'>
-										{p._count.environment_plugins}
-									</td>
-									<td className='px-4 py-3'>
-										<div className='flex items-center gap-1'>
-											<Button
-												size='sm'
-												variant='ghost'
-												className='h-7 w-7 p-0'
-												onClick={() => {
-													setEditTarget(p);
-												}}
-											>
-												<Pencil className='h-3.5 w-3.5' />
-											</Button>
-											<Button
-												size='sm'
-												variant='ghost'
-												className='h-7 w-7 p-0 text-destructive hover:text-destructive'
-												onClick={() => setDeleteTarget(p)}
-												disabled={p._count.environment_plugins > 0}
-												title={
-													p._count.environment_plugins > 0
-														? 'Uninstall from all environments first'
-														: 'Delete'
-												}
-											>
-												<Trash2 className='h-3.5 w-3.5' />
-											</Button>
-										</div>
-									</td>
+				<div className='border rounded-xl overflow-hidden bg-card shadow-sm'>
+					<div className='overflow-x-auto'>
+						<table className='w-full text-sm'>
+							<thead>
+								<tr className='bg-muted/50 border-b'>
+									<th className='text-left px-5 py-4 font-bold uppercase tracking-wider text-[10px] text-muted-foreground'>Asset Details</th>
+									<th className='text-left px-5 py-4 font-bold uppercase tracking-wider text-[10px] text-muted-foreground'>Repository</th>
+									<th className='text-left px-5 py-4 font-bold uppercase tracking-wider text-[10px] text-muted-foreground'>Internal Path</th>
+									<th className='text-center px-5 py-4 font-bold uppercase tracking-wider text-[10px] text-muted-foreground'>Usage</th>
+									<th className='w-20 px-5 py-4' />
 								</tr>
-							))}
-						</tbody>
-					</table>
+							</thead>
+							<tbody className='divide-y'>
+								{plugins.map(p => (
+									<tr key={p.id} className='hover:bg-muted/30 transition-colors'>
+										<td className='px-5 py-4'>
+											<div className='flex items-center gap-2.5'>
+												<div className='p-1.5 bg-muted rounded-lg'>
+													<Package className='h-4 w-4 text-primary/70' />
+												</div>
+												<div>
+													<div className='flex items-center gap-2'>
+														<span className='font-bold'>{p.name}</span>
+														<Badge variant='outline' className='text-[10px] h-4.5 px-1.5 uppercase font-bold text-muted-foreground'>
+															{p.type}
+														</Badge>
+													</div>
+													<p className='text-xs text-muted-foreground mt-0.5 font-mono opacity-80'>
+														{p.slug}
+													</p>
+												</div>
+											</div>
+										</td>
+										<td className='px-5 py-4'>
+											<div className='flex items-center gap-2 group cursor-pointer'>
+												<span className='font-mono text-xs text-muted-foreground max-w-[200px] truncate'>
+													{p.repo_url.replace(/^git@github\.com:/, '')}
+												</span>
+												<ExternalLink className='h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity' />
+											</div>
+										</td>
+										<td className='px-5 py-4'>
+											<code className='text-[11px] bg-muted px-1.5 py-0.5 rounded text-muted-foreground'>
+												{p.repo_path}
+											</code>
+										</td>
+										<td className='px-5 py-4 text-center'>
+											<div className='inline-flex items-center gap-1.5 px-2 py-1 bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 rounded-full border border-indigo-100 dark:border-indigo-900/30'>
+												<span className='text-xs font-bold'>{p._count.environment_plugins}</span>
+												<span className='text-[10px] font-medium'>Sites</span>
+											</div>
+										</td>
+										<td className='px-5 py-4'>
+											<div className='flex items-center justify-end gap-1'>
+												<Button
+													size='icon'
+													variant='ghost'
+													className='h-8 w-8 hover:bg-muted'
+													onClick={() => setEditTarget(p)}
+												>
+													<Pencil className='h-3.5 w-3.5' />
+												</Button>
+												<Button
+													size='icon'
+													variant='ghost'
+													className='h-8 w-8 text-destructive hover:bg-destructive/5 hover:text-destructive'
+													onClick={() => setDeleteTarget(p)}
+													disabled={p._count.environment_plugins > 0}
+													title={
+														p._count.environment_plugins > 0
+															? 'Uninstall from all environments first'
+															: 'Delete'
+													}
+												>
+													<Trash2 className='h-3.5 w-3.5' />
+												</Button>
+											</div>
+										</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+					</div>
 				</div>
 			)}
 
@@ -418,7 +451,7 @@ export function CustomPluginsSettings() {
 					onOpenChange={v => !v && setDeleteTarget(null)}
 					title={`Remove ${deleteTarget.name}?`}
 					description='This removes the plugin from the catalog. It will not uninstall it from environments where it is already deployed.'
-					confirmLabel='Remove'
+					confirmLabel='Remove Permanently'
 					confirmVariant='destructive'
 					onConfirm={() => deleteMutation.mutate(deleteTarget.id)}
 					isPending={deleteMutation.isPending}
