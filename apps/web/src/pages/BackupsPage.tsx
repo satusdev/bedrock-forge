@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, Fragment } from 'react';
-import { Trash2, Download, RotateCcw, AlertCircle } from 'lucide-react';
+import { Trash2, Download, RotateCcw, AlertCircle, ExternalLink } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { api } from '@/lib/api-client';
 import { useAuthStore } from '@/store/auth.store';
 import { useWebSocketEvent, useSubscribeEnvironment } from '@/lib/websocket';
@@ -19,10 +20,12 @@ import { AlertDialog } from '@/components/ui/alert-dialog';
 import { Pagination } from '@/components/crud';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
 	ExecutionLogPanel,
 	ExpandLogButton,
 } from '@/components/ui/execution-log-panel';
+import { BulkActionsBar } from '@/components/crud/BulkActionsBar';
 
 interface Environment {
 	id: number;
@@ -73,10 +76,11 @@ export function BackupsPage() {
 	const [page, setPage] = useState(1);
 	const [restoreTarget, setRestoreTarget] = useState<Backup | null>(null);
 	const [deleteTarget, setDeleteTarget] = useState<Backup | null>(null);
+	const [selectedIds, setSelectedIds] = useState<number[]>([]);
+	const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 	const isAdmin = useAuthStore(s => s.user?.roles?.includes('admin') ?? false);
 	const [jobProgress, setJobProgress] = useState<Record<string, number>>({});
 
-	// GET /environments — flat endpoint added by our backend fix
 	const {
 		data: envs,
 		isError: envsError,
@@ -86,7 +90,6 @@ export function BackupsPage() {
 		queryFn: () => api.get<Environment[]>('/environments'),
 	});
 
-	// GET /backups/environment/:envId — correct nested route
 	const {
 		data: backupsData,
 		isLoading,
@@ -99,7 +102,6 @@ export function BackupsPage() {
 				`/backups/environment/${envId}?page=${page}&limit=20`,
 			),
 		enabled: !!envId,
-		// Polling fallback: recover if a WS event was missed or the socket dropped
 		refetchInterval: 15_000,
 	});
 
@@ -137,7 +139,22 @@ export function BackupsPage() {
 		onError: () => toast({ title: 'Delete failed', variant: 'destructive' }),
 	});
 
-	// Subscribe to environment WS room so targeted events are received
+	const bulkDeleteMutation = useMutation({
+		mutationFn: (ids: number[]) =>
+			Promise.all(ids.map(id => api.delete(`/backups/${id}`))),
+		onSuccess: () => {
+			qc.invalidateQueries({ queryKey: ['backups', envId] });
+			setSelectedIds([]);
+			setIsBulkDeleting(false);
+			toast({ title: 'Backups deleted successfully' });
+		},
+		onError: () => {
+			setIsBulkDeleting(false);
+			toast({ title: 'Bulk delete failed', variant: 'destructive' });
+		},
+	});
+
+	// Subscribe to environment WS room
 	useSubscribeEnvironment(envId);
 
 	useWebSocketEvent(WS_EVENTS.JOB_PROGRESS, data => {
@@ -174,6 +191,20 @@ export function BackupsPage() {
 	const totalPages = backupsData ? Math.ceil(backupsData.total / 20) : 1;
 	const [expandedLogId, setExpandedLogId] = useState<number | null>(null);
 
+	const toggleSelectAll = () => {
+		if (selectedIds.length === (backupsData?.items.length ?? 0)) {
+			setSelectedIds([]);
+		} else {
+			setSelectedIds(backupsData?.items.map(b => b.id) ?? []);
+		}
+	};
+
+	const toggleSelect = (id: number) => {
+		setSelectedIds(prev =>
+			prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id],
+		);
+	};
+
 	if (envsError) {
 		return (
 			<div className='space-y-4'>
@@ -193,11 +224,11 @@ export function BackupsPage() {
 	}
 
 	return (
-		<div className='space-y-4'>
+		<div className='space-y-4 pb-20'>
 			<h1 className='text-2xl font-bold'>Backups</h1>
 
 			{/* Environment + type selector */}
-			<div className='flex flex-wrap items-end gap-4 bg-card border rounded-lg p-4'>
+			<div className='flex flex-wrap items-end gap-4 bg-card border rounded-lg p-4 shadow-sm'>
 				<div className='space-y-1'>
 					<Label>Environment</Label>
 					<Select
@@ -205,6 +236,7 @@ export function BackupsPage() {
 						onValueChange={v => {
 							setEnvId(v ? Number(v) : null);
 							setPage(1);
+							setSelectedIds([]);
 						}}
 					>
 						<SelectTrigger className='w-64'>
@@ -239,6 +271,7 @@ export function BackupsPage() {
 				<Button
 					onClick={() => createBackup.mutate()}
 					disabled={!envId || createBackup.isPending || missingFolderId}
+					className='shadow-sm'
 				>
 					{createBackup.isPending ? 'Starting…' : 'Create Backup'}
 				</Button>
@@ -252,12 +285,12 @@ export function BackupsPage() {
 						<p className='text-xs mt-0.5 opacity-80'>
 							This environment has no Google Drive Folder ID set. Go to the
 							project’s{' '}
-							<a
-								href={`/projects/${selectedEnv.project.id}`}
+							<Link
+								to={`/projects/${selectedEnv.project.id}?tab=environments`}
 								className='underline font-medium'
 							>
 								Environments tab
-							</a>{' '}
+							</Link>{' '}
 							to add it.
 						</p>
 					</div>
@@ -266,7 +299,7 @@ export function BackupsPage() {
 
 			{/* Active job progress */}
 			{Object.keys(jobProgress).length > 0 && (
-				<div className='space-y-2 bg-card border rounded-lg p-4'>
+				<div className='space-y-2 bg-card border rounded-lg p-4 shadow-sm'>
 					<p className='text-sm font-medium'>Active jobs</p>
 					{Object.entries(jobProgress).map(([jobId, progress]) => (
 						<div key={jobId}>
@@ -286,8 +319,8 @@ export function BackupsPage() {
 			)}
 
 			{!envId && (
-				<p className='text-muted-foreground text-sm'>
-					Select an environment to view and create backups.
+				<p className='text-muted-foreground text-sm py-10 text-center border-2 border-dashed rounded-lg'>
+					Select an environment above to view and manage backups.
 				</p>
 			)}
 
@@ -313,10 +346,19 @@ export function BackupsPage() {
 							</button>
 						</div>
 					) : (
-						<div className='border rounded-lg overflow-hidden'>
+						<div className='border rounded-lg overflow-hidden bg-card shadow-sm'>
 							<table className='w-full text-sm'>
 								<thead className='border-b bg-muted/40'>
 									<tr>
+										<th className='w-10 px-4 py-3'>
+											<Checkbox
+												checked={
+													selectedIds.length > 0 &&
+													selectedIds.length === backupsData?.items.length
+												}
+												onCheckedChange={toggleSelectAll}
+											/>
+										</th>
 										<th className='text-left px-4 py-3 font-medium'>Type</th>
 										<th className='text-left px-4 py-3 font-medium'>Size</th>
 										<th className='text-left px-4 py-3 font-medium'>Status</th>
@@ -326,9 +368,9 @@ export function BackupsPage() {
 								</thead>
 								<tbody className='divide-y'>
 									{isLoading &&
-										[1, 2, 3].map(i => (
+										[1, 2, 3, 4, 5].map(i => (
 											<tr key={i}>
-												<td colSpan={5} className='px-4 py-3'>
+												<td colSpan={6} className='px-4 py-3'>
 													<Skeleton className='h-5 w-full' />
 												</td>
 											</tr>
@@ -336,7 +378,17 @@ export function BackupsPage() {
 									{!isLoading &&
 										backupsData?.items.map(b => (
 											<Fragment key={b.id}>
-												<tr>
+												<tr
+													className={
+														selectedIds.includes(b.id) ? 'bg-muted/30' : ''
+													}
+												>
+													<td className='px-4 py-3'>
+														<Checkbox
+															checked={selectedIds.includes(b.id)}
+															onCheckedChange={() => toggleSelect(b.id)}
+														/>
+													</td>
 													<td className='px-4 py-3 capitalize'>{b.type}</td>
 													<td className='px-4 py-3 font-mono text-muted-foreground'>
 														{fmt(b.size_bytes)}
@@ -389,7 +441,7 @@ export function BackupsPage() {
 																<Button
 																	variant='outline'
 																	size='sm'
-																	className='h-7 text-xs'
+																	className='h-7 text-xs shadow-sm'
 																	onClick={() => setRestoreTarget(b)}
 																	disabled={restoreBackup.isPending}
 																>
@@ -398,20 +450,39 @@ export function BackupsPage() {
 																</Button>
 															)}
 															{b.status === 'completed' && (
-																<Button
-																	variant='ghost'
-																	size='icon'
-																	className='h-7 w-7 text-muted-foreground hover:text-foreground'
-																	title='Download backup'
-																	onClick={() =>
-																		window.open(
-																			`/api/backups/${b.id}/download`,
-																			'_blank',
-																		)
-																	}
-																>
-																	<Download className='h-3.5 w-3.5' />
-																</Button>
+																<>
+																	<Button
+																		variant='ghost'
+																		size='icon'
+																		className='h-7 w-7 text-muted-foreground hover:text-foreground'
+																		title='Download backup'
+																		onClick={() =>
+																			window.open(
+																				`/api/backups/${b.id}/download`,
+																				'_blank',
+																			)
+																		}
+																	>
+																		<Download className='h-3.5 w-3.5' />
+																	</Button>
+																	{selectedEnv?.google_drive_folder_id && (
+																		<Button
+																			variant='ghost'
+																			size='icon'
+																			className='h-7 w-7 text-muted-foreground hover:text-primary'
+																			title='Open Drive'
+																			onClick={() =>
+																				window.open(
+																					`https://drive.google.com/drive/folders/${selectedEnv.google_drive_folder_id}`,
+																					'_blank',
+																					'noopener',
+																				)
+																			}
+																		>
+																			<ExternalLink className='h-3.5 w-3.5' />
+																		</Button>
+																	)}
+																</>
 															)}
 															{isAdmin && (
 																<Button
@@ -420,7 +491,7 @@ export function BackupsPage() {
 																	className='h-7 w-7 text-muted-foreground hover:text-destructive'
 																	onClick={() => setDeleteTarget(b)}
 																	disabled={deleteBackup.isPending}
-																	title='Delete backup'
+																	title='Delete'
 																>
 																	<Trash2 className='h-3.5 w-3.5' />
 																</Button>
@@ -430,7 +501,7 @@ export function BackupsPage() {
 												</tr>
 												{expandedLogId === b.jobExecution?.id && (
 													<tr>
-														<td colSpan={5} className='px-4 pb-3 bg-muted/30'>
+														<td colSpan={6} className='px-4 pb-3 bg-muted/30'>
 															<ExecutionLogPanel
 																jobExecutionId={b.jobExecution?.id ?? null}
 															/>
@@ -447,8 +518,7 @@ export function BackupsPage() {
 								</p>
 							)}
 						</div>
-					)}{' '}
-					{/* end backupsError ternary */}
+					)}
 					<Pagination
 						page={page}
 						totalPages={totalPages}
@@ -457,11 +527,24 @@ export function BackupsPage() {
 				</>
 			)}
 
+			<BulkActionsBar
+				selectedCount={selectedIds.length}
+				actions={[
+					{
+						label: 'Delete Selected',
+						icon: <Trash2 className='h-4 w-4' />,
+						variant: 'destructive',
+						onClick: () => setIsBulkDeleting(true),
+					},
+				]}
+				onClear={() => setSelectedIds([])}
+			/>
+
 			<AlertDialog
 				open={!!restoreTarget}
 				onOpenChange={o => !o && setRestoreTarget(null)}
 				title='Restore Backup'
-				description={`Restore the ${restoreTarget?.type} backup from ${restoreTarget ? new Date(restoreTarget.created_at).toLocaleString() : ''}? This will overwrite the current site files/database.`}
+				description={`Restore the ${restoreTarget?.type} backup from ${restoreTarget ? new Date(restoreTarget.created_at).toLocaleString() : ''}? This will overwrite the current site.`}
 				confirmLabel='Restore'
 				confirmVariant='destructive'
 				onConfirm={() =>
@@ -474,11 +557,22 @@ export function BackupsPage() {
 				open={!!deleteTarget}
 				onOpenChange={o => !o && setDeleteTarget(null)}
 				title='Delete Backup'
-				description={`Permanently delete this ${deleteTarget?.type} backup from ${deleteTarget ? new Date(deleteTarget.created_at).toLocaleString() : ''}? This cannot be undone.`}
+				description={`Permanently delete this backup from ${deleteTarget ? new Date(deleteTarget.created_at).toLocaleString() : ''}? This cannot be undone.`}
 				confirmLabel='Delete'
 				confirmVariant='destructive'
 				onConfirm={() => deleteTarget && deleteBackup.mutate(deleteTarget.id)}
 				isPending={deleteBackup.isPending}
+			/>
+
+			<AlertDialog
+				open={isBulkDeleting}
+				onOpenChange={o => !o && setIsBulkDeleting(false)}
+				title='Delete Backups'
+				description={`Are you sure you want to delete ${selectedIds.length} selected backups? This action cannot be undone.`}
+				confirmLabel='Delete All'
+				confirmVariant='destructive'
+				onConfirm={() => bulkDeleteMutation.mutate(selectedIds)}
+				isPending={bulkDeleteMutation.isPending}
 			/>
 		</div>
 	);

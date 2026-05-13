@@ -1,5 +1,6 @@
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
 	ArrowLeft,
 	FolderKanban,
@@ -7,11 +8,13 @@ import {
 	Phone,
 	Tag,
 	Receipt,
+	Pencil,
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
+import { ClientFormDialog } from './ClientsPage';
 
 interface TagItem {
 	id: number;
@@ -50,6 +53,14 @@ interface ClientDetail {
 export function ClientDetailPage() {
 	const { id } = useParams<{ id: string }>();
 	const navigate = useNavigate();
+	const qc = useQueryClient();
+	const [editOpen, setEditOpen] = useState(false);
+
+	const { data: tags = [] } = useQuery<TagItem[]>({
+		queryKey: ['tags'],
+		queryFn: () => api.get('/tags'),
+		staleTime: 120_000,
+	});
 
 	const { data: client, isLoading } = useQuery<ClientDetail>({
 		queryKey: ['client', id],
@@ -103,20 +114,26 @@ export function ClientDetailPage() {
 	return (
 		<div className='space-y-6 p-6 max-w-3xl'>
 			{/* Header */}
-			<div className='flex items-center gap-3'>
-				<Button
-					variant='ghost'
-					size='icon'
-					onClick={() => navigate('/clients')}
-				>
-					<ArrowLeft className='h-4 w-4' />
-				</Button>
-				<div>
-					<h1 className='text-2xl font-bold'>{client.name}</h1>
-					<p className='text-sm text-muted-foreground'>
-						Client since {new Date(client.created_at).toLocaleDateString()}
-					</p>
+			<div className='flex items-center justify-between gap-3'>
+				<div className='flex items-center gap-3'>
+					<Button
+						variant='ghost'
+						size='icon'
+						onClick={() => navigate('/clients')}
+					>
+						<ArrowLeft className='h-4 w-4' />
+					</Button>
+					<div>
+						<h1 className='text-2xl font-bold'>{client.name}</h1>
+						<p className='text-sm text-muted-foreground'>
+							Client since {new Date(client.created_at).toLocaleDateString()}
+						</p>
+					</div>
 				</div>
+				<Button variant='outline' size='sm' onClick={() => setEditOpen(true)}>
+					<Pencil className='h-4 w-4 mr-1.5' />
+					Edit Client
+				</Button>
 			</div>
 
 			{/* Info card */}
@@ -275,6 +292,20 @@ export function ClientDetailPage() {
 					</div>
 				)}
 			</div>
+
+			{editOpen && (
+				<ClientFormDialog
+					open={editOpen}
+					onOpenChange={setEditOpen}
+					initial={client as Parameters<typeof ClientFormDialog>[0]['initial']}
+					allTags={tags}
+					onSuccess={() => {
+						qc.invalidateQueries({ queryKey: ['client', id] });
+						qc.invalidateQueries({ queryKey: ['clients'] });
+						setEditOpen(false);
+					}}
+				/>
+			)}
 		</div>
 	);
 }

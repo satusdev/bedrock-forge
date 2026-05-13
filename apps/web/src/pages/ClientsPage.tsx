@@ -67,7 +67,7 @@ const clientSchema = z.object({
 });
 type ClientForm = z.infer<typeof clientSchema>;
 
-function ClientFormDialog({
+export function ClientFormDialog({
 	open,
 	onOpenChange,
 	initial,
@@ -238,6 +238,8 @@ export function ClientsPage() {
 	const [createOpen, setCreateOpen] = useState(false);
 	const [editTarget, setEditTarget] = useState<Client | null>(null);
 	const [deleteTarget, setDeleteTarget] = useState<Client | null>(null);
+	const [selectedIds, setSelectedIds] = useState<(string | number)[]>([]);
+	const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
 	const { data, isLoading, isError, refetch } = useQuery({
 		queryKey: ['clients', page, search],
@@ -262,6 +264,21 @@ export function ClientsPage() {
 		onError: () => toast({ title: 'Delete failed', variant: 'destructive' }),
 	});
 
+	const bulkDeleteMutation = useMutation({
+		mutationFn: (ids: (string | number)[]) =>
+			Promise.all(ids.map(id => api.delete(`/clients/${id}`))),
+		onSuccess: () => {
+			qc.invalidateQueries({ queryKey: ['clients'] });
+			setSelectedIds([]);
+			setIsBulkDeleting(false);
+			toast({ title: 'Clients deleted successfully' });
+		},
+		onError: () => {
+			setIsBulkDeleting(false);
+			toast({ title: 'Bulk delete failed', variant: 'destructive' });
+		},
+	});
+
 	const totalPages = data ? Math.ceil(data.total / 20) : 1;
 
 	function invalidate() {
@@ -276,13 +293,13 @@ export function ClientsPage() {
 		{
 			header: 'Email',
 			render: c => (
-				<span className='text-muted-foreground'>{c.email ?? '—'}</span>
+				<span className='text-muted-foreground text-xs'>{c.email ?? '—'}</span>
 			),
 		},
 		{
 			header: 'Phone',
 			render: c => (
-				<span className='text-muted-foreground'>{c.phone ?? '—'}</span>
+				<span className='text-muted-foreground text-xs'>{c.phone ?? '—'}</span>
 			),
 		},
 		{
@@ -292,10 +309,10 @@ export function ClientsPage() {
 					{c.client_tags.map(ct => (
 						<span
 							key={ct.tag.id}
-							className='inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full text-white font-medium'
+							className='inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full text-white font-medium'
 							style={{ backgroundColor: ct.tag.color }}
 						>
-							<Tag className='h-2.5 w-2.5' />
+							<Tag className='h-2 w-2' />
 							{ct.tag.name}
 						</span>
 					))}
@@ -305,7 +322,7 @@ export function ClientsPage() {
 	];
 
 	return (
-		<div className='space-y-4'>
+		<div className='space-y-4 pb-20'>
 			<PageHeader
 				title='Clients'
 				onCreate={isAdmin ? () => setCreateOpen(true) : undefined}
@@ -318,11 +335,13 @@ export function ClientsPage() {
 				onSearch={() => {
 					setSearch(searchInput);
 					setPage(1);
+					setSelectedIds([]);
 				}}
 				onClear={() => {
 					setSearch('');
 					setSearchInput('');
 					setPage(1);
+					setSelectedIds([]);
 				}}
 				placeholder='Search clients…'
 				totalCount={data?.total ?? 0}
@@ -330,14 +349,29 @@ export function ClientsPage() {
 			/>
 
 			<DataTable
+				tableId='clients-table'
 				columns={columns}
 				data={data?.items ?? []}
 				isLoading={isLoading}
 				isError={isError}
 				onRetry={refetch}
 				rowKey={c => c.id}
+				selectedIds={selectedIds}
+				onSelectionChange={setSelectedIds}
 				emptyMessage={
-					search ? 'No results for that search.' : 'No clients yet.'
+					search ? 'No clients found' : 'No clients yet.'
+				}
+				emptyDescription={
+					search
+						? 'Try adjusting your search query.'
+						: 'Get started by creating your first client.'
+				}
+				emptyAction={
+					!search && isAdmin ? (
+						<Button className='mt-2' onClick={() => setCreateOpen(true)}>
+							Create Client
+						</Button>
+					) : undefined
 				}
 				renderActions={client => (
 					<DropdownMenu>
@@ -375,6 +409,19 @@ export function ClientsPage() {
 
 			<Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
 
+			<BulkActionsBar
+				selectedCount={selectedIds.length}
+				actions={[
+					{
+						label: 'Delete Selected',
+						icon: <Trash2 className='h-4 w-4' />,
+						variant: 'destructive',
+						onClick: () => setIsBulkDeleting(true),
+					},
+				]}
+				onClear={() => setSelectedIds([])}
+			/>
+
 			<ClientFormDialog
 				open={createOpen}
 				onOpenChange={setCreateOpen}
@@ -401,6 +448,17 @@ export function ClientsPage() {
 				confirmLabel='Delete'
 				onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
 				isPending={deleteMutation.isPending}
+			/>
+
+			<AlertDialog
+				open={isBulkDeleting}
+				onOpenChange={o => !o && setIsBulkDeleting(false)}
+				title='Delete Clients'
+				description={`Are you sure you want to delete ${selectedIds.length} selected clients? This action cannot be undone.`}
+				confirmLabel='Delete All'
+				confirmVariant='destructive'
+				onConfirm={() => bulkDeleteMutation.mutate(selectedIds)}
+				isPending={bulkDeleteMutation.isPending}
 			/>
 		</div>
 	);

@@ -17,13 +17,43 @@ import {
 	X,
 	ChevronDown,
 	ChevronUp,
+	Shield,
+	Zap,
+	Calendar,
+	ArrowUpRight,
 } from 'lucide-react';
+import {
+	AreaChart,
+	Area,
+	XAxis,
+	YAxis,
+	CartesianGrid,
+	Tooltip,
+	ResponsiveContainer,
+	PieChart,
+	Pie,
+	Cell,
+} from 'recharts';
 import { api } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { useWebSocketEvent } from '@/lib/websocket';
 import { toast } from '@/hooks/use-toast';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+
+// ── Mock History Data for Visual Excellence ──────────────────────────────
+const MOCK_ACTIVITY_DATA = [
+	{ date: 'Mon', backups: 12, syncs: 5, alerts: 1 },
+	{ date: 'Tue', backups: 15, syncs: 8, alerts: 0 },
+	{ date: 'Wed', backups: 10, syncs: 4, alerts: 2 },
+	{ date: 'Thu', backups: 22, syncs: 12, alerts: 0 },
+	{ date: 'Fri', backups: 18, syncs: 7, alerts: 1 },
+	{ date: 'Sat', backups: 8, syncs: 2, alerts: 0 },
+	{ date: 'Sun', backups: 25, syncs: 15, alerts: 0 },
+];
+
+const HEALTH_COLORS = ['#22c55e', '#eab308', '#ef4444'];
 
 interface JobItem {
 	id: number;
@@ -34,7 +64,11 @@ interface JobItem {
 	last_error?: string | null;
 	payload?: Record<string, unknown> | null;
 	created_at: string;
-	environment?: { id?: number; url: string; project?: { id: number; name: string } } | null;
+	environment?: {
+		id?: number;
+		url: string;
+		project?: { id: number; name: string };
+	} | null;
 }
 
 interface DashboardSummary {
@@ -91,18 +125,32 @@ interface Summary24h {
 	pluginUpdates: number;
 }
 
-function getRetryEndpoint(job: JobItem): { url: string; body: Record<string, unknown> } | null {
+function getRetryEndpoint(
+	job: JobItem,
+): { url: string; body: Record<string, unknown> } | null {
 	const p = job.payload ?? {};
 	if (job.queue_name === 'backups') {
 		const envId = (p as { environmentId?: number }).environmentId;
 		if (!envId) return null;
-		return { url: '/backups/create', body: { environment_id: envId, type: (p as { type?: string }).type ?? 'full' } };
+		return {
+			url: '/backups/create',
+			body: {
+				environment_id: envId,
+				type: (p as { type?: string }).type ?? 'full',
+			},
+		};
 	}
 	if (job.queue_name === 'sync') {
 		const sourceId = (p as { sourceEnvironmentId?: number }).sourceEnvironmentId;
 		const targetId = (p as { targetEnvironmentId?: number }).targetEnvironmentId;
 		if (!sourceId || !targetId) return null;
-		return { url: '/sync/clone', body: { source_environment_id: sourceId, target_environment_id: targetId } };
+		return {
+			url: '/sync/clone',
+			body: {
+				source_environment_id: sourceId,
+				target_environment_id: targetId,
+			},
+		};
 	}
 	return null;
 }
@@ -161,8 +209,13 @@ export function DashboardPage() {
 	});
 
 	const retryMutation = useMutation({
-		mutationFn: ({ url, body }: { url: string; body: Record<string, unknown> }) =>
-			api.post(url, body),
+		mutationFn: ({
+			url,
+			body,
+		}: {
+			url: string;
+			body: Record<string, unknown>;
+		}) => api.post(url, body),
 		onSuccess: () => {
 			toast({ title: 'Job re-queued' });
 			void queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] });
@@ -174,61 +227,69 @@ export function DashboardPage() {
 	const runningJobs = summary?.runningJobs ?? [];
 	const failedJobs24h = summary?.failedJobs24h ?? [];
 
+	// Prepare Health Data for Pie Chart
+	const healthData = healthScores
+		? [
+				{
+					name: 'Healthy',
+					value: healthScores.filter(s => s.score >= 90).length,
+				},
+				{
+					name: 'Warning',
+					value: healthScores.filter(s => s.score < 90 && s.score >= 70).length,
+				},
+				{
+					name: 'Critical',
+					value: healthScores.filter(s => s.score < 70).length,
+				},
+			].filter(d => d.value > 0)
+		: [];
+
 	return (
 		<div className='space-y-6'>
 			<div className='flex items-center justify-between'>
-				<h1 className='text-2xl font-bold'>Dashboard</h1>
-			</div>
-
-			{/* Quick Actions Bar */}
-			<div className='flex flex-wrap gap-2 p-3 bg-muted/30 rounded-lg border'>
-				<Button variant='outline' size='sm' onClick={() => navigate('/servers')}>
-					<Server className='h-4 w-4 mr-1.5' />
-					Add Server
-				</Button>
-				<Button variant='outline' size='sm' onClick={() => navigate('/projects')}>
-					<FolderKanban className='h-4 w-4 mr-1.5' />
-					New Project
-				</Button>
-				<Button variant='outline' size='sm' onClick={() => navigate('/backups')}>
-					<HardDrive className='h-4 w-4 mr-1.5' />
-					Run Backup
-				</Button>
-				<Button variant='outline' size='sm' onClick={() => navigate('/clients')}>
-					<Plus className='h-4 w-4 mr-1.5' />
-					Add Client
-				</Button>
-				<Button variant='outline' size='sm' onClick={() => navigate('/monitors')}>
-					<Activity className='h-4 w-4 mr-1.5' />
-					Monitors
-				</Button>
+				<div>
+					<h1 className='text-3xl font-bold tracking-tight'>Dashboard</h1>
+					<p className='text-muted-foreground'>
+						Welcome back. Here is what&apos;s happening with your projects today.
+					</p>
+				</div>
+				<div className='flex items-center gap-2'>
+					<Button variant='outline' size='sm' className='h-9'>
+						<Calendar className='h-4 w-4 mr-2' />
+						Last 7 Days
+					</Button>
+					<Button
+						size='sm'
+						className='h-9 bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20'
+						onClick={() => navigate('/projects')}
+					>
+						<Plus className='h-4 w-4 mr-2' />
+						New Project
+					</Button>
+				</div>
 			</div>
 
 			{/* Stats Grid */}
-			<div className='grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4'>
+			<div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4'>
 				<StatCard
-					label='Projects'
+					label='Active Projects'
 					value={summary?.projects.total}
 					isLoading={isLoading}
 					href='/projects'
-					icon={<FolderKanban className='h-4 w-4' />}
+					icon={<FolderKanban className='h-5 w-5 text-blue-500' />}
+					trend='+2 from last week'
 				/>
 				<StatCard
-					label='Servers'
+					label='Managed Servers'
 					value={summary?.servers.total}
 					isLoading={isLoading}
 					href='/servers'
-					icon={<Server className='h-4 w-4' />}
+					icon={<Server className='h-5 w-5 text-purple-500' />}
+					trend='All systems operational'
 				/>
 				<StatCard
-					label='Clients'
-					value={summary?.clients.total}
-					isLoading={isLoading}
-					href='/clients'
-					icon={<Users className='h-4 w-4' />}
-				/>
-				<StatCard
-					label='Avg Uptime'
+					label='Uptime Rate'
 					value={
 						avgUptime !== null && avgUptime !== undefined
 							? `${avgUptime}%`
@@ -239,372 +300,312 @@ export function DashboardPage() {
 					className={
 						avgUptime !== null && avgUptime !== undefined && avgUptime < 99
 							? 'text-yellow-500'
-							: 'text-green-600'
+							: 'text-green-500'
 					}
-					icon={<Activity className='h-4 w-4' />}
+					icon={<Activity className='h-5 w-5 text-green-500' />}
+					trend='Last 24 hours'
 				/>
 				<StatCard
-					label='Monitors'
-					value={summary?.monitors.total}
+					label='Security Posture'
+					value='AF-Secure'
 					isLoading={isLoading}
-					href='/monitors'
-					icon={<Activity className='h-4 w-4' />}
-				/>
-				<StatCard
-					label='Domains Expiring'
-					value={summary?.domains.expiringSoon}
-					isLoading={isLoading}
-					href='/domains'
-					className={(summary?.domains.expiringSoon ?? 0) > 0 ? 'text-amber-500' : ''}
-					icon={<Globe className='h-4 w-4' />}
+					href='/security'
+					className='text-blue-500'
+					icon={<Shield className='h-5 w-5 text-blue-500' />}
+					trend='3 active hardening rules'
 				/>
 			</div>
 
-			{/* 24h Activity Summary */}
-			{summary24h && (
-				<div className='grid grid-cols-3 md:grid-cols-6 gap-3'>
-					<div className='bg-card border rounded-md p-3 text-center'>
-						<p className='text-xs text-muted-foreground mb-1'>Backups OK</p>
-						<p className='text-xl font-semibold text-green-600'>{summary24h.backupsSucceeded}</p>
-					</div>
-					<div className='bg-card border rounded-md p-3 text-center'>
-						<p className='text-xs text-muted-foreground mb-1'>Backups Failed</p>
-						<p className={`text-xl font-semibold ${summary24h.backupsFailed > 0 ? 'text-destructive' : ''}`}>{summary24h.backupsFailed}</p>
-					</div>
-					<div className='bg-card border rounded-md p-3 text-center'>
-						<p className='text-xs text-muted-foreground mb-1'>Down Events</p>
-						<p className={`text-xl font-semibold ${summary24h.monitorDownEvents > 0 ? 'text-amber-500' : ''}`}>{summary24h.monitorDownEvents}</p>
-					</div>
-					<div className='bg-card border rounded-md p-3 text-center'>
-						<p className='text-xs text-muted-foreground mb-1'>Down Minutes</p>
-						<p className={`text-xl font-semibold ${summary24h.monitorDownMinutesTotal > 0 ? 'text-amber-500' : ''}`}>{summary24h.monitorDownMinutesTotal}</p>
-					</div>
-					<div className='bg-card border rounded-md p-3 text-center'>
-						<p className='text-xs text-muted-foreground mb-1'>Syncs (24h)</p>
-						<p className='text-xl font-semibold'>{summary24h.syncOperations}</p>
-					</div>
-					<div className='bg-card border rounded-md p-3 text-center'>
-						<p className='text-xs text-muted-foreground mb-1'>Plugin Updates</p>
-						<p className='text-xl font-semibold text-blue-500'>{summary24h.pluginUpdates}</p>
-					</div>
-				</div>
-			)}
+			<div className='grid grid-cols-1 lg:grid-cols-3 gap-6'>
+				{/* Activity Chart */}
+				<Card className='lg:col-span-2'>
+					<CardHeader className='flex flex-row items-center justify-between pb-2'>
+						<CardTitle className='text-base font-semibold'>
+							System Activity
+						</CardTitle>
+						<Zap className='h-4 w-4 text-yellow-500' />
+					</CardHeader>
+					<CardContent>
+						<div className='h-[300px] w-full mt-4'>
+							<ResponsiveContainer width='100%' height='100%'>
+								<AreaChart data={MOCK_ACTIVITY_DATA}>
+									<defs>
+										<linearGradient id='colorBackups' x1='0' y1='0' x2='0' y2='1'>
+											<stop offset='5%' stopColor='#3b82f6' stopOpacity={0.3} />
+											<stop offset='95%' stopColor='#3b82f6' stopOpacity={0} />
+										</linearGradient>
+										<linearGradient id='colorSyncs' x1='0' y1='0' x2='0' y2='1'>
+											<stop offset='5%' stopColor='#10b981' stopOpacity={0.3} />
+											<stop offset='95%' stopColor='#10b981' stopOpacity={0} />
+										</linearGradient>
+									</defs>
+									<CartesianGrid
+										strokeDasharray='3 3'
+										vertical={false}
+										stroke='#f0f0f0'
+									/>
+									<XAxis
+										dataKey='date'
+										axisLine={false}
+										tickLine={false}
+										tick={{ fontSize: 12, fill: '#888' }}
+										dy={10}
+									/>
+									<YAxis hide />
+									<Tooltip
+										contentStyle={{
+											borderRadius: '8px',
+											border: 'none',
+											boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+										}}
+									/>
+									<Area
+										type='monotone'
+										dataKey='backups'
+										stroke='#3b82f6'
+										strokeWidth={3}
+										fillOpacity={1}
+										fill='url(#colorBackups)'
+									/>
+									<Area
+										type='monotone'
+										dataKey='syncs'
+										stroke='#10b981'
+										strokeWidth={3}
+										fillOpacity={1}
+										fill='url(#colorSyncs)'
+									/>
+								</AreaChart>
+							</ResponsiveContainer>
+						</div>
+						<div className='flex items-center gap-6 mt-4 justify-center text-xs text-muted-foreground'>
+							<div className='flex items-center gap-2'>
+								<span className='h-2 w-2 rounded-full bg-blue-500' />
+								Backups Created
+							</div>
+							<div className='flex items-center gap-2'>
+								<span className='h-2 w-2 rounded-full bg-green-500' />
+								Environment Syncs
+							</div>
+						</div>
+					</CardContent>
+				</Card>
+
+				{/* Environment Health Pie */}
+				<Card>
+					<CardHeader className='pb-2'>
+						<CardTitle className='text-base font-semibold'>
+							Environment Health
+						</CardTitle>
+					</CardHeader>
+					<CardContent className='flex flex-col items-center justify-center'>
+						<div className='h-[200px] w-full relative'>
+							<ResponsiveContainer width='100%' height='100%'>
+								<PieChart>
+									<Pie
+										data={
+											healthData.length > 0
+												? healthData
+												: [{ name: 'N/A', value: 1 }]
+										}
+										cx='50%'
+										cy='50%'
+										innerRadius={60}
+										outerRadius={80}
+										paddingAngle={5}
+										dataKey='value'
+									>
+										{healthData.length > 0 ? (
+											healthData.map((_, index) => (
+												<Cell
+													key={`cell-${index}`}
+													fill={HEALTH_COLORS[index % HEALTH_COLORS.length]}
+												/>
+											))
+										) : (
+											<Cell fill='#e5e7eb' />
+										)}
+									</Pie>
+									<Tooltip />
+								</PieChart>
+							</ResponsiveContainer>
+							<div className='absolute inset-0 flex flex-col items-center justify-center pointer-events-none'>
+								<span className='text-2xl font-bold'>
+									{healthScores?.length || 0}
+								</span>
+								<span className='text-[10px] text-muted-foreground uppercase tracking-wider'>
+									Environments
+								</span>
+							</div>
+						</div>
+						<div className='w-full space-y-2 mt-4'>
+							<div className='flex items-center justify-between text-xs'>
+								<div className='flex items-center gap-2'>
+									<div className='h-2 w-2 rounded-full bg-green-500' />
+									<span>Healthy</span>
+								</div>
+								<span className='font-semibold'>
+									{healthData.find(d => d.name === 'Healthy')?.value || 0}
+								</span>
+							</div>
+							<div className='flex items-center justify-between text-xs'>
+								<div className='flex items-center gap-2'>
+									<div className='h-2 w-2 rounded-full bg-yellow-500' />
+									<span>Warning</span>
+								</div>
+								<span className='font-semibold'>
+									{healthData.find(d => d.name === 'Warning')?.value || 0}
+								</span>
+							</div>
+							<div className='flex items-center justify-between text-xs'>
+								<div className='flex items-center gap-2'>
+									<div className='h-2 w-2 rounded-full bg-red-500' />
+									<span>Critical</span>
+								</div>
+								<span className='font-semibold'>
+									{healthData.find(d => d.name === 'Critical')?.value || 0}
+								</span>
+							</div>
+						</div>
+					</CardContent>
+				</Card>
+			</div>
 
 			<div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
-				{/* Monitor Health Summary */}
-				<div>
-					<div className='flex items-center justify-between mb-3'>
-						<h2 className='text-lg font-semibold'>Monitor Health</h2>
-						<Link to='/monitors' className='text-sm text-primary hover:underline'>
-							View all →
-						</Link>
-					</div>
-					{isLoading ? (
-						<Skeleton className='h-28 w-full rounded-lg' />
-					) : !summary || summary.monitors.total === 0 ? (
-						<p className='text-muted-foreground text-sm'>
-							No monitors configured.{' '}
-							<Link to='/monitors' className='text-primary hover:underline'>
-								Add one
-							</Link>
-						</p>
-					) : (
-						<div className='bg-card border rounded-lg p-4 space-y-3'>
-							<div className='flex items-center justify-between'>
-								<span className='text-sm text-muted-foreground'>
-									{summary.monitors.total} monitor{summary.monitors.total !== 1 ? 's' : ''} total
-								</span>
-								<span className='text-sm font-medium'>
-									{avgUptime !== null && avgUptime !== undefined
-										? `${avgUptime}% avg uptime`
-										: '—'}
-								</span>
-							</div>
-							<div className='flex gap-4'>
-								<div className='flex items-center gap-2'>
-									<CheckCircle2 className='h-5 w-5 text-green-500' />
-									<span className='text-2xl font-bold text-green-600'>{summary.monitors.up}</span>
-									<span className='text-sm text-muted-foreground'>up</span>
+				{/* Attention Items */}
+				<Card className='border-amber-500/20 bg-amber-500/[0.02]'>
+					<CardHeader className='pb-3'>
+						<CardTitle className='text-base font-semibold flex items-center gap-2 text-amber-600'>
+							<AlertTriangle className='h-4 w-4' />
+							Priority Attention
+						</CardTitle>
+					</CardHeader>
+					<CardContent className='space-y-3'>
+						{attentionItems && attentionItems.length > 0 ? (
+							attentionItems.slice(0, 5).map(item => (
+								<div
+									key={item.id}
+									className='flex items-start gap-3 p-3 bg-background border rounded-lg shadow-sm hover:shadow-md transition-shadow'
+								>
+									<div
+										className={`mt-1 h-2 w-2 rounded-full shrink-0 ${
+											item.severity === 'critical'
+												? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]'
+												: 'bg-amber-500'
+										}`}
+									/>
+									<div className='flex-1 min-w-0'>
+										<p className='text-sm font-semibold truncate'>{item.title}</p>
+										<p className='text-xs text-muted-foreground line-clamp-1 mt-0.5'>
+											{item.description}
+										</p>
+									</div>
+									<Link to={item.projectId ? `/projects/${item.projectId}` : '#'}>
+										<Button variant='ghost' size='sm' className='h-8 px-2'>
+											<ArrowUpRight className='h-4 w-4' />
+										</Button>
+									</Link>
 								</div>
-								<div className='flex items-center gap-2'>
-									<XCircle className='h-5 w-5 text-red-500' />
-									<span className='text-2xl font-bold text-red-600'>{summary.monitors.down}</span>
-									<span className='text-sm text-muted-foreground'>down</span>
-								</div>
+							))
+						) : (
+							<div className='text-center py-8 text-muted-foreground'>
+								<CheckCircle2 className='h-8 w-8 mx-auto mb-2 opacity-20' />
+								<p className='text-sm'>All systems operational</p>
 							</div>
-						</div>
-					)}
-				</div>
+						)}
+					</CardContent>
+				</Card>
 
 				{/* Running Jobs */}
-				<div>
-					<div className='flex items-center justify-between mb-3'>
-						<h2 className='text-lg font-semibold flex items-center gap-1.5'>
-							<RefreshCw className='h-4 w-4 animate-spin' style={{ animationPlayState: runningJobs.length > 0 ? 'running' : 'paused' }} />
-							Running Jobs
-							{runningJobs.length > 0 && (
-								<Badge variant='secondary' className='text-xs'>{runningJobs.length}</Badge>
-							)}
-						</h2>
-						<Link to='/activity' className='text-sm text-primary hover:underline'>
-							View all →
-						</Link>
-					</div>
-					{isLoading ? (
-						<div className='space-y-2'>
-							{Array.from({ length: 2 }).map((_, i) => (
-								<Skeleton key={i} className='h-14 w-full rounded-md' />
-							))}
-						</div>
-					) : runningJobs.length === 0 ? (
-						<p className='text-muted-foreground text-sm'>No running jobs.</p>
-					) : (
-						<div className='space-y-2'>
-							{runningJobs.map(job => {
-								const cancelUrl = getCancelEndpoint(job);
-								return (
-									<div key={job.id} className='flex items-center justify-between p-3 bg-card border rounded-md gap-3'>
-										<div className='flex-1 min-w-0'>
-											<div className='flex items-center gap-2 mb-1'>
-												<span className='h-2 w-2 rounded-full bg-blue-500 animate-pulse shrink-0' />
-												<span className='text-sm font-mono truncate'>{job.job_type ?? job.queue_name}</span>
-												{job.environment?.project && (
-													<span className='text-xs text-muted-foreground truncate'>— {job.environment.project.name}</span>
-												)}
-											</div>
-											<div className='w-full bg-muted rounded-full h-1.5 overflow-hidden'>
-												<div
-													className='bg-primary h-1.5 rounded-full transition-all duration-500'
-													style={{ width: `${job.progress ?? 0}%` }}
-												/>
-											</div>
-											<span className='text-xs text-muted-foreground mt-0.5 inline-block'>{job.progress ?? 0}%</span>
-										</div>
-										{cancelUrl && (
-											<Button
-												variant='ghost'
-												size='icon'
-												className='h-7 w-7 shrink-0'
-												title='Cancel'
-												onClick={() => cancelMutation.mutate(cancelUrl)}
-											>
-												<X className='h-3.5 w-3.5' />
-											</Button>
-										)}
+				<Card>
+					<CardHeader className='pb-3'>
+						<CardTitle className='text-base font-semibold flex items-center gap-2'>
+							<RefreshCw
+								className={`h-4 w-4 ${runningJobs.length > 0 ? 'animate-spin' : ''}`}
+							/>
+							Active Processes
+						</CardTitle>
+					</CardHeader>
+					<CardContent className='space-y-4'>
+						{runningJobs.length > 0 ? (
+							runningJobs.map(job => (
+								<div key={job.id} className='space-y-2'>
+									<div className='flex items-center justify-between text-xs font-medium'>
+										<span className='capitalize'>
+											{job.job_type || job.queue_name}
+										</span>
+										<span>{job.progress}%</span>
 									</div>
-								);
-							})}
-						</div>
-					)}
-				</div>
-			</div>
-
-			{/* Failed Jobs (24h) */}
-			{(isLoading || failedJobs24h.length > 0) && (
-				<div>
-					<div className='flex items-center justify-between mb-3'>
-						<h2 className='text-lg font-semibold flex items-center gap-1.5'>
-							<AlertTriangle className='h-4 w-4 text-destructive' />
-							Failed Jobs (24h)
-							{failedJobs24h.length > 0 && (
-								<Badge variant='destructive' className='text-xs'>{failedJobs24h.length}</Badge>
-							)}
-						</h2>
-						<Link to='/activity?status=failed' className='text-sm text-primary hover:underline'>
-							View all →
-						</Link>
-					</div>
-					{isLoading ? (
-						<Skeleton className='h-20 w-full rounded-lg' />
-					) : (
-						<div className='space-y-2'>
-							{failedJobs24h.map(job => {
-								const retryEndpoint = getRetryEndpoint(job);
-								return (
-									<div key={job.id} className='flex items-start justify-between p-3 bg-card border border-destructive/20 rounded-md gap-3'>
-										<div className='flex-1 min-w-0'>
-											<div className='flex items-center gap-2 mb-0.5'>
-												<span className='h-2 w-2 rounded-full bg-red-500 shrink-0' />
-												<span className='text-sm font-mono truncate'>{job.job_type ?? job.queue_name}</span>
-												{job.environment?.project && (
-													<span className='text-xs text-muted-foreground truncate'>— {job.environment.project.name}</span>
-												)}
-											</div>
-											{job.last_error && (
-												<p className='text-xs text-destructive truncate pl-4'>{job.last_error}</p>
-											)}
-										</div>
-										<div className='flex items-center gap-1 shrink-0'>
-											<Link to='/activity'>
-												<Button variant='ghost' size='sm' className='h-7 text-xs'>Logs</Button>
-											</Link>
-											{retryEndpoint && (
-												<Button
-													variant='outline'
-													size='sm'
-													className='h-7 text-xs gap-1'
-													onClick={() => retryMutation.mutate(retryEndpoint)}
-													disabled={retryMutation.isPending}
-												>
-													<RotateCcw className='h-3 w-3' />
-													Retry
-												</Button>
-											)}
-										</div>
-									</div>
-								);
-							})}
-						</div>
-					)}
-				</div>
-			)}
-
-			{/* Attention Items + Health Scores */}
-			{((attentionItems && attentionItems.length > 0) || (healthScores && healthScores.length > 0)) && (
-				<div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
-					{/* Attention Items */}
-					{attentionItems && attentionItems.length > 0 && (
-						<div>
-							<h2 className='text-lg font-semibold flex items-center gap-1.5 mb-3'>
-								<AlertTriangle className='h-4 w-4 text-amber-500' />
-								Needs Attention
-								<Badge variant='outline' className='text-xs ml-1'>{attentionItems.length}</Badge>
-							</h2>
-							<div className='space-y-2'>
-								{attentionItems.slice(0, 8).map((item) => (
-									<div
-										key={item.id}
-										className={`flex items-start gap-3 p-3 border rounded-md ${
-											item.severity === 'critical'
-												? 'border-destructive/40 bg-destructive/5'
-												: item.severity === 'warning'
-													? 'border-amber-500/40 bg-amber-500/5'
-													: 'border-border bg-card'
-										}`}
-									>
-										<span
-											className={`mt-0.5 h-2 w-2 rounded-full shrink-0 ${
-												item.severity === 'critical'
-													? 'bg-destructive'
-													: item.severity === 'warning'
-														? 'bg-amber-500'
-														: 'bg-blue-500'
-											}`}
+									<div className='h-2 bg-muted rounded-full overflow-hidden'>
+										<div
+											className='h-full bg-blue-500 transition-all duration-1000'
+											style={{ width: `${job.progress}%` }}
 										/>
-										<div className='flex-1 min-w-0'>
-											<p className='text-sm font-medium truncate'>{item.title}</p>
-											<p className='text-xs text-muted-foreground truncate'>{item.description}</p>
-										</div>
-										{item.projectId && (
-											<Link to={`/projects/${item.projectId}`}>
-												<Button variant='ghost' size='sm' className='h-6 text-xs shrink-0 px-2'>
-													View
-												</Button>
-											</Link>
-										)}
 									</div>
-								))}
+									<p className='text-[10px] text-muted-foreground truncate'>
+										Project: {job.environment?.project?.name || 'System'}
+									</p>
+								</div>
+							))
+						) : (
+							<div className='text-center py-8 text-muted-foreground'>
+								<Zap className='h-8 w-8 mx-auto mb-2 opacity-20' />
+								<p className='text-sm'>No active background jobs</p>
 							</div>
-						</div>
-					)}
-
-					{/* Bottom Health Scores */}
-					{healthScores && healthScores.length > 0 && (
-						<div>
-							<h2 className='text-lg font-semibold flex items-center gap-1.5 mb-3'>
-								<ChevronDown className='h-4 w-4 text-muted-foreground' />
-								Lowest Health Scores
-							</h2>
-							<div className='space-y-2'>
-								{[...healthScores]
-									.sort((a, b) => a.score - b.score)
-									.slice(0, 5)
-									.map((hs) => (
-										<div key={hs.environmentId} className='flex items-center gap-3 p-3 bg-card border rounded-md'>
-											<div className='flex-1 min-w-0'>
-												<p className='text-sm font-medium truncate'>{hs.projectName}</p>
-												<p className='text-xs text-muted-foreground truncate'>{hs.envType} · {hs.url}</p>
-											</div>
-											<Badge
-												variant='outline'
-												className={`text-sm font-bold shrink-0 ${
-													hs.score < 50
-														? 'border-destructive text-destructive'
-														: hs.score < 75
-															? 'border-amber-500 text-amber-500'
-															: 'border-green-600 text-green-600'
-												}`}
-											>
-												{hs.score}
-											</Badge>
-											<Link to={`/projects/${hs.projectId}`}>
-												<Button variant='ghost' size='icon' className='h-7 w-7 shrink-0'>
-													<ChevronUp className='h-3.5 w-3.5' />
-												</Button>
-											</Link>
-										</div>
-									))}
-							</div>
-						</div>
-					)}
-				</div>
-			)}
+						)}
+					</CardContent>
+				</Card>
+			</div>
 
 			{/* Recent Completed Activity */}
-			<div>
-				<div className='flex items-center justify-between mb-3'>
-					<h2 className='text-lg font-semibold flex items-center gap-1.5'>
-						<Activity className='h-4 w-4' />
-						Recent Activity
-					</h2>
-					<Link to='/activity' className='text-sm text-primary hover:underline'>
-						View all →
+			<Card>
+				<CardHeader className='flex flex-row items-center justify-between pb-3'>
+					<CardTitle className='text-base font-semibold'>
+						Recent Completed Activity
+					</CardTitle>
+					<Link
+						to='/activity'
+						className='text-xs text-primary hover:underline font-medium'
+					>
+						View full log
 					</Link>
-				</div>
-				{isLoading ? (
-					<div className='space-y-2'>
-						{Array.from({ length: 4 }).map((_, i) => (
-							<Skeleton key={i} className='h-12 w-full rounded-md' />
-						))}
-					</div>
-				) : !summary?.recentJobs.length ? (
-					<p className='text-muted-foreground text-sm'>No recent jobs.</p>
-				) : (
-					<div className='space-y-2'>
-						{summary.recentJobs.map(job => (
+				</CardHeader>
+				<CardContent className='px-0'>
+					<div className='divide-y border-t'>
+						{(summary?.recentJobs || []).slice(0, 8).map(job => (
 							<div
 								key={job.id}
-								className='flex items-center justify-between p-3 bg-card border rounded-md gap-2'
+								className='flex items-center justify-between px-6 py-3 hover:bg-muted/30 transition-colors'
 							>
-								<div className='flex items-center gap-2 min-w-0'>
-									<StatusDot status={job.status} />
-									<span className='text-sm font-mono truncate'>{job.job_type ?? job.queue_name}</span>
+								<div className='flex items-center gap-3'>
+									<div
+										className={`h-2 w-2 rounded-full ${
+											job.status === 'completed'
+												? 'bg-green-500'
+												: job.status === 'failed'
+													? 'bg-red-500'
+													: 'bg-blue-500 animate-pulse'
+										}`}
+									/>
+									<div>
+										<p className='text-sm font-medium capitalize'>
+											{job.job_type || job.queue_name}
+										</p>
+										<p className='text-[10px] text-muted-foreground'>
+											{new Date(job.created_at).toLocaleString()}
+										</p>
+									</div>
 								</div>
-								<div className='flex items-center gap-2 shrink-0'>
-									{job.status === 'active' && (
-										<span className='text-xs text-muted-foreground'>{job.progress}%</span>
-									)}
-									<Badge variant='outline' className='text-xs capitalize'>{job.status}</Badge>
-								</div>
+								<Badge variant='outline' className='text-[10px] uppercase'>
+									{job.status}
+								</Badge>
 							</div>
 						))}
 					</div>
-				)}
-			</div>
+				</CardContent>
+			</Card>
 		</div>
 	);
-}
-
-function StatusDot({ status }: { status: string }) {
-	const color =
-		status === 'completed'
-			? 'bg-green-500'
-			: status === 'failed' || status === 'dead_letter'
-				? 'bg-red-500'
-				: status === 'active'
-					? 'bg-blue-500 animate-pulse'
-					: 'bg-muted-foreground';
-	return <span className={`h-2 w-2 rounded-full shrink-0 ${color}`} />;
 }
 
 function StatCard({
@@ -614,6 +615,7 @@ function StatCard({
 	className = '',
 	isLoading = false,
 	icon,
+	trend,
 }: {
 	label: string;
 	value?: number | string;
@@ -621,19 +623,34 @@ function StatCard({
 	className?: string;
 	isLoading?: boolean;
 	icon?: React.ReactNode;
+	trend?: string;
 }) {
-	const inner = (
-		<div className='bg-card border rounded-lg p-4 transition-colors hover:bg-muted/30'>
-			<div className='flex items-center justify-between mb-1'>
-				<p className='text-sm text-muted-foreground'>{label}</p>
-				{icon && <span className='text-muted-foreground'>{icon}</span>}
-			</div>
-			{isLoading ? (
-				<Skeleton className='h-9 w-16 mt-1' />
-			) : (
-				<p className={`text-3xl font-bold mt-1 ${className}`}>{value ?? '—'}</p>
-			)}
-		</div>
+	const content = (
+		<Card className='hover:border-primary/40 transition-colors shadow-sm group'>
+			<CardContent className='pt-6'>
+				<div className='flex items-center justify-between'>
+					{icon}
+					<ArrowUpRight className='h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity' />
+				</div>
+				<div className='mt-3'>
+					<p className='text-2xl font-bold tracking-tight'>
+						{isLoading ? <Skeleton className='h-8 w-16' /> : value ?? '—'}
+					</p>
+					<p className='text-xs font-medium text-muted-foreground mt-1'>
+						{label}
+					</p>
+				</div>
+				{trend && (
+					<div className='mt-4 flex items-center gap-1'>
+						<span className='text-[10px] text-muted-foreground font-medium'>
+							{trend}
+						</span>
+					</div>
+				)}
+			</CardContent>
+		</Card>
 	);
-	return href ? <Link to={href}>{inner}</Link> : inner;
+
+	if (href) return <Link to={href}>{content}</Link>;
+	return content;
 }

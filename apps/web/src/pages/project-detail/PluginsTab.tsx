@@ -48,6 +48,7 @@ import {
 	DialogFooter,
 } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useWebSocketEvent, useSubscribeEnvironment } from '@/lib/websocket';
 
 interface Environment {
@@ -137,12 +138,13 @@ function AddPluginDialog({
 	const qc = useQueryClient();
 	const [slug, setSlug] = useState('');
 	const [version, setVersion] = useState('');
+	const [skipSafetyBackup, setSkipSafetyBackup] = useState(false);
 
 	const mutation = useMutation({
 		mutationFn: () =>
 			api.post<{ jobExecutionId: number; bullJobId: string }>(
 				`/plugin-scans/environment/${envId}/plugins`,
-				{ slug: slug.trim(), version: version.trim() || undefined },
+				{ slug: slug.trim(), version: version.trim() || undefined, skipSafetyBackup },
 			),
 		onSuccess: () => {
 			toast({
@@ -152,6 +154,7 @@ function AddPluginDialog({
 			qc.invalidateQueries({ queryKey: ['plugin-scans', envId] });
 			setSlug('');
 			setVersion('');
+			setSkipSafetyBackup(false);
 			onClose();
 		},
 		onError: () =>
@@ -201,6 +204,20 @@ function AddPluginDialog({
 							disabled={mutation.isPending}
 						/>
 					</div>
+					<div className='flex items-center space-x-2 pt-2'>
+						<Checkbox
+							id='add-skip-backup'
+							checked={skipSafetyBackup}
+							onCheckedChange={(checked) => setSkipSafetyBackup(checked as boolean)}
+							disabled={mutation.isPending}
+						/>
+						<label
+							htmlFor='add-skip-backup'
+							className='text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
+						>
+							Skip pre-flight safety backup
+						</label>
+					</div>
 					<DialogFooter>
 						<Button
 							type='button'
@@ -220,6 +237,60 @@ function AddPluginDialog({
 						</Button>
 					</DialogFooter>
 				</form>
+			</DialogContent>
+		</Dialog>
+	);
+}
+
+function ConfirmPluginActionDialog({
+	open,
+	onClose,
+	onConfirm,
+	title,
+	description,
+	isPending,
+}: {
+	open: boolean;
+	onClose: () => void;
+	onConfirm: (skipSafetyBackup: boolean) => void;
+	title: string;
+	description: string;
+	isPending: boolean;
+}) {
+	const [skipSafetyBackup, setSkipSafetyBackup] = useState(false);
+
+	return (
+		<Dialog open={open} onOpenChange={v => !v && onClose()}>
+			<DialogContent className='sm:max-w-md'>
+				<DialogHeader>
+					<DialogTitle>{title}</DialogTitle>
+				</DialogHeader>
+				<div className='py-4 space-y-4'>
+					<p className='text-sm text-muted-foreground'>{description}</p>
+					<div className='flex items-center space-x-2'>
+						<Checkbox
+							id='action-skip-backup'
+							checked={skipSafetyBackup}
+							onCheckedChange={(checked) => setSkipSafetyBackup(checked as boolean)}
+							disabled={isPending}
+						/>
+						<label
+							htmlFor='action-skip-backup'
+							className='text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
+						>
+							Skip pre-flight safety backup
+						</label>
+					</div>
+				</div>
+				<DialogFooter>
+					<Button variant='outline' onClick={onClose} disabled={isPending}>
+						Cancel
+					</Button>
+					<Button onClick={() => onConfirm(skipSafetyBackup)} disabled={isPending}>
+						{isPending && <Loader2 className='h-4 w-4 mr-2 animate-spin' />}
+						Confirm
+					</Button>
+				</DialogFooter>
 			</DialogContent>
 		</Dialog>
 	);
@@ -550,6 +621,11 @@ export function PluginsTab({
 	const [scanning, setScanning] = useState(false);
 	const [managingJobId, setManagingJobId] = useState<string | null>(null);
 	const [showAddDialog, setShowAddDialog] = useState(false);
+	const [actionDialogState, setActionDialogState] = useState<{
+		open: boolean;
+		action: 'update' | 'remove' | 'updateAll' | null;
+		slug: string | null;
+	}>({ open: false, action: null, slug: null });
 	const [editConstraintPlugin, setEditConstraintPlugin] =
 		useState<Plugin | null>(null);
 	const [composerViewOpen, setComposerViewOpen] = useState(false);
@@ -772,10 +848,10 @@ export function PluginsTab({
 	});
 
 	const updateAllMutation = useMutation({
-		mutationFn: () =>
+		mutationFn: (skipSafetyBackup: boolean) =>
 			api.put<{ jobExecutionId: number; bullJobId: string }>(
 				`/plugin-scans/environment/${selectedEnvId}/plugins`,
-				{},
+				{ skipSafetyBackup },
 			),
 		onSuccess: data => {
 			const jobId = data?.bullJobId ?? null;
@@ -791,11 +867,12 @@ export function PluginsTab({
 	});
 
 	const removePluginMutation = useMutation({
-		mutationFn: (slug: string) =>
+		mutationFn: ({ slug, skipSafetyBackup }: { slug: string; skipSafetyBackup: boolean }) =>
 			api.delete<{ jobExecutionId: number; bullJobId: string }>(
 				`/plugin-scans/environment/${selectedEnvId}/plugins/${slug}`,
+				{ data: { skipSafetyBackup } },
 			),
-		onSuccess: (data, slug) => {
+		onSuccess: (data, { slug }) => {
 			const jobId = data?.bullJobId ?? null;
 			setManagingJobId(jobId);
 			managingJobIdRef.current = jobId;
@@ -809,12 +886,12 @@ export function PluginsTab({
 	});
 
 	const updatePluginMutation = useMutation({
-		mutationFn: (slug: string) =>
+		mutationFn: ({ slug, skipSafetyBackup }: { slug: string; skipSafetyBackup: boolean }) =>
 			api.put<{ jobExecutionId: number; bullJobId: string }>(
 				`/plugin-scans/environment/${selectedEnvId}/plugins/${slug}`,
-				{},
+				{ skipSafetyBackup },
 			),
-		onSuccess: (data, slug) => {
+		onSuccess: (data, { slug }) => {
 			const jobId = data?.bullJobId ?? null;
 			setManagingJobId(jobId);
 			managingJobIdRef.current = jobId;
@@ -1017,7 +1094,7 @@ export function PluginsTab({
 						<Button
 							size='sm'
 							variant='outline'
-							onClick={() => updateAllMutation.mutate()}
+							onClick={() => setActionDialogState({ open: true, action: 'updateAll', slug: null })}
 							disabled={!selectedEnvId || isManaging || updatesAvailable === 0}
 						>
 							{updateAllMutation.isPending ? (
@@ -1274,7 +1351,7 @@ export function PluginsTab({
 																className='h-7 px-2 text-xs'
 																disabled={isManaging}
 																onClick={() =>
-																	updatePluginMutation.mutate(p.slug)
+																	setActionDialogState({ open: true, action: 'update', slug: p.slug })
 																}
 																title='Update via composer'
 															>
@@ -1287,7 +1364,7 @@ export function PluginsTab({
 															className='h-7 px-2 text-xs text-destructive hover:text-destructive'
 															disabled={isManaging}
 															onClick={() =>
-																removePluginMutation.mutate(p.slug)
+																setActionDialogState({ open: true, action: 'remove', slug: p.slug })
 															}
 															title='Remove via composer'
 														>
@@ -1552,6 +1629,44 @@ export function PluginsTab({
 			{/* Auto-update schedule (Bedrock only) */}
 			{isBedrock && selectedEnvId && (
 				<PluginUpdateScheduleCard envId={selectedEnvId} />
+			)}
+
+			{selectedEnvId && actionDialogState.open && (
+				<ConfirmPluginActionDialog
+					open={actionDialogState.open}
+					onClose={() => setActionDialogState({ open: false, action: null, slug: null })}
+					title={
+						actionDialogState.action === 'updateAll'
+							? 'Update All Composer Plugins'
+							: actionDialogState.action === 'update'
+								? `Update Plugin: ${actionDialogState.slug}`
+								: `Remove Plugin: ${actionDialogState.slug}`
+					}
+					description={
+						actionDialogState.action === 'updateAll'
+							? 'This will run `composer update` to update all plugins to their latest versions according to your composer.json constraints.'
+							: actionDialogState.action === 'update'
+								? `This will update ${actionDialogState.slug} to the latest version allowed by your constraints.`
+								: `This will remove ${actionDialogState.slug} from your composer.json and delete its files.`
+					}
+					isPending={
+						actionDialogState.action === 'updateAll'
+							? updateAllMutation.isPending
+							: actionDialogState.action === 'update'
+								? updatePluginMutation.isPending
+								: removePluginMutation.isPending
+					}
+					onConfirm={(skipSafetyBackup) => {
+						if (actionDialogState.action === 'updateAll') {
+							updateAllMutation.mutate(skipSafetyBackup);
+						} else if (actionDialogState.action === 'update' && actionDialogState.slug) {
+							updatePluginMutation.mutate({ slug: actionDialogState.slug, skipSafetyBackup });
+						} else if (actionDialogState.action === 'remove' && actionDialogState.slug) {
+							removePluginMutation.mutate({ slug: actionDialogState.slug, skipSafetyBackup });
+						}
+						setActionDialogState({ open: false, action: null, slug: null });
+					}}
+				/>
 			)}
 		</div>
 	);

@@ -21,10 +21,12 @@ export function EmptyState({
 }: EmptyStateProps) {
 	return (
 		<div
-			className={`flex flex-col items-center justify-center gap-3 py-16 text-center ${className}`}
+			className={`flex flex-col items-center justify-center gap-3 py-16 text-center animate-in fade-in zoom-in duration-300 ${className}`}
 		>
-			<div className='rounded-full bg-muted p-4'>
-				<Icon className='h-6 w-6 text-muted-foreground' />
+			<div className='relative flex h-16 w-16 items-center justify-center rounded-full bg-muted/50'>
+				<div className='absolute inset-0 rounded-full bg-gradient-to-tr from-primary/10 to-transparent blur-xl' />
+				<div className='absolute inset-1 rounded-full border border-primary/10 bg-background/50 shadow-sm backdrop-blur-sm' />
+				<Icon className='relative z-10 h-8 w-8 text-muted-foreground' />
 			</div>
 			<div>
 				<p className='text-sm font-medium text-foreground'>{title}</p>
@@ -54,10 +56,12 @@ export function ErrorState({
 }: ErrorStateProps) {
 	return (
 		<div
-			className={`flex flex-col items-center justify-center gap-3 py-16 text-center ${className}`}
+			className={`flex flex-col items-center justify-center gap-3 py-16 text-center animate-in fade-in zoom-in duration-300 ${className}`}
 		>
-			<div className='rounded-full bg-destructive/10 p-4'>
-				<AlertCircle className='h-6 w-6 text-destructive' />
+			<div className='relative flex h-16 w-16 items-center justify-center rounded-full bg-destructive/10'>
+				<div className='absolute inset-0 rounded-full bg-gradient-to-tr from-destructive/20 to-transparent blur-xl' />
+				<div className='absolute inset-1 rounded-full border border-destructive/20 bg-background/50 shadow-sm backdrop-blur-sm' />
+				<AlertCircle className='relative z-10 h-8 w-8 text-destructive' />
 			</div>
 			<div>
 				<p className='text-sm font-medium text-foreground'>{title}</p>

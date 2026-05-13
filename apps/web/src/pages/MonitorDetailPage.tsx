@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import { isHttpStatusWorking } from '@bedrock-forge/shared';
 import {
 	ArrowLeft,
 	Activity,
@@ -12,6 +13,15 @@ import {
 	Globe,
 	Type,
 } from 'lucide-react';
+import {
+	AreaChart,
+	Area,
+	XAxis,
+	YAxis,
+	CartesianGrid,
+	Tooltip,
+	ResponsiveContainer,
+} from 'recharts';
 import { api } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -81,10 +91,6 @@ interface PaginatedResults {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function isUp(statusCode: number | null): boolean {
-	return statusCode !== null && statusCode >= 200 && statusCode < 400;
-}
-
 function formatDuration(seconds: number | null): string {
 	if (seconds === null) return '—';
 	if (seconds < 60) return `${seconds}s`;
@@ -102,92 +108,96 @@ function StatusDot({ statusCode }: { statusCode: number | null }) {
 	return (
 		<span
 			className={`inline-block w-2.5 h-2.5 rounded-full shrink-0 ${
-				isUp(statusCode) ? 'bg-green-500' : 'bg-red-500'
+				isHttpStatusWorking(statusCode) ? 'bg-green-500' : 'bg-red-500'
 			}`}
 		/>
 	);
 }
 
-// ── Sparkline ─────────────────────────────────────────────────────────────────
+// ── Response Time Chart ───────────────────────────────────────────────────────
 
-function ResponseTimeSparkline({ results }: { results: MonitorResult[] }) {
-	if (results.length < 2) {
+function ResponseTimeChart({ results }: { results: MonitorResult[] }) {
+	const chartData = useMemo(() => {
+		// Oldest first for chart
+		return [...results].reverse().map(r => ({
+			time: new Date(r.checked_at).toLocaleTimeString([], {
+				hour: '2-digit',
+				minute: '2-digit',
+			}),
+			response_ms: r.response_ms,
+			status: r.status_code,
+			is_up: r.is_up,
+		}));
+	}, [results]);
+
+	if (results.length === 0) {
 		return (
-			<div className='flex items-center justify-center h-20 text-xs text-muted-foreground'>
-				Not enough data yet
+			<div className='flex items-center justify-center h-64 text-sm text-muted-foreground'>
+				No data available yet
 			</div>
 		);
 	}
 
-	// Reverse so oldest is leftmost
-	const sorted = [...results].reverse();
-	const values = sorted.map(r => r.response_ms);
-	const max = Math.max(...values, 1);
-	const min = Math.min(...values);
-	const range = max - min || 1;
-
-	const WIDTH = 600;
-	const HEIGHT = 80;
-	const PADDING = 4;
-
-	const points = values.map((v, i) => {
-		const x = PADDING + ((WIDTH - PADDING * 2) / (values.length - 1)) * i;
-		const y = PADDING + (HEIGHT - PADDING * 2) * (1 - (v - min) / range);
-		return `${x},${y}`;
-	});
-
-	const polylinePoints = points.join(' ');
-
-	// Area fill path
-	const first = points[0].split(',');
-	const last = points[points.length - 1].split(',');
-	const areaPath = `M${first[0]},${HEIGHT - PADDING} L${polylinePoints.replace(/ /g, ' L')} L${last[0]},${HEIGHT - PADDING} Z`;
-
 	return (
-		<div className='w-full'>
-			<svg
-				viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-				className='w-full h-20 overflow-visible'
-				preserveAspectRatio='none'
-			>
-				<defs>
-					<linearGradient id='sparkGradient' x1='0' y1='0' x2='0' y2='1'>
-						<stop
-							offset='0%'
-							stopColor='hsl(var(--primary))'
-							stopOpacity='0.3'
-						/>
-						<stop
-							offset='100%'
-							stopColor='hsl(var(--primary))'
-							stopOpacity='0.02'
-						/>
-					</linearGradient>
-				</defs>
-				<path d={areaPath} fill='url(#sparkGradient)' />
-				<polyline
-					points={polylinePoints}
-					fill='none'
-					stroke='hsl(var(--primary))'
-					strokeWidth='2'
-					strokeLinejoin='round'
-					strokeLinecap='round'
-					vectorEffect='non-scaling-stroke'
-				/>
-			</svg>
-			<div className='flex justify-between text-xs text-muted-foreground mt-1'>
-				<span>
-					{sorted[0] ? new Date(sorted[0].checked_at).toLocaleTimeString() : ''}
-				</span>
-				<span className='font-medium'>Response time (ms)</span>
-				<span>
-					{sorted[sorted.length - 1]
-						? new Date(
-								sorted[sorted.length - 1].checked_at,
-							).toLocaleTimeString()
-						: ''}
-				</span>
-			</div>
+		<div className='h-64 w-full'>
+			<ResponsiveContainer width='100%' height='100%'>
+				<AreaChart
+					data={chartData}
+					margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+				>
+					<defs>
+						<linearGradient id='colorResponse' x1='0' y1='0' x2='0' y2='1'>
+							<stop
+								offset='5%'
+								stopColor='hsl(var(--primary))'
+								stopOpacity={0.3}
+							/>
+							<stop
+								offset='95%'
+								stopColor='hsl(var(--primary))'
+								stopOpacity={0}
+							/>
+						</linearGradient>
+					</defs>
+					<CartesianGrid
+						strokeDasharray='3 3'
+						vertical={false}
+						stroke='hsl(var(--border))'
+					/>
+					<XAxis
+						dataKey='time'
+						axisLine={false}
+						tickLine={false}
+						tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+						interval='preserveStartEnd'
+						minTickGap={30}
+					/>
+					<YAxis
+						axisLine={false}
+						tickLine={false}
+						tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+					/>
+					<Tooltip
+						contentStyle={{
+							backgroundColor: 'hsl(var(--background))',
+							border: '1px solid hsl(var(--border))',
+							borderRadius: 'var(--radius)',
+							fontSize: '12px',
+						}}
+						itemStyle={{ color: 'hsl(var(--primary))' }}
+						cursor={{ stroke: 'hsl(var(--primary))', strokeWidth: 1 }}
+					/>
+					<Area
+						type='monotone'
+						dataKey='response_ms'
+						stroke='hsl(var(--primary))'
+						strokeWidth={2}
+						fillOpacity={1}
+						fill='url(#colorResponse)'
+						animationDuration={1500}
+					/>
+				</AreaChart>
+			</ResponsiveContainer>
 		</div>
 	);
 }
@@ -381,7 +391,7 @@ export function MonitorDetailPage() {
 					<CardContent className='px-4 pb-3'>
 						<p
 							className={`text-xl font-semibold ${
-								isUp(monitor.last_status)
+								isHttpStatusWorking(monitor.last_status)
 									? 'text-green-600 dark:text-green-400'
 									: monitor.last_status === null
 										? 'text-muted-foreground'
@@ -390,7 +400,7 @@ export function MonitorDetailPage() {
 						>
 							{monitor.last_status === null
 								? 'Pending'
-								: isUp(monitor.last_status)
+								: isHttpStatusWorking(monitor.last_status)
 									? 'UP'
 									: 'DOWN'}
 						</p>
@@ -559,10 +569,10 @@ export function MonitorDetailPage() {
 			{/* Response time chart */}
 			<Card>
 				<CardHeader className='pb-2'>
-					<CardTitle className='text-sm'>Response Time</CardTitle>
+					<CardTitle className='text-sm'>Response Time History</CardTitle>
 				</CardHeader>
 				<CardContent>
-					<ResponseTimeSparkline results={results} />
+					<ResponseTimeChart results={results} />
 				</CardContent>
 			</Card>
 
@@ -584,8 +594,8 @@ export function MonitorDetailPage() {
 							{logsData && logsData.total > 20 && (
 								<div className='mt-4'>
 									<Pagination
-										page={logPage}
-										totalPages={Math.ceil(logsData.total / 20)}
+										current={logPage}
+										total={Math.ceil(logsData.total / 20)}
 										onPageChange={setLogPage}
 									/>
 								</div>

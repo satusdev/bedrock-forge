@@ -11,6 +11,7 @@ import {
 	Calendar,
 	Pencil,
 	XCircle,
+	ExternalLink,
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
@@ -558,20 +559,39 @@ export function BackupsTab({
 													</Button>
 												)}
 												{b.status === 'completed' && (
-													<Button
-														variant='ghost'
-														size='icon'
-														className='h-7 w-7'
-														title='Download'
-														onClick={() =>
-															window.open(
-																`/api/backups/${b.id}/download`,
-																'_blank',
-															)
-														}
-													>
-														<Download className='h-3.5 w-3.5' />
-													</Button>
+													<>
+														<Button
+															variant='ghost'
+															size='icon'
+															className='h-7 w-7'
+															title='Download backup (stream from Drive)'
+															onClick={() =>
+																window.open(
+																	`/api/backups/${b.id}/download`,
+																	'_blank',
+																)
+															}
+														>
+															<Download className='h-3.5 w-3.5' />
+														</Button>
+														{selectedEnv?.google_drive_folder_id && (
+															<Button
+																variant='ghost'
+																size='icon'
+																className='h-7 w-7 text-muted-foreground hover:text-primary'
+																title='Open in Google Drive'
+																onClick={() =>
+																	window.open(
+																		`https://drive.google.com/drive/folders/${selectedEnv.google_drive_folder_id}`,
+																		'_blank',
+																		'noopener',
+																	)
+																}
+															>
+																<ExternalLink className='h-3.5 w-3.5' />
+															</Button>
+														)}
+													</>
 												)}
 												<Button
 													variant='ghost'

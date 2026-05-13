@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useWebSocketEvent } from '@/lib/websocket';
-import { WS_EVENTS } from '@bedrock-forge/shared';
+import { isHttpStatusWorking, WS_EVENTS } from '@bedrock-forge/shared';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -17,6 +17,7 @@ import {
 	ChevronRight,
 	ChevronDown,
 	ChevronUp,
+	Activity,
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
@@ -25,7 +26,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { AlertDialog } from '@/components/ui/alert-dialog';
-import { PageHeader, DataTable, type Column } from '@/components/crud';
+import {
+	PageHeader,
+	DataTable,
+	type Column,
+	SearchBar,
+	Pagination,
+} from '@/components/crud';
 import {
 	Dialog,
 	DialogContent,
@@ -40,6 +47,9 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
+import { BulkActionsBar } from '@/components/ui/bulk-actions-bar';
+import { EmptyState } from '@/components/ui/EmptyState';
 
 // Types
 
@@ -110,17 +120,13 @@ const monitorSchema = z
 	});
 type MonitorForm = z.infer<typeof monitorSchema>;
 
-function isUp(status: number | null): boolean {
-	return status !== null && status >= 200 && status < 300;
-}
-
 function StatusDot({ status }: { status: number | null }) {
 	if (status === null)
 		return <span className='inline-block w-2 h-2 rounded-full bg-muted' />;
 	return (
 		<span
 			className={`inline-block w-2 h-2 rounded-full ${
-				isUp(status) ? 'bg-green-500' : 'bg-red-500'
+				isHttpStatusWorking(status) ? 'bg-green-500' : 'bg-red-500'
 			}`}
 		/>
 	);
@@ -496,51 +502,6 @@ function EditMonitorDialog({
 	);
 }
 
-function Pagination({
-	page,
-	total,
-	limit,
-	onPage,
-}: {
-	page: number;
-	total: number;
-	limit: number;
-	onPage: (p: number) => void;
-}) {
-	const totalPages = Math.max(1, Math.ceil(total / limit));
-	if (totalPages <= 1) return null;
-	return (
-		<div className='flex items-center justify-between text-sm text-muted-foreground'>
-			<span>
-				{(page - 1) * limit + 1}–{Math.min(page * limit, total)} of {total}
-			</span>
-			<div className='flex items-center gap-1'>
-				<Button
-					variant='ghost'
-					size='icon'
-					className='h-7 w-7'
-					disabled={page <= 1}
-					onClick={() => onPage(page - 1)}
-				>
-					<ChevronLeft className='h-4 w-4' />
-				</Button>
-				<span className='px-2 text-xs font-medium'>
-					{page} / {totalPages}
-				</span>
-				<Button
-					variant='ghost'
-					size='icon'
-					className='h-7 w-7'
-					disabled={page >= totalPages}
-					onClick={() => onPage(page + 1)}
-				>
-					<ChevronRight className='h-4 w-4' />
-				</Button>
-			</div>
-		</div>
-	);
-}
-
 export function MonitorsPage() {
 	const qc = useQueryClient();
 	const navigate = useNavigate();
@@ -550,6 +511,9 @@ export function MonitorsPage() {
 	const [createOpen, setCreateOpen] = useState(false);
 	const [deleteTarget, setDeleteTarget] = useState<Monitor | null>(null);
 	const [editTarget, setEditTarget] = useState<Monitor | null>(null);
+
+	// ── Selection State ──────────────────────────────────────────────────────
+	const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
 	const { data, isLoading, isError, refetch } = useQuery({
 		queryKey: ['monitors', page, search],
@@ -563,6 +527,9 @@ export function MonitorsPage() {
 		},
 		refetchInterval: 30_000,
 	});
+
+	const monitors = data?.items ?? [];
+	const totalPages = data ? Math.ceil(data.total / PAGE_LIMIT) : 1;
 
 	const { data: environments = [] } = useQuery({
 		queryKey: ['environments-all'],
@@ -591,6 +558,19 @@ export function MonitorsPage() {
 		onError: () => toast({ title: 'Delete failed', variant: 'destructive' }),
 	});
 
+	const bulkDeleteMutation = useMutation({
+		mutationFn: async (ids: number[]) => {
+			for (const id of ids) {
+				await api.delete(`/monitors/${id}`);
+			}
+		},
+		onSuccess: () => {
+			qc.invalidateQueries({ queryKey: ['monitors'] });
+			clearSelection();
+			toast({ title: 'Monitors deleted' });
+		},
+	});
+
 	const editMutation = useMutation({
 		mutationFn: ({ id, ...rest }: { id: number } & Partial<MonitorForm>) =>
 			api.put(`/monitors/${id}`, rest),
@@ -602,7 +582,42 @@ export function MonitorsPage() {
 		onError: () => toast({ title: 'Update failed', variant: 'destructive' }),
 	});
 
+	// ── Selection Logic ──────────────────────────────────────────────────────
+	const toggleSelect = (id: number) => {
+		const next = new Set(selectedIds);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		setSelectedIds(next);
+	};
+
+	const clearSelection = () => setSelectedIds(new Set());
+
+	const isAllSelected =
+		monitors.length > 0 && monitors.every(m => selectedIds.has(m.id));
+
+	const toggleAll = () => {
+		if (isAllSelected) {
+			const next = new Set(selectedIds);
+			monitors.forEach(m => next.delete(m.id));
+			setSelectedIds(next);
+		} else {
+			const next = new Set(selectedIds);
+			monitors.forEach(m => next.add(m.id));
+			setSelectedIds(next);
+		}
+	};
+
 	const columns: Column<Monitor>[] = [
+		{
+			header: '',
+			headerClassName: 'w-10 px-4 py-3',
+			render: m => (
+				<Checkbox
+					checked={selectedIds.has(m.id)}
+					onCheckedChange={() => toggleSelect(m.id)}
+				/>
+			),
+		},
 		{
 			header: 'Status',
 			render: m => (
@@ -614,7 +629,13 @@ export function MonitorsPage() {
 					>
 						<StatusDot status={m.last_status} />
 						<span
-							className={`text-xs font-medium ${m.last_status === null ? 'text-muted-foreground' : isUp(m.last_status) ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}
+							className={`text-xs font-medium ${
+								m.last_status === null
+									? 'text-muted-foreground'
+									: isHttpStatusWorking(m.last_status)
+										? 'text-green-600 dark:text-green-400'
+										: 'text-red-600 dark:text-red-400'
+							}`}
 						>
 							{m.last_status ?? 'pending'}
 						</span>
@@ -693,86 +714,77 @@ export function MonitorsPage() {
 				createLabel='New Monitor'
 			/>
 
-			<div className='flex items-center gap-2 max-w-sm'>
-				<div className='relative flex-1'>
-					<Search className='absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground' />
-					<Input
-						className='pl-8 h-8 text-sm'
-						placeholder='Search by URL…'
-						value={searchInput}
-						onChange={e => setSearchInput(e.target.value)}
-						onKeyDown={e => {
-							if (e.key === 'Enter') {
-								setPage(1);
-								setSearch(searchInput.trim());
-							}
-						}}
-					/>
-				</div>
-				<Button
-					size='sm'
-					variant='outline'
-					className='h-8'
-					onClick={() => {
-						setPage(1);
-						setSearch(searchInput.trim());
+			<SearchBar
+				value={searchInput}
+				onChange={setSearchInput}
+				onSearch={() => {
+					setSearch(searchInput);
+					setPage(1);
+				}}
+				onClear={() => {
+					setSearch('');
+					setSearchInput('');
+					setPage(1);
+				}}
+				placeholder='Search by URL…'
+				totalCount={data?.total ?? 0}
+				totalLabel='total monitors'
+			/>
+
+			{!isLoading && monitors.length === 0 ? (
+				<EmptyState
+					icon={Activity}
+					title='No monitors found'
+					description='You haven’t added any monitors yet. Add your first monitor to start tracking your project uptime.'
+					action={{
+						label: 'Add Monitor',
+						onClick: () => setCreateOpen(true),
+						icon: Activity,
 					}}
-				>
-					Search
-				</Button>
-				{search && (
-					<Button
-						size='sm'
-						variant='ghost'
-						className='h-8'
-						onClick={() => {
-							setSearch('');
-							setSearchInput('');
-							setPage(1);
-						}}
-					>
-						Clear
-					</Button>
-				)}
-			</div>
+					className='py-20'
+				/>
+			) : (
+				<DataTable
+					columns={columns}
+					data={monitors}
+					isLoading={isLoading}
+					isError={isError}
+					onRetry={refetch}
+					rowKey={m => m.id}
+					actionsHeader={
+						<Checkbox checked={isAllSelected} onCheckedChange={toggleAll} />
+					}
+					renderActions={m => (
+						<div className='flex items-center gap-1'>
+							<Button
+								variant='ghost'
+								size='icon'
+								className='h-7 w-7 text-muted-foreground hover:text-foreground'
+								onClick={() => setEditTarget(m)}
+								title='Edit monitor'
+							>
+								<Pencil className='h-4 w-4' />
+							</Button>
+							<Button
+								variant='ghost'
+								size='icon'
+								className='h-7 w-7 text-destructive hover:text-destructive'
+								onClick={() => setDeleteTarget(m)}
+							>
+								<Trash2 className='h-4 w-4' />
+							</Button>
+						</div>
+					)}
+				/>
+			)}
 
-			<DataTable
-				columns={columns}
-				data={data?.items ?? []}
-				isLoading={isLoading}
-				isError={isError}
-				onRetry={refetch}
-				rowKey={m => m.id}
-				emptyMessage='No monitors yet.'
-				renderActions={m => (
-					<div className='flex items-center gap-1'>
-						<Button
-							variant='ghost'
-							size='icon'
-							className='h-7 w-7 text-muted-foreground hover:text-foreground'
-							onClick={() => setEditTarget(m)}
-							title='Edit monitor'
-						>
-							<Pencil className='h-4 w-4' />
-						</Button>
-						<Button
-							variant='ghost'
-							size='icon'
-							className='h-7 w-7 text-destructive hover:text-destructive'
-							onClick={() => setDeleteTarget(m)}
-						>
-							<Trash2 className='h-4 w-4' />
-						</Button>
-					</div>
-				)}
-			/>
-
-			<Pagination
-				page={page}
-				total={data?.total ?? 0}
-				limit={PAGE_LIMIT}
-				onPage={setPage}
-			/>
+			{totalPages > 1 && (
+				<Pagination
+					current={page}
+					total={totalPages}
+					onPageChange={setPage}
+				/>
+			)}
 
 			<CreateMonitorDialog
 				open={createOpen}
@@ -795,6 +807,27 @@ export function MonitorsPage() {
 				confirmLabel='Delete'
 				onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
 				isPending={deleteMutation.isPending}
+			/>
+
+			<BulkActionsBar
+				selectedCount={selectedIds.size}
+				onClear={clearSelection}
+				actions={[
+					{
+						label: 'Delete',
+						icon: Trash2,
+						variant: 'destructive',
+						onClick: () => {
+							if (
+								confirm(
+									`Are you sure you want to delete ${selectedIds.size} monitors?`,
+								)
+							) {
+								bulkDeleteMutation.mutate(Array.from(selectedIds));
+							}
+						},
+					},
+				]}
 			/>
 		</div>
 	);

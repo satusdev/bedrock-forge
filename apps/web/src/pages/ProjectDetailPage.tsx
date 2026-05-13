@@ -154,6 +154,7 @@ function HeaderSkeleton() {
 }
 
 export function ProjectDetailPage() {
+	const navigate = useNavigate();
 	const { id } = useParams<{ id: string }>();
 	const projectId = Number(id);
 	const qc = useQueryClient();
@@ -213,7 +214,7 @@ export function ProjectDetailPage() {
 				<Button
 					className='mt-4'
 					variant='outline'
-					onClick={() => history.back()}
+					onClick={() => navigate(-1)}
 				>
 					<ArrowLeft className='h-4 w-4 mr-1.5' />
 					Go Back

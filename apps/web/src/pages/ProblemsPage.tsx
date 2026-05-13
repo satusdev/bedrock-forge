@@ -4,6 +4,7 @@ import { AlertTriangle, AlertCircle, Info, ExternalLink } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '@/lib/api-client';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Pagination } from '@/components/crud';
 
@@ -48,6 +49,7 @@ const SEVERITY_CONFIG = {
 
 export function ProblemsPage() {
 	const [page, setPage] = useState(1);
+	const [severityFilter, setSeverityFilter] = useState<string | null>(null);
 	const PAGE_SIZE = 20;
 	const { data: items = [], isLoading } = useQuery<AttentionItem[]>({
 		queryKey: ['attention'],
@@ -55,7 +57,11 @@ export function ProblemsPage() {
 		staleTime: 30_000,
 	});
 
-	const sorted = [...items].sort(
+	const filtered = severityFilter
+		? items.filter(i => i.severity === severityFilter)
+		: items;
+
+	const sorted = [...filtered].sort(
 		(a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity],
 	);
 
@@ -77,20 +83,69 @@ export function ProblemsPage() {
 				</p>
 			</div>
 
-			{/* Summary badges */}
+			{/* Summary badges and filters */}
 			{!isLoading && items.length > 0 && (
-				<div className='flex gap-3 flex-wrap'>
-					{counts.critical > 0 && (
-						<Badge variant='destructive'>{counts.critical} critical</Badge>
-					)}
-					{counts.warning > 0 && (
-						<Badge variant='warning'>
-							{counts.warning} warning{counts.warning !== 1 ? 's' : ''}
-						</Badge>
-					)}
-					{counts.info > 0 && (
-						<Badge variant='secondary'>{counts.info} info</Badge>
-					)}
+				<div className='flex items-center gap-4 flex-wrap'>
+					<div className='flex gap-1 bg-muted p-1 rounded-md'>
+						<Button
+							variant={severityFilter === null ? 'secondary' : 'ghost'}
+							size='sm'
+							className='h-7 text-xs px-2'
+							onClick={() => {
+								setSeverityFilter(null);
+								setPage(1);
+							}}
+						>
+							All
+						</Button>
+						<Button
+							variant={severityFilter === 'critical' ? 'secondary' : 'ghost'}
+							size='sm'
+							className='h-7 text-xs px-2'
+							onClick={() => {
+								setSeverityFilter('critical');
+								setPage(1);
+							}}
+						>
+							Critical
+						</Button>
+						<Button
+							variant={severityFilter === 'warning' ? 'secondary' : 'ghost'}
+							size='sm'
+							className='h-7 text-xs px-2'
+							onClick={() => {
+								setSeverityFilter('warning');
+								setPage(1);
+							}}
+						>
+							Warning
+						</Button>
+						<Button
+							variant={severityFilter === 'info' ? 'secondary' : 'ghost'}
+							size='sm'
+							className='h-7 text-xs px-2'
+							onClick={() => {
+								setSeverityFilter('info');
+								setPage(1);
+							}}
+						>
+							Info
+						</Button>
+					</div>
+
+					<div className='flex gap-3 flex-wrap'>
+						{counts.critical > 0 && (
+							<Badge variant='destructive'>{counts.critical} critical</Badge>
+						)}
+						{counts.warning > 0 && (
+							<Badge variant='warning'>
+								{counts.warning} warning{counts.warning !== 1 ? 's' : ''}
+							</Badge>
+						)}
+						{counts.info > 0 && (
+							<Badge variant='secondary'>{counts.info} info</Badge>
+						)}
+					</div>
 				</div>
 			)}
 

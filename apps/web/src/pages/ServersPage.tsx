@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -11,6 +12,7 @@ import {
 	ExternalLink,
 	ChevronDown,
 	ChevronUp,
+	Server as ServerIcon,
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
@@ -41,8 +43,11 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Checkbox } from '@/components/ui/checkbox';
+import { BulkActionsBar } from '@/components/ui/bulk-actions-bar';
 
-interface Server {
+
+export interface Server {
 	id: number;
 	name: string;
 	ip_address: string;
@@ -80,7 +85,7 @@ const STATUS_VARIANT: Record<string, 'success' | 'destructive' | 'secondary'> =
 		unknown: 'secondary',
 	};
 
-function ServerFormDialog({
+export function ServerFormDialog({
 	open,
 	onOpenChange,
 	initial,
@@ -409,6 +414,9 @@ export function ServersPage() {
 	const [search, setSearch] = useState('');
 	const [searchInput, setSearchInput] = useState('');
 
+	// ── Selection State ──────────────────────────────────────────────────────
+	const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+
 	const { data, isLoading, isError, refetch } = useQuery({
 		queryKey: ['servers', page, search],
 		queryFn: () =>
@@ -428,6 +436,19 @@ export function ServersPage() {
 			toast({ title: 'Server deleted' });
 		},
 		onError: () => toast({ title: 'Delete failed', variant: 'destructive' }),
+	});
+
+	const bulkDeleteMutation = useMutation({
+		mutationFn: async (ids: number[]) => {
+			for (const id of ids) {
+				await api.delete(`/servers/${id}`);
+			}
+		},
+		onSuccess: () => {
+			qc.invalidateQueries({ queryKey: ['servers'] });
+			clearSelection();
+			toast({ title: 'Servers deleted' });
+		},
 	});
 
 	const testConnection = useMutation({
@@ -482,10 +503,52 @@ export function ServersPage() {
 		}
 	}
 
+	// ── Selection Logic ──────────────────────────────────────────────────────
+	const toggleSelect = (id: number) => {
+		const next = new Set(selectedIds);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		setSelectedIds(next);
+	};
+
+	const clearSelection = () => setSelectedIds(new Set());
+
+	const isAllSelected =
+		servers.length > 0 && servers.every(s => selectedIds.has(s.id));
+
+	const toggleAll = () => {
+		if (isAllSelected) {
+			const next = new Set(selectedIds);
+			servers.forEach(s => next.delete(s.id));
+			setSelectedIds(next);
+		} else {
+			const next = new Set(selectedIds);
+			servers.forEach(s => next.add(s.id));
+			setSelectedIds(next);
+		}
+	};
+
 	const columns: Column<Server>[] = [
 		{
+			header: '',
+			headerClassName: 'w-10 px-4 py-3',
+			render: s => (
+				<Checkbox
+					checked={selectedIds.has(s.id)}
+					onCheckedChange={() => toggleSelect(s.id)}
+				/>
+			),
+		},
+		{
 			header: 'Name',
-			render: s => <span className='font-medium'>{s.name}</span>,
+			render: s => (
+				<Link
+					to={`/servers/${s.id}`}
+					className='font-medium hover:text-primary transition-colors'
+				>
+					{s.name}
+				</Link>
+			),
 		},
 		{
 			header: 'IP Address',
@@ -562,7 +625,25 @@ export function ServersPage() {
 				isError={isError}
 				onRetry={refetch}
 				rowKey={s => s.id}
-				emptyMessage={search ? 'No results.' : 'No servers yet.'}
+				emptyMessage={
+					search ? 'No servers found' : 'No servers found'
+				}
+				emptyDescription={
+					search
+						? 'Try adjusting your search query.'
+						: 'You haven’t added any servers yet. Add your first server to start managing your projects.'
+				}
+				emptyAction={
+					!search && isAdmin ? (
+						<Button className='mt-2' onClick={() => setCreateOpen(true)}>
+							<ServerIcon className='h-4 w-4 mr-2' />
+							Add Server
+						</Button>
+					) : undefined
+				}
+				actionsHeader={
+					<Checkbox checked={isAllSelected} onCheckedChange={toggleAll} />
+				}
 				renderActions={s => (
 					<DropdownMenu>
 						<DropdownMenuTrigger asChild>
@@ -571,6 +652,12 @@ export function ServersPage() {
 							</Button>
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align='end'>
+							<DropdownMenuItem asChild>
+								<Link to={`/servers/${s.id}`} className='flex items-center'>
+									<ServerIcon className='h-4 w-4 mr-2' />
+									View Details
+								</Link>
+							</DropdownMenuItem>
 							<DropdownMenuItem
 								onClick={() => testConnection.mutate(s.id)}
 								disabled={testConnection.isPending}
@@ -602,7 +689,9 @@ export function ServersPage() {
 				)}
 			/>
 
-			<Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+			{totalPages > 1 && (
+				<Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+			)}
 
 			<ServerFormDialog
 				open={createOpen}
@@ -628,6 +717,27 @@ export function ServersPage() {
 				confirmLabel='Delete'
 				onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
 				isPending={deleteMutation.isPending}
+			/>
+
+			<BulkActionsBar
+				selectedCount={selectedIds.size}
+				onClear={clearSelection}
+				actions={[
+					{
+						label: 'Delete',
+						icon: Trash2,
+						variant: 'destructive',
+						onClick: () => {
+							if (
+								confirm(
+									`Are you sure you want to delete ${selectedIds.size} servers?`,
+								)
+							) {
+								bulkDeleteMutation.mutate(Array.from(selectedIds));
+							}
+						},
+					},
+				]}
 			/>
 		</div>
 	);

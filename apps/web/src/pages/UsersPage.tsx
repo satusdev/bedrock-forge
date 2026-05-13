@@ -32,6 +32,7 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { BulkActionsBar } from '@/components/crud/BulkActionsBar';
 
 interface Role {
 	id: number;
@@ -249,6 +250,8 @@ export function UsersPage() {
 	const [createOpen, setCreateOpen] = useState(false);
 	const [editTarget, setEditTarget] = useState<User | null>(null);
 	const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
+	const [selectedIds, setSelectedIds] = useState<(string | number)[]>([]);
+	const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
 	const { data, isLoading, isError, refetch } = useQuery({
 		queryKey: ['users', page, search],
@@ -271,6 +274,21 @@ export function UsersPage() {
 			toast({ title: 'User deleted' });
 		},
 		onError: () => toast({ title: 'Delete failed', variant: 'destructive' }),
+	});
+
+	const bulkDeleteMutation = useMutation({
+		mutationFn: (ids: (string | number)[]) =>
+			Promise.all(ids.map(id => api.delete(`/users/${id}`))),
+		onSuccess: () => {
+			qc.invalidateQueries({ queryKey: ['users'] });
+			setSelectedIds([]);
+			setIsBulkDeleting(false);
+			toast({ title: 'Users deleted successfully' });
+		},
+		onError: () => {
+			setIsBulkDeleting(false);
+			toast({ title: 'Bulk delete failed', variant: 'destructive' });
+		},
 	});
 
 	const totalPages = data?.totalPages ?? 1;
@@ -298,7 +316,9 @@ export function UsersPage() {
 		},
 		{
 			header: 'Email',
-			render: u => <span className='text-muted-foreground'>{u.email}</span>,
+			render: u => (
+				<span className='text-muted-foreground text-xs'>{u.email}</span>
+			),
 		},
 		{
 			header: 'Roles',
@@ -314,7 +334,7 @@ export function UsersPage() {
 									| 'secondary'
 									| 'outline'
 							}
-							className='capitalize text-xs'
+							className='capitalize text-[10px] h-4 px-1.5'
 						>
 							<Shield className='h-2.5 w-2.5 mr-1' />
 							{role}
@@ -326,7 +346,7 @@ export function UsersPage() {
 		{
 			header: 'Joined',
 			render: u => (
-				<span className='text-muted-foreground text-sm'>
+				<span className='text-muted-foreground text-xs'>
 					{new Date(u.created_at).toLocaleDateString()}
 				</span>
 			),
@@ -334,7 +354,7 @@ export function UsersPage() {
 	];
 
 	return (
-		<div className='space-y-4'>
+		<div className='space-y-4 pb-20'>
 			<PageHeader
 				title='Users & Roles'
 				onCreate={() => setCreateOpen(true)}
@@ -347,11 +367,13 @@ export function UsersPage() {
 				onSearch={() => {
 					setSearch(searchInput);
 					setPage(1);
+					setSelectedIds([]);
 				}}
 				onClear={() => {
 					setSearch('');
 					setSearchInput('');
 					setPage(1);
+					setSelectedIds([]);
 				}}
 				placeholder='Search users…'
 				totalCount={data?.total ?? 0}
@@ -365,6 +387,8 @@ export function UsersPage() {
 				isError={isError}
 				onRetry={refetch}
 				rowKey={u => u.id}
+				selectedIds={selectedIds}
+				onSelectionChange={setSelectedIds}
 				emptyMessage={search ? 'No results for that search.' : 'No users yet.'}
 				renderActions={user => (
 					<DropdownMenu>
@@ -393,6 +417,19 @@ export function UsersPage() {
 
 			<Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
 
+			<BulkActionsBar
+				selectedCount={selectedIds.length}
+				actions={[
+					{
+						label: 'Delete Selected',
+						icon: <Trash2 className='h-4 w-4' />,
+						variant: 'destructive',
+						onClick: () => setIsBulkDeleting(true),
+					},
+				]}
+				onClear={() => setSelectedIds([])}
+			/>
+
 			<UserFormDialog
 				open={createOpen}
 				onOpenChange={setCreateOpen}
@@ -419,6 +456,21 @@ export function UsersPage() {
 				confirmLabel='Delete'
 				onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
 				isPending={deleteMutation.isPending}
+			/>
+
+			<AlertDialog
+				open={isBulkDeleting}
+				onOpenChange={o => !o && setIsBulkDeleting(false)}
+				title='Delete Users'
+				description={`Are you sure you want to delete ${selectedIds.length} selected users? This action cannot be undone.`}
+				confirmLabel='Delete All'
+				confirmVariant='destructive'
+				onConfirm={() =>
+					bulkDeleteMutation.mutate(
+						selectedIds.filter(id => id !== currentUser?.id),
+					)
+				}
+				isPending={bulkDeleteMutation.isPending}
 			/>
 		</div>
 	);

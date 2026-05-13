@@ -41,6 +41,7 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { BulkActionsBar } from '@/components/crud/BulkActionsBar';
 
 interface Domain {
 	id: number;
@@ -173,6 +174,8 @@ export function DomainsPage() {
 	const [refreshingId, setRefreshingId] = useState<number | null>(null);
 	const [refreshingSslId, setRefreshingSslId] = useState<number | null>(null);
 	const [whoisTarget, setWhoisTarget] = useState<Domain | null>(null);
+	const [selectedIds, setSelectedIds] = useState<(string | number)[]>([]);
+	const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
 	const limit = 20;
 
@@ -232,6 +235,21 @@ export function DomainsPage() {
 		},
 		onError: (e: { message?: string }) =>
 			toast({ title: 'Error', description: e.message, variant: 'destructive' }),
+	});
+
+	const bulkDeleteMutation = useMutation({
+		mutationFn: (ids: (string | number)[]) =>
+			Promise.all(ids.map(id => api.delete(`/domains/${id}`))),
+		onSuccess: () => {
+			invalidate();
+			setSelectedIds([]);
+			setIsBulkDeleting(false);
+			toast({ title: 'Domains deleted successfully' });
+		},
+		onError: () => {
+			setIsBulkDeleting(false);
+			toast({ title: 'Bulk delete failed', variant: 'destructive' });
+		},
 	});
 
 	async function handleWhoisRefresh(domain: Domain) {
@@ -315,56 +333,79 @@ export function DomainsPage() {
 		{
 			header: 'SSL Issuer',
 			render: d => (
-				<span className='text-sm text-muted-foreground'>
+				<span className='text-xs text-muted-foreground'>
 					{d.ssl_issuer ?? '—'}
 				</span>
 			),
 		},
 		{
 			header: 'Last Checked',
-			render: d =>
-				d.last_checked_at
-					? new Date(d.last_checked_at).toLocaleDateString()
-					: '—',
+			render: d => (
+				<span className='text-xs text-muted-foreground'>
+					{d.last_checked_at
+						? new Date(d.last_checked_at).toLocaleDateString()
+						: '—'}
+				</span>
+			),
 		},
 	];
 
 	return (
-		<div className='space-y-6 p-6'>
+		<div className='space-y-4 pb-20'>
 			<PageHeader
 				title='Domains'
 				onCreate={openCreate}
 				createLabel='Add Domain'
 			/>
 
-			<div className='flex gap-3 flex-wrap'>
-				<SearchBar
-					value={searchInput}
-					onChange={setSearchInput}
-					onSearch={() => {
-						setSearch(searchInput);
-						setPage(1);
-					}}
-					onClear={() => {
-						setSearchInput('');
-						setSearch('');
-						setPage(1);
-					}}
-					placeholder='Search domains…'
-				/>
-			</div>
+			<SearchBar
+				value={searchInput}
+				onChange={setSearchInput}
+				onSearch={() => {
+					setSearch(searchInput);
+					setPage(1);
+					setSelectedIds([]);
+				}}
+				onClear={() => {
+					setSearchInput('');
+					setSearch('');
+					setPage(1);
+					setSelectedIds([]);
+				}}
+				placeholder='Search domains…'
+				totalCount={data?.total ?? 0}
+				totalLabel='total domains'
+			/>
 
 			<DataTable
+				tableId='domains-table'
 				data={data?.items ?? []}
 				columns={columns}
 				isLoading={isLoading}
 				isError={isError}
 				onRetry={refetch}
 				rowKey={d => d.id}
+				selectedIds={selectedIds}
+				onSelectionChange={setSelectedIds}
+				emptyMessage={
+					search ? 'No domains found' : 'No domains yet.'
+				}
+				emptyDescription={
+					search
+						? 'Try adjusting your search query.'
+						: 'Get started by adding your first domain.'
+				}
+				emptyAction={
+					!search ? (
+						<Button className='mt-2' onClick={openCreate}>
+							Add Domain
+						</Button>
+					) : undefined
+				}
 				renderActions={d => (
 					<DropdownMenu>
 						<DropdownMenuTrigger asChild>
-							<Button variant='ghost' size='icon'>
+							<Button variant='ghost' size='icon' className='h-7 w-7'>
 								<MoreHorizontal className='h-4 w-4' />
 							</Button>
 						</DropdownMenuTrigger>
@@ -399,7 +440,7 @@ export function DomainsPage() {
 							</DropdownMenuItem>
 							{isAdmin && (
 								<DropdownMenuItem
-									className='text-destructive'
+									className='text-destructive focus:text-destructive'
 									onClick={() => setDeleteTarget(d)}
 								>
 									<Trash2 className='h-4 w-4 mr-2' />
@@ -411,13 +452,20 @@ export function DomainsPage() {
 				)}
 			/>
 
-			{totalPages > 1 && (
-				<Pagination
-					page={page}
-					totalPages={totalPages}
-					onPageChange={setPage}
-				/>
-			)}
+			<Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+
+			<BulkActionsBar
+				selectedCount={selectedIds.length}
+				actions={[
+					{
+						label: 'Delete Selected',
+						icon: <Trash2 className='h-4 w-4' />,
+						variant: 'destructive',
+						onClick: () => setIsBulkDeleting(true),
+					},
+				]}
+				onClear={() => setSelectedIds([])}
+			/>
 
 			<Dialog
 				open={dialogOpen}
@@ -485,7 +533,7 @@ export function DomainsPage() {
 					<DialogHeader>
 						<DialogTitle>WHOIS — {whoisTarget?.name}</DialogTitle>
 					</DialogHeader>
-					<pre className='text-xs bg-muted rounded p-3 overflow-auto max-h-96 whitespace-pre-wrap break-all'>
+					<pre className='text-[11px] bg-muted rounded p-3 overflow-auto max-h-96 whitespace-pre-wrap font-mono'>
 						{whoisTarget?.whois_json
 							? JSON.stringify(whoisTarget.whois_json, null, 2)
 							: 'No WHOIS data yet. Refresh to fetch.'}
@@ -503,6 +551,17 @@ export function DomainsPage() {
 				confirmLabel='Delete'
 				confirmVariant='destructive'
 				isPending={deleteMutation.isPending}
+			/>
+
+			<AlertDialog
+				open={isBulkDeleting}
+				onOpenChange={o => !o && setIsBulkDeleting(false)}
+				title='Delete Domains'
+				description={`Are you sure you want to delete ${selectedIds.length} selected domains? This action cannot be undone.`}
+				confirmLabel='Delete All'
+				confirmVariant='destructive'
+				onConfirm={() => bulkDeleteMutation.mutate(selectedIds)}
+				isPending={bulkDeleteMutation.isPending}
 			/>
 		</div>
 	);

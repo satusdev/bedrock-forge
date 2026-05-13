@@ -53,7 +53,7 @@ interface ThemeInfo {
 	status: 'active' | 'inactive';
 	version: string;
 	update_version: string | null;
-	update: 'available' | 'none';
+	update: 'available' | 'none' | 'none available';
 	title: string;
 	description: string;
 	author: string;
@@ -63,6 +63,21 @@ interface ThemeScan {
 	id: number;
 	themes: ThemeInfo[];
 	scanned_at: string;
+}
+
+interface ThemeScanExecution {
+	id: number;
+	status: 'queued' | 'active' | 'completed' | 'failed' | 'dead_letter';
+	progress: number | null;
+	started_at: string | null;
+	completed_at: string | null;
+	created_at: string;
+	last_error: string | null;
+}
+
+interface ThemeScansResponse {
+	items: ThemeScan[];
+	latestExecution: ThemeScanExecution | null;
 }
 
 function InstallThemeDialog({
@@ -219,9 +234,11 @@ export function ThemesTab({
 			event.environmentId === scanningEnvIdRef.current ||
 			(event.jobId != null && event.jobId === scanJobIdRef.current);
 		if (isScanJob) {
+			const envId = event.environmentId ?? scanningEnvIdRef.current;
 			setScanning(false);
 			scanningEnvIdRef.current = null;
 			scanJobIdRef.current = null;
+			qc.invalidateQueries({ queryKey: ['theme-scans', envId] });
 			toast({
 				title: 'Theme scan failed',
 				description: event.error ?? 'An unexpected error occurred',
@@ -246,13 +263,22 @@ export function ThemesTab({
 		queryKey: ['theme-scans', selectedEnvId],
 		enabled: !!selectedEnvId,
 		queryFn: () =>
-			api.get<{ items: ThemeScan[] }>(
+			api.get<ThemeScansResponse>(
 				`/theme-scans/environment/${selectedEnvId}?limit=1`,
 			),
 		refetchInterval: 15_000,
 	});
 
 	const latestScan = scans?.items[0];
+	const latestExecution = scans?.latestExecution ?? null;
+	const latestScanAttemptFailed =
+		latestExecution?.status === 'failed' ||
+		latestExecution?.status === 'dead_letter';
+	const latestFailureIsNewerThanScan =
+		latestScanAttemptFailed &&
+		(!latestScan ||
+			new Date(latestExecution.created_at).getTime() >
+				new Date(latestScan.scanned_at).getTime());
 	const themes: ThemeInfo[] = Array.isArray(latestScan?.themes)
 		? (latestScan.themes as ThemeInfo[])
 		: [];
@@ -427,11 +453,44 @@ export function ThemesTab({
 			{/* Last scanned at */}
 			{latestScan && (
 				<p className='text-xs text-muted-foreground'>
-					Last scan:{' '}
+					Last successful scan:{' '}
 					<span className='font-medium text-foreground'>
 						{new Date(latestScan.scanned_at).toLocaleString()}
 					</span>
+					{latestFailureIsNewerThanScan && (
+						<span className='ml-2 text-destructive font-medium'>
+							Latest attempt failed; showing stale data.
+						</span>
+					)}
 				</p>
+			)}
+
+			{latestFailureIsNewerThanScan && (
+				<Card className='border-destructive/40 bg-destructive/[0.03]'>
+					<CardHeader className='pb-2'>
+						<CardTitle className='text-sm flex items-center gap-2 text-destructive'>
+							<AlertTriangle className='h-4 w-4' />
+							Latest theme scan failed
+						</CardTitle>
+						<CardDescription>
+							{latestExecution.last_error ?? 'An unexpected error occurred.'}
+						</CardDescription>
+					</CardHeader>
+					<CardContent>
+						<Button
+							size='sm'
+							onClick={() => scanMutation.mutate()}
+							disabled={!selectedEnvId || isBusy || scanMutation.isPending}
+						>
+							{scanMutation.isPending ? (
+								<Loader2 className='h-3.5 w-3.5 mr-1.5 animate-spin' />
+							) : (
+								<ScanLine className='h-3.5 w-3.5 mr-1.5' />
+							)}
+							Retry Scan
+						</Button>
+					</CardContent>
+				</Card>
 			)}
 
 			{isLoading ? (
@@ -443,10 +502,23 @@ export function ThemesTab({
 			) : !latestScan ? (
 				<Card>
 					<CardContent className='py-12 flex flex-col items-center gap-3 text-muted-foreground'>
-						<Palette className='h-8 w-8 opacity-40' />
-						<p className='text-sm'>
-							No theme scan data yet. Run a scan to see installed themes.
-						</p>
+						{latestScanAttemptFailed ? (
+							<AlertTriangle className='h-8 w-8 text-destructive opacity-80' />
+						) : (
+							<Palette className='h-8 w-8 opacity-40' />
+						)}
+						<div className='space-y-1 text-center'>
+							<p className='text-sm'>
+								{latestScanAttemptFailed
+									? 'The latest theme scan failed.'
+									: 'No theme scan data yet. Run a scan to see installed themes.'}
+							</p>
+							{latestScanAttemptFailed && latestExecution?.last_error && (
+								<p className='text-xs text-destructive max-w-xl'>
+									{latestExecution.last_error}
+								</p>
+							)}
+						</div>
 						<Button
 							size='sm'
 							onClick={() => scanMutation.mutate()}
@@ -457,7 +529,7 @@ export function ThemesTab({
 							) : (
 								<ScanLine className='h-3.5 w-3.5 mr-1.5' />
 							)}
-							Run First Scan
+							{latestScanAttemptFailed ? 'Retry Scan' : 'Run First Scan'}
 						</Button>
 					</CardContent>
 				</Card>

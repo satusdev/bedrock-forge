@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -13,6 +13,7 @@ import {
 	ExternalLink,
 	History,
 	HardDrive,
+	FolderPlus,
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '@/lib/api-client';
@@ -44,6 +45,9 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Checkbox } from '@/components/ui/checkbox';
+import { BulkActionsBar } from '@/components/ui/bulk-actions-bar';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { ImportFromServerDialog } from './projects/ImportFromServerDialog';
 import { CreateBedrockDialog } from './projects/CreateBedrockDialog';
 import { useServersList } from '@/hooks/useServersList';
@@ -306,12 +310,16 @@ function ProjectCard({
 	onDelete,
 	onClick,
 	onBackupNow,
+	selected,
+	onSelect,
 }: {
 	project: Project;
 	onEdit: () => void;
 	onDelete: () => void;
 	onClick: () => void;
 	onBackupNow: (envId: number) => void;
+	selected: boolean;
+	onSelect: (val: boolean) => void;
 }) {
 	const servers = [
 		...new Map(project.environments.map(e => [e.server.id, e.server])).values(),
@@ -359,10 +367,21 @@ function ProjectCard({
 
 	return (
 		<Card
-			className='group cursor-pointer hover:border-primary/50 transition-colors'
+			className={`group relative cursor-pointer hover:border-primary/50 transition-all duration-200 ${selected ? 'border-primary bg-primary/5 ring-1 ring-primary' : ''}`}
 			onClick={onClick}
 		>
-			<CardHeader className='pb-3'>
+			<div
+				className='absolute top-3 left-3 z-10'
+				onClick={e => e.stopPropagation()}
+			>
+				<Checkbox
+					checked={selected}
+					onCheckedChange={v => onSelect(!!v)}
+					className={`transition-opacity ${selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+				/>
+			</div>
+
+			<CardHeader className='pb-3 pl-10'>
 				<div className='flex items-start justify-between gap-2'>
 					<div className='min-w-0 flex-1'>
 						<h3 className='font-semibold text-sm truncate leading-tight'>
@@ -416,7 +435,7 @@ function ProjectCard({
 				</div>
 			</CardHeader>
 
-			<CardContent className='pt-0 space-y-1.5'>
+			<CardContent className='pt-0 pl-10 space-y-1.5'>
 				{project.environments.map(env => {
 					const lastBackup = env.backups[0];
 					return (
@@ -702,6 +721,9 @@ export function ProjectsPage() {
 	const [editTarget, setEditTarget] = useState<Project | null>(null);
 	const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
 
+	// ── Selection State ──────────────────────────────────────────────────────
+	const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+
 	const { data, isLoading } = useQuery({
 		queryKey: ['projects', page, search, clientFilter, serverFilter],
 		queryFn: () => {
@@ -760,6 +782,44 @@ export function ProjectsPage() {
 
 	const projects = data?.items ?? [];
 
+	// ── Selection Logic ──────────────────────────────────────────────────────
+	const toggleSelect = (id: number) => {
+		const next = new Set(selectedIds);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		setSelectedIds(next);
+	};
+
+	const clearSelection = () => setSelectedIds(new Set());
+
+	const isAllSelected =
+		projects.length > 0 && projects.every(p => selectedIds.has(p.id));
+
+	const toggleAll = () => {
+		if (isAllSelected) {
+			const next = new Set(selectedIds);
+			projects.forEach(p => next.delete(p.id));
+			setSelectedIds(next);
+		} else {
+			const next = new Set(selectedIds);
+			projects.forEach(p => next.add(p.id));
+			setSelectedIds(next);
+		}
+	};
+
+	const bulkDeleteMutation = useMutation({
+		mutationFn: async (ids: number[]) => {
+			for (const id of ids) {
+				await api.delete(`/projects/${id}`);
+			}
+		},
+		onSuccess: () => {
+			qc.invalidateQueries({ queryKey: ['projects'] });
+			clearSelection();
+			toast({ title: 'Projects deleted' });
+		},
+	});
+
 	return (
 		<div className='space-y-4'>
 			<PageHeader
@@ -804,133 +864,126 @@ export function ProjectsPage() {
 				placeholder='Search projects…'
 				totalCount={data?.total ?? 0}
 				totalLabel='total projects'
-			/>
-
-			{/* Filters */}
-			<div className='flex gap-3 flex-wrap items-center'>
-				<Select
-					value={clientFilter || 'all'}
-					onValueChange={v => {
-						setClientFilter(v === 'all' ? '' : v);
-						setPage(1);
-					}}
-				>
-					<SelectTrigger className='w-44'>
-						<SelectValue placeholder='All Clients' />
-					</SelectTrigger>
-					<SelectContent>
-						<SelectItem value='all'>All Clients</SelectItem>
-						{clients.map(c => (
-							<SelectItem key={c.id} value={String(c.id)}>
-								{c.name}
-							</SelectItem>
-						))}
-					</SelectContent>
-				</Select>
-				<Select
-					value={serverFilter || 'all'}
-					onValueChange={v => {
-						setServerFilter(v === 'all' ? '' : v);
-						setPage(1);
-					}}
-				>
-					<SelectTrigger className='w-44'>
-						<SelectValue placeholder='All Servers' />
-					</SelectTrigger>
-					<SelectContent>
-						<SelectItem value='all'>All Servers</SelectItem>
-						{servers.map(s => (
-							<SelectItem key={s.id} value={String(s.id)}>
-								{s.name}
-							</SelectItem>
-						))}
-					</SelectContent>
-				</Select>
-				{(clientFilter || serverFilter) && (
-					<Button
-						variant='ghost'
-						size='sm'
-						onClick={() => {
-							setClientFilter('');
-							setServerFilter('');
+			>
+				<div className='flex items-center gap-2'>
+					<Select
+						value={clientFilter}
+						onValueChange={v => {
+							setClientFilter(v);
+							setSearchParams(prev => {
+								if (v) prev.set('client_id', v);
+								else prev.delete('client_id');
+								return prev;
+							});
 							setPage(1);
 						}}
 					>
-						Clear filters
-					</Button>
-				)}
+						<SelectTrigger className='w-[160px] h-9'>
+							<SelectValue placeholder='All Clients' />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value='all-clients'>All Clients</SelectItem>
+							{clients.map(c => (
+								<SelectItem key={c.id} value={c.id.toString()}>
+									{c.name}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+
+					<Select
+						value={serverFilter}
+						onValueChange={v => {
+							setServerFilter(v);
+							setSearchParams(prev => {
+								if (v) prev.set('server_id', v);
+								else prev.delete('server_id');
+								return prev;
+							});
+							setPage(1);
+						}}
+					>
+						<SelectTrigger className='w-[160px] h-9'>
+							<SelectValue placeholder='All Servers' />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value='all-servers'>All Servers</SelectItem>
+							{servers.map(s => (
+								<SelectItem key={s.id} value={s.id.toString()}>
+									{s.name}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+				</div>
+			</SearchBar>
+
+			<div className='flex items-center justify-between px-1'>
+				<div className='flex items-center gap-2'>
+					<Checkbox
+						id='select-all'
+						checked={isAllSelected}
+						onCheckedChange={toggleAll}
+					/>
+					<Label htmlFor='select-all' className='text-sm font-normal cursor-pointer'>
+						Select all on this page
+					</Label>
+				</div>
+				<p className='text-xs text-muted-foreground'>
+					Showing {projects.length} of {data?.total ?? 0} projects
+				</p>
 			</div>
 
 			{isLoading ? (
-				<div className='grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4'>
-					{Array.from({ length: 6 }).map((_, i) => (
+				<div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'>
+					{Array.from({ length: 8 }).map((_, i) => (
 						<ProjectCardSkeleton key={i} />
 					))}
 				</div>
 			) : projects.length === 0 ? (
-				<div className='flex flex-col items-center justify-center py-16 text-center'>
-					<ServerIcon className='h-10 w-10 text-muted-foreground/40 mb-3' />
-					<p className='text-muted-foreground text-sm'>
-						{search ? 'No results for that search.' : 'No projects yet.'}
-					</p>
-					{!search && (
-						<Button
-							variant='outline'
-							size='sm'
-							className='mt-4'
-							onClick={() => setCreateOpen(true)}
-						>
-							Create your first project
-						</Button>
-					)}
-				</div>
+				<EmptyState
+					icon={FolderPlus}
+					title='No projects found'
+					description='You haven’t created any projects yet. Start by creating a new project or importing one from a server.'
+					action={{
+						label: 'Create Project',
+						onClick: () => setCreateOpen(true),
+						icon: FolderPlus,
+					}}
+					className='py-20'
+				/>
 			) : (
-				<div className='grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4'>
+				<div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'>
 					{projects.map(project => (
 						<ProjectCard
 							key={project.id}
 							project={project}
-							onClick={() => navigate(`/projects/${project.id}`)}
+							selected={selectedIds.has(project.id)}
+							onSelect={() => toggleSelect(project.id)}
 							onEdit={() => setEditTarget(project)}
 							onDelete={() => setDeleteTarget(project)}
+							onClick={() => navigate(`/projects/${project.id}`)}
 							onBackupNow={envId => backupNowMutation.mutate(envId)}
 						/>
 					))}
 				</div>
 			)}
 
-			<Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+			{totalPages > 1 && (
+				<Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+			)}
 
 			<ProjectFormDialog
-				open={createOpen}
-				onOpenChange={setCreateOpen}
+				open={createOpen || !!editTarget}
+				onOpenChange={o => {
+					setCreateOpen(o);
+					if (!o) setEditTarget(null);
+				}}
+				initial={editTarget ?? undefined}
 				clients={clients}
 				hostingPackages={hostingPkgs}
 				supportPackages={supportPkgs}
 				onSuccess={invalidate}
-			/>
-
-			{editTarget && (
-				<ProjectFormDialog
-					key={editTarget.id}
-					open
-					onOpenChange={o => !o && setEditTarget(null)}
-					initial={editTarget}
-					clients={clients}
-					hostingPackages={hostingPkgs}
-					supportPackages={supportPkgs}
-					onSuccess={invalidate}
-				/>
-			)}
-
-			<AlertDialog
-				open={!!deleteTarget}
-				onOpenChange={o => !o && setDeleteTarget(null)}
-				title='Delete Project'
-				description={`"${deleteTarget?.name}" and all associated environments, backups, and domains will be permanently deleted.`}
-				confirmLabel='Delete'
-				onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
-				isPending={deleteMutation.isPending}
 			/>
 
 			<ImportFromServerDialog
@@ -947,6 +1000,37 @@ export function ProjectsPage() {
 			<BedrockJobsDialog
 				open={bedrockJobsOpen}
 				onOpenChange={setBedrockJobsOpen}
+			/>
+			<AlertDialog
+				open={!!deleteTarget}
+				onOpenChange={o => !o && setDeleteTarget(null)}
+				title='Delete Project'
+				description={`Are you sure you want to delete "${deleteTarget?.name}"? This will also remove all associated environment records and monitoring history.`}
+				confirmLabel='Delete'
+				confirmVariant='destructive'
+				onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+				isPending={deleteMutation.isPending}
+			/>
+
+			<BulkActionsBar
+				selectedCount={selectedIds.size}
+				onClear={clearSelection}
+				actions={[
+					{
+						label: 'Delete',
+						icon: Trash2,
+						variant: 'destructive',
+						onClick: () => {
+							if (
+								confirm(
+									`Are you sure you want to delete ${selectedIds.size} projects?`,
+								)
+							) {
+								bulkDeleteMutation.mutate(Array.from(selectedIds));
+							}
+						},
+					},
+				]}
 			/>
 		</div>
 	);

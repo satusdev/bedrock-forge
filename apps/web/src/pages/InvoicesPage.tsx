@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
 	FileText,
@@ -706,9 +707,12 @@ export function InvoicesPage() {
 			render: inv => (
 				<div className='flex items-center gap-2'>
 					<FileText className='h-4 w-4 text-muted-foreground' />
-					<span className='font-mono font-medium text-sm'>
+					<Link
+						to={`/invoices/${inv.id}`}
+						className='font-mono font-medium text-sm hover:text-primary transition-colors'
+					>
 						{inv.invoice_number}
-					</span>
+					</Link>
 				</div>
 			),
 		},
@@ -864,7 +868,23 @@ export function InvoicesPage() {
 				isError={isError}
 				onRetry={refetch}
 				rowKey={inv => inv.id}
-				emptyMessage='No invoices found.'
+				emptyMessage={
+					statusFilter || yearFilter || clientFilter
+						? 'No invoices match your filters.'
+						: 'No invoices yet.'
+				}
+				emptyDescription={
+					statusFilter || yearFilter || clientFilter
+						? 'Try adjusting your filters.'
+						: 'Generate your first invoice to get started.'
+				}
+				emptyAction={
+					!(statusFilter || yearFilter || clientFilter) ? (
+						<Button className='mt-2' onClick={() => setGenerateOpen(true)}>
+							Generate Invoices
+						</Button>
+					) : undefined
+				}
 				onRowClick={toggleExpand}
 				expandedRowKey={expandedId}
 				renderExpandedRow={inv => <InvoiceDetailPanel inv={inv} />}
@@ -876,6 +896,12 @@ export function InvoicesPage() {
 							</Button>
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align='end'>
+						<DropdownMenuItem asChild>
+							<Link to={`/invoices/${inv.id}`} className='flex items-center'>
+								<FileText className='h-4 w-4 mr-2' />
+								View Details
+							</Link>
+						</DropdownMenuItem>
 							{inv.status === 'draft' && (
 								<DropdownMenuItem
 									onClick={() => markSentMutation.mutate(inv.id)}

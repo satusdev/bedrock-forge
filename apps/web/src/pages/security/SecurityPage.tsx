@@ -10,6 +10,7 @@ import {
 	Lock,
 	Monitor,
 	RefreshCw,
+	Clock,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -26,6 +27,7 @@ import { FindingsTab } from './tabs/FindingsTab';
 import { SecurityReportTab } from './tabs/SecurityReportTab';
 import { ForgeSecurityTab } from './tabs/ForgeSecurityTab';
 import { SessionsTab } from './tabs/SessionsTab';
+import { ServerSchedulesTab, ProjectSchedulesTab } from './tabs/ScheduleTabs';
 
 export function SecurityPage() {
 	const queryClient = useQueryClient();
@@ -86,6 +88,10 @@ export function SecurityPage() {
 						<FileText className='h-3.5 w-3.5 mr-1.5' />
 						Report
 					</TabsTrigger>
+					<TabsTrigger value='schedules'>
+						<Clock className='h-3.5 w-3.5 mr-1.5' />
+						Schedules
+					</TabsTrigger>
 					<TabsTrigger value='forge-security'>
 						<Lock className='h-3.5 w-3.5 mr-1.5' />
 						Forge Security
@@ -131,6 +137,20 @@ export function SecurityPage() {
 									servers={overview.servers}
 									environments={overview.environments}
 								/>
+							</TabsContent>
+							<TabsContent value='schedules'>
+								<Tabs defaultValue='server-schedules'>
+									<TabsList className='mb-4'>
+										<TabsTrigger value='server-schedules'>Servers</TabsTrigger>
+										<TabsTrigger value='project-schedules'>Projects</TabsTrigger>
+									</TabsList>
+									<TabsContent value='server-schedules'>
+										<ServerSchedulesTab data={overview} />
+									</TabsContent>
+									<TabsContent value='project-schedules'>
+										<ProjectSchedulesTab data={overview} />
+									</TabsContent>
+								</Tabs>
 							</TabsContent>
 						</>
 					)}
