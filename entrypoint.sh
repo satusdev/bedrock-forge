@@ -1,5 +1,17 @@
 #!/bin/sh
-set -e
+set -eu
+
+API_PID=""
+WORKER_PID=""
+
+shutdown_children() {
+  echo "[forge] Shutting down…"
+  [ -n "$API_PID" ] && kill "$API_PID" 2>/dev/null || true
+  [ -n "$WORKER_PID" ] && kill "$WORKER_PID" 2>/dev/null || true
+  wait 2>/dev/null || true
+}
+
+trap 'shutdown_children; exit 143' TERM INT
 
 # ── Wait for PostgreSQL to accept connections ────────────────────────────────
 # Belt-and-suspenders guard: depends_on service_healthy handles the normal case,
@@ -35,24 +47,22 @@ echo "[forge] Starting Worker…"
 node apps/worker/dist/main.js &
 WORKER_PID=$!
 
-# Graceful shutdown on SIGTERM/SIGINT
-trap 'echo "[forge] Shutting down…"; kill $API_PID $WORKER_PID 2>/dev/null || true; exit 0' TERM INT
-
 echo "[forge] All services started. API_PID=$API_PID WORKER_PID=$WORKER_PID"
 
 # Monitor both children. If either process dies, exit the container so Docker's
 # restart policy can recover — a dead API must not leave the container "running"
-# while health checks fail indefinitely.
-while true; do
-  sleep 5
-  if ! kill -0 $API_PID 2>/dev/null; then
+# while health checks fail indefinitely. Use a short POSIX-compatible poll
+# interval because the runtime image only guarantees /bin/sh.
+while :; do
+  if ! kill -0 "$API_PID" 2>/dev/null; then
     echo "[forge] API process (PID $API_PID) has exited — shutting down container for restart"
-    kill $WORKER_PID 2>/dev/null || true
+    shutdown_children
     exit 1
   fi
-  if ! kill -0 $WORKER_PID 2>/dev/null; then
+  if ! kill -0 "$WORKER_PID" 2>/dev/null; then
     echo "[forge] Worker process (PID $WORKER_PID) has exited — shutting down container for restart"
-    kill $API_PID 2>/dev/null || true
+    shutdown_children
     exit 1
   fi
+  sleep 1
 done

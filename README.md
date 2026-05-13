@@ -100,7 +100,7 @@ Before adopting, understand the current scope boundaries:
 | 📊 Audit & Activity Logs                   | ✅ Implemented     | User action audit trail + per-job execution log (step-by-step, JSONB trace); both paginated            |
 | 📊 Problems / Attention Feed               | ✅ Implemented     | Cross-project attention feed: expiring domains, down monitors, outdated plugins, config drift          |
 | 📈 Dashboard                               | ✅ Implemented     | Stats summary, live job feed via WebSocket, WP quick actions                                           |
-| 🔐 Auth — JWT + Refresh Rotation           | ✅ Implemented     | 15-min access tokens, 7-day refresh tokens (bcrypt-hashed, rotated on use)                             |
+| 🔐 Auth — JWT + Refresh Rotation           | ✅ Implemented     | 4-hour access tokens, 30-day refresh tokens (hashed, rotated on use)                                   |
 | 🔐 Auth — RBAC (4-tier)                    | ✅ Implemented     | `admin` > `manager` > `maintainer` > `client`; API guards + frontend navigation; per-role UI gating    |
 | 🔐 Auth — 2FA / MFA                        | ❌ Not Implemented | No TOTP or MFA. Roadmap.                                                                               |
 | 🔐 Auth — SSO / Social Login               | ❌ Not Implemented | Not planned                                                                                            |
@@ -218,8 +218,8 @@ All queues use exponential backoff (base 1 s) and a dead-letter queue
   Decrypted in memory only during use; never returned in API responses.
 - **Credential parsing:** `wp-config.php` / `.env` values extracted via regex
   only — never sourced, never eval'd, never passed to a shell.
-- **JWT:** 15-minute access tokens + 7-day refresh tokens. Refresh tokens stored
-  as bcrypt hashes with rotation on every use.
+- **JWT:** 4-hour access tokens + 30-day refresh tokens by default. Refresh
+  tokens stored as bcrypt hashes with rotation on every use.
 - **Rate limiting:** 5 login attempts per 15 minutes (Redis-backed); API
   endpoints rate-limited at 30 req/s with burst 60 at the nginx layer.
 - **RBAC:** 4-tier role hierarchy: `admin` > `manager` > `maintainer` >
@@ -273,6 +273,20 @@ for a walkthrough of adding your first server, project, backup, and monitor.
 
 ## Development Setup
 
+The easiest way to develop locally is using the included dev launcher, which handles secret generation and starts a hot-reloading full-stack environment in Docker:
+
+```bash
+./dev.sh
+```
+
+This starts:
+- **API** on `:3000` (hot-reloading)
+- **Worker** (hot-reloading)
+- **Web** on `:5173` (hot-reloading, proxies `/api` → `:3000`)
+- **Postgres & Redis**
+
+Alternatively, for manual setup without Docker containers for the app services:
+
 ```bash
 # Prerequisites: Node.js 22, pnpm 9+
 docker compose -f docker-compose.dev.yml up -d postgres redis
@@ -285,12 +299,6 @@ pnpm db:generate
 pnpm db:migrate
 pnpm dev
 ```
-
-This starts:
-
-- **API** on `:3000` (NestJS with hot reload)
-- **Worker** (BullMQ with hot reload)
-- **Web** on `:5173` (Vite dev server, proxies `/api` → `:3000`)
 
 See [docs/guides/DEVELOPMENT.md](docs/guides/DEVELOPMENT.md) for module
 conventions, testing, and code standards.

@@ -122,7 +122,19 @@ docker compose exec forge node prisma/seed.js
 
 ## Development Setup
 
-For local development with hot reload:
+The easiest way to develop locally is using the included dev launcher, which handles secret generation and starts a hot-reloading full-stack environment in Docker:
+
+```bash
+./dev.sh
+```
+
+This starts:
+- **API** on `:3000` (NestJS with hot reload)
+- **Worker** (NestJS standalone, hot reload)
+- **Web** on `:5173` (Vite dev server, proxies `/api` → `:3000` and `/ws` → `:3000`)
+- **Postgres & Redis**
+
+Alternatively, for manual setup without Docker containers for the app services:
 
 ```bash
 # 1. Start only postgres and redis in Docker
@@ -142,13 +154,6 @@ pnpm db:migrate         # runs prisma migrate dev
 # 5. Start all apps with hot reload
 pnpm dev
 ```
-
-This starts:
-
-- **API** on `:3000` (NestJS, ts-jest, hot reload via `tsc --watch`)
-- **Worker** (NestJS standalone, hot reload)
-- **Web** on `:5173` (Vite dev server, proxies `/api` → `:3000` and `/ws` →
-  `:3000`)
 
 ---
 

@@ -193,8 +193,8 @@ src/modules/<feature>/
 
 ### Identity & Access
 
-- `users` — platform users (admin, manager, client)
-- `roles` — exactly 3 roles: admin, manager, client
+- `users` — platform users (admin, manager, maintainer, client)
+- `roles` — exactly 4 roles: admin, manager, maintainer, client
 - `user_roles` — many-to-many join
 - `refresh_tokens` — hashed JWT refresh tokens for rotation
 
@@ -276,7 +276,8 @@ All queues: exponential backoff (base 1s), dead-letter queue (`<name>-dlq`),
   `ENCRYPTION_KEY` env var. Never stored in DB.
 - **SSH keys:** Encrypted at rest. Decrypted in memory only during SSH
   connection. Never returned in API responses.
-- **JWT:** 15min access token + 7d refresh token. Refresh tokens stored as
+- **JWT:** 4h access token + 30d refresh token by default, configurable via
+  `JWT_ACCESS_EXPIRES_IN` and `JWT_REFRESH_EXPIRES_IN`. Refresh tokens stored as
   bcrypt hash. Rotation on every refresh.
 - **Validation:** `ValidationPipe` global with `whitelist: true`,
   `forbidNonWhitelisted: true`, `transform: true`.
@@ -297,7 +298,9 @@ All queues: exponential backoff (base 1s), dead-letter queue (`<name>-dlq`),
 
 `forge` container entrypoint: runs `prisma migrate deploy`, then starts API
 (`apps/api`) and Worker (`apps/worker`) as parallel Node processes via
-`entrypoint.sh`.
+`entrypoint.sh`. The API exposes `/health` on internal port 3000. The worker
+exposes `/worker/health` on internal port 3001 so Docker health checks can fail
+the combined `forge` container when either runtime is unavailable.
 
 ---
 

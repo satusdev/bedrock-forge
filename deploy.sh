@@ -23,6 +23,7 @@ source .env.deploy
 : "${DOMAIN:?DOMAIN must be set in .env.deploy}"
 
 CORS_ORIGIN="$DOMAIN"
+REMOTE_CORS_ORIGIN=$(printf '%q' "$CORS_ORIGIN")
 
 FORCE_INSTALL=false
 if [[ "${1:-}" == "--install" ]]; then
@@ -48,9 +49,11 @@ echo ""
 command -v rsync >/dev/null 2>&1 || err "rsync is not installed locally."
 command -v ssh   >/dev/null 2>&1 || err "ssh is not installed locally."
 
+SSH_OPTS=(-o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=accept-new)
+
 # Test SSH connectivity up-front so we fail early with a clear message.
 info "Testing SSH connection…"
-ssh -o ConnectTimeout=10 -o BatchMode=yes "${SERVER_USER}@${SERVER_HOST}" "echo connected" \
+ssh "${SSH_OPTS[@]}" "${SERVER_USER}@${SERVER_HOST}" "echo connected" \
   >/dev/null 2>&1 || err "Cannot connect to ${SERVER_USER}@${SERVER_HOST}. Check SSH keys / firewall."
 ok "SSH connection OK"
 
@@ -67,16 +70,30 @@ rsync -az --delete \
   --exclude='.turbo/' \
   --exclude='coverage/' \
   --exclude='**/coverage/' \
-  -e "ssh -o StrictHostKeyChecking=no" \
+  -e "ssh -o StrictHostKeyChecking=accept-new" \
   ./ "${SERVER_USER}@${SERVER_HOST}:${SERVER_PATH}/"
 ok "Files synced"
 
 # ── Remote setup / update ─────────────────────────────────────────────────────
 info "Running remote deployment steps…"
 # shellcheck disable=SC2029
-ssh -o StrictHostKeyChecking=no "${SERVER_USER}@${SERVER_HOST}" bash <<ENDSSH
+ssh "${SSH_OPTS[@]}" "${SERVER_USER}@${SERVER_HOST}" bash <<ENDSSH
 set -euo pipefail
 cd "${SERVER_PATH}"
+CORS_ORIGIN=${REMOTE_CORS_ORIGIN}
+
+set_env_value() {
+  local key="\$1"
+  local value="\$2"
+  local file="\${3:-.env}"
+  local escaped
+  escaped=\$(printf '%s' "\$value" | sed -e 's/[\/&|\\]/\\&/g')
+  if grep -q "^\${key}=" "\$file"; then
+    sed -i "s|^\${key}=.*|\${key}=\${escaped}|" "\$file"
+  else
+    printf '%s=%s\n' "\$key" "\$value" >> "\$file"
+  fi
+}
 
 # ── Verify Docker is available on the server ─────────────────────────────────
 command -v docker >/dev/null 2>&1 || { echo "ERROR: Docker is not installed on the server."; exit 1; }
@@ -97,13 +114,13 @@ if [[ ! -f .env ]] || [[ "${FORCE_INSTALL}" == "true" ]]; then
   POSTGRES_PASSWORD=\$(openssl rand -hex 16)
   REDIS_PASSWORD=\$(openssl rand -hex 16)
 
-  sed -i "s|ENCRYPTION_KEY=.*|ENCRYPTION_KEY=\${ENCRYPTION_KEY}|" .env
-  sed -i "s|JWT_SECRET=.*|JWT_SECRET=\${JWT_SECRET}|" .env
-  sed -i "s|JWT_REFRESH_SECRET=.*|JWT_REFRESH_SECRET=\${JWT_REFRESH_SECRET}|" .env
-  sed -i "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=\${POSTGRES_PASSWORD}|" .env
-  sed -i "s|REDIS_PASSWORD=.*|REDIS_PASSWORD=\${REDIS_PASSWORD}|" .env
-  sed -i "s|CORS_ORIGIN=.*|CORS_ORIGIN=${CORS_ORIGIN}|" .env
-  sed -i "s|NODE_ENV=.*|NODE_ENV=production|" .env
+  set_env_value ENCRYPTION_KEY "\$ENCRYPTION_KEY"
+  set_env_value JWT_SECRET "\$JWT_SECRET"
+  set_env_value JWT_REFRESH_SECRET "\$JWT_REFRESH_SECRET"
+  set_env_value POSTGRES_PASSWORD "\$POSTGRES_PASSWORD"
+  set_env_value REDIS_PASSWORD "\$REDIS_PASSWORD"
+  set_env_value CORS_ORIGIN "\$CORS_ORIGIN"
+  set_env_value NODE_ENV production
 
   echo "Secrets generated and written to .env"
 
@@ -120,11 +137,7 @@ else
   echo ">>> Incremental update"
 
   # Set CORS_ORIGIN in case it changed
-  if grep -q "^CORS_ORIGIN=" .env; then
-    sed -i "s|CORS_ORIGIN=.*|CORS_ORIGIN=${CORS_ORIGIN}|" .env
-  else
-    echo "CORS_ORIGIN=${CORS_ORIGIN}" >> .env
-  fi
+  set_env_value CORS_ORIGIN "\$CORS_ORIGIN"
 
   # Ensure infra services are running (no-op if already healthy)
   docker compose up -d postgres redis

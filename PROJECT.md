@@ -35,11 +35,12 @@ deployment.
 
 - **Stack**: NestJS 11 API, NestJS Worker (BullMQ), React 19 + Vite 5,
   PostgreSQL 16, Redis 7
-- **4 Docker services**: `postgres`, `redis`, `forge` (API + Worker on port
-  3001), `web` (Nginx on port 3002)
-- **Auth**: JWT access token (15min) + hashed refresh token (7d) rotation
+- **4 Docker services**: `postgres`, `redis`, `forge` (API on host port 3001 +
+  Worker health on internal port 3001), `web` (Nginx on port 3002)
+- **Auth**: JWT access token (4h default) + hashed refresh token (30d default)
+  rotation
 - **Encryption**: AES-256-GCM for all credentials at rest
-- **Background jobs**: BullMQ with Redis (10 queues, exponential backoff,
+- **Background jobs**: BullMQ with Redis (11 queues, exponential backoff,
   dead-letter)
 - **Remote execution**: SSH connection pool via `ssh2`, no shell injection
   (shellQuote everywhere)

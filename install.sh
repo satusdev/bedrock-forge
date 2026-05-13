@@ -9,6 +9,19 @@ echo "╚═══════════════════════�
 command -v docker  >/dev/null 2>&1 || { echo "ERROR: Docker is not installed."; exit 1; }
 command -v openssl >/dev/null 2>&1 || { echo "ERROR: openssl is required."; exit 1; }
 
+set_env_value() {
+  local key="$1"
+  local value="$2"
+  local file="${3:-.env}"
+  local escaped
+  escaped=$(printf '%s' "$value" | sed -e 's/[\/&|\\]/\\&/g')
+  if grep -q "^${key}=" "$file"; then
+    sed -i "s|^${key}=.*|${key}=${escaped}|" "$file"
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$file"
+  fi
+}
+
 # ── Generate .env ────────────────────────────────────────────────────────────
 if [ ! -f .env ]; then
   echo "Generating .env from .env.example…"
@@ -20,11 +33,11 @@ if [ ! -f .env ]; then
   POSTGRES_PASSWORD=$(openssl rand -hex 16)
   REDIS_PASSWORD=$(openssl rand -hex 16)
 
-  sed -i "s|ENCRYPTION_KEY=.*|ENCRYPTION_KEY=${ENCRYPTION_KEY}|" .env
-  sed -i "s|JWT_SECRET=.*|JWT_SECRET=${JWT_SECRET}|" .env
-  sed -i "s|JWT_REFRESH_SECRET=.*|JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}|" .env
-  sed -i "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${POSTGRES_PASSWORD}|" .env
-  sed -i "s|REDIS_PASSWORD=.*|REDIS_PASSWORD=${REDIS_PASSWORD}|" .env
+  set_env_value ENCRYPTION_KEY "$ENCRYPTION_KEY"
+  set_env_value JWT_SECRET "$JWT_SECRET"
+  set_env_value JWT_REFRESH_SECRET "$JWT_REFRESH_SECRET"
+  set_env_value POSTGRES_PASSWORD "$POSTGRES_PASSWORD"
+  set_env_value REDIS_PASSWORD "$REDIS_PASSWORD"
 
   echo "Secrets written to .env"
 else
