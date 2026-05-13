@@ -21,4 +21,12 @@ export class PluginManageDto {
 		message: 'Invalid version constraint characters',
 	})
 	constraint?: string;
+
+	@IsOptional()
+	skipSafetyBackup?: boolean;
+}
+
+export class UpdateAllPluginsDto {
+	@IsOptional()
+	skipSafetyBackup?: boolean;
 }

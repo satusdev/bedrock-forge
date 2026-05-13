@@ -17,7 +17,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { ROLES } from '@bedrock-forge/shared';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { PluginScansService } from './plugin-scans.service';
-import { PluginManageDto } from './dto/plugin-manage.dto';
+import { PluginManageDto, UpdateAllPluginsDto } from './dto/plugin-manage.dto';
 import { ChangeConstraintDto } from './dto/change-constraint.dto';
 
 @Controller('plugin-scans')
@@ -44,15 +44,16 @@ export class PluginScansController {
 		@Param('envId', ParseIntPipe) envId: number,
 		@Body() dto: PluginManageDto,
 	) {
-		return this.svc.enqueuePluginManage(envId, 'add', dto.slug, dto.version);
+		return this.svc.enqueuePluginManage(envId, 'add', dto.slug, dto.version, dto.skipSafetyBackup);
 	}
 
 	@Delete('environment/:envId/plugins/:slug')
 	removePlugin(
 		@Param('envId', ParseIntPipe) envId: number,
 		@Param('slug') slug: string,
+		@Query('skipSafetyBackup') skipSafetyBackup?: string,
 	) {
-		return this.svc.enqueuePluginManage(envId, 'remove', slug);
+		return this.svc.enqueuePluginManage(envId, 'remove', slug, undefined, skipSafetyBackup === 'true');
 	}
 
 	@Put('environment/:envId/plugins/:slug')
@@ -61,12 +62,15 @@ export class PluginScansController {
 		@Param('slug') slug: string,
 		@Body() dto: Partial<PluginManageDto>,
 	) {
-		return this.svc.enqueuePluginManage(envId, 'update', slug, dto.version);
+		return this.svc.enqueuePluginManage(envId, 'update', slug, dto.version, dto.skipSafetyBackup);
 	}
 
 	@Put('environment/:envId/plugins')
-	updateAllPlugins(@Param('envId', ParseIntPipe) envId: number) {
-		return this.svc.enqueuePluginManage(envId, 'update-all');
+	updateAllPlugins(
+		@Param('envId', ParseIntPipe) envId: number,
+		@Body() dto: UpdateAllPluginsDto,
+	) {
+		return this.svc.enqueuePluginManage(envId, 'update-all', undefined, undefined, dto.skipSafetyBackup);
 	}
 
 	/** Change the composer version constraint for a specific plugin */

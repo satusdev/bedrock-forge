@@ -203,4 +203,32 @@ export class SettingsController {
 	@Delete(':key') delete(@Param('key') key: string) {
 		return this.svc.delete(key);
 	}
+
+	@Post('test-webhook')
+	async testWebhook(@Body() dto: { type: 'slack' | 'discord'; url: string }) {
+		if (!dto.url) throw new BadRequestException('Webhook URL is required');
+
+		const payload =
+			dto.type === 'slack'
+				? { text: '✅ Bedrock Forge — Test Notification' }
+				: { content: '✅ Bedrock Forge — Test Notification' };
+
+		try {
+			const res = await fetch(dto.url, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(payload),
+			});
+
+			if (!res.ok) {
+				const text = await res.text();
+				throw new Error(`Status ${res.status}: ${text}`);
+			}
+
+			return { success: true };
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			throw new BadRequestException(`Failed to send test notification: ${msg}`);
+		}
+	}
 }

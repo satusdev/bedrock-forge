@@ -32,7 +32,8 @@ const makeJwt = () => ({
 const makeConfig = () => ({
 	get: jest.fn().mockImplementation((key: string) => {
 		if (key === 'jwt.secret') return 'test-secret';
-		if (key === 'jwt.accessExpiresIn') return '15m';
+		if (key === 'jwt.accessExpiresIn') return '4h';
+		if (key === 'jwt.refreshExpiresIn') return '30d';
 		return undefined;
 	}),
 });
@@ -40,14 +41,16 @@ const makeConfig = () => ({
 describe('AuthService', () => {
 	let service: AuthService;
 	let repo: ReturnType<typeof makeRepo>;
+	let jwt: ReturnType<typeof makeJwt>;
 
 	beforeEach(async () => {
 		repo = makeRepo();
+		jwt = makeJwt();
 		const module = await Test.createTestingModule({
 			providers: [
 				AuthService,
 				{ provide: AuthRepository, useValue: repo },
-				{ provide: JwtService, useValue: makeJwt() },
+				{ provide: JwtService, useValue: jwt },
 				{ provide: ConfigService, useValue: makeConfig() },
 			],
 		}).compile();
@@ -85,6 +88,22 @@ describe('AuthService', () => {
 			expect(result.accessToken).toBe('signed-access-token');
 			expect(result.refreshToken).toBeDefined();
 			expect(result.user.email).toBe('test@forge.local');
+			expect(jwt.sign).toHaveBeenCalledWith(
+				expect.objectContaining({ sub: 1 }),
+				expect.objectContaining({ expiresIn: '4h' }),
+			);
+			expect(repo.storeRefreshToken).toHaveBeenCalledWith(
+				BigInt(1),
+				expect.any(String),
+				expect.any(Date),
+				undefined,
+				undefined,
+			);
+			const expiresAt = repo.storeRefreshToken.mock.calls[0][2] as Date;
+			const daysUntilExpiry =
+				(expiresAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000);
+			expect(daysUntilExpiry).toBeGreaterThan(29.9);
+			expect(daysUntilExpiry).toBeLessThanOrEqual(30);
 		});
 	});
 

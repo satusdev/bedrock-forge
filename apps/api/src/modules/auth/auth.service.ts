@@ -138,10 +138,10 @@ export class AuthService {
 	}
 
 	private refreshExpiresMs(): number {
-		const raw = this.config.get<string>('jwt.refreshExpiresIn') ?? '7d';
+		const raw = this.config.get<string>('jwt.refreshExpiresIn') ?? '30d';
 		// Parse simple duration strings: Nd, Nh, Nm, Ns
 		const match = /^(\d+)([dhms])$/.exec(raw);
-		if (!match) return 7 * 24 * 60 * 60 * 1_000;
+		if (!match) return 30 * 24 * 60 * 60 * 1_000;
 		const n = parseInt(match[1], 10);
 		const multipliers: Record<string, number> = {
 			d: 24 * 60 * 60 * 1_000,

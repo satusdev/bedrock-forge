@@ -35,17 +35,30 @@ export class AuditInterceptor implements NestInterceptor {
 		return next.handle().pipe(
 			tap({
 				next: () => {
-					this.writeLog(req, 'success').catch(err =>
-						this.logger.warn(`Audit log write failed: ${err?.message}`),
-					);
+					this.writeLog(req, 'success').catch(err => {
+						this.logAuditWriteFailure(req, 'success', err);
+					});
 				},
 				error: (err: unknown) => {
 					const errMsg = err instanceof Error ? err.message : String(err);
-					this.writeLog(req, 'failure', errMsg).catch(e =>
-						this.logger.warn(`Audit log write failed: ${e?.message}`),
-					);
+					this.writeLog(req, 'failure', errMsg).catch(e => {
+						this.logAuditWriteFailure(req, 'failure', e);
+					});
 				},
 			}),
+		);
+	}
+
+	private logAuditWriteFailure(
+		req: Request,
+		outcome: 'success' | 'failure',
+		err: unknown,
+	): void {
+		const message = err instanceof Error ? err.message : String(err);
+		const stack = err instanceof Error ? err.stack : undefined;
+		this.logger.error(
+			`Audit log write failed for ${req.method} ${req.path} after ${outcome}: ${message}`,
+			stack,
 		);
 	}
 

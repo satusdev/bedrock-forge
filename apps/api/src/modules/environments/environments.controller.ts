@@ -42,6 +42,7 @@ export class EnvironmentsController {
 	 * which are already environments in this project vs. available to add.
 	 */
 	@Post('scan-server')
+	@Roles(ROLES.MANAGER)
 	scanServer(
 		@Param('projectId', ParseIntPipe) projectId: number,
 		@Body() dto: ScanServerForEnvDto,
@@ -59,6 +60,7 @@ export class EnvironmentsController {
 	}
 
 	@Post()
+	@Roles(ROLES.MANAGER)
 	create(
 		@Param('projectId', ParseIntPipe) projectId: number,
 		@Body() dto: CreateEnvironmentDto,
@@ -67,6 +69,7 @@ export class EnvironmentsController {
 	}
 
 	@Put(':id')
+	@Roles(ROLES.MANAGER)
 	async update(
 		@Param('projectId', ParseIntPipe) projectId: number,
 		@Param('id', ParseIntPipe) id: number,
@@ -102,6 +105,7 @@ export class EnvironmentsController {
 	}
 
 	@Put(':id/db-credentials')
+	@Roles(ROLES.MANAGER)
 	async upsertDbCredentials(
 		@Param('projectId', ParseIntPipe) projectId: number,
 		@Param('id', ParseIntPipe) id: number,
@@ -130,6 +134,7 @@ export class EnvironmentsController {
 	}
 
 	@Post(':id/wp-quick-login')
+	@Roles(ROLES.MANAGER)
 	async createWpQuickLogin(
 		@Param('projectId', ParseIntPipe) projectId: number,
 		@Param('id', ParseIntPipe) id: number,

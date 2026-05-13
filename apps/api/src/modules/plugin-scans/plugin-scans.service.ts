@@ -46,6 +46,7 @@ export class PluginScansService {
 		action: 'add' | 'remove' | 'update' | 'update-all',
 		slug?: string,
 		version?: string,
+		skipSafetyBackup?: boolean,
 	) {
 		const bullJobId = randomUUID();
 		const exec = await this.repo.createJobExecution({
@@ -56,7 +57,7 @@ export class PluginScansService {
 		});
 		const job = await this.queue.add(
 			JOB_TYPES.PLUGIN_MANAGE,
-			{ environmentId, jobExecutionId: Number(exec.id), action, slug, version },
+			{ environmentId, jobExecutionId: Number(exec.id), action, slug, version, skipSafetyBackup: skipSafetyBackup ?? false },
 			{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
 		);
 		return { jobExecutionId: Number(exec.id), bullJobId: job.id };

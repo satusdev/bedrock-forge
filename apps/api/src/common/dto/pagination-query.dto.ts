@@ -1,5 +1,15 @@
-import { IsOptional, IsInt, IsString, Min, Max } from 'class-validator';
-import { Type } from 'class-transformer';
+import {
+	IsOptional,
+	IsInt,
+	IsString,
+	Min,
+	Max,
+	MaxLength,
+} from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+
+const MAX_PAGE_SIZE = 100;
+const MAX_SEARCH_LENGTH = 100;
 
 export class PaginationQueryDto {
 	@IsOptional()
@@ -11,11 +21,17 @@ export class PaginationQueryDto {
 	@IsOptional()
 	@IsInt()
 	@Min(1)
-	@Max(200)
+	@Max(MAX_PAGE_SIZE)
 	@Type(() => Number)
 	limit: number = 20;
 
 	@IsOptional()
 	@IsString()
+	@MaxLength(MAX_SEARCH_LENGTH)
+	@Transform(({ value }) => {
+		if (typeof value !== 'string') return value;
+		const trimmed = value.trim();
+		return trimmed.length > 0 ? trimmed : undefined;
+	})
 	search?: string;
 }
