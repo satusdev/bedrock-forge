@@ -28,6 +28,7 @@ import { SecurityReportTab } from './tabs/SecurityReportTab';
 import { ForgeSecurityTab } from './tabs/ForgeSecurityTab';
 import { SessionsTab } from './tabs/SessionsTab';
 import { ServerSchedulesTab, ProjectSchedulesTab } from './tabs/ScheduleTabs';
+import { SecurityScanProgress } from './components/SecurityScanProgress';
 
 export function SecurityPage() {
 	const queryClient = useQueryClient();
@@ -57,6 +58,8 @@ export function SecurityPage() {
 					Refresh
 				</Button>
 			</PageHeader>
+
+			<SecurityScanProgress />
 
 			<Tabs defaultValue='overview'>
 				<TabsList className='flex-wrap h-auto gap-1'>

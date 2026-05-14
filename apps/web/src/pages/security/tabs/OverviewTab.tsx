@@ -3,6 +3,8 @@ import { ShieldAlert } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import type { OverviewData } from '../types';
 import { ScoreRing, SummaryBadges } from '../components';
+import { SecurityScoreGauge } from '../components/SecurityScoreGauge';
+import { SecurityTrendChart } from '../components/SecurityTrendChart';
 
 export function OverviewTab({ data }: { data: OverviewData }) {
 	const { totals } = data;
@@ -17,40 +19,64 @@ export function OverviewTab({ data }: { data: OverviewData }) {
 
 	return (
 		<div className='space-y-6'>
-			<div className='grid grid-cols-2 md:grid-cols-4 gap-4'>
-				<Card>
-					<CardContent className='p-4'>
-						<p className='text-xs text-muted-foreground'>Servers scanned</p>
-						<p className='text-2xl font-bold mt-1'>{totals.servers_scanned}</p>
+			<div className='grid grid-cols-1 lg:grid-cols-3 gap-6'>
+				<Card className='lg:col-span-1 overflow-hidden'>
+					<CardContent className='p-6 flex flex-col items-center justify-center min-h-[240px] bg-gradient-to-br from-card to-accent/10'>
+						<SecurityScoreGauge score={totals.global_score ?? 0} size={240} />
 					</CardContent>
 				</Card>
-				<Card>
-					<CardContent className='p-4'>
-						<p className='text-xs text-muted-foreground'>
-							Environments scanned
-						</p>
-						<p className='text-2xl font-bold mt-1'>
-							{totals.environments_scanned}
-						</p>
-					</CardContent>
-				</Card>
-				<Card className='border-red-200 dark:border-red-900'>
-					<CardContent className='p-4'>
-						<p className='text-xs text-muted-foreground'>Critical findings</p>
-						<p className='text-2xl font-bold mt-1 text-red-600 dark:text-red-400'>
-							{totals.critical}
-						</p>
-					</CardContent>
-				</Card>
-				<Card className='border-orange-200 dark:border-orange-900'>
-					<CardContent className='p-4'>
-						<p className='text-xs text-muted-foreground'>High findings</p>
-						<p className='text-2xl font-bold mt-1 text-orange-500'>
-							{totals.high}
-						</p>
-					</CardContent>
-				</Card>
+
+				<div className='lg:col-span-2 grid grid-cols-2 gap-4'>
+					<Card className='bg-card/50'>
+						<CardContent className='p-6'>
+							<p className='text-sm font-medium text-muted-foreground'>
+								Servers Scanned
+							</p>
+							<div className='flex items-baseline gap-2 mt-2'>
+								<p className='text-3xl font-bold tracking-tight'>
+									{totals.servers_scanned}
+								</p>
+								<p className='text-xs text-muted-foreground'>Total infra</p>
+							</div>
+						</CardContent>
+					</Card>
+					<Card className='bg-card/50'>
+						<CardContent className='p-6'>
+							<p className='text-sm font-medium text-muted-foreground'>
+								Websites Scanned
+							</p>
+							<div className='flex items-baseline gap-2 mt-2'>
+								<p className='text-3xl font-bold tracking-tight'>
+									{totals.environments_scanned}
+								</p>
+								<p className='text-xs text-muted-foreground'>WP Envs</p>
+							</div>
+						</CardContent>
+					</Card>
+					<Card className='border-red-200/50 dark:border-red-900/50 bg-red-50/30 dark:bg-red-900/10'>
+						<CardContent className='p-6'>
+							<p className='text-sm font-medium text-red-800 dark:text-red-300'>
+								Critical Threats
+							</p>
+							<p className='text-3xl font-bold mt-2 text-red-600 dark:text-red-400 tracking-tight'>
+								{totals.critical}
+							</p>
+						</CardContent>
+					</Card>
+					<Card className='border-orange-200/50 dark:border-orange-900/50 bg-orange-50/30 dark:bg-orange-900/10'>
+						<CardContent className='p-6'>
+							<p className='text-sm font-medium text-orange-800 dark:text-orange-300'>
+								High Risk Findings
+							</p>
+							<p className='text-3xl font-bold mt-2 text-orange-500 tracking-tight'>
+								{totals.high}
+							</p>
+						</CardContent>
+					</Card>
+				</div>
 			</div>
+
+			<SecurityTrendChart data={data.history} />
 
 			{topServers.length > 0 && (
 				<Card>

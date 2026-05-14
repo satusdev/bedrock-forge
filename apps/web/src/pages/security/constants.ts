@@ -14,13 +14,15 @@ export const SCAN_TYPE_LABELS: Record<string, string> = {
 	MALWARE_SCAN: 'Malware Scan',
 	WP_AUDIT: 'WP Audit',
 	PROJECT_MALWARE: 'Project Malware',
+	BACKDOOR_SEARCH: 'Backdoor Search',
+	PLUGIN_AUDIT: 'Plugin Audit',
 };
 
 export const SCAN_FINDINGS_INITIAL_LIMIT = 3;
 
 export const SCAN_TYPES_BY_KIND = {
 	server: ['SSH_AUDIT', 'SERVER_HARDENING', 'MALWARE_SCAN'],
-	environment: ['WP_AUDIT', 'PROJECT_MALWARE'],
+	environment: ['WP_AUDIT', 'PROJECT_MALWARE', 'BACKDOOR_SEARCH', 'PLUGIN_AUDIT'],
 } as const;
 
 export const SERVER_HARDENING_ACTIONS = [
@@ -138,5 +140,17 @@ export const ENVIRONMENT_HARDENING_ACTIONS = [
 		label: 'Block user enumeration',
 		description:
 			'Redirect ?author=N queries via .htaccess to prevent WordPress username disclosure',
+	},
+	{
+		id: 'FORCE_REINSTALL_CORE',
+		label: 'Force reinstall WP core',
+		description:
+			'Overwrites core files with a fresh copy to remove unauthorized changes',
+	},
+	{
+		id: 'UPDATE_ALL_PLUGINS',
+		label: 'Update all plugins',
+		description:
+			'Brings all plugins to the latest version to patch vulnerabilities',
 	},
 ] as const;

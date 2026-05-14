@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Clock, Plus } from 'lucide-react';
+import { Bell, Clock, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api-client';
@@ -9,13 +9,18 @@ import type {
 	ServerSummary,
 	EnvironmentSummary,
 	SecuritySchedule,
+	ServerSecurityAlertSetting,
 } from '../types';
-import { ScheduleDialog } from '../dialogs';
+import { ScheduleDialog, ServerAlertDialog } from '../dialogs';
 
 // ─── ServerSchedulesTab ───────────────────────────────────────────────────────
 
 export function ServerSchedulesTab({ data }: { data: OverviewData }) {
 	const [dialog, setDialog] = useState<{
+		serverId: number;
+		serverName: string;
+	} | null>(null);
+	const [alertDialog, setAlertDialog] = useState<{
 		serverId: number;
 		serverName: string;
 	} | null>(null);
@@ -39,6 +44,9 @@ export function ServerSchedulesTab({ data }: { data: OverviewData }) {
 							<th className='text-left px-3 py-2 text-xs font-medium text-muted-foreground'>
 								Schedule
 							</th>
+							<th className='text-left px-3 py-2 text-xs font-medium text-muted-foreground'>
+								Alerts
+							</th>
 							<th className='px-3 py-2 w-8' />
 						</tr>
 					</thead>
@@ -50,12 +58,18 @@ export function ServerSchedulesTab({ data }: { data: OverviewData }) {
 								onEdit={() =>
 									setDialog({ serverId: server.id, serverName: server.name })
 								}
+								onEditAlerts={() =>
+									setAlertDialog({
+										serverId: server.id,
+										serverName: server.name,
+									})
+								}
 							/>
 						))}
 						{data.servers.length === 0 && (
 							<tr>
 								<td
-									colSpan={4}
+									colSpan={5}
 									className='text-center py-8 text-muted-foreground text-xs'
 								>
 									No servers found.
@@ -75,6 +89,14 @@ export function ServerSchedulesTab({ data }: { data: OverviewData }) {
 					targetName={dialog.serverName}
 				/>
 			)}
+			{alertDialog && (
+				<ServerAlertDialog
+					open
+					onClose={() => setAlertDialog(null)}
+					serverId={alertDialog.serverId}
+					serverName={alertDialog.serverName}
+				/>
+			)}
 		</div>
 	);
 }
@@ -82,9 +104,11 @@ export function ServerSchedulesTab({ data }: { data: OverviewData }) {
 function ServerScheduleRow({
 	server,
 	onEdit,
+	onEditAlerts,
 }: {
 	server: ServerSummary;
 	onEdit: () => void;
+	onEditAlerts: () => void;
 }) {
 	const { data: schedule } = useQuery<SecuritySchedule | null>({
 		queryKey: ['security', 'schedule', 'server', server.id],
@@ -92,6 +116,18 @@ function ServerScheduleRow({
 			try {
 				return await api.get<SecuritySchedule>(
 					`/security/schedules/servers/${server.id}`,
+				);
+			} catch {
+				return null;
+			}
+		},
+	});
+	const { data: alertSetting } = useQuery<ServerSecurityAlertSetting | null>({
+		queryKey: ['security', 'server-alerts', server.id],
+		queryFn: async () => {
+			try {
+				return await api.get<ServerSecurityAlertSetting>(
+					`/security/server-alerts/${server.id}`,
 				);
 			} catch {
 				return null;
@@ -129,6 +165,19 @@ function ServerScheduleRow({
 				) : (
 					<span className='text-xs text-muted-foreground'>Not configured</span>
 				)}
+			</td>
+			<td className='px-3 py-2'>
+				<Button
+					variant='ghost'
+					size='sm'
+					className='h-7 px-2 gap-1.5'
+					onClick={onEditAlerts}
+				>
+					<Bell className='h-3.5 w-3.5' />
+					<span className='text-xs'>
+						{alertSetting?.enabled ? 'Enabled' : 'Off'}
+					</span>
+				</Button>
 			</td>
 			<td className='px-3 py-2 text-right'>
 				<Button variant='ghost' size='sm' className='h-7 px-2' onClick={onEdit}>

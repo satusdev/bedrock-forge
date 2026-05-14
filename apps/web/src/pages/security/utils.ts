@@ -101,6 +101,9 @@ export function getFixAction(
 				t.includes('username'))
 		)
 			return 'BLOCK_USER_ENUMERATION';
+		if (category === 'WP_CORE_INTEGRITY') return 'FORCE_REINSTALL_CORE';
+		if (category === 'MALWARE' && t.includes('vulnerability'))
+			return 'UPDATE_ALL_PLUGINS';
 	}
 	return null;
 }

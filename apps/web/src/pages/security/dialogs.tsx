@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import {
 	Select,
 	SelectContent,
@@ -22,7 +23,11 @@ import {
 	DialogTitle,
 	DialogFooter,
 } from '@/components/ui/dialog';
-import type { HardeningResult, SecuritySchedule } from './types';
+import type {
+	HardeningResult,
+	SecuritySchedule,
+	ServerSecurityAlertSetting,
+} from './types';
 import {
 	SERVER_HARDENING_ACTIONS,
 	ENVIRONMENT_HARDENING_ACTIONS,
@@ -612,6 +617,173 @@ export function ScheduleDialog({
 							{upsert.isPending ? 'Saving…' : 'Save Schedule'}
 						</Button>
 					</div>
+				</DialogFooter>
+			</DialogContent>
+		</Dialog>
+	);
+}
+
+// ─── ServerAlertDialog ───────────────────────────────────────────────────────
+
+export function ServerAlertDialog({
+	open,
+	onClose,
+	serverId,
+	serverName,
+}: {
+	open: boolean;
+	onClose: () => void;
+	serverId: number;
+	serverName: string;
+}) {
+	const queryClient = useQueryClient();
+	const queryKey = ['security', 'server-alerts', serverId];
+	const { data: existing, isLoading } =
+		useQuery<ServerSecurityAlertSetting | null>({
+			queryKey,
+			queryFn: () =>
+				api.get<ServerSecurityAlertSetting>(
+					`/security/server-alerts/${serverId}`,
+				),
+			enabled: open,
+		});
+
+	const [form, setForm] = useState<ServerSecurityAlertSetting>({
+		server_id: serverId,
+		enabled: false,
+		ssh_login_alerts_enabled: true,
+		file_change_alerts_enabled: true,
+		interval_minutes: 5,
+		file_watch_paths: [],
+	});
+	const [pathsText, setPathsText] = useState('');
+	const [synced, setSynced] = useState(false);
+
+	if (existing && !synced && !isLoading) {
+		setForm(existing);
+		setPathsText(existing.file_watch_paths.join('\n'));
+		setSynced(true);
+	}
+	if (!open && synced) setSynced(false);
+
+	const save = useMutation({
+		mutationFn: () =>
+			api.put(`/security/server-alerts/${serverId}`, {
+				enabled: form.enabled,
+				ssh_login_alerts_enabled: form.ssh_login_alerts_enabled,
+				file_change_alerts_enabled: form.file_change_alerts_enabled,
+				interval_minutes: form.interval_minutes,
+				file_watch_paths: pathsText
+					.split('\n')
+					.map(path => path.trim())
+					.filter(Boolean),
+			}),
+		onSuccess: () => {
+			toast({ title: 'Security alerts saved' });
+			queryClient.invalidateQueries({ queryKey: ['security', 'server-alerts'] });
+			onClose();
+		},
+		onError: () =>
+			toast({
+				title: 'Failed to save security alerts',
+				variant: 'destructive',
+			}),
+	});
+
+	const test = useMutation({
+		mutationFn: () => api.post(`/security/server-alerts/${serverId}/test`, {}),
+		onSuccess: () =>
+			toast({ title: 'Security alert test poll queued' }),
+		onError: () =>
+			toast({ title: 'Failed to queue test poll', variant: 'destructive' }),
+	});
+
+	return (
+		<Dialog open={open} onOpenChange={v => !v && onClose()}>
+			<DialogContent className='max-w-lg'>
+				<DialogHeader>
+					<DialogTitle>Security Alerts — {serverName}</DialogTitle>
+				</DialogHeader>
+				{isLoading ? (
+					<div className='flex justify-center py-8'>
+						<RefreshCw className='h-5 w-5 animate-spin text-muted-foreground' />
+					</div>
+				) : (
+					<div className='space-y-4 py-2'>
+						<div className='flex items-center justify-between'>
+							<Label className='text-sm'>Enabled</Label>
+							<Switch
+								checked={form.enabled}
+								onCheckedChange={v => setForm(f => ({ ...f, enabled: v }))}
+							/>
+						</div>
+						<div className='flex items-center justify-between'>
+							<Label className='text-sm'>SSH login alerts</Label>
+							<Switch
+								checked={form.ssh_login_alerts_enabled}
+								onCheckedChange={v =>
+									setForm(f => ({ ...f, ssh_login_alerts_enabled: v }))
+								}
+							/>
+						</div>
+						<div className='flex items-center justify-between'>
+							<Label className='text-sm'>File change alerts</Label>
+							<Switch
+								checked={form.file_change_alerts_enabled}
+								onCheckedChange={v =>
+									setForm(f => ({ ...f, file_change_alerts_enabled: v }))
+								}
+							/>
+						</div>
+						<div className='space-y-1'>
+							<Label className='text-xs'>Interval minutes</Label>
+							<Input
+								type='number'
+								min={1}
+								max={1440}
+								value={form.interval_minutes}
+								onChange={e =>
+									setForm(f => ({
+										...f,
+										interval_minutes: Number(e.target.value),
+									}))
+								}
+								className='h-8 text-xs w-24'
+							/>
+						</div>
+						<div className='space-y-1'>
+							<Label className='text-xs'>Watched paths</Label>
+							<Textarea
+								value={pathsText}
+								onChange={e => setPathsText(e.target.value)}
+								className='min-h-48 font-mono text-xs'
+							/>
+						</div>
+						{form.last_checked_at && (
+							<p className='text-xs text-muted-foreground'>
+								Last checked {new Date(form.last_checked_at).toLocaleString()}
+							</p>
+						)}
+					</div>
+				)}
+				<DialogFooter className='gap-2'>
+					<Button
+						type='button'
+						variant='outline'
+						onClick={() => test.mutate()}
+						disabled={test.isPending || isLoading}
+					>
+						{test.isPending ? 'Queuing…' : 'Test'}
+					</Button>
+					<Button variant='outline' onClick={onClose}>
+						Cancel
+					</Button>
+					<Button
+						onClick={() => save.mutate()}
+						disabled={save.isPending || isLoading}
+					>
+						{save.isPending ? 'Saving…' : 'Save Alerts'}
+					</Button>
 				</DialogFooter>
 			</DialogContent>
 		</Dialog>

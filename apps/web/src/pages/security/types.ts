@@ -60,7 +60,9 @@ export interface OverviewData {
 		high: number;
 		medium: number;
 		low: number;
+		global_score: number | null;
 	};
+	history: { date: string; score: number }[];
 }
 
 export interface ScanRecord {
@@ -117,6 +119,19 @@ export interface SecuritySchedule {
 	last_run_at?: string | null;
 	notify_enabled: boolean;
 	notify_threshold: string;
+}
+
+export interface ServerSecurityAlertSetting {
+	id?: number;
+	server_id: number;
+	enabled: boolean;
+	ssh_login_alerts_enabled: boolean;
+	file_change_alerts_enabled: boolean;
+	interval_minutes: number;
+	file_watch_paths: string[];
+	last_checked_at?: string | null;
+	last_auth_cursor?: string | null;
+	file_snapshot?: Record<string, unknown> | null;
 }
 
 export interface SecuritySettings {

@@ -66,6 +66,15 @@ const EVENT_GROUPS: Record<string, string[]> = {
 	Users: ['user.registered', 'user.login'],
 	Servers: ['server.created', 'server.deleted'],
 	Reports: ['report.weekly'],
+	Security: [
+		'security.critical_found',
+		'security.high_found',
+		'security.scan_completed',
+		'security.attack_detected',
+		'security.ssh_login',
+		'security.ssh_failed_login_spike',
+		'security.file_changes',
+	],
 };
 
 const ALL_EVENTS = Object.values(EVENT_GROUPS).flat();

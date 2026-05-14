@@ -300,17 +300,17 @@ export function FindingItem({
 						</div>
 					)}
 					{hasMetadata && (
-						<div className='border-l-2 border-blue-300 pl-2'>
-							<p className='text-xs text-muted-foreground font-medium mb-1'>
-								Details
+						<div className='bg-muted/30 rounded-lg p-3 border border-muted-foreground/10'>
+							<p className='text-[10px] text-muted-foreground font-bold uppercase tracking-widest mb-3'>
+								Technical Details
 							</p>
-							<dl className='space-y-0.5'>
+							<div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
 								{Object.entries(finding.metadata!).map(([k, v]) => (
-									<div key={k} className='flex gap-2 text-xs'>
-										<dt className='text-muted-foreground font-medium shrink-0 min-w-[100px]'>
+									<div key={k} className='space-y-1'>
+										<dt className='text-[10px] text-muted-foreground font-medium uppercase'>
 											{k.replace(/_/g, ' ')}
 										</dt>
-										<dd className='font-mono text-foreground break-all'>
+										<dd className='font-mono text-xs text-foreground break-all bg-background/50 p-1.5 rounded border border-muted-foreground/5'>
 											{Array.isArray(v)
 												? v.join(', ')
 												: typeof v === 'object' && v !== null
@@ -319,7 +319,7 @@ export function FindingItem({
 										</dd>
 									</div>
 								))}
-							</dl>
+							</div>
 						</div>
 					)}
 					{row && (
