@@ -25,7 +25,7 @@ import {
 	ExecutionLogPanel,
 	ExpandLogButton,
 } from '@/components/ui/execution-log-panel';
-import { BulkActionsBar } from '@/components/crud/BulkActionsBar';
+import { BulkActionsBar } from '@/components/ui/bulk-actions-bar';
 
 interface Environment {
 	id: number;
@@ -532,7 +532,7 @@ export function BackupsPage() {
 				actions={[
 					{
 						label: 'Delete Selected',
-						icon: <Trash2 className='h-4 w-4' />,
+						icon: Trash2,
 						variant: 'destructive',
 						onClick: () => setIsBulkDeleting(true),
 					},

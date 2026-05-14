@@ -10,6 +10,7 @@ interface SearchBarProps {
 	placeholder?: string;
 	totalCount?: number;
 	totalLabel?: string;
+	children?: React.ReactNode;
 }
 
 export function SearchBar({
@@ -20,6 +21,7 @@ export function SearchBar({
 	placeholder = 'Search…',
 	totalCount,
 	totalLabel = 'results',
+	children,
 }: SearchBarProps) {
 	return (
 		<div className='space-y-2'>
@@ -53,6 +55,7 @@ export function SearchBar({
 					{totalCount} {totalLabel}
 				</p>
 			)}
+			{children && <div className='mt-2'>{children}</div>}
 		</div>
 	);
 }

@@ -594,8 +594,8 @@ export function MonitorDetailPage() {
 							{logsData && logsData.total > 20 && (
 								<div className='mt-4'>
 									<Pagination
-										current={logPage}
-										total={Math.ceil(logsData.total / 20)}
+										page={logPage}
+										totalPages={Math.ceil(logsData.total / 20)}
 										onPageChange={setLogPage}
 									/>
 								</div>

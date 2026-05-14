@@ -38,6 +38,7 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { BulkActionsBar } from '@/components/ui/bulk-actions-bar';
 
 interface TagItem {
 	id: number;
@@ -414,7 +415,7 @@ export function ClientsPage() {
 				actions={[
 					{
 						label: 'Delete Selected',
-						icon: <Trash2 className='h-4 w-4' />,
+						icon: Trash2,
 						variant: 'destructive',
 						onClick: () => setIsBulkDeleting(true),
 					},

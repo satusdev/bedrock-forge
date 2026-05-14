@@ -780,8 +780,8 @@ export function MonitorsPage() {
 
 			{totalPages > 1 && (
 				<Pagination
-					current={page}
-					total={totalPages}
+					page={page}
+					totalPages={totalPages}
 					onPageChange={setPage}
 				/>
 			)}
