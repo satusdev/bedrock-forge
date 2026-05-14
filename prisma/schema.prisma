@@ -183,6 +183,7 @@ model Server {
   job_executions           JobExecution[]
   security_scans           SecurityScan[]
   security_scan_schedules  SecurityScanSchedule[]
+  security_alert_setting   ServerSecurityAlertSetting?
   finding_acks             SecurityFindingAck[]
 
   @@map("servers")
@@ -768,6 +769,8 @@ enum SecurityScanType {
   MALWARE_SCAN
   WP_AUDIT
   PROJECT_MALWARE
+  BACKDOOR_SEARCH
+  PLUGIN_AUDIT
 }
 
 enum SecurityScanStatus {
@@ -834,6 +837,26 @@ model SecurityScanSchedule {
 
   @@index([enabled])
   @@map("security_scan_schedules")
+}
+
+model ServerSecurityAlertSetting {
+  id                         BigInt    @id @default(autoincrement())
+  server_id                  BigInt    @unique
+  enabled                    Boolean   @default(false)
+  ssh_login_alerts_enabled   Boolean   @default(true)
+  file_change_alerts_enabled Boolean   @default(true)
+  interval_minutes           Int       @default(5)
+  file_watch_paths           String[]  @default([])
+  last_checked_at            DateTime? @db.Timestamptz()
+  last_auth_cursor           String?
+  file_snapshot              Json?
+  created_at                 DateTime  @default(now()) @db.Timestamptz()
+  updated_at                 DateTime  @updatedAt @db.Timestamptz()
+
+  server Server @relation(fields: [server_id], references: [id], onDelete: Cascade)
+
+  @@index([enabled])
+  @@map("server_security_alert_settings")
 }
 
 // Acknowledged (reviewed/accepted-risk) security findings.

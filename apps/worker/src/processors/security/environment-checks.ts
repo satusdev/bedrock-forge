@@ -759,3 +759,166 @@ export async function runProjectMalware(
 
 	return findings;
 }
+
+// ─── BACKDOOR_SEARCH ────────────────────────────────────────────────────────
+
+export async function runBackdoorSearch(
+	exec: Executor,
+	rootPath: string,
+): Promise<SecurityFinding[]> {
+	const findings: SecurityFinding[] = [];
+	const q = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
+
+	// 1. Search for suspicious file names in the entire root (common backdoor names)
+	const suspiciousNames = [
+		'shell.php',
+		'cmd.php',
+		'wp-log.php',
+		'database.php', // common in uploads
+		'wp-config-bak.php',
+		'.user.php', // can override php.ini settings
+		'.htaccess.bak',
+		'uploader.php',
+		'wso.php',
+		'c99.php',
+		'r57.php',
+	];
+	const { stdout: foundSuspicious } = await exec.execute(
+		`find ${q(rootPath)} -type f \\( ${suspiciousNames.map(n => `-name "${n}"`).join(' -o ')} \\) 2>/dev/null | head -50 || true`,
+		{ timeout: 30000 },
+	);
+	const suspiciousFiles = foundSuspicious
+		.split('\n')
+		.map(l => l.trim())
+		.filter(Boolean);
+	if (suspiciousFiles.length > 0) {
+		findings.push(
+			makeFinding(
+				'critical',
+				'SUSPICIOUS_FILES',
+				`${suspiciousFiles.length} file(s) with suspicious names detected`,
+				'Files with names like shell.php or cmd.php are almost certainly backdoors.',
+				{
+					remediation: 'Inspect and delete these files immediately.',
+					metadata: { files: suspiciousFiles },
+				},
+			),
+		);
+	}
+
+	// 2. Search for PHP files starting with a dot (hidden PHP files)
+	const { stdout: hiddenPhp } = await exec.execute(
+		`find ${q(rootPath)} -type f -name ".*.php" 2>/dev/null | head -20 || true`,
+		{ timeout: 30000 },
+	);
+	const hiddenFiles = hiddenPhp
+		.split('\n')
+		.map(l => l.trim())
+		.filter(Boolean);
+	if (hiddenFiles.length > 0) {
+		findings.push(
+			makeFinding(
+				'critical',
+				'SUSPICIOUS_FILES',
+				`${hiddenFiles.length} hidden PHP file(s) detected`,
+				'Hidden PHP files (starting with a dot) are often used to hide backdoors.',
+				{
+					remediation: 'Inspect and delete these files.',
+					metadata: { files: hiddenFiles },
+				},
+			),
+		);
+	}
+
+	// 3. Advanced pattern matching (signatures of modern backdoors)
+	const advancedPatterns = [
+		{
+			name: 'Dynamic function call',
+			pattern: '\\$\\w+\\s*\\(\\s*\\$_(POST|GET|REQUEST|COOKIE)',
+			severity: 'critical' as const,
+		},
+		{
+			name: 'Obfuscated eval (gzuncompress)',
+			pattern: 'eval\\s*\\(\\s*gzuncompress\\s*\\(',
+			severity: 'critical' as const,
+		},
+		{
+			name: 'Obfuscated eval (str_rot13)',
+			pattern: 'eval\\s*\\(\\s*str_rot13\\s*\\(',
+			severity: 'critical' as const,
+		},
+		{
+			name: 'Payload extraction',
+			pattern: 'extract\\s*\\(\\s*\\$_(POST|GET|REQUEST|COOKIE)',
+			severity: 'high' as const,
+		},
+		{
+			name: 'Inline hex/base64 blob',
+			pattern: '[a-zA-Z0-9+/]{100,}', // Long strings of base64-like chars
+			severity: 'medium' as const,
+		},
+	];
+
+	for (const { name, pattern, severity } of advancedPatterns) {
+		const { stdout } = await exec.execute(
+			`grep -rlE "${pattern}" ${q(rootPath)} --include="*.php" --exclude-dir=node_modules --exclude-dir=vendor 2>/dev/null | head -20 || true`,
+			{ timeout: 60000 },
+		);
+		const matched = stdout
+			.split('\n')
+			.map(l => l.trim())
+			.filter(Boolean);
+		if (matched.length > 0) {
+			findings.push(
+				makeFinding(
+					severity,
+					'MALWARE',
+					`${name} pattern detected in ${matched.length} file(s)`,
+					`Signature of obfuscated or malicious code found.`,
+					{
+						remediation: 'Manually audit these files for malicious content.',
+						metadata: { files: matched },
+					},
+				),
+			);
+		}
+	}
+
+	// 4. WP Core Integrity check (Deep)
+	const { stdout: wpCliCheck } = await exec.execute(
+		`which wp 2>/dev/null && echo found || echo missing`,
+	);
+	if (wpCliCheck.trim() === 'found') {
+		const { stdout: checksums, code } = await exec.execute(
+			`wp core verify-checksums --path=${q(rootPath)} --format=json 2>/dev/null || true`,
+			{ timeout: 60000 },
+		);
+		if (code !== 0 && checksums.trim()) {
+			try {
+				const failed = JSON.parse(checksums.trim()) as {
+					file: string;
+					message: string;
+				}[];
+				if (failed.length > 0) {
+					findings.push(
+						makeFinding(
+							'critical',
+							'SUSPICIOUS_FILES',
+							`WordPress core integrity check failed for ${failed.length} file(s)`,
+							'Modified core files are a strong indicator of a compromised site.',
+							{
+								remediation:
+									'Run "wp core download --force" to restore official core files.',
+								metadata: { failed_files: failed },
+							},
+						),
+					);
+				}
+			} catch {
+				// Parse error
+			}
+		}
+	}
+
+	return findings;
+}

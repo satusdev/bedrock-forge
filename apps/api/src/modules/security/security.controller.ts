@@ -34,6 +34,7 @@ import { FindingsQueryDto } from './dto/findings-query.dto';
 import { AckFindingDto, RemoveAckDto } from './dto/ack-finding.dto';
 import { GenerateSecurityReportDto } from './dto/generate-security-report.dto';
 import { HardenServerDto, HardenEnvironmentDto } from './dto/harden-target.dto';
+import { UpsertServerAlertSettingDto } from './dto/server-alert-setting.dto';
 
 @Controller('security')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -169,6 +170,31 @@ export class SecurityController {
 	@HttpCode(HttpStatus.NO_CONTENT)
 	deleteEnvironmentSchedule(@Param('id', ParseIntPipe) id: number) {
 		return this.svc.deleteEnvironmentSchedule(id);
+	}
+
+	// ─── Server Security Alerts ────────────────────────────────────────────────
+
+	/** GET /security/server-alerts/:serverId */
+	@Get('server-alerts/:serverId')
+	getServerAlertSetting(@Param('serverId', ParseIntPipe) serverId: number) {
+		return this.svc.getServerAlertSetting(serverId);
+	}
+
+	/** PUT /security/server-alerts/:serverId */
+	@Put('server-alerts/:serverId')
+	upsertServerAlertSetting(
+		@Param('serverId', ParseIntPipe) serverId: number,
+		@Body() dto: UpsertServerAlertSettingDto,
+	) {
+		return this.svc.upsertServerAlertSetting(serverId, dto);
+	}
+
+	/** POST /security/server-alerts/:serverId/test */
+	@Post('server-alerts/:serverId/test')
+	@HttpCode(HttpStatus.ACCEPTED)
+	@Throttle({ default: { ttl: 60_000, limit: 3 } })
+	testServerAlertSetting(@Param('serverId', ParseIntPipe) serverId: number) {
+		return this.svc.testServerAlertSetting(serverId);
 	}
 
 	// ─── Security Settings ───────────────────────────────────────────────────────

@@ -366,6 +366,10 @@ export const NOTIFICATION_EVENTS = {
 		'security.critical_found',
 		'security.high_found',
 		'security.scan_completed',
+		'security.attack_detected',
+		'security.ssh_login',
+		'security.ssh_failed_login_spike',
+		'security.file_changes',
 	],
 } as const;
 
@@ -392,7 +396,11 @@ export type NotificationEventType =
 	| 'report.weekly'
 	| 'security.critical_found'
 	| 'security.high_found'
-	| 'security.scan_completed';
+	| 'security.scan_completed'
+	| 'security.attack_detected'
+	| 'security.ssh_login'
+	| 'security.ssh_failed_login_spike'
+	| 'security.file_changes';
 
 // ─── Pagination ───────────────────────────────────────────────────────────────
 

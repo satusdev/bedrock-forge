@@ -737,6 +737,30 @@ async function blockUserEnumeration(
 	return ok(action, `User enumeration blocked via ${htaccess}`);
 }
 
+async function forceReinstallCore(
+	exec: Executor,
+	webRoot: string,
+): Promise<HardeningActionResult> {
+	const action = 'FORCE_REINSTALL_CORE';
+	const cmd = `wp core download --version=$(wp core version --path="${webRoot}" --allow-root) --force --path="${webRoot}" --allow-root`;
+	const runCmd = await run(exec, cmd);
+	if (runCmd.code !== 0)
+		return fail(action, runCmd.stderr || 'wp core download failed');
+	return ok(action, 'WordPress core files reinstalled successfully');
+}
+
+async function updateAllPlugins(
+	exec: Executor,
+	webRoot: string,
+): Promise<HardeningActionResult> {
+	const action = 'UPDATE_ALL_PLUGINS';
+	const cmd = `wp plugin update --all --path="${webRoot}" --allow-root`;
+	const runCmd = await run(exec, cmd);
+	if (runCmd.code !== 0)
+		return fail(action, runCmd.stderr || 'wp plugin update failed');
+	return ok(action, 'All plugins updated to their latest versions');
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export async function applyServerHardeningActions(
@@ -841,6 +865,12 @@ export async function applyEnvironmentHardeningActions(
 					break;
 				case 'BLOCK_USER_ENUMERATION':
 					results.push(await blockUserEnumeration(exec, webRoot));
+					break;
+				case 'FORCE_REINSTALL_CORE':
+					results.push(await forceReinstallCore(exec, webRoot));
+					break;
+				case 'UPDATE_ALL_PLUGINS':
+					results.push(await updateAllPlugins(exec, webRoot));
 					break;
 				default: {
 					const _exhaustive: never = action;

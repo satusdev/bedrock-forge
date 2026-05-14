@@ -117,6 +117,9 @@ export class NotificationProcessor extends WorkerHost {
 			'invoice.overdue',
 			'security.critical_found',
 			'security.high_found',
+			'security.ssh_login',
+			'security.ssh_failed_login_spike',
+			'security.file_changes',
 		]);
 
 		if (!ALERT_EVENTS.has(eventType)) return;
@@ -200,6 +203,21 @@ export class NotificationProcessor extends WorkerHost {
 				return {
 					title: 'Security: High severity findings',
 					message: `Security scan found high severity issues — score: ${payload.score ?? '?'}`,
+				};
+			case 'security.ssh_login':
+				return {
+					title: 'Security: SSH login',
+					message: `${payload.user ?? 'Unknown user'} logged in to ${payload.serverName ?? `server #${payload.serverId ?? '?'}`} from ${payload.sourceIp ?? '?'}`,
+				};
+			case 'security.ssh_failed_login_spike':
+				return {
+					title: 'Security: Failed SSH login spike',
+					message: `${payload.count ?? '?'} failed SSH login attempts from ${payload.sourceIp ?? '?'} on ${payload.serverName ?? `server #${payload.serverId ?? '?'}`}`,
+				};
+			case 'security.file_changes':
+				return {
+					title: 'Security: Sensitive file changes',
+					message: `${payload.addedCount ?? 0} added, ${payload.modifiedCount ?? 0} modified, ${payload.deletedCount ?? 0} deleted on ${payload.serverName ?? `server #${payload.serverId ?? '?'}`}`,
 				};
 			default:
 				return {
@@ -293,12 +311,64 @@ export class NotificationProcessor extends WorkerHost {
 				);
 				break;
 			}
+			case 'security.attack_detected': {
+				const attacks = (payload.attacks as any[]) || [];
+				lines.push(`🚨 *SECURITY ATTACK DETECTED* 🚨`);
+				lines.push(`Time: \`${payload.timestamp}\``);
+				
+				for (const a of attacks) {
+					if (a.type === 'mass_infection') {
+						lines.push(`• *Mass Infection*: Found ${a.criticalCount} critical issues across ${a.targetCount} targets.`);
+					} else {
+						lines.push(`• *Batch Pattern*: \`${a.title}\` found on ${a.count} targets:`);
+						lines.push(`  > ${a.targets.join(', ')}`);
+					}
+				}
+				lines.push(`\n_Action required: Check the Security Dashboard immediately._`);
+				break;
+			}
 			case 'security.scan_completed': {
 				const s = payload.summary as Record<string, number> | undefined;
 				lines.push(
 					`✅ Security scan completed`,
 					`Score: ${payload.score ?? '?'} | Info: ${s?.info ?? 0}`,
 				);
+				break;
+			}
+			case 'security.ssh_login':
+				lines.push(
+					`SSH login accepted`,
+					`Server: ${payload.serverName ?? '?'} (${payload.serverIp ?? '?'})`,
+					`User: ${payload.user ?? '?'} | Source: ${payload.sourceIp ?? '?'} | Method: ${payload.authMethod ?? '?'}`,
+					`Time: ${payload.timestamp ?? '?'}`,
+					`Log: ${(String(payload.rawExcerpt ?? '') || '?').slice(0, 500)}`,
+				);
+				break;
+			case 'security.ssh_failed_login_spike':
+				lines.push(
+					`Failed SSH login spike`,
+					`Server: ${payload.serverName ?? '?'} (${payload.serverIp ?? '?'})`,
+					`Source: ${payload.sourceIp ?? '?'} | Attempts: ${payload.count ?? '?'} | Threshold: ${payload.threshold ?? '?'}`,
+					`Window: ${payload.windowStart ?? '?'} to ${payload.windowEnd ?? '?'}`,
+				);
+				break;
+			case 'security.file_changes': {
+				const paths = Array.isArray(payload.topChangedPaths)
+					? payload.topChangedPaths
+					: [];
+				lines.push(
+					`Sensitive file changes detected`,
+					`Server: ${payload.serverName ?? '?'} (${payload.serverIp ?? '?'})`,
+					`Window: ${payload.windowStart ?? '?'} to ${payload.windowEnd ?? '?'}`,
+					`Added: ${payload.addedCount ?? 0} | Modified: ${payload.modifiedCount ?? 0} | Deleted: ${payload.deletedCount ?? 0}`,
+				);
+				if (paths.length > 0) {
+					lines.push(
+						`Top changed paths:\n${paths
+							.map(path => `• ${String(path).slice(0, 180)}`)
+							.join('\n')}`,
+					);
+				}
 				break;
 			}
 			case 'user.registered':

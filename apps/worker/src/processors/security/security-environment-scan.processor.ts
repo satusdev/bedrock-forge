@@ -4,14 +4,23 @@ import { Job, Queue } from 'bullmq';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SshKeyService } from '../../services/ssh-key.service';
 import { createRemoteExecutor } from '@bedrock-forge/remote-executor';
-import { QUEUES, JOB_TYPES } from '@bedrock-forge/shared';
+import {
+	QUEUES,
+	JOB_TYPES,
+	checkPluginVulnerability,
+} from '@bedrock-forge/shared';
 import type {
 	SecurityEnvironmentScanPayload,
 	SecurityScanType,
 	SecurityScanSummary,
+	SecurityFinding,
 } from '@bedrock-forge/shared';
-import { calculateScore, buildSummary } from './scoring';
-import { runWpAudit, runProjectMalware } from './environment-checks';
+import { calculateScore, buildSummary, makeFinding } from './scoring';
+import {
+	runWpAudit,
+	runProjectMalware,
+	runBackdoorSearch,
+} from './environment-checks';
 
 export class SecurityEnvironmentScanProcessor {
 	private readonly logger = new Logger(SecurityEnvironmentScanProcessor.name);
@@ -204,9 +213,93 @@ export class SecurityEnvironmentScanProcessor {
 				return runWpAudit(executor, rootPath);
 			case 'PROJECT_MALWARE':
 				return runProjectMalware(executor, rootPath);
+			case 'BACKDOOR_SEARCH':
+				return runBackdoorSearch(executor, rootPath);
+			case 'PLUGIN_AUDIT':
+				return this.runPluginAudit(executor, rootPath);
 			default:
 				return [];
 		}
+	}
+
+	private async runPluginAudit(
+		executor: ReturnType<typeof createRemoteExecutor>,
+		rootPath: string,
+	): Promise<SecurityFinding[]> {
+		const findings: SecurityFinding[] = [];
+
+		// 1. Get plugin list via remote script (reuse existing logic if possible, or just run wp-cli)
+		const { stdout: pluginListRaw } = await executor.execute(
+			`wp plugin list --format=json --path=${rootPath} 2>/dev/null || true`,
+			{ timeout: 30000 },
+		);
+
+		let plugins: {
+			name: string;
+			status: string;
+			update: string;
+			version: string;
+		}[] = [];
+		try {
+			plugins = JSON.parse(pluginListRaw.trim());
+		} catch {
+			return findings; // WP-CLI not available or error
+		}
+
+		for (const plugin of plugins) {
+			// Check for updates
+			if (plugin.update === 'available') {
+				findings.push(
+					makeFinding(
+						'medium',
+						'SUSPICIOUS_FILES',
+						`Plugin update available: ${plugin.name}`,
+						`Version ${plugin.version} is installed, but an update is available. Outdated plugins are a common attack vector.`,
+						{
+							remediation: `Update the plugin via the dashboard or run: wp plugin update ${plugin.name} --path=${rootPath}`,
+							resource: plugin.name,
+							metadata: { current_version: plugin.version },
+						},
+					),
+				);
+			}
+
+			// Check for inactive plugins
+			if (plugin.status === 'inactive') {
+				findings.push(
+					makeFinding(
+						'low',
+						'SUSPICIOUS_FILES',
+						`Inactive plugin: ${plugin.name}`,
+						'Inactive plugins should be removed to reduce the attack surface.',
+						{
+							remediation: `Delete the plugin if not needed: wp plugin delete ${plugin.name} --path=${rootPath}`,
+							resource: plugin.name,
+						},
+					),
+				);
+			}
+
+			// 3. Vulnerability check (Shared logic + extensible for API)
+			const vuln = checkPluginVulnerability(plugin.name, plugin.version);
+			if (vuln) {
+				findings.push(
+					makeFinding(
+						'critical',
+						'MALWARE',
+						`Vulnerability detected in ${plugin.name}`,
+						`The version ${plugin.version} of ${plugin.name} has a known critical vulnerability: ${vuln.title}.`,
+						{
+							remediation: `Immediately update ${plugin.name} to version ${vuln.fixed_in} or later.`,
+							resource: plugin.name,
+							metadata: { cve: vuln.cve, fixed_in: vuln.fixed_in },
+						},
+					),
+				);
+			}
+		}
+
+		return findings;
 	}
 
 	private async failExecution(jobExecutionId: number, error: string) {

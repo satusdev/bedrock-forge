@@ -281,6 +281,31 @@ export class SecurityRepository {
 		});
 	}
 
+	// ─── Server Security Alerts ────────────────────────────────────────────────
+
+	findServerAlertSetting(serverId: bigint) {
+		return this.prisma.serverSecurityAlertSetting.findUnique({
+			where: { server_id: serverId },
+		});
+	}
+
+	upsertServerAlertSetting(
+		serverId: bigint,
+		data: {
+			enabled: boolean;
+			ssh_login_alerts_enabled: boolean;
+			file_change_alerts_enabled: boolean;
+			interval_minutes: number;
+			file_watch_paths: string[];
+		},
+	) {
+		return this.prisma.serverSecurityAlertSetting.upsert({
+			where: { server_id: serverId },
+			create: { server_id: serverId, ...data },
+			update: data,
+		});
+	}
+
 	// ─── Finding Acknowledgements ────────────────────────────────────────────────
 
 	upsertAck(data: {
@@ -453,6 +478,21 @@ export class SecurityRepository {
 		return this.prisma.securityScanSchedule.update({
 			where: { id },
 			data: { last_run_at: lastRunAt },
+		});
+	}
+
+	findGlobalScanHistory(since: Date) {
+		return this.prisma.securityScan.findMany({
+			where: {
+				completed_at: { gte: since },
+				status: 'completed',
+				score: { not: null },
+			},
+			select: {
+				completed_at: true,
+				score: true,
+			},
+			orderBy: { completed_at: 'asc' },
 		});
 	}
 

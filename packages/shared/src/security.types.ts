@@ -58,7 +58,9 @@ export type SecurityScanType =
 	| 'SERVER_HARDENING'
 	| 'MALWARE_SCAN'
 	| 'WP_AUDIT'
-	| 'PROJECT_MALWARE';
+	| 'PROJECT_MALWARE'
+	| 'BACKDOOR_SEARCH'
+	| 'PLUGIN_AUDIT';
 
 export const SERVER_SCAN_TYPES: SecurityScanType[] = [
 	'SSH_AUDIT',
@@ -69,6 +71,8 @@ export const SERVER_SCAN_TYPES: SecurityScanType[] = [
 export const ENVIRONMENT_SCAN_TYPES: SecurityScanType[] = [
 	'WP_AUDIT',
 	'PROJECT_MALWARE',
+	'BACKDOOR_SEARCH',
+	'PLUGIN_AUDIT',
 ];
 // ─── Schedule Types ──────────────────────────────────────────────────────────
 
@@ -135,7 +139,9 @@ export type EnvironmentHardeningActionType =
 	| 'BLOCK_DEBUG_LOG' // deny HTTP access to *.log files (debug.log) via .htaccess
 	| 'BLOCK_SENSITIVE_FILES' // deny .env, *.bak, *.sql, composer files via .htaccess
 	| 'DISABLE_FILE_EDITOR' // add WP_DISALLOW_FILE_EDIT=true to wp-config.php
-	| 'BLOCK_USER_ENUMERATION'; // redirect ?author=N queries to block username enumeration
+	| 'BLOCK_USER_ENUMERATION' // redirect ?author=N queries to block username enumeration
+	| 'FORCE_REINSTALL_CORE' // wp core download --force
+	| 'UPDATE_ALL_PLUGINS'; // wp plugin update --all
 
 export const SERVER_HARDENING_ACTION_TYPES: ServerHardeningActionType[] = [
 	'FIX_WORLD_WRITABLE',
@@ -163,6 +169,8 @@ export const ENVIRONMENT_HARDENING_ACTION_TYPES: EnvironmentHardeningActionType[
 		'BLOCK_SENSITIVE_FILES',
 		'DISABLE_FILE_EDITOR',
 		'BLOCK_USER_ENUMERATION',
+		'FORCE_REINSTALL_CORE',
+		'UPDATE_ALL_PLUGINS',
 	];
 
 export interface HardeningActionResult {

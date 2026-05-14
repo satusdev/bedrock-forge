@@ -156,6 +156,28 @@ async function seedServers() {
 	return 0 as number;
 }
 
+// ── Custom Plugins ───────────────────────────────────────────────────────────
+
+async function seedCustomPlugins() {
+	const plugin = await prisma.customPlugin.upsert({
+		where: { slug: 'wp-secure-guard' },
+		update: {
+			name: 'WP Secure Guard',
+			repo_url: 'https://github.com/satusdev/wp-secure-guard.git',
+			repo_path: '.',
+			type: 'plugin',
+		},
+		create: {
+			name: 'WP Secure Guard',
+			slug: 'wp-secure-guard',
+			repo_url: 'https://github.com/satusdev/wp-secure-guard.git',
+			repo_path: '.',
+			type: 'plugin',
+		},
+	});
+	return plugin ? 1 : 0;
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -178,6 +200,9 @@ async function main() {
 
 	const servers = await seedServers();
 	console.log(`  Servers created:           ${servers}`);
+
+	const customPlugins = await seedCustomPlugins();
+	console.log(`  Custom plugins upserted:   ${customPlugins}`);
 
 	console.log('\nDone.');
 	console.log(

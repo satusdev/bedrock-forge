@@ -130,4 +130,61 @@ describe('NotificationProcessor', () => {
 			);
 		});
 	});
+
+	describe('security alert message formatting', () => {
+		function build(eventType: string, payload: Record<string, unknown>) {
+			return (processor as any).buildMessage(eventType, payload) as string;
+		}
+
+		it('formats SSH login details', () => {
+			const message = build('security.ssh_login', {
+				serverName: 'prod-1',
+				serverIp: '203.0.113.10',
+				user: 'deploy',
+				sourceIp: '198.51.100.4',
+				authMethod: 'publickey',
+				timestamp: '2026-05-14T10:00:00Z',
+				rawExcerpt: 'Accepted publickey for deploy from 198.51.100.4 port 51234',
+			});
+
+			expect(message).toContain('SSH login accepted');
+			expect(message).toContain('prod-1 (203.0.113.10)');
+			expect(message).toContain('deploy');
+			expect(message).toContain('198.51.100.4');
+			expect(message).toContain('publickey');
+		});
+
+		it('formats failed login spikes', () => {
+			const message = build('security.ssh_failed_login_spike', {
+				serverName: 'prod-1',
+				serverIp: '203.0.113.10',
+				sourceIp: '198.51.100.8',
+				count: 14,
+				threshold: 10,
+				windowStart: '2026-05-14T09:55:00Z',
+				windowEnd: '2026-05-14T10:00:00Z',
+			});
+
+			expect(message).toContain('Failed SSH login spike');
+			expect(message).toContain('Attempts: 14');
+			expect(message).toContain('Threshold: 10');
+			expect(message).toContain('198.51.100.8');
+		});
+
+		it('formats batched file changes', () => {
+			const message = build('security.file_changes', {
+				serverName: 'prod-1',
+				serverIp: '203.0.113.10',
+				addedCount: 1,
+				modifiedCount: 2,
+				deletedCount: 3,
+				topChangedPaths: ['/etc/ssh/sshd_config', '/var/www/site/wp-config.php'],
+			});
+
+			expect(message).toContain('Sensitive file changes detected');
+			expect(message).toContain('Added: 1 | Modified: 2 | Deleted: 3');
+			expect(message).toContain('/etc/ssh/sshd_config');
+			expect(message).toContain('/var/www/site/wp-config.php');
+		});
+	});
 });

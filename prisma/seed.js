@@ -205,6 +205,26 @@ async function seedServers() {
 	// SSH credentials and IP addresses that must be supplied by the operator.
 	return 0;
 }
+// ── Custom Plugins ───────────────────────────────────────────────────────────
+async function seedCustomPlugins() {
+	const plugin = await prisma.customPlugin.upsert({
+		where: { slug: 'wp-secure-guard' },
+		update: {
+			name: 'WP Secure Guard',
+			repo_url: 'https://github.com/satusdev/wp-secure-guard.git',
+			repo_path: '.',
+			type: 'plugin',
+		},
+		create: {
+			name: 'WP Secure Guard',
+			slug: 'wp-secure-guard',
+			repo_url: 'https://github.com/satusdev/wp-secure-guard.git',
+			repo_path: '.',
+			type: 'plugin',
+		},
+	});
+	return plugin ? 1 : 0;
+}
 // ── Main ─────────────────────────────────────────────────────────────────────
 async function main() {
 	console.log('Seeding database…\n');
@@ -220,6 +240,8 @@ async function main() {
 	console.log(`  Support packages created:  ${supportPkgs}`);
 	const servers = await seedServers();
 	console.log(`  Servers created:           ${servers}`);
+	const customPlugins = await seedCustomPlugins();
+	console.log(`  Custom plugins upserted:   ${customPlugins}`);
 	console.log('\nDone.');
 	console.log(
 		'\nAdmin credentials are printed by install.sh. Change the password immediately after first login.',

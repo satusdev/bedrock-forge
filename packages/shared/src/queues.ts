@@ -85,6 +85,8 @@ export const JOB_TYPES = {
 	SECURITY_REPORT_GENERATE: 'security:report-generate',
 	SECURITY_SERVER_HARDEN: 'security:server-harden',
 	SECURITY_ENVIRONMENT_HARDEN: 'security:environment-harden',
+	SECURITY_ATTACK_WATCH: 'security:attack-watch',
+	SECURITY_ALERT_POLL: 'security:alert-poll',
 } as const;
 
 // ─── Default Job Options ──────────────────────────────────────────────────────

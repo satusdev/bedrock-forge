@@ -1,6 +1,6 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
-import { Job } from 'bullmq';
+import { Job, Queue } from 'bullmq';
 import { readFileSync } from 'fs';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SshKeyService } from '../../services/ssh-key.service';
@@ -247,14 +247,13 @@ export class PluginScanProcessor extends WorkerHost {
 					data: {
 						environment_id: BigInt(environmentId),
 						type: 'db_only',
-						status: 'in_progress',
+						status: 'running',
 						size_bytes: 0,
 						file_path: 'temp',
 						job_execution_id: backupExec.id,
 					},
 				});
 
-				const { Queue } = await import('bullmq');
 				const redisUrl = this.config.get<string>('redis.url')!;
 				const backupQueue = new Queue(QUEUES.BACKUPS, { connection: { url: redisUrl } });
 				const { randomUUID } = await import('crypto');
