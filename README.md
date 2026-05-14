@@ -22,7 +22,9 @@
 Bedrock Forge is a **self-hosted WordPress infrastructure management platform**,
 designed as a single-operator or small-team alternative to ManageWP/MainWP. It
 manages multiple WordPress/Bedrock environments across multiple Linux servers
-through SSH — no agent installed on managed servers, no wp-cli dependency.
+through SSH — no agent installed on managed servers. Core backup, sync, and
+plugin inventory workflows do not require wp-cli; theme and WordPress core
+actions use wp-cli when those actions are requested.
 
 **Built for CyberPanel-hosted Bedrock stacks.** Standard WordPress
 (`wp-config.php`) is supported for backups, plugin scanning, and sync.
@@ -46,17 +48,18 @@ Before adopting, understand the current scope boundaries:
   payment gateway.
 - **No 2FA/MFA.** Authentication is JWT only. TOTP is not implemented.
 - **No email notifications.** Alerts are Slack-only. No SMTP integration exists.
-- **No plugin auto-updates.** Plugin management covers inventory,
-  enable/disable/delete, and install/remove via Composer. Scheduled update jobs
-  are not implemented.
+- **Plugin auto-updates are Bedrock/Composer-only.** Scheduled updates exist for
+  Composer-managed Bedrock environments, with a pre-flight DB backup when Google
+  Drive is configured.
 - **No incremental backups.** All backups are full-snapshot operations (full,
   DB-only, or files-only).
 - **No cross-server restore.** Restore runs only within the same environment.
   Restoring a backup to a different server is not implemented.
 - **Google Drive is the only remote backup target.** S3, SFTP, and other rclone
   targets are not wired into the UI.
-- **Uptime monitoring is HTTP-only.** SSL certificate expiry, DNS resolution
-  checks, and keyword/content matching are not implemented.
+- **Advanced monitoring is HTTP-centric.** SSL expiry, DNS resolution, and
+  keyword/content checks exist, but TCP, ping, header matching, and synthetic
+  browser checks are not implemented.
 - **Reports are Slack-only.** Weekly summary reports are delivered to a Slack
   channel. No email, PDF, or in-app export.
 
@@ -68,54 +71,78 @@ Before adopting, understand the current scope boundaries:
 > **Partial** = backend exists, frontend incomplete or feature has gaps. **Not
 > Implemented** = planned, stubbed, or roadmap only.
 
-| Feature                                    | Status             | Notes                                                                                                  |
-| ------------------------------------------ | ------------------ | ------------------------------------------------------------------------------------------------------ |
-| 🖥️ Server Management                       | ✅ Implemented     | SSH key vault (AES-256-GCM), CyberPanel auto-login, server scanning; admin-only create/edit            |
-| 📁 Project & Client Management             | ✅ Implemented     | Client → Project → Environment hierarchy, tags, bulk import; admin-only create/edit clients            |
-| 🌍 Environment Management                  | ✅ Implemented     | Multi-env per project, DB credential vault, env scanning                                               |
-| 💾 Backup — Create & Schedule              | ✅ Implemented     | Full / DB-only / files-only; daily/weekly/monthly schedules; Google Drive upload via rclone            |
-| 💾 Backup — Retention Policies             | ✅ Implemented     | Count-based and age-based pruning on schedule configuration                                            |
-| 💾 Backup — Restore (same environment)     | ✅ Implemented     | Restore to source environment with real-time progress streaming                                        |
-| 💾 Backup — Cross-server Restore           | ❌ Not Implemented | Restore is scoped to the originating environment only                                                  |
-| 💾 Backup — Incremental                    | ❌ Not Implemented | All backups are full snapshots; block-level incrementals are roadmap                                   |
-| 💾 Backup — S3 / SFTP targets              | ❌ Not Implemented | Only Google Drive is wired; other rclone-compatible targets are roadmap                                |
-| 🔌 Plugin Scanning                         | ✅ Implemented     | On-demand scan via PHP script (no wp-cli); returns structured inventory                                |
-| 🔌 Plugin — Enable / Disable / Delete      | ✅ Implemented     | Direct management from plugin detail page                                                              |
-| 🔌 Plugin — Install / Remove (Composer)    | ✅ Implemented     | Composer-based install/remove for Bedrock environments                                                 |
-| 🔌 Plugin — Update (manual trigger)        | ⚠️ Partial         | API endpoints exist (`plugin install/remove/update`); frontend UI coverage is limited                  |
-| 🔌 Plugin — Scheduled Auto-updates         | ❌ Not Implemented | Roadmap only                                                                                           |
-| 🔌 Plugin — Vulnerability Scanning         | ❌ Not Implemented | No CVE/WPScan integration; scanning is inventory-only                                                  |
-| 🔄 Environment Sync                        | ✅ Implemented     | Files via rsync, DB via mysqldump; dry-run mode; conflict detection; safety backup before clone        |
-| 🔄 Config Drift Detection                  | ✅ Implemented     | Compares active `.env` against last committed config; flags mismatches in project detail               |
-| 📡 Uptime Monitoring — HTTP checks         | ✅ Implemented     | Configurable interval, response time, uptime %, down/up/degraded logging; incident log with pagination |
-| 📡 Uptime Monitoring — SSL / DNS / Content | ❌ Not Implemented | HTTP status check only; keyword, certificate, and DNS checks are roadmap                               |
-| 🌐 Domain WHOIS                            | ✅ Implemented     | Expiry tracking, cached WHOIS data, expiry alerts; SSL standalone check                                |
-| 🏗️ Bedrock Provisioning (CyberPanel)       | ✅ Implemented     | End-to-end queue job: CyberPanel site + DB creation, Bedrock install, environment clone                |
-| 💰 Invoices & Billing                      | ✅ Implemented     | Yearly invoice generation, draft/sent/paid/overdue/cancelled statuses, bulk operations                 |
-| 💰 Invoice PDF Export                      | ❌ Not Implemented | Invoices are data records only; no PDF generation                                                      |
-| 💰 Payment Processing                      | ❌ Not Implemented | No payment gateway integration                                                                         |
-| 🔔 Slack Notifications                     | ✅ Implemented     | Per-event channel subscriptions, delivery logs with pagination, error capture                          |
-| 🔔 Email / Discord / Webhook Notifications | ❌ Not Implemented | Roadmap only                                                                                           |
-| 📋 Weekly Reports                          | ✅ Implemented     | Generated by BullMQ `report:generate` job, delivered to Slack channel                                  |
-| 📊 Audit & Activity Logs                   | ✅ Implemented     | User action audit trail + per-job execution log (step-by-step, JSONB trace); both paginated            |
-| 📊 Problems / Attention Feed               | ✅ Implemented     | Cross-project attention feed: expiring domains, down monitors, outdated plugins, config drift          |
-| 📈 Dashboard                               | ✅ Implemented     | Stats summary, live job feed via WebSocket, WP quick actions                                           |
-| 🔐 Auth — JWT + Refresh Rotation           | ✅ Implemented     | 4-hour access tokens, 30-day refresh tokens (hashed, rotated on use)                                   |
-| 🔐 Auth — RBAC (4-tier)                    | ✅ Implemented     | `admin` > `manager` > `maintainer` > `client`; API guards + frontend navigation; per-role UI gating    |
-| 🔐 Auth — 2FA / MFA                        | ❌ Not Implemented | No TOTP or MFA. Roadmap.                                                                               |
-| 🔐 Auth — SSO / Social Login               | ❌ Not Implemented | Not planned                                                                                            |
-| 🌑 Dark Mode                               | ✅ Implemented     | Per-session toggle in sidebar; preference stored in UI store (Zustand)                                 |
-| 📦 Package Management                      | ✅ Implemented     | Hosting and support package definitions linked to projects for billing; both tabs paginated            |
-| 🗂️ Command Palette                         | ✅ Implemented     | Global search (⌘K / Ctrl+K): pages, clients, servers, projects; role-filtered results                  |
-| 🎨 Theme Management                        | ❌ Not Implemented | Roadmap only                                                                                           |
-| 🌐 WordPress Core Updates                  | ❌ Not Implemented | Roadmap only                                                                                           |
-| 👥 Multi-tenant Workspaces                 | ❌ Not Implemented | Single-tenant per installation                                                                         |
+| Feature                                 | Status             | Notes                                                                                                  |
+| --------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------ |
+| Server Management                       | ✅ Implemented     | SSH key vault (AES-256-GCM), CyberPanel auto-login, server scanning; admin-only create/edit            |
+| Project & Client Management             | ✅ Implemented     | Client -> Project -> Environment hierarchy, tags, bulk import; admin-only create/edit clients          |
+| Environment Management                  | ✅ Implemented     | Multi-env per project, DB credential vault, env scanning, protected tables, environment tags           |
+| Backup — Create & Schedule              | ✅ Implemented     | Full / DB-only / files-only; daily/weekly/monthly schedules; Google Drive upload via rclone            |
+| Backup — Retention Policies             | ✅ Implemented     | Count-based and age-based pruning on schedule configuration                                            |
+| Backup — Restore (same environment)     | ✅ Implemented     | Restore to source environment with real-time progress streaming                                        |
+| Backup — Cross-server Restore           | ❌ Not Implemented | Restore is scoped to the originating environment only                                                  |
+| Backup — Incremental                    | ❌ Not Implemented | All backups are full snapshots; block-level incrementals are roadmap                                   |
+| Backup — S3 / SFTP targets              | ❌ Not Implemented | Only Google Drive is wired; other rclone-compatible targets are roadmap                                |
+| System Backups                          | ✅ Implemented     | Forge self-backup records, manual create, schedules, and downloads                                     |
+| Plugin Scanning                         | ✅ Implemented     | On-demand scan via PHP script; returns structured inventory and Composer metadata                      |
+| Plugin — Enable / Disable / Delete      | ✅ Implemented     | Direct management from plugin detail page                                                              |
+| Plugin — Install / Remove / Update      | ✅ Implemented     | Composer-based add/remove/update, update-all, and constraint changes for Bedrock environments          |
+| Plugin — Scheduled Auto-updates         | ✅ Implemented     | Repeatable scheduled Composer update jobs with DB backup pre-flight and post-update scan               |
+| Plugin — Vulnerability Scanning         | ⚠️ Partial         | Local/shared vulnerability matching exists; external CVE/WPScan feed integration remains roadmap       |
+| Custom Plugin Catalog                   | ✅ Implemented     | GitHub-backed custom plugin catalog and per-environment install/remove workflow                        |
+| Theme Management                        | ✅ Implemented     | Theme scan, install, activate, and delete via wp-cli-backed worker jobs                                |
+| WordPress Core Updates                  | ✅ Implemented     | Core version check and update actions via wp-cli-backed worker jobs                                    |
+| Environment Sync                        | ✅ Implemented     | Files via rsync, DB via mysqldump; dry-run mode; conflict detection; safety backup before clone        |
+| Config Drift Detection                  | ✅ Implemented     | Compares active `.env` against last committed config; flags mismatches in project detail               |
+| Uptime Monitoring — HTTP checks         | ✅ Implemented     | Configurable interval, response time, uptime %, down/up/degraded logging; incident log with pagination |
+| Uptime Monitoring — SSL / DNS / Content | ✅ Implemented     | Certificate expiry, DNS resolution, and keyword/content checks with monitor logs and notifications     |
+| Domain WHOIS                            | ✅ Implemented     | Expiry tracking, cached WHOIS data, expiry alerts; SSL standalone check                                |
+| Bedrock Provisioning (CyberPanel)       | ✅ Implemented     | End-to-end queue job: CyberPanel site + DB creation, Bedrock install, environment clone                |
+| Invoices & Billing                      | ✅ Implemented     | Yearly invoice generation, draft/sent/paid/overdue/cancelled statuses, bulk operations                 |
+| Invoice PDF Export                      | ❌ Not Implemented | Invoices are data records only; no PDF generation                                                      |
+| Payment Processing                      | ❌ Not Implemented | No payment gateway integration                                                                         |
+| Slack Notifications                     | ✅ Implemented     | Per-event channel subscriptions, delivery logs with pagination, error capture                          |
+| Notification Inbox                      | ✅ Implemented     | User notification records, unread count, mark-read, and read-all endpoints                             |
+| Email / Discord / Webhook Notifications | ❌ Not Implemented | Roadmap only; Discord/webhook fields are not production delivery channels yet                          |
+| Weekly Reports                          | ✅ Implemented     | Generated by BullMQ `report:generate` job, delivered to Slack channel                                  |
+| Security Center                         | ✅ Implemented     | Server/env scans, schedules, findings, acknowledgements, reports, hardening jobs, SSH/file alerts      |
+| Audit & Activity Logs                   | ✅ Implemented     | User action audit trail + per-job execution log (step-by-step, JSONB trace); both paginated            |
+| Problems / Attention Feed               | ✅ Implemented     | Cross-project attention feed: expiring domains, down monitors, outdated plugins, config drift          |
+| Dashboard                               | ✅ Implemented     | Stats summary, live job feed via WebSocket, WP quick actions                                           |
+| Auth — JWT + Refresh Rotation           | ✅ Implemented     | 4-hour access tokens, 30-day refresh tokens (hashed, rotated on use)                                   |
+| Auth — RBAC (4-tier)                    | ✅ Implemented     | `admin` > `manager` > `maintainer` > `client`; API guards + frontend navigation; per-role UI gating    |
+| Auth — 2FA / MFA                        | ❌ Not Implemented | No TOTP or MFA. Roadmap.                                                                               |
+| Auth — SSO / Social Login               | ❌ Not Implemented | Not planned                                                                                            |
+| Dark Mode                               | ✅ Implemented     | Per-session toggle in sidebar; preference stored in UI store (Zustand)                                 |
+| Package Management                      | ✅ Implemented     | Hosting and support package definitions linked to projects for billing; both tabs paginated            |
+| Command Palette                         | ✅ Implemented     | Global search (Cmd+K / Ctrl+K): pages, clients, servers, projects; role-filtered results               |
+| Multi-tenant Workspaces                 | ❌ Not Implemented | Single-tenant per installation                                                                         |
+
+---
+
+## Recently Completed
+
+These improvements are present in the current codebase and are now reflected in
+the feature matrix above:
+
+- **Security center expansion:** scheduled server/environment scans, aggregated
+  findings, acknowledgement workflow, security reports, hardening jobs,
+  attack-watch polling, and per-server SSH login/file-change alert settings.
+- **Monitoring expansion:** SSL certificate expiry tracking, DNS resolution
+  checks, keyword/content matching, richer monitor logs, and alert events for
+  SSL/DNS/keyword failures.
+- **WordPress operations:** theme scan/install/activate/delete and WordPress
+  core check/update jobs, both exposed in the project detail workflow.
+- **Plugin operations:** Composer update-all scheduling with pre-flight DB
+  backup support and post-update plugin scan refresh.
+- **Platform operations:** Forge system backup scheduling, notification inbox,
+  custom plugin catalog management, environment tags, and security finding
+  acknowledgements.
 
 ---
 
 ## Architecture
 
-Three Docker services. Minimal footprint — runs on a 4 GB RAM VPS.
+Four Docker Compose services. Minimal footprint — runs on a 4 GB RAM VPS.
 
 ```
 ┌───────────────────────────────────────────────────────────┐
@@ -123,7 +150,7 @@ Three Docker services. Minimal footprint — runs on a 4 GB RAM VPS.
 │  ├─ NestJS 11 API  :3000                                  │
 │  │   REST routes, JWT auth, rate limiting, WebSocket GW   │
 │  └─ BullMQ Worker (no HTTP port)                          │
-│      ├─ 13 processor modules                              │
+│      ├─ 14 processor modules                              │
 │      ├─ SSH connection pool (ssh2, max 15/server)         │
 │      ├─ rclone → Google Drive                             │
 │      └─ whois (system command)                            │
@@ -132,7 +159,7 @@ Three Docker services. Minimal footprint — runs on a 4 GB RAM VPS.
     ┌────▼──────┐   ┌──────────────────────────┐
     │ postgres  │   │ redis 7                  │
     │ :5432     │   │ BullMQ queues            │
-    │ 35 tables │   │ WebSocket pub/sub        │
+    │ 40 models │   │ WebSocket pub/sub        │
     └───────────┘   │ Rate limiting            │
                     └──────────────────────────┘
 
@@ -147,7 +174,8 @@ Three Docker services. Minimal footprint — runs on a 4 GB RAM VPS.
 ┌──────────────────────────────────────────────────┐
 │ WordPress / Bedrock sites                        │
 │ No agent installed — SSH only                    │
-│ Two PHP scripts pushed on-demand, then cleaned   │
+│ Helper scripts pushed on-demand, then cleaned    │
+│ wp-cli used only for theme/core actions          │
 └──────────────────────────────────────────────────┘
 ```
 
@@ -183,31 +211,34 @@ pub/sub.
 | `notifications`  | `notification:send`                                                                                                          | 3       | 30 s    |
 | `reports`        | `report:generate`                                                                                                            | 3       | 2 min   |
 | `wp-actions`     | `wp:fix-action`, `wp:debug-toggle`, `wp:debug-revert`, `wp:logs-fetch`, `wp:cron-list`, `wp:cleanup`, `wp:core-check/update` | 3       | 5 min   |
-| `system-backups` | `system-backup:create`                                                                                                       | 3       | 30 min  |
+| `system-backups` | `system-backup:create`, `system-backup:scheduled`                                                                            | 3       | 30 min  |
+| `security`       | `security:server-scan`, `security:environment-scan`, scheduled scans, reports, hardening, attack watch, alert polling        | 3       | varies  |
 
-All queues use exponential backoff (base 1 s) and a dead-letter queue
-(`<name>-dlq`).
+All queues use exponential backoff (base 1 s by default; long-running backup
+and sync jobs use a 5-minute initial backoff). Failed jobs are retained in
+BullMQ for inspection; separate dead-letter queue consumers are not currently
+implemented.
 
 ---
 
 ## Tech Stack
 
-| Layer            | Technology                                   |
-| ---------------- | -------------------------------------------- |
-| Runtime          | Node.js 22                                   |
-| Backend          | NestJS 11, TypeScript 5, REST API            |
-| ORM              | Prisma 7                                     |
-| Database         | PostgreSQL 16 (35 tables, 7 enums)           |
-| Queue            | BullMQ 5 + Redis 7                           |
-| Remote execution | `ssh2` connection pool (no wp-cli, no agent) |
-| Frontend         | React 19 + Vite 5                            |
-| UI components    | shadcn/ui + Tailwind CSS 4                   |
-| Server state     | TanStack Query v5                            |
-| Client state     | Zustand (UI/session)                         |
-| Forms            | React Hook Form + Zod                        |
-| Real-time        | NestJS WebSocket Gateway + Redis pub/sub     |
-| Monorepo         | pnpm workspaces + Turborepo                  |
-| Containers       | Docker Compose                               |
+| Layer            | Technology                                                            |
+| ---------------- | --------------------------------------------------------------------- |
+| Runtime          | Node.js 22                                                            |
+| Backend          | NestJS 11, TypeScript 5, REST API                                     |
+| ORM              | Prisma 7                                                              |
+| Database         | PostgreSQL 16 (40 Prisma models, 10 enums)                            |
+| Queue            | BullMQ 5 + Redis 7                                                    |
+| Remote execution | `ssh2` connection pool (no agent; wp-cli only for theme/core actions) |
+| Frontend         | React 19 + Vite 5                                                     |
+| UI components    | shadcn/ui + Tailwind CSS 4                                            |
+| Server state     | TanStack Query v5                                                     |
+| Client state     | Zustand (UI/session)                                                  |
+| Forms            | React Hook Form + Zod                                                 |
+| Real-time        | NestJS WebSocket Gateway + Redis pub/sub                              |
+| Monorepo         | pnpm workspaces + Turborepo                                           |
+| Containers       | Docker Compose                                                        |
 
 ---
 
@@ -280,6 +311,7 @@ The easiest way to develop locally is using the included dev launcher, which han
 ```
 
 This starts:
+
 - **API** on `:3000` (hot-reloading)
 - **Worker** (hot-reloading)
 - **Web** on `:5173` (hot-reloading, proxies `/api` → `:3000`)
@@ -358,15 +390,16 @@ Auto-generated by `install.sh`. Only needed for manual setup.
 bedrock-forge/
 ├── apps/
 │   ├── api/                    # NestJS 11 REST API + WebSocket gateway
-│   │   └── src/modules/        # 30 feature modules (controller → service → repository)
-│   │   └── scripts/            # backup.php, plugin-scan.php (pushed on-demand)
-│   └── web/                    # React 19 SPA (21 pages, all lazy-loaded)
-│       └── src/features/       # Feature-scoped components and hooks
+│   │   └── src/modules/        # 31 feature modules (controller -> service -> repository)
+│   ├── worker/                 # 14 BullMQ processor modules + remote PHP helpers
+│   │   └── scripts/            # backup, scan, WP action, Composer, cleanup helpers
+│   └── web/                    # React 19 SPA (25 top-level pages, all lazy-loaded)
+│       └── src/pages/          # Page-level workflows and project/security tabs
 ├── packages/
 │   ├── shared/                 # Queue names, roles, Zod schemas
 │   └── remote-executor/        # SSH pool + credential parser
 ├── prisma/
-│   ├── schema.prisma           # 35-model schema
+│   ├── schema.prisma           # 40-model schema, 10 enums
 │   └── migrations/
 ├── docs/
 │   ├── getting-started/
@@ -419,7 +452,7 @@ finding and its current resolution status.
 | S6  | Security     | SSH host keys not verified on new connections — no TOFU / known_hosts tracking                         | Requires schema column, UI to trust/reject on first connect      |
 | A1  | Architecture | `EncryptionService` is duplicated — API and Worker maintain separate implementations                   | Extract to `@bedrock-forge/shared` or a dedicated crypto package |
 | A6  | Architecture | `DomainWhoisProcessor` does not create `JobExecution` records — inconsistent with all other processors | Low-effort; requires adding `JobExecutionsService` to the module |
-| A7  | Architecture | `QueueEvents` listeners registered per-processor rather than via a shared factory                      | Refactor opportunity — reduces boilerplate across 13 processors  |
+| A7  | Architecture | `QueueEvents` listeners registered per-queue rather than via a shared factory                          | Refactor opportunity — reduces boilerplate across 14 queues      |
 | A8  | Architecture | Several repositories call `findMany({})` with no row cap — unbounded result sets                       | Add max-row guard (e.g. 10 000) to all bare `findAll` calls      |
 | A9  | Architecture | Pagination `take` param is not clamped — callers can request arbitrarily large pages                   | Clamp to a configured max (e.g. 200) in query DTOs               |
 | D3  | DX           | No Jest coverage thresholds configured — coverage can silently drop                                    | Add `coverageThreshold` to `jest.config.js`                      |
@@ -429,18 +462,22 @@ finding and its current resolution status.
 
 ## Missing Capabilities & Planned Work
 
-The following are absent from the current codebase. They are not partial — they
-do not exist. Contributions are welcome.
+The following backlog reflects the current codebase after the latest feature
+audit. Items listed here are not covered end-to-end today, or are known
+production hardening improvements.
 
 ### 🔴 High Priority (Core gaps for production use)
 
+- **httpOnly refresh-token cookies** — Refresh tokens are currently returned in
+  JSON and stored client-side. Moving refresh delivery into secure httpOnly
+  cookies would reduce XSS blast radius.
+- **SSH host-key verification** — New SSH connections do not persist or verify
+  host fingerprints. Add known-host tracking with an explicit trust/reject UI.
 - **Cross-server backup restore** — Restore currently requires the same
   environment as the source. Restoring to a different server or environment is
   not supported.
 - **2FA / TOTP authentication** — No second factor for any role. All accounts
   are password-only.
-- **Plugin update scheduling** — Plugin update endpoints exist on the API;
-  scheduled update jobs with rollback are not implemented.
 - **Email notifications (SMTP)** — All alerts are Slack-only. Operators without
   Slack have no out-of-band alerting.
 
@@ -450,22 +487,24 @@ do not exist. Contributions are welcome.
   Wasabi, MinIO, Amazon S3 (all rclone-compatible) require UI integration.
 - **Invoice PDF export** — Invoices are database records only; no rendered PDF
   output.
-- **Advanced uptime monitoring** — SSL certificate expiry, keyword/content
-  checks, and custom header validation are not implemented.
+- **External vulnerability intelligence** — Local/shared vulnerability matching
+  exists, but there is no CVE/WPScan feed sync, freshness policy, or admin UI
+  for feed status.
+- **Shared encryption package** — API and Worker still maintain separate
+  encryption service implementations.
+- **Pagination and row caps** — Several endpoints need hard max limits to avoid
+  unbounded `findMany` or oversized `take` requests.
 - **Incremental backups** — All backups are full snapshots. rsync-based
   incrementals are roadmap.
 - **Bulk operations** — No multi-select for backup, scan, or sync across
   multiple environments at once.
-- **Multi-tenant workspaces** — Data is not isolated between operator teams.
-  Single-tenant per installation.
 
 ### ⚪ Low Priority / Enhancements
 
-- **Theme management** — No theme inventory or management capability.
-- **WordPress core version management** — No automated or manual WP core update
-  support.
 - **Discord / Telegram / webhook notifications** — Additional notification
   channels beyond Slack.
+- **Multi-tenant workspaces** — Data is not isolated between operator teams.
+  Single-tenant per installation.
 - **White-label / custom branding** — No logo, color, or domain customization.
 - **WordPress Multisite support** — Not tested or documented.
 - **Cloud provider provisioning** — DigitalOcean, Hetzner, Vultr, AWS Lightsail
