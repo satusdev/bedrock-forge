@@ -3,9 +3,11 @@ import {
 	IsNumber,
 	IsOptional,
 	IsString,
+	Max,
 	Min,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
+import { MAX_PAGE_SIZE } from '../../../common/pagination';
 
 export class FindingsQueryDto {
 	/** Comma-separated severities: critical,high,medium,low,info */
@@ -43,5 +45,6 @@ export class FindingsQueryDto {
 	@Type(() => Number)
 	@IsNumber()
 	@Min(1)
+	@Max(MAX_PAGE_SIZE)
 	limit?: number;
 }

@@ -9,6 +9,7 @@ import { randomUUID } from 'crypto';
 import { QUEUES, JOB_TYPES, DEFAULT_JOB_OPTIONS } from '@bedrock-forge/shared';
 import { SystemBackupsRepository } from './system-backups.repository';
 import { SettingsService } from '../settings/settings.service';
+import { normalizePage, normalizePageSize } from '../../common/pagination';
 
 @Injectable()
 export class SystemBackupsService {
@@ -19,7 +20,10 @@ export class SystemBackupsService {
 	) {}
 
 	async list(page = 1, limit = 20) {
-		return this.repo.findAllPaginated(page, limit);
+		return this.repo.findAllPaginated(
+			normalizePage(page),
+			normalizePageSize(limit),
+		);
 	}
 
 	async findOne(id: number) {

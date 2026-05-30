@@ -20,6 +20,7 @@ import { ServersService } from './servers.service';
 import { CreateServerDto, UpdateServerDto } from './dto/server.dto';
 import { DetectBedrockDto } from './dto/detect-bedrock.dto';
 import { ScanProjectsMultiDto } from './dto/scan-projects.dto';
+import { normalizePage, normalizePageSize } from '../../common/pagination';
 
 @Controller('servers')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -33,8 +34,8 @@ export class ServersController {
 		@Query('search') search?: string,
 	) {
 		return this.svc.findAll({
-			page: page ? parseInt(page, 10) : 1,
-			limit: limit ? parseInt(limit, 10) : 50,
+			page: normalizePage(page),
+			limit: normalizePageSize(limit, 50),
 			search,
 		});
 	}

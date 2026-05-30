@@ -15,6 +15,7 @@ import {
 } from '@bedrock-forge/shared';
 import { EnqueueBackupDto, RestoreBackupDto } from './dto/backup.dto';
 import { BackupsRepository } from './backups.repository';
+import { normalizePage, normalizePageSize } from '../../common/pagination';
 
 @Injectable()
 export class BackupsService {
@@ -24,8 +25,8 @@ export class BackupsService {
 	) {}
 
 	findByEnvironment(envId: number, query: PaginationQuery) {
-		const page = query.page ?? 1;
-		const limit = query.limit ?? 20;
+		const page = normalizePage(query.page);
+		const limit = normalizePageSize(query.limit);
 		return this.repo.findByEnvironmentPaginated(BigInt(envId), page, limit);
 	}
 

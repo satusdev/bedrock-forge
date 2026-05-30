@@ -18,6 +18,11 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { ROLES } from '@bedrock-forge/shared';
 import { MonitorsService } from './monitors.service';
 import { CreateMonitorDto, UpdateMonitorDto } from './dto/monitor.dto';
+import {
+	MAX_TIMESERIES_PAGE_SIZE,
+	normalizePage,
+	normalizePageSize,
+} from '../../common/pagination';
 
 @Controller('monitors')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -32,8 +37,8 @@ export class MonitorsController {
 		@Query('search') search?: string,
 	) {
 		return this.svc.findAll({
-			page: page ? parseInt(page, 10) : undefined,
-			limit: limit ? parseInt(limit, 10) : undefined,
+			page: normalizePage(page),
+			limit: normalizePageSize(limit),
 			search: search || undefined,
 		});
 	}
@@ -48,8 +53,8 @@ export class MonitorsController {
 		@Query('limit') limit?: string,
 	) {
 		return this.svc.findLogs(id, {
-			page: page ? parseInt(page, 10) : undefined,
-			limit: limit ? parseInt(limit, 10) : undefined,
+			page: normalizePage(page),
+			limit: normalizePageSize(limit, 50),
 		});
 	}
 
@@ -59,8 +64,8 @@ export class MonitorsController {
 		@Query('limit') limit?: string,
 	) {
 		return this.svc.findResults(id, {
-			page: page ? parseInt(page, 10) : undefined,
-			limit: limit ? parseInt(limit, 10) : undefined,
+			page: normalizePage(page),
+			limit: normalizePageSize(limit, 100, MAX_TIMESERIES_PAGE_SIZE),
 		});
 	}
 

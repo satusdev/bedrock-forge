@@ -9,6 +9,7 @@ import {
 	JOB_TYPES,
 	NotificationEventType,
 } from '@bedrock-forge/shared';
+import { normalizePage, normalizePageSize } from '../../common/pagination';
 
 @Injectable()
 export class NotificationsService {
@@ -22,7 +23,7 @@ export class NotificationsService {
 
 	async findAllChannels() {
 		const channels = await this.repo.findAllChannels();
-		return channels.map(c => this.sanitise(c));
+		return channels.map((c) => this.sanitise(c));
 	}
 
 	async findChannelById(id: number) {
@@ -142,7 +143,7 @@ export class NotificationsService {
 	/* ── Logs ─────────────────────────────────────────────────────────────── */
 
 	findRecentLogs(limit?: number) {
-		return this.repo.findRecentLogs(limit);
+		return this.repo.findRecentLogs(normalizePageSize(limit, 50));
 	}
 
 	/* ── Private ─────────────────────────────────────────────────────────── */
@@ -171,31 +172,44 @@ export class NotificationsService {
 		};
 	}
 
-        /* ── Inbox ─────────────────────────────────────────────────────────── */
+	/* ── Inbox ─────────────────────────────────────────────────────────── */
 
-        async getUnreadCount(userId: number): Promise<{ count: number }> {
-                const count = await this.repo.countUnread(userId);
-                return { count };
-        }
+	async getUnreadCount(userId: number): Promise<{ count: number }> {
+		const count = await this.repo.countUnread(userId);
+		return { count };
+	}
 
-        async findInbox(userId: number, opts: { page: number; limit: number; unread?: boolean }) {
-                const [items, total] = await this.repo.findForUser(userId, opts);
-                return {
-                        data: items.map(n => ({ ...n, id: Number(n.id), user_id: Number(n.user_id) })),
-                        total,
-                        page: opts.page,
-                        limit: opts.limit,
-                        totalPages: Math.ceil(total / opts.limit),
-                };
-        }
+	async findInbox(
+		userId: number,
+		opts: { page: number; limit: number; unread?: boolean },
+	) {
+		const page = normalizePage(opts.page);
+		const limit = normalizePageSize(opts.limit);
+		const [items, total] = await this.repo.findForUser(userId, {
+			...opts,
+			page,
+			limit,
+		});
+		return {
+			data: items.map((n) => ({
+				...n,
+				id: Number(n.id),
+				user_id: Number(n.user_id),
+			})),
+			total,
+			page,
+			limit,
+			totalPages: Math.ceil(total / limit),
+		};
+	}
 
-        async markRead(id: number, userId: number) {
-                await this.repo.markRead(id, userId);
-                return { ok: true };
-        }
+	async markRead(id: number, userId: number) {
+		await this.repo.markRead(id, userId);
+		return { ok: true };
+	}
 
-        async markAllRead(userId: number) {
-                await this.repo.markAllRead(userId);
-                return { ok: true };
-        }
+	async markAllRead(userId: number) {
+		await this.repo.markAllRead(userId);
+		return { ok: true };
+	}
 }

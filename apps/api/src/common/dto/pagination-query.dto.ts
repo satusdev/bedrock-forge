@@ -7,8 +7,8 @@ import {
 	MaxLength,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
+import { MAX_PAGE_SIZE } from '../pagination';
 
-const MAX_PAGE_SIZE = 100;
 const MAX_SEARCH_LENGTH = 100;
 
 export class PaginationQueryDto {
