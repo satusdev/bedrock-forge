@@ -86,12 +86,23 @@ set_env_value() {
   local key="\$1"
   local value="\$2"
   local file="\${3:-.env}"
-  local escaped
-  escaped=\$(printf '%s' "\$value" | sed -e 's/[\/&|\\]/\\&/g')
-  if grep -q "^\${key}=" "\$file"; then
-    sed -i "s|^\${key}=.*|\${key}=\${escaped}|" "\$file"
-  else
-    printf '%s=%s\n' "\$key" "\$value" >> "\$file"
+  local temp_file="\${file}.tmp"
+
+  local found=false
+  if [[ -f "\$file" ]]; then
+    while IFS= read -r line || [[ -n "\$line" ]]; do
+      if [[ "\$line" == "\${key}"=* ]]; then
+        printf '%s\n' "\${key}=\${value}"
+        found=true
+      else
+        printf '%s\n' "\$line"
+      fi
+    done < "\$file" > "\$temp_file"
+    mv "\$temp_file" "\$file"
+  fi
+
+  if [[ "\$found" = false ]]; then
+    printf '%s\n' "\${key}=\${value}" >> "\$file"
   fi
 }
 
