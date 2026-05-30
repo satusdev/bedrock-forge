@@ -3,7 +3,7 @@
 /**
  * custom-plugin-manager.php — Bedrock Forge custom GitHub plugin manager
  *
- * Manages installation and removal of custom GitHub-hosted plugins/themes via
+ * Manages installation, update, and removal of custom GitHub-hosted plugins/themes via
  * the satusdev/monorepo-fetcher Composer plugin. Manipulates the site's
  * composer.json directly so that monorepo-fetcher can pull the correct files
  * on the next `composer install`.
@@ -52,8 +52,8 @@ $ghToken   = $opts['github-token']  ?? null;
 
 // ─── Validation ───────────────────────────────────────────────────────────────
 
-if (!in_array($action, ['add', 'remove'], true)) {
-    bail("Invalid or missing --action. Valid values: add, remove");
+if (!in_array($action, ['add', 'remove', 'update'], true)) {
+    bail("Invalid or missing --action. Valid values: add, remove, update");
 }
 
 if (!$docroot || !is_dir($docroot)) {
@@ -114,7 +114,7 @@ $targetDir = ($type === 'theme')
 
 // ─── Handle add ───────────────────────────────────────────────────────────────
 
-if ($action === 'add') {
+if ($action === 'add' || $action === 'update') {
     // Ensure satusdev/monorepo-fetcher is in require
     if (!isset($composer['require']['satusdev/monorepo-fetcher'])) {
         $composer['require']['satusdev/monorepo-fetcher'] = 'dev-main';
@@ -149,7 +149,9 @@ if ($action === 'add') {
         $composer['prefer-stable'] = true;
     }
 
-    // Find or create the matching monorepo-source entry
+    // Find or create the matching monorepo-source entry.
+    // Update is intentionally idempotent: if an existing site was adopted by
+    // scan, this rewrites the expected source config before composer refreshes.
     $sources = $composer['extra']['monorepo-sources'] ?? [];
     $found = false;
 
@@ -196,8 +198,9 @@ if ($action === 'add') {
         );
     }
 
+    $backup = backupComposerState($composerJsonPath);
     writeComposer($composerJsonPath, $composer);
-    runComposer('install --no-dev --no-interaction 2>&1');
+    runComposer('update satusdev/monorepo-fetcher --no-dev --no-interaction -W', $backup);
 }
 
 // ─── Handle remove ────────────────────────────────────────────────────────────
@@ -239,8 +242,9 @@ if ($action === 'remove') {
         $composer['extra']['monorepo-sources'] = $sources;
     }
 
+    $backup = backupComposerState($composerJsonPath);
     writeComposer($composerJsonPath, $composer);
-    runComposer('install --no-dev --no-interaction 2>&1');
+    runComposer('install --no-dev --no-interaction', $backup);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -267,21 +271,52 @@ function writeComposer(string $path, array $data): void
     file_put_contents($path, $json . "\n");
 }
 
-function runComposer(string $args): void
+function backupComposerState(string $composerJsonPath): array
+{
+    $lockPath = dirname($composerJsonPath) . '/composer.lock';
+    return [
+        'json_path' => $composerJsonPath,
+        'json' => file_get_contents($composerJsonPath),
+        'lock_path' => $lockPath,
+        'lock_exists' => file_exists($lockPath),
+        'lock' => file_exists($lockPath) ? file_get_contents($lockPath) : null,
+    ];
+}
+
+function restoreComposerState(array $backup): void
+{
+    file_put_contents($backup['json_path'], $backup['json']);
+
+    if ($backup['lock_exists']) {
+        file_put_contents($backup['lock_path'], $backup['lock']);
+    } elseif (file_exists($backup['lock_path'])) {
+        unlink($backup['lock_path']);
+    }
+}
+
+function composerCommand(string $args): string
+{
+    return 'COMPOSER_ALLOW_SUPERUSER=1 COMPOSER_NO_INTERACTION=1 composer ' . $args . ' 2>&1';
+}
+
+function runComposer(string $args, ?array $backup = null): void
 {
     // Verify composer is available
-    exec('composer --version 2>&1', $verOut, $verCode);
+    exec(composerCommand('--version'), $verOut, $verCode);
     if ($verCode !== 0) {
         bail('composer binary not found in $PATH');
     }
 
-    $cmd         = 'composer ' . $args;
+    $cmd         = composerCommand($args);
     $outputLines = [];
     $exitCode    = 0;
     exec($cmd, $outputLines, $exitCode);
     $output = implode("\n", $outputLines);
 
     if ($exitCode !== 0) {
+        if ($backup !== null) {
+            restoreComposerState($backup);
+        }
         fwrite(STDERR, "ERROR: composer failed (exit {$exitCode}):\n{$output}\n");
         echo json_encode(['success' => false, 'error' => "composer failed (exit {$exitCode}): {$output}"], JSON_UNESCAPED_SLASHES);
         exit($exitCode);

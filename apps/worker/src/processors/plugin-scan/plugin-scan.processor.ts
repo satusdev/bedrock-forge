@@ -21,6 +21,20 @@ function shellQuote(value: string): string {
 	return "'" + value.replace(/'/g, "'\\''") + "'";
 }
 
+function normalizeGithubRepoUrl(
+	value: string | null | undefined,
+): string | null {
+	if (!value) return null;
+	const trimmed = value.trim();
+	const ssh = trimmed.match(/^git@github\.com:([^/]+)\/(.+?)(?:\.git)?$/i);
+	if (ssh) return `${ssh[1].toLowerCase()}/${ssh[2].toLowerCase()}`;
+	const https = trimmed.match(
+		/^https?:\/\/(?:www\.)?github\.com\/([^/]+)\/(.+?)(?:\.git)?\/?$/i,
+	);
+	if (https) return `${https[1].toLowerCase()}/${https[2].toLowerCase()}`;
+	return trimmed.replace(/\.git$/i, '').toLowerCase();
+}
+
 // concurrency=2: plugin scans are SSH+PHP — moderate I/O, two at a time is safe.
 @Processor(QUEUES.PLUGIN_SCANS, { concurrency: 2 })
 export class PluginScanProcessor extends WorkerHost {
@@ -149,6 +163,8 @@ export class PluginScanProcessor extends WorkerHost {
 				},
 			});
 
+			await this.reconcileCustomPluginCatalog(env.id, plugins);
+
 			await tracker.track({
 				step: 'Storing scan results',
 				level: 'info',
@@ -185,12 +201,53 @@ export class PluginScanProcessor extends WorkerHost {
 						completed_at: new Date(),
 					},
 				})
-				.catch(e =>
+				.catch((e) =>
 					this.logger.error(
 						`Failed to mark JobExecution ${jobExecutionId} as failed: ${e}`,
 					),
 				);
 			throw err;
+		}
+	}
+
+	private async reconcileCustomPluginCatalog(
+		environmentId: bigint,
+		plugins: PluginInfo[],
+	) {
+		const catalog = await this.prisma.customPlugin.findMany({
+			where: { type: 'plugin' },
+			select: { id: true, slug: true, repo_url: true },
+		});
+		if (catalog.length === 0 || plugins.length === 0) return;
+
+		const catalogBySlug = new Map(
+			catalog.map((plugin) => [plugin.slug, plugin]),
+		);
+		for (const plugin of plugins) {
+			if (plugin.is_mu_plugin) continue;
+			const catalogPlugin = catalogBySlug.get(plugin.slug);
+			if (!catalogPlugin) continue;
+
+			const scannedRepo = normalizeGithubRepoUrl(plugin.monorepo_repo_url);
+			const catalogRepo = normalizeGithubRepoUrl(catalogPlugin.repo_url);
+			if (scannedRepo && catalogRepo && scannedRepo !== catalogRepo) continue;
+
+			await this.prisma.environmentCustomPlugin.upsert({
+				where: {
+					environment_id_custom_plugin_id: {
+						environment_id: environmentId,
+						custom_plugin_id: catalogPlugin.id,
+					},
+				},
+				update: {
+					installed_version: plugin.version || null,
+				},
+				create: {
+					environment_id: environmentId,
+					custom_plugin_id: catalogPlugin.id,
+					installed_version: plugin.version || null,
+				},
+			});
 		}
 	}
 
@@ -200,7 +257,14 @@ export class PluginScanProcessor extends WorkerHost {
 
 	private async processManage(job: Job) {
 		const payload = job.data as PluginManagePayload;
-		const { environmentId, jobExecutionId, action, slug, version, skipSafetyBackup } = payload;
+		const {
+			environmentId,
+			jobExecutionId,
+			action,
+			slug,
+			version,
+			skipSafetyBackup,
+		} = payload;
 
 		const tracker = new StepTracker(
 			this.prisma,
@@ -255,7 +319,9 @@ export class PluginScanProcessor extends WorkerHost {
 				});
 
 				const redisUrl = this.config.get<string>('redis.url')!;
-				const backupQueue = new Queue(QUEUES.BACKUPS, { connection: { url: redisUrl } });
+				const backupQueue = new Queue(QUEUES.BACKUPS, {
+					connection: { url: redisUrl },
+				});
 				const { randomUUID } = await import('crypto');
 				const backupBullJobId = randomUUID();
 
@@ -278,14 +344,17 @@ export class PluginScanProcessor extends WorkerHost {
 
 				let attempts = 0;
 				let backupFailed = false;
-				while (attempts < 120) { // wait up to 20 minutes (10s intervals)
-					const exec = await this.prisma.jobExecution.findUnique({ where: { id: backupExec.id } });
+				while (attempts < 120) {
+					// wait up to 20 minutes (10s intervals)
+					const exec = await this.prisma.jobExecution.findUnique({
+						where: { id: backupExec.id },
+					});
 					if (exec?.status === 'completed') break;
 					if (exec?.status === 'failed') {
 						backupFailed = true;
 						throw new Error('Pre-flight backup failed: ' + exec.last_error);
 					}
-					await new Promise(r => setTimeout(r, 10000));
+					await new Promise((r) => setTimeout(r, 10000));
 					attempts++;
 				}
 				if (attempts >= 120 && !backupFailed) {
@@ -332,12 +401,16 @@ export class PluginScanProcessor extends WorkerHost {
 
 			await job.updateProgress(20);
 
-			const pkgArg = slug ? ` --package=wpackagist-plugin/${slug}` : '';
-			const versionArg = version ? ` --version=${version}` : '';
+			const pkgArg = slug
+				? ` --package=${shellQuote(`wpackagist-plugin/${slug}`)}`
+				: '';
+			const versionArg = version ? ` --version=${shellQuote(version)}` : '';
 			const constraintArg = payload.constraint
 				? ` --constraint=${shellQuote(payload.constraint)}`
 				: '';
-			const cmd = `php ${remoteScript} --docroot=${env.root_path} --action=${action}${pkgArg}${versionArg}${constraintArg}`;
+			const cmd =
+				`php ${remoteScript} --docroot=${shellQuote(env.root_path)}` +
+				` --action=${shellQuote(action)}${pkgArg}${versionArg}${constraintArg}`;
 
 			await tracker.track({
 				step: `Running composer ${action}`,

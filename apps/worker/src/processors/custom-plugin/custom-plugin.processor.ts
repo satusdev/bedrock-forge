@@ -42,13 +42,13 @@ export class CustomPluginProcessor extends WorkerHost {
 		const {
 			environmentId,
 			jobExecutionId,
-			action,
 			customPluginId,
 			slug,
 			repoUrl,
 			repoPath,
 			type,
 		} = payload;
+		const action = payload.action as 'add' | 'remove' | 'update';
 
 		const tracker = new StepTracker(
 			this.prisma,
@@ -181,7 +181,7 @@ export class CustomPluginProcessor extends WorkerHost {
 			await executor.execute(`rm -f ${remoteScript}`);
 
 			// Update EnvironmentCustomPlugin junction table
-			if (action === 'add') {
+			if (action === 'add' || action === 'update') {
 				// Fetch latest GitHub tag to record as installed_version
 				let installedVersion: string | null = null;
 				try {
@@ -290,7 +290,7 @@ export class CustomPluginProcessor extends WorkerHost {
 					where: { id: BigInt(jobExecutionId) },
 					data: { status: 'failed', last_error: msg, completed_at: new Date() },
 				})
-				.catch(e =>
+				.catch((e) =>
 					this.logger.error(
 						`Failed to mark JobExecution ${jobExecutionId} as failed: ${e}`,
 					),

@@ -119,7 +119,7 @@ if (!chdir($composerDir)) {
 }
 
 // Verify composer is available
-exec('composer --version 2>&1', $verOutput, $verCode);
+exec(composerCommand('--version'), $verOutput, $verCode);
 if ($verCode !== 0) {
     bail('composer binary not found in $PATH');
 }
@@ -141,6 +141,7 @@ if ($action === 'add') {
 
 } elseif ($action === 'change-constraint') {
     // Read, modify the constraint for the package, write back, then composer update
+    $backup = backupComposerState($composerJson);
     $content = file_get_contents($composerJson);
     $data    = @json_decode($content, true);
     if (!is_array($data)) {
@@ -156,7 +157,7 @@ if ($action === 'add') {
     );
     file_put_contents($composerJson, $newContent . "\n");
     // Run composer update for the specific package to resolve and install the new constraint
-    runComposer('update ' . escapeshellarg($package) . ' --no-interaction --no-dev');
+    runComposer('update ' . escapeshellarg($package) . ' --no-interaction --no-dev', $backup);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -174,9 +175,37 @@ function locateComposerJson(string $docroot): ?string
     return null;
 }
 
-function runComposer(string $args): void
+function backupComposerState(string $composerJsonPath): array
 {
-    $cmd         = "composer {$args} 2>&1";
+    $lockPath = dirname($composerJsonPath) . '/composer.lock';
+    return [
+        'json_path' => $composerJsonPath,
+        'json' => file_get_contents($composerJsonPath),
+        'lock_path' => $lockPath,
+        'lock_exists' => file_exists($lockPath),
+        'lock' => file_exists($lockPath) ? file_get_contents($lockPath) : null,
+    ];
+}
+
+function restoreComposerState(array $backup): void
+{
+    file_put_contents($backup['json_path'], $backup['json']);
+
+    if ($backup['lock_exists']) {
+        file_put_contents($backup['lock_path'], $backup['lock']);
+    } elseif (file_exists($backup['lock_path'])) {
+        unlink($backup['lock_path']);
+    }
+}
+
+function composerCommand(string $args): string
+{
+    return 'COMPOSER_ALLOW_SUPERUSER=1 COMPOSER_NO_INTERACTION=1 composer ' . $args . ' 2>&1';
+}
+
+function runComposer(string $args, ?array $backup = null): void
+{
+    $cmd         = composerCommand($args);
     $outputLines = [];
     $exitCode    = 0;
 
@@ -184,6 +213,9 @@ function runComposer(string $args): void
     $output = implode("\n", $outputLines);
 
     if ($exitCode !== 0) {
+        if ($backup !== null) {
+            restoreComposerState($backup);
+        }
         fwrite(STDERR, "composer failed (exit {$exitCode}):\n{$output}\n");
         exit($exitCode);
     }

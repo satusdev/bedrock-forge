@@ -15,6 +15,11 @@ import {
 } from '@bedrock-forge/shared';
 import { ConfigService } from '@nestjs/config';
 
+/** Wrap a string in single quotes for safe shell embedding on the remote host. */
+function shellQuote(value: string): string {
+	return "'" + value.replace(/'/g, "'\\''") + "'";
+}
+
 @Processor(QUEUES.PLUGIN_UPDATES, { concurrency: 1 })
 export class PluginUpdateProcessor extends WorkerHost {
 	private readonly logger = new Logger(PluginUpdateProcessor.name);
@@ -217,7 +222,9 @@ export class PluginUpdateProcessor extends WorkerHost {
 				detail: `docroot=${env.root_path}`,
 			});
 
-			const composerCmd = `php ${remoteScript} --action=update-all --docroot=${env.root_path}`;
+			const composerCmd =
+				`php ${remoteScript} --action=update-all` +
+				` --docroot=${shellQuote(env.root_path)}`;
 			const composerStart = Date.now();
 			const result = await executor.execute(
 				composerCmd,

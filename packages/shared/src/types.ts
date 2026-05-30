@@ -237,7 +237,7 @@ export interface JobLogEvent {
 export const CustomPluginManagePayloadSchema = z.object({
 	environmentId: z.number().int().positive(),
 	jobExecutionId: z.number().int().positive(),
-	action: z.enum(['add', 'remove']),
+	action: z.enum(['add', 'remove', 'update']),
 	customPluginId: z.number().int().positive(),
 	slug: z.string().regex(/^[a-z0-9_-]+$/),
 	repoUrl: z.string().min(1),
