@@ -28,6 +28,21 @@ export class CustomPluginsController {
 		return this.svc.findAll();
 	}
 
+	@Get(':id/inventory')
+	getInventory(@Param('id', ParseIntPipe) id: number) {
+		return this.svc.getInventory(id);
+	}
+
+	@Post(':id/check-versions')
+	checkVersions(@Param('id', ParseIntPipe) id: number) {
+		return this.svc.checkVersions(id);
+	}
+
+	@Post(':id/update-installed')
+	updateInstalled(@Param('id', ParseIntPipe) id: number) {
+		return this.svc.updateInstalled(id);
+	}
+
 	@Get(':id')
 	findOne(@Param('id', ParseIntPipe) id: number) {
 		return this.svc.findById(id);

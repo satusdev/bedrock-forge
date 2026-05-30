@@ -39,12 +39,23 @@ export class PluginScansController {
 		return this.svc.enqueueScan(envId);
 	}
 
+	@Post('bulk/scan')
+	enqueueBulkScan() {
+		return this.svc.enqueueBulkScan();
+	}
+
 	@Post('environment/:envId/plugins')
 	addPlugin(
 		@Param('envId', ParseIntPipe) envId: number,
 		@Body() dto: PluginManageDto,
 	) {
-		return this.svc.enqueuePluginManage(envId, 'add', dto.slug, dto.version, dto.skipSafetyBackup);
+		return this.svc.enqueuePluginManage(
+			envId,
+			'add',
+			dto.slug,
+			dto.version,
+			dto.skipSafetyBackup,
+		);
 	}
 
 	@Delete('environment/:envId/plugins/:slug')
@@ -53,7 +64,13 @@ export class PluginScansController {
 		@Param('slug') slug: string,
 		@Query('skipSafetyBackup') skipSafetyBackup?: string,
 	) {
-		return this.svc.enqueuePluginManage(envId, 'remove', slug, undefined, skipSafetyBackup === 'true');
+		return this.svc.enqueuePluginManage(
+			envId,
+			'remove',
+			slug,
+			undefined,
+			skipSafetyBackup === 'true',
+		);
 	}
 
 	@Put('environment/:envId/plugins/:slug')
@@ -62,7 +79,13 @@ export class PluginScansController {
 		@Param('slug') slug: string,
 		@Body() dto: Partial<PluginManageDto>,
 	) {
-		return this.svc.enqueuePluginManage(envId, 'update', slug, dto.version, dto.skipSafetyBackup);
+		return this.svc.enqueuePluginManage(
+			envId,
+			'update',
+			slug,
+			dto.version,
+			dto.skipSafetyBackup,
+		);
 	}
 
 	@Put('environment/:envId/plugins')
@@ -70,7 +93,13 @@ export class PluginScansController {
 		@Param('envId', ParseIntPipe) envId: number,
 		@Body() dto: UpdateAllPluginsDto,
 	) {
-		return this.svc.enqueuePluginManage(envId, 'update-all', undefined, undefined, dto.skipSafetyBackup);
+		return this.svc.enqueuePluginManage(
+			envId,
+			'update-all',
+			undefined,
+			undefined,
+			dto.skipSafetyBackup,
+		);
 	}
 
 	/** Change the composer version constraint for a specific plugin */

@@ -41,6 +41,18 @@ export class PluginScansService {
 		return { jobExecutionId: Number(exec.id), bullJobId: job.id };
 	}
 
+	async enqueueBulkScan() {
+		const environments = await this.repo.findAllEnvironmentIds();
+		const queued = [];
+		for (const environment of environments) {
+			queued.push(await this.enqueueScan(Number(environment.id)));
+		}
+		return {
+			count: queued.length,
+			jobs: queued,
+		};
+	}
+
 	async enqueuePluginManage(
 		environmentId: number,
 		action: 'add' | 'remove' | 'update' | 'update-all',
@@ -57,7 +69,14 @@ export class PluginScansService {
 		});
 		const job = await this.queue.add(
 			JOB_TYPES.PLUGIN_MANAGE,
-			{ environmentId, jobExecutionId: Number(exec.id), action, slug, version, skipSafetyBackup: skipSafetyBackup ?? false },
+			{
+				environmentId,
+				jobExecutionId: Number(exec.id),
+				action,
+				slug,
+				version,
+				skipSafetyBackup: skipSafetyBackup ?? false,
+			},
 			{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
 		);
 		return { jobExecutionId: Number(exec.id), bullJobId: job.id };
@@ -118,7 +137,7 @@ export class PluginScansService {
 	async enqueueCustomPluginManage(
 		environmentId: number,
 		customPluginId: number,
-		action: 'add' | 'remove',
+		action: 'add' | 'remove' | 'update',
 	) {
 		const plugin = await this.repo.findCustomPlugin(BigInt(customPluginId));
 		if (!plugin) {
@@ -157,7 +176,7 @@ export class PluginScansService {
 		);
 
 		const results = await Promise.all(
-			installed.map(async entry => {
+			installed.map(async (entry) => {
 				const latestVersion = await this.github.getLatestTag(
 					entry.custom_plugin.repo_url,
 				);

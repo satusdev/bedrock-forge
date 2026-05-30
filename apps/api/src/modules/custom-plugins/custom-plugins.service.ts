@@ -3,6 +3,10 @@ import {
 	NotFoundException,
 	ConflictException,
 } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import { randomUUID } from 'crypto';
+import { DEFAULT_JOB_OPTIONS, JOB_TYPES, QUEUES } from '@bedrock-forge/shared';
 import { CustomPluginsRepository } from './custom-plugins.repository';
 import { GithubService } from './github.service';
 import { CreateCustomPluginDto } from './dto/create-custom-plugin.dto';
@@ -13,10 +17,21 @@ export class CustomPluginsService {
 	constructor(
 		private readonly repo: CustomPluginsRepository,
 		private readonly github: GithubService,
+		@InjectQueue(QUEUES.CUSTOM_PLUGINS)
+		private readonly customQueue: Queue,
 	) {}
 
-	findAll() {
-		return this.repo.findAll();
+	async findAll() {
+		const plugins = await this.repo.findAll();
+		return Promise.all(
+			plugins.map(async (plugin) => {
+				const inventory = await this.buildInventory(plugin);
+				return {
+					...plugin,
+					inventory_summary: inventory.summary,
+				};
+			}),
+		);
 	}
 
 	async findById(id: number) {
@@ -47,5 +62,149 @@ export class CustomPluginsService {
 
 	async getLatestTag(repoUrl: string): Promise<string | null> {
 		return this.github.getLatestTag(repoUrl);
+	}
+
+	async getInventory(id: number) {
+		const plugin = await this.findById(id);
+		return this.buildInventory(plugin);
+	}
+
+	private async buildInventory(plugin: {
+		id: bigint;
+		slug: string;
+		repo_url?: string;
+	}) {
+		const rows = await this.repo.findInventoryData(plugin.id);
+		const inventory = rows.map((env) => {
+			const latestScan = env.plugin_scans[0] ?? null;
+			const scanPlugin = this.findPluginInScan(
+				latestScan?.plugins,
+				plugin.slug,
+			);
+			const install = env.custom_plugins[0] ?? null;
+			const scannedVersion = scanPlugin?.version ?? null;
+			const installedVersion = install?.installed_version ?? scannedVersion;
+			const latestVersion = install?.latest_version ?? null;
+			const outdated =
+				installedVersion != null &&
+				latestVersion != null &&
+				installedVersion !== latestVersion;
+
+			return {
+				environment: {
+					id: Number(env.id),
+					type: env.type,
+					url: env.url,
+					project: {
+						id: Number(env.project.id),
+						name: env.project.name,
+						client: {
+							id: Number(env.project.client.id),
+							name: env.project.client.name,
+						},
+					},
+					server: {
+						id: Number(env.server.id),
+						name: env.server.name,
+						ip_address: env.server.ip_address,
+					},
+				},
+				status: install ? 'installed' : scanPlugin ? 'detected' : 'absent',
+				installed: !!install,
+				detected: !!scanPlugin,
+				scanned_version: scannedVersion,
+				installed_version: installedVersion,
+				latest_version: latestVersion,
+				outdated,
+				last_scanned_at: latestScan?.scanned_at ?? null,
+				version_checked_at: install?.version_checked_at ?? null,
+			};
+		});
+
+		return {
+			plugin,
+			inventory,
+			summary: {
+				environments: inventory.length,
+				installed: inventory.filter((row) => row.installed).length,
+				detected: inventory.filter((row) => row.detected).length,
+				outdated: inventory.filter((row) => row.outdated).length,
+				not_scanned: inventory.filter((row) => row.last_scanned_at == null)
+					.length,
+			},
+		};
+	}
+
+	async checkVersions(id: number) {
+		const plugin = await this.findById(id);
+		const latestVersion = await this.github.getLatestTag(plugin.repo_url);
+		const result = await this.repo.updateLatestVersionForInstallations(
+			BigInt(id),
+			latestVersion,
+		);
+		return {
+			latest_version: latestVersion,
+			updated: result.count,
+		};
+	}
+
+	async updateInstalled(id: number) {
+		const plugin = await this.findById(id);
+		const installations = await this.repo.listInstallations(BigInt(id));
+		const jobs = [];
+
+		for (const install of installations) {
+			const bullJobId = randomUUID();
+			const exec = await this.repo.createJobExecution({
+				environment_id: install.environment_id,
+				queue_name: QUEUES.CUSTOM_PLUGINS,
+				job_type: JOB_TYPES.CUSTOM_PLUGIN_MANAGE,
+				bull_job_id: bullJobId,
+				payload: {
+					environmentId: Number(install.environment_id),
+					customPluginId: id,
+					action: 'update',
+				} as Record<string, string | number>,
+			});
+			const job = await this.customQueue.add(
+				JOB_TYPES.CUSTOM_PLUGIN_MANAGE,
+				{
+					environmentId: Number(install.environment_id),
+					jobExecutionId: Number(exec.id),
+					action: 'update',
+					customPluginId: id,
+					slug: plugin.slug,
+					repoUrl: plugin.repo_url,
+					repoPath: plugin.repo_path,
+					type: plugin.type,
+				},
+				{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
+			);
+			jobs.push({
+				environmentId: Number(install.environment_id),
+				jobExecutionId: Number(exec.id),
+				bullJobId: job.id,
+			});
+		}
+
+		return { count: jobs.length, jobs };
+	}
+
+	private findPluginInScan(scanPayload: unknown, slug: string) {
+		const plugins = Array.isArray(scanPayload)
+			? scanPayload
+			: Array.isArray((scanPayload as { plugins?: unknown[] } | null)?.plugins)
+				? (scanPayload as { plugins: unknown[] }).plugins
+				: [];
+		return plugins.find(
+			(plugin) =>
+				typeof plugin === 'object' &&
+				plugin !== null &&
+				(plugin as { slug?: unknown }).slug === slug,
+		) as
+			| {
+					version?: string | null;
+			  }
+			| undefined;
 	}
 }

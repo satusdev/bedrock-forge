@@ -22,6 +22,13 @@ export class PluginScansRepository {
 			.then(([items, total]) => ({ items, total, page, limit }));
 	}
 
+	findAllEnvironmentIds() {
+		return this.prisma.environment.findMany({
+			select: { id: true },
+			orderBy: { created_at: 'asc' },
+		});
+	}
+
 	createJobExecution(data: {
 		environment_id: bigint;
 		queue_name: string;
