@@ -19,7 +19,7 @@ export class CreateChannelDto {
 
 	@IsOptional()
 	@IsString()
-	@IsIn(['slack'])
+	@IsIn(['slack', 'google_chat'])
 	type?: string;
 
 	@IsOptional()
@@ -31,6 +31,11 @@ export class CreateChannelDto {
 	@IsString()
 	@MaxLength(100)
 	slack_channel_id?: string;
+
+	@IsOptional()
+	@IsString()
+	@MaxLength(2000)
+	google_chat_webhook_url?: string;
 
 	@IsArray()
 	@IsString({ each: true })

@@ -20,6 +20,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from '@/components/ui/select';
 
 import { Separator } from '@/components/ui/separator';
 import { AlertDialog } from '@/components/ui/alert-dialog';
@@ -84,9 +91,10 @@ const ALL_EVENTS = Object.values(EVENT_GROUPS).flat();
 interface NotificationChannel {
 	id: number;
 	name: string;
-	type: string;
+	type: 'slack' | 'google_chat';
 	slack_channel_id: string | null;
 	has_token: boolean;
+	has_webhook: boolean;
 	events: string[];
 	active: boolean;
 	created_at: string;
@@ -105,10 +113,20 @@ interface NotificationLog {
 
 const channelSchema = z.object({
 	name: z.string().min(1, 'Required').max(100),
+	type: z.enum(['google_chat', 'slack']),
 	slack_bot_token: z.string().optional().or(z.literal('')),
 	slack_channel_id: z.string().max(100).optional().or(z.literal('')),
+	google_chat_webhook_url: z.string().max(2000).optional().or(z.literal('')),
 	events: z.array(z.string()).min(1, 'Pick at least one event'),
 	active: z.boolean().default(true),
+}).superRefine((data, ctx) => {
+	if (data.type === 'slack' && !data.slack_channel_id) {
+		ctx.addIssue({
+			code: z.ZodIssueCode.custom,
+			path: ['slack_channel_id'],
+			message: 'Slack channel ID is required',
+		});
+	}
 });
 type ChannelForm = z.infer<typeof channelSchema>;
 
@@ -135,14 +153,17 @@ function ChannelFormDialog({
 		resolver: zodResolver(channelSchema),
 		defaultValues: {
 			name: initial?.name ?? '',
+			type: initial?.type ?? 'google_chat',
 			slack_bot_token: '',
 			slack_channel_id: initial?.slack_channel_id ?? '',
+			google_chat_webhook_url: '',
 			events: initial?.events ?? [],
 			active: initial?.active ?? true,
 		},
 	});
 
 	const selectedEvents = watch('events');
+	const selectedType = watch('type');
 
 	function toggleEvent(ev: string) {
 		const cur = selectedEvents ?? [];
@@ -174,10 +195,32 @@ function ChannelFormDialog({
 
 	async function onSubmit(data: ChannelForm) {
 		try {
+			if (
+				data.type === 'google_chat' &&
+				!data.google_chat_webhook_url &&
+				(!initial || !initial.has_webhook || initial.type !== 'google_chat')
+			) {
+				setError('google_chat_webhook_url', {
+					message: 'Google Chat webhook URL is required',
+				});
+				return;
+			}
+			if (
+				data.type === 'slack' &&
+				!data.slack_bot_token &&
+				(!initial || !initial.has_token || initial.type !== 'slack')
+			) {
+				setError('slack_bot_token', {
+					message: 'Slack bot token is required',
+				});
+				return;
+			}
+
 			const payload: Record<string, unknown> = {
 				name: data.name,
-				type: 'slack',
+				type: data.type,
 				slack_channel_id: data.slack_channel_id || undefined,
+				google_chat_webhook_url: data.google_chat_webhook_url || undefined,
 				events: data.events,
 				active: data.active,
 			};
@@ -205,10 +248,30 @@ function ChannelFormDialog({
 			<DialogContent className='sm:max-w-lg max-h-[90vh] overflow-y-auto'>
 				<DialogHeader>
 					<DialogTitle>
-						{initial ? 'Edit Channel' : 'New Slack Channel'}
+						{initial ? 'Edit Channel' : 'New Messaging Channel'}
 					</DialogTitle>
 				</DialogHeader>
 				<form onSubmit={handleSubmit(onSubmit)} className='space-y-4'>
+					<div className='space-y-1'>
+						<Label>Provider *</Label>
+						<Select
+							value={selectedType}
+							onValueChange={v =>
+								setValue('type', v as ChannelForm['type'], {
+									shouldValidate: true,
+								})
+							}
+						>
+							<SelectTrigger>
+								<SelectValue placeholder='Select provider' />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value='google_chat'>Google Chat</SelectItem>
+								<SelectItem value='slack'>Slack</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
+
 					<div className='space-y-1'>
 						<Label htmlFor='nc-name'>Channel Name *</Label>
 						<Input
@@ -221,28 +284,61 @@ function ChannelFormDialog({
 						)}
 					</div>
 
-					<div className='space-y-1'>
-						<Label htmlFor='nc-token'>
-							Bot Token{' '}
-							{initial?.has_token ? '(leave blank to keep existing)' : '*'}
-						</Label>
-						<Input
-							id='nc-token'
-							type='password'
-							{...register('slack_bot_token')}
-							placeholder='xoxb-••••••••••••••••••••••••'
-							autoComplete='off'
-						/>
-					</div>
+					{selectedType === 'google_chat' ? (
+						<div className='space-y-1'>
+							<Label htmlFor='nc-google-chat-webhook'>
+								Google Chat Webhook URL{' '}
+								{initial?.has_webhook ? '(leave blank to keep existing)' : '*'}
+							</Label>
+							<Input
+								id='nc-google-chat-webhook'
+								type='password'
+								{...register('google_chat_webhook_url')}
+								placeholder='https://chat.googleapis.com/v1/spaces/...'
+								autoComplete='off'
+							/>
+							{errors.google_chat_webhook_url && (
+								<p className='text-xs text-destructive'>
+									{errors.google_chat_webhook_url.message}
+								</p>
+							)}
+						</div>
+					) : (
+						<>
+							<div className='space-y-1'>
+								<Label htmlFor='nc-token'>
+									Bot Token{' '}
+									{initial?.has_token ? '(leave blank to keep existing)' : '*'}
+								</Label>
+								<Input
+									id='nc-token'
+									type='password'
+									{...register('slack_bot_token')}
+									placeholder='xoxb-••••••••••••••••••••••••'
+									autoComplete='off'
+								/>
+								{errors.slack_bot_token && (
+									<p className='text-xs text-destructive'>
+										{errors.slack_bot_token.message}
+									</p>
+								)}
+							</div>
 
-					<div className='space-y-1'>
-						<Label htmlFor='nc-channel'>Slack Channel ID</Label>
-						<Input
-							id='nc-channel'
-							{...register('slack_channel_id')}
-							placeholder='C0XXXXXXXXX'
-						/>
-					</div>
+							<div className='space-y-1'>
+								<Label htmlFor='nc-channel'>Slack Channel ID *</Label>
+								<Input
+									id='nc-channel'
+									{...register('slack_channel_id')}
+									placeholder='C0XXXXXXXXX'
+								/>
+								{errors.slack_channel_id && (
+									<p className='text-xs text-destructive'>
+										{errors.slack_channel_id.message}
+									</p>
+								)}
+							</div>
+						</>
+					)}
 
 					<div className='space-y-2'>
 						<div className='flex items-center justify-between'>
@@ -411,22 +507,32 @@ export function NotificationsPage() {
 			header: 'Type',
 			render: c => (
 				<Badge variant='secondary' className='capitalize'>
-					{c.type}
+					{c.type === 'google_chat' ? 'Google Chat' : 'Slack'}
 				</Badge>
 			),
 		},
 		{
-			header: 'Channel ID',
+			header: 'Destination',
 			render: c => (
 				<span className='font-mono text-xs text-muted-foreground'>
-					{c.slack_channel_id ?? '—'}
+					{c.type === 'google_chat'
+						? c.has_webhook
+							? 'Webhook configured'
+							: '—'
+						: c.slack_channel_id ?? '—'}
 				</span>
 			),
 		},
 		{
-			header: 'Token',
+			header: 'Credentials',
 			render: c =>
-				c.has_token ? (
+				c.type === 'google_chat' ? (
+					c.has_webhook ? (
+						<CheckCircle2 className='h-4 w-4 text-green-500' />
+					) : (
+						<XCircle className='h-4 w-4 text-muted-foreground' />
+					)
+				) : c.has_token ? (
 					<CheckCircle2 className='h-4 w-4 text-green-500' />
 				) : (
 					<XCircle className='h-4 w-4 text-muted-foreground' />

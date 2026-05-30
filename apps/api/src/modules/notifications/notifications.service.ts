@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+	BadRequestException,
+	Injectable,
+	NotFoundException,
+} from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { NotificationsRepository } from './notifications.repository';
@@ -34,15 +38,21 @@ export class NotificationsService {
 	}
 
 	async createChannel(dto: CreateChannelDto) {
-		const enc = dto.slack_bot_token
+		this.validateCreateChannelConfig(dto.type ?? 'slack', dto);
+
+		const slackTokenEnc = dto.slack_bot_token
 			? this.encryption.encrypt(dto.slack_bot_token)
+			: null;
+		const googleChatWebhookEnc = dto.google_chat_webhook_url
+			? this.encryption.encrypt(dto.google_chat_webhook_url)
 			: null;
 
 		const ch = await this.repo.createChannel({
 			name: dto.name,
 			type: dto.type ?? 'slack',
-			slack_bot_token_enc: enc,
+			slack_bot_token_enc: slackTokenEnc,
 			slack_channel_id: dto.slack_channel_id ?? null,
+			google_chat_webhook_url_enc: googleChatWebhookEnc,
 			events: dto.events,
 			active: dto.active ?? true,
 		});
@@ -51,13 +61,20 @@ export class NotificationsService {
 	}
 
 	async updateChannel(id: number, dto: UpdateChannelDto) {
-		await this.findChannelById(id);
+		const existing = await this.repo.findChannelById(id);
+		if (!existing)
+			throw new NotFoundException(`Notification channel #${id} not found`);
 
 		const updateData: Parameters<typeof this.repo.updateChannel>[1] = {};
 		if (dto.name !== undefined) updateData.name = dto.name;
 		if (dto.type !== undefined) updateData.type = dto.type;
 		if (dto.slack_channel_id !== undefined)
 			updateData.slack_channel_id = dto.slack_channel_id;
+		if (dto.google_chat_webhook_url !== undefined) {
+			updateData.google_chat_webhook_url_enc = dto.google_chat_webhook_url
+				? this.encryption.encrypt(dto.google_chat_webhook_url)
+				: null;
+		}
 		if (dto.events !== undefined) updateData.events = dto.events;
 		if (dto.active !== undefined) updateData.active = dto.active;
 		if (dto.slack_bot_token !== undefined) {
@@ -65,6 +82,24 @@ export class NotificationsService {
 				? this.encryption.encrypt(dto.slack_bot_token)
 				: null;
 		}
+
+		this.validateStoredChannelConfig({
+			type: updateData.type ?? existing.type,
+			active:
+				updateData.active !== undefined ? updateData.active : existing.active,
+			slack_bot_token_enc:
+				updateData.slack_bot_token_enc !== undefined
+					? updateData.slack_bot_token_enc
+					: existing.slack_bot_token_enc,
+			slack_channel_id:
+				updateData.slack_channel_id !== undefined
+					? updateData.slack_channel_id
+					: existing.slack_channel_id,
+			google_chat_webhook_url_enc:
+				updateData.google_chat_webhook_url_enc !== undefined
+					? updateData.google_chat_webhook_url_enc
+					: existing.google_chat_webhook_url_enc,
+		});
 
 		const ch = await this.repo.updateChannel(id, updateData);
 		return this.sanitise(ch);
@@ -78,7 +113,7 @@ export class NotificationsService {
 	/* ── Dispatch ─────────────────────────────────────────────────────────── */
 
 	/**
-	 * Enqueue a notification job. The worker processes it and calls Slack.
+	 * Enqueue a notification job. The worker processes it and calls providers.
 	 * Fire-and-forget — never awaited in the hot path.
 	 */
 	dispatch(
@@ -98,23 +133,47 @@ export class NotificationsService {
 
 	/* ── Test ─────────────────────────────────────────────────────────────── */
 
-	async testChannel(id: number): Promise<{ ok: boolean; error?: string }> {
+	async testChannel(
+		id: number,
+	): Promise<{ ok: boolean; error?: string; message?: string }> {
 		const ch = await this.repo.findChannelById(id);
 		if (!ch)
 			throw new NotFoundException(`Notification channel #${id} not found`);
 
 		try {
-			const { WebClient } = await import('@slack/web-api');
-			if (!ch.slack_bot_token_enc || !ch.slack_channel_id) {
-				return { ok: false, error: 'Missing bot token or channel ID' };
-			}
+			if (ch.type === 'google_chat') {
+				if (!ch.google_chat_webhook_url_enc) {
+					return {
+						ok: false,
+						error: 'Missing Google Chat webhook URL',
+						message: 'Missing Google Chat webhook URL',
+					};
+				}
 
-			const token = this.encryption.decrypt(ch.slack_bot_token_enc);
-			const slack = new WebClient(token);
-			await slack.chat.postMessage({
-				channel: ch.slack_channel_id,
-				text: `✅ Bedrock Forge — test notification from channel *${ch.name}*`,
-			});
+				const webhookUrl = this.encryption.decrypt(
+					ch.google_chat_webhook_url_enc,
+				);
+				await this.postGoogleChatMessage(
+					webhookUrl,
+					`Bedrock Forge - test notification from channel ${ch.name}`,
+				);
+			} else {
+				const { WebClient } = await import('@slack/web-api');
+				if (!ch.slack_bot_token_enc || !ch.slack_channel_id) {
+					return {
+						ok: false,
+						error: 'Missing bot token or channel ID',
+						message: 'Missing bot token or channel ID',
+					};
+				}
+
+				const token = this.encryption.decrypt(ch.slack_bot_token_enc);
+				const slack = new WebClient(token);
+				await slack.chat.postMessage({
+					channel: ch.slack_channel_id,
+					text: `Bedrock Forge - test notification from channel *${ch.name}*`,
+				});
+			}
 
 			await this.repo.createLog({
 				channel_id: Number(ch.id),
@@ -136,7 +195,7 @@ export class NotificationsService {
 				status: 'failed',
 				error: msg,
 			});
-			return { ok: false, error: msg };
+			return { ok: false, error: msg, message: msg };
 		}
 	}
 
@@ -154,6 +213,7 @@ export class NotificationsService {
 		type: string;
 		slack_bot_token_enc: string | null;
 		slack_channel_id: string | null;
+		google_chat_webhook_url_enc: string | null;
 		events: string[];
 		active: boolean;
 		created_at: Date;
@@ -164,12 +224,72 @@ export class NotificationsService {
 			name: ch.name,
 			type: ch.type,
 			has_token: !!ch.slack_bot_token_enc,
+			has_webhook: !!ch.google_chat_webhook_url_enc,
+			google_chat_configured: !!ch.google_chat_webhook_url_enc,
 			slack_channel_id: ch.slack_channel_id,
 			events: ch.events,
 			active: ch.active,
 			created_at: ch.created_at,
 			updated_at: ch.updated_at,
 		};
+	}
+
+	private validateCreateChannelConfig(
+		type: string,
+		dto: CreateChannelDto,
+	) {
+		if (type === 'slack') {
+			if (!dto.slack_bot_token || !dto.slack_channel_id)
+				throw new BadRequestException(
+					'Slack bot token and channel ID are required',
+				);
+			return;
+		}
+
+		if (type === 'google_chat') {
+			if (!dto.google_chat_webhook_url)
+				throw new BadRequestException('Google Chat webhook URL is required');
+			return;
+		}
+
+		throw new BadRequestException(
+			`Unsupported notification channel type: ${type}`,
+		);
+	}
+
+	private validateStoredChannelConfig(ch: {
+		type: string;
+		active: boolean;
+		slack_bot_token_enc: string | null;
+		slack_channel_id: string | null;
+		google_chat_webhook_url_enc: string | null;
+	}) {
+		if (!ch.active) return;
+
+		if (ch.type === 'google_chat' && !ch.google_chat_webhook_url_enc) {
+			throw new BadRequestException('Google Chat webhook URL is required');
+		}
+		if (
+			ch.type === 'slack' &&
+			(!ch.slack_bot_token_enc || !ch.slack_channel_id)
+		) {
+			throw new BadRequestException(
+				'Slack bot token and channel ID are required',
+			);
+		}
+	}
+
+	private async postGoogleChatMessage(webhookUrl: string, text: string) {
+		const res = await fetch(webhookUrl, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ text }),
+		});
+
+		if (!res.ok) {
+			const body = await res.text().catch(() => '');
+			throw new Error(`Google Chat returned ${res.status}: ${body}`);
+		}
 	}
 
 	/* ── Inbox ─────────────────────────────────────────────────────────── */

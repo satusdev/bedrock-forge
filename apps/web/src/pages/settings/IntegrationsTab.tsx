@@ -1,29 +1,26 @@
-import React, { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import {
 	Cloud,
 	CloudOff,
 	ShieldCheck,
 	Loader2,
-	MessageSquare,
-	Bell,
 	Trash2,
 	Check,
-	Activity,
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { AlertDialog } from '@/components/ui/alert-dialog';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { NotificationsPage } from '@/pages/NotificationsPage';
 import { GdriveStatus } from './types';
 
 export function IntegrationsTab() {
-	const qc = useQueryClient();
 	const [gdriveToken, setGdriveToken] = useState('');
 	const [gdriveTestResult, setGdriveTestResult] = useState<{
 		success: boolean;
@@ -34,11 +31,6 @@ export function IntegrationsTab() {
 	const { data: gdriveStatus, refetch: refetchGdrive } = useQuery({
 		queryKey: ['gdrive-status'],
 		queryFn: () => api.get<GdriveStatus>('/settings/gdrive'),
-	});
-
-	const { data: settings } = useQuery({
-		queryKey: ['settings'],
-		queryFn: () => api.get<Record<string, string>>('/settings'),
 	});
 
 	const saveGdrive = useMutation({
@@ -88,28 +80,6 @@ export function IntegrationsTab() {
 			toast({ title: 'Failed to remove credentials', variant: 'destructive' }),
 	});
 
-	const saveSetting = useMutation({
-		mutationFn: ({ key, value }: { key: string; value: string }) =>
-			api.put(`/settings/${key}`, { value }),
-		onSuccess: () => {
-			qc.invalidateQueries({ queryKey: ['settings'] });
-			toast({ title: 'Setting saved' });
-		},
-		onError: () => toast({ title: 'Save failed', variant: 'destructive' }),
-	});
-
-	const testWebhook = useMutation({
-		mutationFn: ({ type, url }: { type: 'slack' | 'discord'; url: string }) =>
-			api.post('/settings/test-webhook', { type, url }),
-		onSuccess: () => toast({ title: 'Test notification sent' }),
-		onError: (err: any) =>
-			toast({
-				title: 'Test failed',
-				description: err?.message ?? 'Could not send test notification.',
-				variant: 'destructive',
-			}),
-	});
-
 	async function handleSaveAndTest() {
 		if (!gdriveToken.trim()) return;
 		await saveGdrive.mutateAsync(gdriveToken.trim());
@@ -118,7 +88,17 @@ export function IntegrationsTab() {
 
 	return (
 		<div className='space-y-6 max-w-4xl'>
-			{/* Storage Integrations */}
+			<Tabs defaultValue='messaging'>
+				<TabsList className='mb-4'>
+					<TabsTrigger value='messaging'>Messaging</TabsTrigger>
+					<TabsTrigger value='storage'>Storage</TabsTrigger>
+				</TabsList>
+
+				<TabsContent value='messaging'>
+					<NotificationsPage />
+				</TabsContent>
+
+				<TabsContent value='storage'>
 			<Card className='overflow-hidden border-blue-100 dark:border-blue-900/30'>
 				<CardHeader className='bg-blue-50/50 dark:bg-blue-950/20 pb-4'>
 					<div className='flex items-center gap-3'>
@@ -287,119 +267,8 @@ export function IntegrationsTab() {
 					</div>
 				</CardContent>
 			</Card>
-
-			{/* Notification Integrations */}
-			<Card className='overflow-hidden border-purple-100 dark:border-purple-900/30'>
-				<CardHeader className='bg-purple-50/50 dark:bg-purple-950/20 pb-4'>
-					<div className='flex items-center gap-3'>
-						<div className='p-2 bg-purple-100 dark:bg-purple-900/30 rounded-lg'>
-							<Bell className='h-5 w-5 text-purple-600 dark:purple-400' />
-						</div>
-						<div>
-							<CardTitle className='text-lg'>Notification Channels</CardTitle>
-							<CardDescription>Stay updated with real-time alerts via your favorite apps.</CardDescription>
-						</div>
-					</div>
-				</CardHeader>
-				<CardContent className='pt-6 space-y-8'>
-					{/* Slack */}
-					<div className='space-y-4'>
-						<div className='flex items-center gap-4'>
-							<div className='h-12 w-12 rounded-xl bg-[#4A154B] flex items-center justify-center border shadow-sm shrink-0'>
-								<svg viewBox='0 0 100 100' className='h-6 w-6'>
-									<path d='M20 55a10 10 0 1 1-10-10h10v10zm5 0a10 10 0 1 1 10 10H25V55zm0-25a10 10 0 1 1 10-10v10H25zm20 5a10 10 0 1 1 10 10H45V35zm0-25a10 10 0 1 1 10-10v10H45zm25 0a10 10 0 1 1 10 10H70V10zm0 25a10 10 0 1 1 10 10V35H70zm-20 45a10 10 0 1 1-10-10h10v10zm-5-25a10 10 0 1 1-10-10v10h10zm25 5a10 10 0 1 1-10 10V60h10z' fill='white'/>
-								</svg>
-							</div>
-							<div className='flex-1'>
-								<p className='text-sm font-bold'>Slack Webhook</p>
-								<p className='text-xs text-muted-foreground'>
-									Send uptime alerts and system notifications to a Slack channel.
-								</p>
-							</div>
-						</div>
-						<div className='flex gap-3 pl-16'>
-							<div className='flex-1 relative group'>
-								<Input
-									placeholder='https://hooks.slack.com/services/...'
-									className='font-mono text-xs pr-10 bg-muted/20 focus:bg-background transition-all'
-									defaultValue={settings?.slack_webhook_url}
-									onBlur={e => {
-										const val = e.target.value.trim();
-										if (val !== settings?.slack_webhook_url) {
-											saveSetting.mutate({ key: 'slack_webhook_url', value: val });
-										}
-									}}
-								/>
-								<div className='absolute right-3 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity'>
-									<MessageSquare className='h-3.5 w-3.5 text-muted-foreground' />
-								</div>
-							</div>
-							<Button 
-								variant='outline' 
-								size='sm' 
-								className='px-4 transition-all active:scale-95'
-								disabled={!settings?.slack_webhook_url || testWebhook.isPending}
-								onClick={() => testWebhook.mutate({ type: 'slack', url: settings?.slack_webhook_url || '' })}
-							>
-								{testWebhook.isPending && testWebhook.variables?.type === 'slack' ? (
-									<Loader2 className='h-4 w-4 animate-spin' />
-								) : (
-									'Test'
-								)}
-							</Button>
-						</div>
-					</div>
-
-					{/* Discord */}
-					<div className='space-y-4 pt-6 border-t'>
-						<div className='flex items-center gap-4'>
-							<div className='h-12 w-12 rounded-xl bg-[#5865F2] flex items-center justify-center border shadow-sm shrink-0'>
-								<Activity className='h-6 w-6 text-white' />
-							</div>
-							<div className='flex-1'>
-								<p className='text-sm font-bold'>Discord Webhook</p>
-								<p className='text-xs text-muted-foreground'>
-									Send alerts to a Discord channel via webhooks.
-								</p>
-							</div>
-						</div>
-						<div className='flex gap-3 pl-16'>
-							<div className='flex-1 relative group'>
-								<Input
-									placeholder='https://discord.com/api/webhooks/...'
-									className='font-mono text-xs pr-10 bg-muted/20 focus:bg-background transition-all'
-									defaultValue={settings?.discord_webhook_url}
-									onBlur={e => {
-										const val = e.target.value.trim();
-										if (val !== settings?.discord_webhook_url) {
-											saveSetting.mutate({
-												key: 'discord_webhook_url',
-												value: val,
-											});
-										}
-									}}
-								/>
-								<div className='absolute right-3 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity'>
-									<Bell className='h-3.5 w-3.5 text-muted-foreground' />
-								</div>
-							</div>
-							<Button 
-								variant='outline' 
-								size='sm' 
-								className='px-4 transition-all active:scale-95'
-								disabled={!settings?.discord_webhook_url || testWebhook.isPending}
-								onClick={() => testWebhook.mutate({ type: 'discord', url: settings?.discord_webhook_url || '' })}
-							>
-								{testWebhook.isPending && testWebhook.variables?.type === 'discord' ? (
-									<Loader2 className='h-4 w-4 animate-spin' />
-								) : (
-									'Test'
-								)}
-							</Button>
-						</div>
-					</div>
-				</CardContent>
-			</Card>
+				</TabsContent>
+			</Tabs>
 
 			<AlertDialog
 				open={deleteGdriveOpen}

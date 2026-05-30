@@ -37,8 +37,10 @@ import {
 interface ReportChannel {
 	id: number;
 	name: string;
+	type: 'slack' | 'google_chat';
 	slack_channel_id: string | null;
 	has_token: boolean;
+	has_webhook: boolean;
 	active: boolean;
 	subscribed: boolean;
 }
@@ -261,7 +263,7 @@ export function ReportsPage() {
 				<h2 className='font-semibold text-base'>Generate Report</h2>
 				<p className='text-sm text-muted-foreground'>
 					Generate a PDF backup and monitor status report and send it
-					immediately to selected Slack channels.
+					immediately to selected messaging channels.
 				</p>
 
 				<div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
@@ -354,7 +356,7 @@ export function ReportsPage() {
 					Channel Subscriptions
 				</h2>
 				<p className='text-sm text-muted-foreground'>
-					Toggle which Slack channels automatically receive scheduled weekly
+					Toggle which messaging channels automatically receive scheduled weekly
 					reports.
 				</p>
 				{channelsLoading ? (
@@ -384,15 +386,22 @@ export function ReportsPage() {
 								/>
 								<div className='flex-1 min-w-0'>
 									<p className='text-sm font-medium'>{ch.name}</p>
-									{ch.slack_channel_id && (
-										<p className='text-xs text-muted-foreground'>
-											#{ch.slack_channel_id}
-										</p>
-									)}
+									<p className='text-xs text-muted-foreground'>
+										{ch.type === 'google_chat'
+											? 'Google Chat'
+											: ch.slack_channel_id
+												? `#${ch.slack_channel_id}`
+												: 'Slack'}
+									</p>
 								</div>
-								{!ch.has_token && (
+								{ch.type === 'slack' && !ch.has_token && (
 									<Badge variant='warning' className='text-xs shrink-0'>
 										No token
+									</Badge>
+								)}
+								{ch.type === 'google_chat' && !ch.has_webhook && (
+									<Badge variant='warning' className='text-xs shrink-0'>
+										No webhook
 									</Badge>
 								)}
 							</div>

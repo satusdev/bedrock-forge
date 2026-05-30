@@ -10,7 +10,7 @@ interface NotificationJob {
 	payload: Record<string, unknown>;
 }
 
-// concurrency=3: Slack API calls are lightweight network I/O.
+// concurrency=3: notification provider calls are lightweight network I/O.
 @Processor(QUEUES.NOTIFICATIONS, { concurrency: 3, lockDuration: 30_000 })
 export class NotificationProcessor extends WorkerHost {
 	private readonly logger = new Logger(NotificationProcessor.name);
@@ -40,12 +40,8 @@ export class NotificationProcessor extends WorkerHost {
 
 		if (channels.length === 0) return;
 
-		const { WebClient } = await import('@slack/web-api');
-
 		await Promise.allSettled(
-			channels.map(channel =>
-				this.sendToChannel(channel, eventType, payload, WebClient),
-			),
+			channels.map(channel => this.sendToChannel(channel, eventType, payload)),
 		);
 	}
 
@@ -53,34 +49,29 @@ export class NotificationProcessor extends WorkerHost {
 		channel: {
 			id: bigint;
 			name: string;
+			type: string;
 			slack_bot_token_enc: string | null;
 			slack_channel_id: string | null;
+			google_chat_webhook_url_enc: string | null;
 		},
 		eventType: string,
 		payload: Record<string, unknown>,
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		WebClient: any,
 	): Promise<void> {
 		let status: 'sent' | 'failed' = 'failed';
 		let error: string | undefined;
 
 		try {
-			if (!channel.slack_bot_token_enc || !channel.slack_channel_id) {
-				throw new Error('Missing bot token or channel ID');
-			}
-
-			const token = this.encryption.decrypt(channel.slack_bot_token_enc);
-			const slack = new WebClient(token);
 			const text = this.buildMessage(eventType, payload);
 
-			await slack.chat.postMessage({
-				channel: channel.slack_channel_id,
-				text,
-			});
+			if (channel.type === 'google_chat') {
+				await this.sendGoogleChat(channel, text);
+			} else {
+				await this.sendSlack(channel, text);
+			}
 
 			status = 'sent';
 			this.logger.log(
-				`Slack notification sent to channel ${channel.name} for ${eventType}`,
+				`${this.providerLabel(channel.type)} notification sent to channel ${channel.name} for ${eventType}`,
 			);
 		} catch (err: unknown) {
 			const raw = err instanceof Error ? err.message : String(err);
@@ -88,7 +79,7 @@ export class NotificationProcessor extends WorkerHost {
 				? `channel_not_found: Bot is not a member of the private channel "${channel.slack_channel_id}". Invite the bot via /invite @BotName in Slack.`
 				: raw;
 			this.logger.error(
-				`Failed to send Slack notification to channel ${channel.name}: ${error}`,
+				`Failed to send ${this.providerLabel(channel.type)} notification to channel ${channel.name}: ${error}`,
 			);
 		}
 
@@ -101,6 +92,53 @@ export class NotificationProcessor extends WorkerHost {
 				error: error ?? null,
 			},
 		});
+	}
+
+	private async sendSlack(
+		channel: {
+			slack_bot_token_enc: string | null;
+			slack_channel_id: string | null;
+		},
+		text: string,
+	) {
+		if (!channel.slack_bot_token_enc || !channel.slack_channel_id) {
+			throw new Error('Missing bot token or channel ID');
+		}
+
+		const { WebClient } = await import('@slack/web-api');
+		const token = this.encryption.decrypt(channel.slack_bot_token_enc);
+		const slack = new WebClient(token);
+		await slack.chat.postMessage({
+			channel: channel.slack_channel_id,
+			text,
+		});
+	}
+
+	private async sendGoogleChat(
+		channel: { google_chat_webhook_url_enc: string | null },
+		text: string,
+	) {
+		if (!channel.google_chat_webhook_url_enc) {
+			throw new Error('Missing Google Chat webhook URL');
+		}
+
+		const webhookUrl = this.encryption.decrypt(
+			channel.google_chat_webhook_url_enc,
+		);
+		const res = await fetch(webhookUrl, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ text }),
+		});
+
+		if (!res.ok) {
+			const body = await res.text().catch(() => '');
+			throw new Error(`Google Chat returned ${res.status}: ${body}`);
+		}
+	}
+
+	private providerLabel(type: string): string {
+		return type === 'google_chat' ? 'Google Chat' : 'Slack';
 	}
 
 	private async createInAppNotification(

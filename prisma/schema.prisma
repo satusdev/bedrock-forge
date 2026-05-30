@@ -694,6 +694,7 @@ model NotificationChannel {
   type                  String   @default("slack") // extensible
   slack_bot_token_enc   String?  // AES-256-GCM encrypted bot token
   slack_channel_id      String?
+  google_chat_webhook_url_enc String? // AES-256-GCM encrypted incoming webhook URL
   events                String[] // Array of NotificationEventType strings
   active                Boolean  @default(true)
   created_at            DateTime @default(now()) @db.Timestamptz()

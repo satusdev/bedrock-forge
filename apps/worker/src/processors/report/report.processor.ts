@@ -704,7 +704,7 @@ export class ReportProcessor extends WorkerHost {
 				monitors,
 			);
 
-			// ── 4. Send to Slack ───────────────────────────────────────────────────
+			// ── 4. Send to notification channels ───────────────────────────────────
 
 			// Honor channelIds filter when provided (manual trigger with specific channels)
 			const channelWhere = channelIds?.length
@@ -721,7 +721,7 @@ export class ReportProcessor extends WorkerHost {
 
 			if (channels.length === 0) {
 				this.logger.warn(
-					'No active Slack channels subscribed to report.weekly',
+					'No active notification channels subscribed to report.weekly',
 				);
 			} else {
 				const { WebClient } = await import('@slack/web-api');
@@ -742,20 +742,35 @@ export class ReportProcessor extends WorkerHost {
 					``,
 					`_(PDF attached)_`,
 				].join('\n');
+				const googleChatSummary = [
+					`Bedrock Forge - ${periodLabel} (${dateRange})`,
+					``,
+					`Backups: ${okBackups} successful, ${failedBackups} failed in period`,
+					`Monitors: ${downMonitors > 0 ? `${downMonitors} currently down` : 'all up'} of ${monitors.length} total`,
+					``,
+					`PDF report generated in Forge.`,
+				].join('\n');
 
 				for (const channel of channels) {
-					if (!channel.slack_bot_token_enc || !channel.slack_channel_id)
-						continue;
 					try {
-						const token = this.encryption.decrypt(channel.slack_bot_token_enc);
-						const slack = new WebClient(token);
-						await slack.filesUploadV2({
-							channel_id: channel.slack_channel_id,
-							file: pdfBuffer,
-							filename,
-							title: `${periodLabel} ${fmt(now)}`,
-							initial_comment: initialComment,
-						});
+						if (channel.type === 'google_chat') {
+							await this.sendGoogleChatSummary(
+								channel.google_chat_webhook_url_enc,
+								googleChatSummary,
+							);
+						} else {
+							if (!channel.slack_bot_token_enc || !channel.slack_channel_id)
+								continue;
+							const token = this.encryption.decrypt(channel.slack_bot_token_enc);
+							const slack = new WebClient(token);
+							await slack.filesUploadV2({
+								channel_id: channel.slack_channel_id,
+								file: pdfBuffer,
+								filename,
+								title: `${periodLabel} ${fmt(now)}`,
+								initial_comment: initialComment,
+							});
+						}
 						this.logger.log(`Report sent to channel "${channel.name}"`);
 					} catch (err) {
 						this.logger.error(
@@ -900,7 +915,7 @@ export class ReportProcessor extends WorkerHost {
 				doc.end();
 			});
 
-			// ── 4. Send to Slack ─────────────────────────────────────────────────────
+			// ── 4. Send to notification channels ─────────────────────────────────────
 
 			const channelWhere = channelIds?.length
 				? { active: true, id: { in: channelIds.map(id => BigInt(id)) } }
@@ -911,7 +926,7 @@ export class ReportProcessor extends WorkerHost {
 			});
 
 			if (channels.length === 0) {
-				this.logger.warn('No active Slack channels for security report');
+				this.logger.warn('No active notification channels for security report');
 			} else {
 				const { WebClient } = await import('@slack/web-api');
 				const filename = `bedrock-forge-security-report-${fmt(now)}.pdf`;
@@ -924,20 +939,36 @@ export class ReportProcessor extends WorkerHost {
 					``,
 					`_(PDF attached)_`,
 				].join('\n');
+				const googleChatSummary = [
+					`Bedrock Forge - Security Report (${scopeLabel})`,
+					``,
+					`Total findings: Critical ${scans.reduce((s, r) => s + (r.summary?.critical ?? 0), 0)} · High ${scans.reduce((s, r) => s + (r.summary?.high ?? 0), 0)} · Medium ${scans.reduce((s, r) => s + (r.summary?.medium ?? 0), 0)}`,
+					`Acknowledged: ${ackCount}`,
+					`Scans included: ${scans.length}`,
+					``,
+					`PDF report generated in Forge.`,
+				].join('\n');
 
 				for (const channel of channels) {
-					if (!channel.slack_bot_token_enc || !channel.slack_channel_id)
-						continue;
 					try {
-						const token = this.encryption.decrypt(channel.slack_bot_token_enc);
-						const slack = new WebClient(token);
-						await slack.filesUploadV2({
-							channel_id: channel.slack_channel_id,
-							file: pdfBuffer,
-							filename,
-							title: `Security Report ${fmt(now)}`,
-							initial_comment: initialComment,
-						});
+						if (channel.type === 'google_chat') {
+							await this.sendGoogleChatSummary(
+								channel.google_chat_webhook_url_enc,
+								googleChatSummary,
+							);
+						} else {
+							if (!channel.slack_bot_token_enc || !channel.slack_channel_id)
+								continue;
+							const token = this.encryption.decrypt(channel.slack_bot_token_enc);
+							const slack = new WebClient(token);
+							await slack.filesUploadV2({
+								channel_id: channel.slack_channel_id,
+								file: pdfBuffer,
+								filename,
+								title: `Security Report ${fmt(now)}`,
+								initial_comment: initialComment,
+							});
+						}
 						this.logger.log(
 							`Security report sent to channel "${channel.name}"`,
 						);
@@ -968,6 +999,25 @@ export class ReportProcessor extends WorkerHost {
 				})
 				.catch(() => {});
 			throw err;
+		}
+	}
+
+	private async sendGoogleChatSummary(
+		webhookUrlEnc: string | null,
+		text: string,
+	) {
+		if (!webhookUrlEnc) throw new Error('Missing Google Chat webhook URL');
+
+		const webhookUrl = this.encryption.decrypt(webhookUrlEnc);
+		const res = await fetch(webhookUrl, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ text }),
+		});
+
+		if (!res.ok) {
+			const body = await res.text().catch(() => '');
+			throw new Error(`Google Chat returned ${res.status}: ${body}`);
 		}
 	}
 

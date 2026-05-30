@@ -205,11 +205,13 @@ export class SettingsController {
 	}
 
 	@Post('test-webhook')
-	async testWebhook(@Body() dto: { type: 'slack' | 'discord'; url: string }) {
+	async testWebhook(
+		@Body() dto: { type: 'slack' | 'discord' | 'google_chat'; url: string },
+	) {
 		if (!dto.url) throw new BadRequestException('Webhook URL is required');
 
 		const payload =
-			dto.type === 'slack'
+			dto.type === 'slack' || dto.type === 'google_chat'
 				? { text: '✅ Bedrock Forge — Test Notification' }
 				: { content: '✅ Bedrock Forge — Test Notification' };
 

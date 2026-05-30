@@ -71,8 +71,10 @@ describe('NotificationProcessor', () => {
 			{
 				id: BigInt(1),
 				name: 'no-token-channel',
+				type: 'slack',
 				slack_bot_token_enc: null,
 				slack_channel_id: null,
+				google_chat_webhook_url_enc: null,
 				active: true,
 				events: ['backup.completed'],
 			},
@@ -98,8 +100,10 @@ describe('NotificationProcessor', () => {
 		const channel = {
 			id: BigInt(2),
 			name: 'test-channel',
+			type: 'slack',
 			slack_bot_token_enc: 'enc-token',
 			slack_channel_id: 'C123',
+			google_chat_webhook_url_enc: null,
 			active: true,
 			events: ['backup.completed'],
 		};
@@ -126,6 +130,52 @@ describe('NotificationProcessor', () => {
 			expect(prisma.notificationLog.create).toHaveBeenCalledWith(
 				expect.objectContaining({
 					data: expect.objectContaining({ event_type: 'backup.completed' }),
+				}),
+			);
+		});
+	});
+
+	describe('Google Chat delivery', () => {
+		beforeEach(() => {
+			prisma.notificationChannel.findMany.mockResolvedValue([
+				{
+					id: BigInt(3),
+					name: 'google-chat-channel',
+					type: 'google_chat',
+					slack_bot_token_enc: null,
+					slack_channel_id: null,
+					google_chat_webhook_url_enc: 'enc-webhook',
+					active: true,
+					events: ['backup.completed'],
+				},
+			]);
+			encryption.decrypt.mockReturnValue('https://chat.googleapis.com/test');
+			global.fetch = jest.fn().mockResolvedValue({
+				ok: true,
+			} as Response);
+		});
+
+		it('posts text payloads to Google Chat webhooks', async () => {
+			const job = makeJob(JOB_TYPES.NOTIFICATION_SEND, {
+				eventType: 'backup.completed',
+				payload: { environmentId: 5, backupType: 'full', sizeBytes: 1024 },
+			});
+
+			await processor.process(job);
+
+			expect(global.fetch).toHaveBeenCalledWith(
+				'https://chat.googleapis.com/test',
+				expect.objectContaining({
+					method: 'POST',
+					body: expect.stringContaining('backup.completed'),
+				}),
+			);
+			expect(prisma.notificationLog.create).toHaveBeenCalledWith(
+				expect.objectContaining({
+					data: expect.objectContaining({
+						channel_id: BigInt(3),
+						status: 'sent',
+					}),
 				}),
 			);
 		});

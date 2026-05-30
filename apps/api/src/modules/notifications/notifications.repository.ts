@@ -33,6 +33,7 @@ export class NotificationsRepository {
 		type?: string;
 		slack_bot_token_enc?: string | null;
 		slack_channel_id?: string | null;
+		google_chat_webhook_url_enc?: string | null;
 		events: string[];
 		active?: boolean;
 	}) {
@@ -42,6 +43,7 @@ export class NotificationsRepository {
 				type: data.type ?? 'slack',
 				slack_bot_token_enc: data.slack_bot_token_enc ?? null,
 				slack_channel_id: data.slack_channel_id ?? null,
+				google_chat_webhook_url_enc: data.google_chat_webhook_url_enc ?? null,
 				events: data.events,
 				active: data.active ?? true,
 			},
@@ -55,6 +57,7 @@ export class NotificationsRepository {
 			type?: string;
 			slack_bot_token_enc?: string | null;
 			slack_channel_id?: string | null;
+			google_chat_webhook_url_enc?: string | null;
 			events?: string[];
 			active?: boolean;
 		},
