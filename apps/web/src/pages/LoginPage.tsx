@@ -25,7 +25,7 @@ type FormData = z.infer<typeof schema>;
 
 export function LoginPage() {
 	const navigate = useNavigate();
-	const { setTokens, setUser } = useAuthStore();
+	const { setAccessToken, setUser } = useAuthStore();
 	const [error, setError] = useState('');
 	const [showPassword, setShowPassword] = useState(false);
 
@@ -48,10 +48,9 @@ export function LoginPage() {
 		try {
 			const res = await api.post<{
 				accessToken: string;
-				refreshToken: string;
 				user: { id: number; email: string; name: string; roles: string[] };
 			}>('/auth/login', data);
-			setTokens(res.accessToken, res.refreshToken);
+			setAccessToken(res.accessToken);
 			setUser(res.user);
 			navigate('/dashboard');
 		} catch (err: unknown) {

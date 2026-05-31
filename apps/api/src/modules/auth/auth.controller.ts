@@ -11,12 +11,14 @@ import {
 	Req,
 	Param,
 	ParseIntPipe,
+	Res,
+	UnauthorizedException,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Throttle } from '@nestjs/throttler';
-import type { Request as ExpressRequest } from 'express';
+import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
 import { AuthService } from './auth.service';
-import { LoginDto, RefreshTokenDto } from './dto/auth.dto';
+import { LoginDto } from './dto/auth.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import {
 	CurrentUser,
@@ -30,33 +32,58 @@ export class AuthController {
 	@Post('login')
 	@HttpCode(HttpStatus.OK)
 	@Throttle({ default: { ttl: 15 * 60_000, limit: 5 } })
-	async login(@Body() dto: LoginDto, @Req() req: ExpressRequest): Promise<any> {
-		return this.authService.login(
+	async login(
+		@Body() dto: LoginDto,
+		@Req() req: ExpressRequest,
+		@Res({ passthrough: true }) res: ExpressResponse,
+	): Promise<any> {
+		const tokenPair = await this.authService.login(
 			dto.email,
 			dto.password,
 			req.headers['user-agent'],
 			req.ip,
 		);
+		this.setRefreshCookie(res, tokenPair.refreshToken);
+		return {
+			accessToken: tokenPair.accessToken,
+			user: tokenPair.user,
+		};
 	}
 
 	@Post('refresh')
 	@HttpCode(HttpStatus.OK)
 	@Throttle({ default: { ttl: 60_000, limit: 30 } })
 	async refresh(
-		@Body() dto: RefreshTokenDto,
 		@Req() req: ExpressRequest,
+		@Res({ passthrough: true }) res: ExpressResponse,
 	): Promise<any> {
-		return this.authService.refresh(
-			dto.refreshToken,
+		const refreshToken = this.getRefreshCookie(req);
+		if (!refreshToken) {
+			throw new UnauthorizedException('Missing refresh token');
+		}
+		const tokenPair = await this.authService.refresh(
+			refreshToken,
 			req.headers['user-agent'],
 			req.ip,
 		);
+		this.setRefreshCookie(res, tokenPair.refreshToken);
+		return {
+			accessToken: tokenPair.accessToken,
+			user: tokenPair.user,
+		};
 	}
 
 	@Post('logout')
 	@HttpCode(HttpStatus.NO_CONTENT)
-	async logout(@Body() dto: RefreshTokenDto) {
-		await this.authService.logout(dto.refreshToken);
+	async logout(
+		@Req() req: ExpressRequest,
+		@Res({ passthrough: true }) res: ExpressResponse,
+	) {
+		const refreshToken = this.getRefreshCookie(req);
+		if (refreshToken) {
+			await this.authService.logout(refreshToken);
+		}
+		this.clearRefreshCookie(res);
 	}
 
 	@Post('logout-all')
@@ -100,5 +127,41 @@ export class AuthController {
 		@Param('id', ParseIntPipe) sessionId: number,
 	) {
 		await this.authService.revokeSession(user.id, sessionId);
+	}
+
+	private setRefreshCookie(res: ExpressResponse, refreshToken: string): void {
+		res.cookie('bf_refresh', refreshToken, {
+			httpOnly: true,
+			secure: process.env.NODE_ENV === 'production',
+			sameSite: 'lax',
+			path: '/api/auth',
+			maxAge: this.authService.refreshExpiresMs(),
+		});
+	}
+
+	private clearRefreshCookie(res: ExpressResponse): void {
+		res.clearCookie('bf_refresh', {
+			httpOnly: true,
+			secure: process.env.NODE_ENV === 'production',
+			sameSite: 'lax',
+			path: '/api/auth',
+		});
+	}
+
+	private getRefreshCookie(req: ExpressRequest): string | null {
+		const cookieHeader = req.headers.cookie;
+		if (!cookieHeader) return null;
+		const cookies = cookieHeader.split(';');
+		for (const cookie of cookies) {
+			const [rawName, ...rawValue] = cookie.trim().split('=');
+			if (rawName === 'bf_refresh') {
+				try {
+					return decodeURIComponent(rawValue.join('='));
+				} catch {
+					return null;
+				}
+			}
+		}
+		return null;
 	}
 }

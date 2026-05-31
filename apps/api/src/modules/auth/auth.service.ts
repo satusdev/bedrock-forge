@@ -137,7 +137,7 @@ export class AuthService {
 		await this.repo.revokeAllUserRefreshTokens(BigInt(userId));
 	}
 
-	private refreshExpiresMs(): number {
+	refreshExpiresMs(): number {
 		const raw = this.config.get<string>('jwt.refreshExpiresIn') ?? '30d';
 		// Parse simple duration strings: Nd, Nh, Nm, Ns
 		const match = /^(\d+)([dhms])$/.exec(raw);
