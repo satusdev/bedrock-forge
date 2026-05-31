@@ -256,8 +256,7 @@ export function Header({ onOpenSearch }: { onOpenSearch?: () => void }) {
 
 	const handleLogout = async () => {
 		try {
-			const { refreshToken } = useAuthStore.getState();
-			await api.post('/auth/logout', { refreshToken });
+			await api.post('/auth/logout', {});
 		} catch {
 			/* ignore */
 		}

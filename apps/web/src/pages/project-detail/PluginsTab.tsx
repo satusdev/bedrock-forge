@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, FormEvent } from 'react';
+import { useState, useRef, useEffect, FormEvent, Fragment } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
 	ScanLine,
@@ -20,12 +20,16 @@ import {
 	AlertTriangle,
 	GitBranch,
 	Search,
+	ChevronDown,
+	ChevronUp,
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
+import { BulkActionsBar } from '@/components/ui/bulk-actions-bar';
 import {
 	Card,
 	CardContent,
@@ -48,7 +52,6 @@ import {
 	DialogFooter,
 } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Checkbox } from '@/components/ui/checkbox';
 import { useWebSocketEvent, useSubscribeEnvironment } from '@/lib/websocket';
 
 interface Environment {
@@ -71,6 +74,7 @@ interface Plugin {
 	is_mu_plugin?: boolean;
 	managed_by_monorepo?: boolean;
 	monorepo_repo_url?: string | null;
+	status?: 'active' | 'inactive';
 }
 
 interface PluginScanOutput {
@@ -130,30 +134,67 @@ function AddPluginDialog({
 	envId,
 	open,
 	onClose,
+	isBedrock,
 }: {
 	envId: number;
 	open: boolean;
 	onClose: () => void;
+	isBedrock: boolean;
 }) {
 	const qc = useQueryClient();
 	const [slug, setSlug] = useState('');
 	const [version, setVersion] = useState('');
 	const [skipSafetyBackup, setSkipSafetyBackup] = useState(false);
+	const [workflow, setWorkflow] = useState<'composer' | 'manual'>('composer');
+
+	const [searchQuery, setSearchQuery] = useState('');
+	const [searchResults, setSearchResults] = useState<any[]>([]);
+	const [isSearching, setIsSearching] = useState(false);
+
+	useEffect(() => {
+		if (!searchQuery.trim()) {
+			setSearchResults([]);
+			return;
+		}
+		const delay = setTimeout(() => {
+			setIsSearching(true);
+			api.get<any[]>(`/plugin-scans/search-wp-org?query=${encodeURIComponent(searchQuery)}`)
+				.then(res => {
+					setSearchResults(res || []);
+				})
+				.catch(() => {
+					setSearchResults([]);
+				})
+				.finally(() => {
+					setIsSearching(false);
+				});
+		}, 400);
+		return () => clearTimeout(delay);
+	}, [searchQuery]);
 
 	const mutation = useMutation({
 		mutationFn: () =>
 			api.post<{ jobExecutionId: number; bullJobId: string }>(
 				`/plugin-scans/environment/${envId}/plugins`,
-				{ slug: slug.trim(), version: version.trim() || undefined, skipSafetyBackup },
+				{
+					slug: slug.trim(),
+					version: version.trim() || undefined,
+					workflow: isBedrock ? workflow : 'manual',
+					skipSafetyBackup
+				},
 			),
 		onSuccess: () => {
 			toast({
 				title: 'Plugin install queued',
-				description: `wpackagist-plugin/${slug} will be added via composer.`,
+				description: isBedrock && workflow === 'composer'
+					? `wpackagist-plugin/${slug} will be added via composer.`
+					: `${slug} will be installed via WP-CLI.`,
 			});
 			qc.invalidateQueries({ queryKey: ['plugin-scans', envId] });
 			setSlug('');
 			setVersion('');
+			setSearchQuery('');
+			setWorkflow('composer');
 			setSkipSafetyBackup(false);
 			onClose();
 		},
@@ -169,56 +210,127 @@ function AddPluginDialog({
 
 	return (
 		<Dialog open={open} onOpenChange={v => !v && onClose()}>
-			<DialogContent className='sm:max-w-md'>
+			<DialogContent className='sm:max-w-lg max-h-[90vh] flex flex-col'>
 				<DialogHeader>
-					<DialogTitle>Add Plugin via Composer</DialogTitle>
+					<DialogTitle>Add New Plugin</DialogTitle>
 				</DialogHeader>
-				<form onSubmit={handleSubmit} className='space-y-4 py-2'>
+				<form onSubmit={handleSubmit} className='space-y-4 py-2 overflow-y-auto flex-1 pr-1'>
+					{/* Search field */}
 					<div className='space-y-1.5'>
-						<label className='text-sm font-medium'>Plugin Slug</label>
-						<Input
-							placeholder='e.g. woocommerce'
-							value={slug}
-							onChange={e => setSlug(e.target.value)}
-							disabled={mutation.isPending}
-							autoFocus
-						/>
-						<p className='text-xs text-muted-foreground'>
-							Slug from wordpress.org/plugins — will be required as{' '}
-							<code className='bg-muted px-1 rounded'>
-								wpackagist-plugin/slug
-							</code>
-						</p>
-					</div>
-					<div className='space-y-1.5'>
-						<label className='text-sm font-medium'>
-							Version constraint{' '}
-							<span className='text-muted-foreground font-normal'>
-								(optional)
-							</span>
+						<label className='text-xs font-semibold uppercase tracking-wider text-muted-foreground'>
+							Search WordPress.org
 						</label>
-						<Input
-							placeholder='e.g. ^8.0 or 8.1.2'
-							value={version}
-							onChange={e => setVersion(e.target.value)}
-							disabled={mutation.isPending}
-						/>
+						<div className='relative'>
+							<Search className='absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground' />
+							<Input
+								placeholder='Search plugins (e.g. contact form, seo)...'
+								className='pl-9'
+								value={searchQuery}
+								onChange={e => setSearchQuery(e.target.value)}
+								disabled={mutation.isPending}
+							/>
+						</div>
+						{isSearching && (
+							<div className='flex items-center gap-2 text-xs text-muted-foreground pt-1.5 justify-center'>
+								<Loader2 className='h-3 w-3 animate-spin' />
+								Searching WordPress.org...
+							</div>
+						)}
+						{searchResults.length > 0 && (
+							<div className='border rounded-md divide-y max-h-48 overflow-y-auto bg-muted/10 mt-1.5'>
+								{searchResults.map(p => (
+									<div
+										key={p.slug}
+										className='p-2.5 flex items-start justify-between gap-4 hover:bg-muted/30 transition-colors text-xs'
+									>
+										<div className='space-y-0.5'>
+											<span className='font-semibold text-foreground'>{p.name}</span>
+											<span className='text-[10px] bg-muted px-1 py-0.5 rounded text-muted-foreground ml-1.5 font-mono'>{p.slug}</span>
+											<p className='text-muted-foreground line-clamp-1 text-[11px]'>{p.description}</p>
+											<p className='text-[10px] text-muted-foreground/80'>By {p.author}</p>
+										</div>
+										<Button
+											type='button'
+											size='sm'
+											variant='outline'
+											className='h-7 text-xs px-2 shrink-0'
+											onClick={() => {
+												setSlug(p.slug);
+												setSearchQuery('');
+												setSearchResults([]);
+											}}
+										>
+											Select
+										</Button>
+									</div>
+								))}
+							</div>
+						)}
 					</div>
-					<div className='flex items-center space-x-2 pt-2'>
-						<Checkbox
-							id='add-skip-backup'
-							checked={skipSafetyBackup}
-							onCheckedChange={(checked) => setSkipSafetyBackup(checked as boolean)}
-							disabled={mutation.isPending}
-						/>
-						<label
-							htmlFor='add-skip-backup'
-							className='text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
-						>
-							Skip pre-flight safety backup
-						</label>
+
+					<div className='border-t pt-3 space-y-4'>
+						<div className='space-y-1.5'>
+							<label className='text-sm font-medium'>Plugin Slug</label>
+							<Input
+								placeholder='e.g. woocommerce'
+								value={slug}
+								onChange={e => setSlug(e.target.value)}
+								disabled={mutation.isPending}
+								required
+							/>
+						</div>
+
+						{isBedrock && (
+							<div className='space-y-1.5'>
+								<label className='text-sm font-medium'>Installation Workflow</label>
+								<Select
+									value={workflow}
+									onValueChange={v => setWorkflow(v as 'composer' | 'manual')}
+									disabled={mutation.isPending}
+								>
+									<SelectTrigger>
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value='composer'>Composer-managed (composer.json)</SelectItem>
+										<SelectItem value='manual'>Manual installation (WP-CLI direct)</SelectItem>
+									</SelectContent>
+								</Select>
+							</div>
+						)}
+
+						<div className='space-y-1.5'>
+							<label className='text-sm font-medium'>
+								Version constraint{' '}
+								<span className='text-muted-foreground font-normal'>
+									(optional)
+								</span>
+							</label>
+							<Input
+								placeholder={workflow === 'composer' ? 'e.g. ^8.0 or 8.1.2' : 'e.g. 8.1.2'}
+								value={version}
+								onChange={e => setVersion(e.target.value)}
+								disabled={mutation.isPending}
+							/>
+						</div>
+
+						<div className='flex items-center space-x-2 pt-2'>
+							<Checkbox
+								id='add-skip-backup'
+								checked={skipSafetyBackup}
+								onCheckedChange={(checked) => setSkipSafetyBackup(checked as boolean)}
+								disabled={mutation.isPending}
+							/>
+							<label
+								htmlFor='add-skip-backup'
+								className='text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
+							>
+								Skip pre-flight safety backup
+							</label>
+						</div>
 					</div>
-					<DialogFooter>
+
+					<DialogFooter className='border-t pt-3'>
 						<Button
 							type='button'
 							variant='outline'
@@ -618,12 +730,24 @@ export function PluginsTab({
 	const [pluginFilter, setPluginFilter] = useState<
 		'all' | 'wpackagist' | 'monorepo' | 'manual'
 	>('all');
+	const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+	const [updateFilter, setUpdateFilter] = useState<'all' | 'updates'>('all');
+	const [selectedSlugs, setSelectedSlugs] = useState<Set<string>>(new Set());
+	const [expandedSlugs, setExpandedSlugs] = useState<Set<string>>(new Set());
+	const [bulkProcessing, setBulkProcessing] = useState(false);
+	const [bulkActionProgress, setBulkActionProgress] = useState('');
+
+	useEffect(() => {
+		setSelectedSlugs(new Set());
+		setExpandedSlugs(new Set());
+	}, [selectedEnvId, pluginFilter, statusFilter, updateFilter]);
+
 	const [scanning, setScanning] = useState(false);
 	const [managingJobId, setManagingJobId] = useState<string | null>(null);
 	const [showAddDialog, setShowAddDialog] = useState(false);
 	const [actionDialogState, setActionDialogState] = useState<{
 		open: boolean;
-		action: 'update' | 'remove' | 'updateAll' | null;
+		action: 'update' | 'remove' | 'updateAll' | 'activate' | 'deactivate' | 'migrate' | 'bulk-activate' | 'bulk-deactivate' | 'bulk-update' | 'bulk-remove' | null;
 		slug: string | null;
 	}>({ open: false, action: null, slug: null });
 	const [editConstraintPlugin, setEditConstraintPlugin] =
@@ -920,8 +1044,44 @@ export function PluginsTab({
 				description: `${slug} constraint will be updated.`,
 			});
 		},
+	});
+
+	const toggleStatusMutation = useMutation({
+		mutationFn: ({ slug, status, skipSafetyBackup }: { slug: string; status: 'active' | 'inactive'; skipSafetyBackup: boolean }) =>
+			api.put<{ jobExecutionId: number; bullJobId: string }>(
+				`/plugin-scans/environment/${selectedEnvId}/plugins/${slug}/status`,
+				{ status, skipSafetyBackup },
+			),
+		onSuccess: (data, { slug, status }) => {
+			const jobId = data?.bullJobId ?? null;
+			setManagingJobId(jobId);
+			managingJobIdRef.current = jobId;
+			toast({
+				title: `${status === 'active' ? 'Activation' : 'Deactivation'} queued`,
+				description: `${slug} status change has been requested.`,
+			});
+		},
 		onError: () =>
-			toast({ title: 'Failed to update constraint', variant: 'destructive' }),
+			toast({ title: 'Failed to queue status change', variant: 'destructive' }),
+	});
+
+	const migrateToComposerMutation = useMutation({
+		mutationFn: ({ slug, skipSafetyBackup }: { slug: string; skipSafetyBackup: boolean }) =>
+			api.post<{ jobExecutionId: number; bullJobId: string }>(
+				`/plugin-scans/environment/${selectedEnvId}/plugins/${slug}/migrate-to-composer`,
+				{ skipSafetyBackup },
+			),
+		onSuccess: (data, { slug }) => {
+			const jobId = data?.bullJobId ?? null;
+			setManagingJobId(jobId);
+			managingJobIdRef.current = jobId;
+			toast({
+				title: 'Migration queued',
+				description: `${slug} is being migrated to composer-managed wpackagist package.`,
+			});
+		},
+		onError: () =>
+			toast({ title: 'Failed to queue migration', variant: 'destructive' }),
 	});
 
 	const installCustomMutation = useMutation({
@@ -990,6 +1150,89 @@ export function PluginsTab({
 			toast({ title: 'Failed to read composer.json', variant: 'destructive' }),
 	});
 
+	const runBulkToggleStatus = async (slugs: string[], active: boolean, skipSafetyBackup: boolean) => {
+		setBulkProcessing(true);
+		setSelectedSlugs(new Set());
+		try {
+			let index = 1;
+			for (const slug of slugs) {
+				setBulkActionProgress(`Processing ${index}/${slugs.length}: ${active ? 'activating' : 'deactivating'} ${slug}...`);
+				await toggleStatusMutation.mutateAsync({
+					slug,
+					status: active ? 'active' : 'inactive',
+					skipSafetyBackup
+				});
+				index++;
+			}
+			toast({
+				title: 'Bulk status update completed',
+				description: `Successfully processed ${slugs.length} plugin(s).`,
+			});
+		} catch (err) {
+			toast({
+				title: 'Bulk status update encountered errors',
+				description: 'Some status updates might have failed.',
+				variant: 'destructive',
+			});
+		} finally {
+			setBulkProcessing(false);
+			setBulkActionProgress('');
+			qc.invalidateQueries({ queryKey: ['env-custom-plugins', selectedEnvId] });
+		}
+	};
+
+	const runBulkUpdate = async (slugs: string[], skipSafetyBackup: boolean) => {
+		setBulkProcessing(true);
+		setSelectedSlugs(new Set());
+		try {
+			let index = 1;
+			for (const slug of slugs) {
+				setBulkActionProgress(`Processing ${index}/${slugs.length}: updating ${slug}...`);
+				await updatePluginMutation.mutateAsync({ slug, skipSafetyBackup });
+				index++;
+			}
+			toast({
+				title: 'Bulk update completed',
+				description: `Successfully enqueued updates for ${slugs.length} plugin(s).`,
+			});
+		} catch (err) {
+			toast({
+				title: 'Bulk update encountered errors',
+				description: 'Some updates might have failed.',
+				variant: 'destructive',
+			});
+		} finally {
+			setBulkProcessing(false);
+			setBulkActionProgress('');
+		}
+	};
+
+	const runBulkDelete = async (slugs: string[], skipSafetyBackup: boolean) => {
+		setBulkProcessing(true);
+		setSelectedSlugs(new Set());
+		try {
+			let index = 1;
+			for (const slug of slugs) {
+				setBulkActionProgress(`Processing ${index}/${slugs.length}: deleting ${slug}...`);
+				await removePluginMutation.mutateAsync({ slug, skipSafetyBackup });
+				index++;
+			}
+			toast({
+				title: 'Bulk delete completed',
+				description: `Successfully enqueued removal of ${slugs.length} plugin(s).`,
+			});
+		} catch (err) {
+			toast({
+				title: 'Bulk delete encountered errors',
+				description: 'Some deletions might have failed.',
+				variant: 'destructive',
+			});
+		} finally {
+			setBulkProcessing(false);
+			setBulkActionProgress('');
+		}
+	};
+
 	if (environments.length === 0) {
 		return (
 			<div className='text-center py-12 text-muted-foreground'>
@@ -1016,6 +1259,10 @@ export function PluginsTab({
 			(p.managed_by_composer || p.managed_by_monorepo)
 		)
 			return false;
+		if (statusFilter === 'active' && p.status !== 'active') return false;
+		if (statusFilter === 'inactive' && p.status !== 'inactive') return false;
+		if (updateFilter === 'updates' && !p.update_available) return false;
+
 		if (search) {
 			const q = search.toLowerCase();
 			return (
@@ -1026,13 +1273,16 @@ export function PluginsTab({
 		}
 		return true;
 	});
-	const isBusy = scanMutation.isPending || scanning;
+	const isBusy = scanMutation.isPending || scanning || bulkProcessing;
 	const isManaging =
 		!!managingJobId ||
 		updateAllMutation.isPending ||
 		removePluginMutation.isPending ||
 		updatePluginMutation.isPending ||
-		changeConstraintMutation.isPending;
+		changeConstraintMutation.isPending ||
+		toggleStatusMutation.isPending ||
+		migrateToComposerMutation.isPending ||
+		bulkProcessing;
 
 	return (
 		<div className='space-y-4'>
@@ -1212,143 +1462,335 @@ export function PluginsTab({
 						</div>
 					</div>
 
-					{isBedrock && (
-						<div className='flex items-center gap-1'>
+					<div className='flex flex-wrap items-center gap-4 bg-muted/20 p-2.5 rounded-lg border border-border/40'>
+						{isBedrock && (
+							<div className='flex flex-wrap items-center gap-1 border-r pr-4 border-border/60'>
+								<span className='text-xs font-semibold text-muted-foreground mr-2 uppercase tracking-wider'>Source:</span>
+								{(
+									[
+										['all', 'All', plugins.length],
+										['wpackagist', 'Composer', composerManaged],
+										['monorepo', 'Monorepo', monorepoManaged],
+										['manual', 'Manual', manualCount],
+									] as [typeof pluginFilter, string, number][]
+								).map(([key, label, count]) => (
+									<button
+										key={key}
+										type='button'
+										onClick={() => setPluginFilter(key)}
+										className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all duration-150 ${
+											pluginFilter === key
+												? 'bg-primary text-primary-foreground shadow-sm'
+												: 'text-muted-foreground hover:bg-muted hover:text-foreground'
+										}`}
+									>
+										{label}
+										<span className='ml-1 opacity-70'>({count})</span>
+									</button>
+								))}
+							</div>
+						)}
+
+						<div className='flex flex-wrap items-center gap-1 border-r pr-4 border-border/60'>
+							<span className='text-xs font-semibold text-muted-foreground mr-2 uppercase tracking-wider'>Status:</span>
 							{(
 								[
 									['all', 'All', plugins.length],
-									['wpackagist', 'Composer', composerManaged],
-									['monorepo', 'Monorepo', monorepoManaged],
-									['manual', 'Manual', manualCount],
-								] as [typeof pluginFilter, string, number][]
+									['active', 'Active', plugins.filter(p => p.status === 'active').length],
+									['inactive', 'Inactive', plugins.filter(p => p.status === 'inactive').length],
+								] as [typeof statusFilter, string, number][]
 							).map(([key, label, count]) => (
 								<button
 									key={key}
 									type='button'
-									onClick={() => setPluginFilter(key)}
-									className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
-										pluginFilter === key
-											? 'bg-primary text-primary-foreground'
-											: 'text-muted-foreground hover:bg-muted'
+									onClick={() => setStatusFilter(key)}
+									className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all duration-150 ${
+										statusFilter === key
+											? 'bg-primary text-primary-foreground shadow-sm'
+											: 'text-muted-foreground hover:bg-muted hover:text-foreground'
 									}`}
 								>
 									{label}
-									<span className='ml-1.5 opacity-70'>{count}</span>
+									<span className='ml-1 opacity-70'>({count})</span>
 								</button>
 							))}
 						</div>
-					)}
+
+						<div className='flex flex-wrap items-center gap-1'>
+							<span className='text-xs font-semibold text-muted-foreground mr-2 uppercase tracking-wider'>Updates:</span>
+							{(
+								[
+									['all', 'All', plugins.length],
+									['updates', 'Update Available', updatesAvailable],
+								] as [typeof updateFilter, string, number][]
+							).map(([key, label, count]) => (
+								<button
+									key={key}
+									type='button'
+									onClick={() => setUpdateFilter(key)}
+									className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all duration-150 ${
+										updateFilter === key
+											? 'bg-primary text-primary-foreground shadow-sm'
+											: 'text-muted-foreground hover:bg-muted hover:text-foreground'
+									}`}
+								>
+									{label}
+									{count > 0 && (
+										<span className={`ml-1 px-1.5 py-0.5 text-[10px] rounded-full font-bold ${
+											updateFilter === key 
+												? 'bg-primary-foreground text-primary' 
+												: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-950/40 dark:text-yellow-400'
+										}`}>
+											{count}
+										</span>
+									)}
+								</button>
+							))}
+						</div>
+					</div>
 
 					<div className='border rounded-lg overflow-hidden'>
 						<table className='w-full text-sm'>
 							<thead className='border-b bg-muted/40'>
 								<tr>
+									<th className='w-12 px-4 py-3 text-center'>
+										<Checkbox
+											checked={filtered.length > 0 && filtered.every(p => selectedSlugs.has(p.slug))}
+											onCheckedChange={(checked) => {
+												if (checked) {
+													setSelectedSlugs(new Set(filtered.map(p => p.slug)));
+												} else {
+													setSelectedSlugs(new Set());
+												}
+											}}
+										/>
+									</th>
+									<th className='w-10 px-0 py-3'></th>
 									<th className='text-left px-4 py-3 font-medium'>Plugin</th>
 									<th className='text-left px-4 py-3 font-medium'>Version</th>
 									<th className='text-left px-4 py-3 font-medium'>Author</th>
-									<th className='text-left px-4 py-3 font-medium'>Status</th>
+									<th className='text-left px-4 py-3 font-medium'>WP Status</th>
+									<th className='text-left px-4 py-3 font-medium'>Updates</th>
 									{isBedrock && (
 										<th className='text-left px-4 py-3 font-medium'>Source</th>
 									)}
-									{isBedrock && <th className='w-24 px-4 py-3 font-medium' />}
+									<th className='w-48 px-4 py-3 font-medium text-right'>Actions</th>
 								</tr>
 							</thead>
 							<tbody className='divide-y'>
-								{filtered.map((p, i) => (
-									<tr key={`${p.slug}-${i}`} className='hover:bg-muted/20'>
-										<td className='px-4 py-3'>
-											<span className='font-medium'>{p.name}</span>
-											{p.plugin_uri && (
-												<a
-													href={p.plugin_uri}
-													target='_blank'
-													rel='noopener noreferrer'
-													className='ml-1.5 text-muted-foreground hover:text-foreground'
-												>
-													<ExternalLink className='h-3 w-3 inline' />
-												</a>
-											)}
-											<p className='text-xs text-muted-foreground font-mono'>
-												{p.slug}
-											</p>
-										</td>
-										<td className='px-4 py-3 text-muted-foreground font-mono text-xs'>
-											{p.version}
-											{p.composer_constraint && (
-												<p className='text-muted-foreground/60'>
-													{p.composer_constraint}
-												</p>
-											)}
-										</td>
-										<td className='px-4 py-3 text-muted-foreground'>
-											{p.author ?? '\u2014'}
-										</td>
-										<td className='px-4 py-3'>
-											{p.update_available ? (
-												<span className='flex items-center gap-1 text-yellow-600 dark:text-yellow-400 text-xs font-medium'>
-													<ArrowUpCircle className='h-3.5 w-3.5 shrink-0' />
-													{p.latest_version ?? 'Update available'}
-												</span>
-											) : (
-												<span className='flex items-center gap-1 text-green-600 dark:text-green-400 text-xs'>
-													<CheckCircle2 className='h-3.5 w-3.5 shrink-0' />
-													Up to date
-												</span>
-											)}
-										</td>
-										{isBedrock && (
-											<td className='px-4 py-3'>
-												{p.managed_by_composer ? (
-													<div className='flex flex-col gap-0.5'>
+								{filtered.map((p, i) => {
+									const isSelected = selectedSlugs.has(p.slug);
+									const isExpanded = expandedSlugs.has(p.slug);
+									return (
+										<Fragment key={`${p.slug}-${i}`}>
+											<tr className={`hover:bg-muted/20 transition-colors ${isSelected ? 'bg-primary/5' : ''}`}>
+												<td className='px-4 py-3 text-center'>
+													<Checkbox
+														checked={isSelected}
+														onCheckedChange={(checked) => {
+															setSelectedSlugs(prev => {
+																const next = new Set(prev);
+																if (checked) {
+																	next.add(p.slug);
+																} else {
+																	next.delete(p.slug);
+																}
+																return next;
+															});
+														}}
+													/>
+												</td>
+												<td className='px-0 py-3 text-center'>
+													<Button
+														variant='ghost'
+														size='icon'
+														className='h-7 w-7 text-muted-foreground hover:bg-muted'
+														onClick={() => {
+															setExpandedSlugs(prev => {
+																const next = new Set(prev);
+																if (isExpanded) {
+																	next.delete(p.slug);
+																} else {
+																	next.add(p.slug);
+																}
+																return next;
+															});
+														}}
+													>
+														{isExpanded ? (
+															<ChevronUp className='h-4 w-4 text-primary' />
+														) : (
+															<ChevronDown className='h-4 w-4' />
+														)}
+													</Button>
+												</td>
+												<td className='px-4 py-3 cursor-pointer' onClick={(e) => {
+													if ((e.target as HTMLElement).closest('a, button, input')) return;
+													setExpandedSlugs(prev => {
+														const next = new Set(prev);
+														if (isExpanded) {
+															next.delete(p.slug);
+														} else {
+															next.add(p.slug);
+														}
+														return next;
+													});
+												}}>
+													<span className='font-medium'>{p.name}</span>
+													{p.plugin_uri && (
+														<a
+															href={p.plugin_uri}
+															target='_blank'
+															rel='noopener noreferrer'
+															className='ml-1.5 text-muted-foreground hover:text-foreground'
+														>
+															<ExternalLink className='h-3 w-3 inline' />
+														</a>
+													)}
+													<p className='text-xs text-muted-foreground font-mono'>
+														{p.slug}
+													</p>
+												</td>
+												<td className='px-4 py-3 text-muted-foreground font-mono text-xs'>
+													{p.version}
+													{p.composer_constraint && (
+														<p className='text-muted-foreground/60'>
+															{p.composer_constraint}
+														</p>
+													)}
+												</td>
+												<td className='px-4 py-3 text-muted-foreground'>
+													{p.author ?? '\u2014'}
+												</td>
+												<td className='px-4 py-3'>
+													{p.status === 'active' ? (
 														<Badge
 															variant='outline'
-															className='text-xs gap-1 w-fit'
+															className='bg-green-50 text-green-700 border-green-200 dark:bg-green-950/30 dark:text-green-400 dark:border-green-800 text-xs font-semibold'
 														>
-															<Package className='h-2.5 w-2.5' />
-															composer
+															Active
 														</Badge>
-														{p.composer_constraint && (
-															<span className='text-xs text-muted-foreground/70 font-mono'>
-																{p.composer_constraint}
+													) : (
+														<Badge
+															variant='outline'
+															className='bg-gray-50 text-gray-500 border-gray-200 dark:bg-gray-950/30 dark:text-gray-400 dark:border-gray-800 text-xs font-medium'
+														>
+															Inactive
+														</Badge>
+													)}
+												</td>
+												<td className='px-4 py-3'>
+													{p.update_available ? (
+														<span className='flex items-center gap-1 text-yellow-600 dark:text-yellow-400 text-xs font-medium'>
+															<ArrowUpCircle className='h-3.5 w-3.5 shrink-0' />
+															{p.latest_version ?? 'Update available'}
+														</span>
+													) : (
+														<span className='flex items-center gap-1 text-green-600 dark:text-green-400 text-xs'>
+															<CheckCircle2 className='h-3.5 w-3.5 shrink-0' />
+															Up to date
+														</span>
+													)}
+												</td>
+												{isBedrock && (
+													<td className='px-4 py-3'>
+														{p.managed_by_composer ? (
+															<div className='flex flex-col gap-0.5'>
+																<Badge
+																	variant='outline'
+																	className='text-xs gap-1 w-fit'
+																>
+																	<Package className='h-2.5 w-2.5' />
+																	composer
+																</Badge>
+																{p.composer_constraint && (
+																	<span className='text-xs text-muted-foreground/70 font-mono'>
+																		{p.composer_constraint}
+																	</span>
+																)}
+															</div>
+														) : p.managed_by_monorepo ? (
+															<Badge
+																variant='outline'
+																className='text-xs gap-1 w-fit bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/30 dark:text-purple-400 dark:border-purple-800'
+															>
+																<GitBranch className='h-2.5 w-2.5' />
+																monorepo
+															</Badge>
+														) : (
+															<span className='text-xs text-muted-foreground'>
+																manual
 															</span>
 														)}
-													</div>
-												) : p.managed_by_monorepo ? (
-													<Badge
-														variant='outline'
-														className='text-xs gap-1 w-fit bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/30 dark:text-purple-400 dark:border-purple-800'
-													>
-														<GitBranch className='h-2.5 w-2.5' />
-														monorepo
-													</Badge>
-												) : (
-													<span className='text-xs text-muted-foreground'>
-														manual
-													</span>
+													</td>
 												)}
-											</td>
-										)}
-										{isBedrock && (
-											<td className='px-4 py-3'>
-												{p.managed_by_composer && (
-													<div className='flex items-center gap-1'>
-														<Button
-															size='sm'
-															variant='ghost'
-															className='h-7 px-2 text-xs text-muted-foreground'
-															disabled={isManaging}
-															onClick={() => {
-																setEditConstraintPlugin(p);
-															}}
-															title='Edit version constraint'
-														>
-															<Pencil className='h-3 w-3' />
-														</Button>
-														{p.update_available && (
+												<td className='px-4 py-3 text-right'>
+													<div className='flex items-center justify-end gap-1.5'>
+														{/* Activation Toggle */}
+														{p.status === 'active' ? (
 															<Button
 																size='sm'
 																variant='ghost'
-																className='h-7 px-2 text-xs'
+																className='h-7 px-2 text-xs text-muted-foreground hover:bg-muted'
+																disabled={isManaging}
+																onClick={() =>
+																	setActionDialogState({ open: true, action: 'deactivate', slug: p.slug })
+																}
+															>
+																Deactivate
+															</Button>
+														) : (
+															<Button
+																size='sm'
+																variant='ghost'
+																className='h-7 px-2 text-xs text-primary font-medium hover:bg-primary/5'
+																disabled={isManaging}
+																onClick={() =>
+																	setActionDialogState({ open: true, action: 'activate', slug: p.slug })
+																}
+															>
+																Activate
+															</Button>
+														)}
+
+														{/* Composer Constraint Editing */}
+														{isBedrock && p.managed_by_composer && (
+															<Button
+																size='sm'
+																variant='ghost'
+																className='h-7 px-2 text-xs text-muted-foreground hover:bg-muted'
+																disabled={isManaging}
+																onClick={() => {
+																	setEditConstraintPlugin(p);
+																}}
+																title='Edit version constraint'
+															>
+																<Pencil className='h-3 w-3' />
+															</Button>
+														)}
+
+														{/* Migrate Manual to Composer */}
+														{isBedrock && !p.managed_by_composer && !p.managed_by_monorepo && (
+															<Button
+																size='sm'
+																variant='ghost'
+																className='h-7 px-2 text-xs text-purple-600 hover:text-purple-700 hover:bg-purple-50 dark:hover:bg-purple-950/20'
+																disabled={isManaging}
+																onClick={() =>
+																	setActionDialogState({ open: true, action: 'migrate', slug: p.slug })
+																}
+																title='Migrate manual plugin to Composer dependency'
+															>
+																<ArrowUpCircle className='h-3 w-3 mr-1 inline' /> Migrate
+															</Button>
+														)}
+
+														{/* Composer-specific Updates */}
+														{isBedrock && p.managed_by_composer && p.update_available && (
+															<Button
+																size='sm'
+																variant='ghost'
+																className='h-7 px-2 text-xs hover:bg-muted'
 																disabled={isManaging}
 																onClick={() =>
 																	setActionDialogState({ open: true, action: 'update', slug: p.slug })
@@ -1358,24 +1800,89 @@ export function PluginsTab({
 																<RotateCcw className='h-3 w-3' />
 															</Button>
 														)}
-														<Button
-															size='sm'
-															variant='ghost'
-															className='h-7 px-2 text-xs text-destructive hover:text-destructive'
-															disabled={isManaging}
-															onClick={() =>
-																setActionDialogState({ open: true, action: 'remove', slug: p.slug })
-															}
-															title='Remove via composer'
-														>
-															<Trash2 className='h-3 w-3' />
-														</Button>
+
+														{/* Delete Action (only if not monorepo) */}
+														{!p.managed_by_monorepo && (
+															<Button
+																size='sm'
+																variant='ghost'
+																className='h-7 px-2 text-xs text-destructive hover:text-destructive hover:bg-destructive/5'
+																disabled={isManaging}
+																onClick={() =>
+																	setActionDialogState({ open: true, action: 'remove', slug: p.slug })
+																}
+																title={p.managed_by_composer ? 'Remove via Composer' : 'Delete plugin files'}
+															>
+																<Trash2 className='h-3 w-3' />
+															</Button>
+														)}
 													</div>
-												)}
-											</td>
-										)}
-									</tr>
-								))}
+												</td>
+											</tr>
+											{isExpanded && (
+												<tr className='bg-muted/10 border-t-0'>
+													<td colSpan={isBedrock ? 9 : 8} className='px-6 py-4 border-t-0'>
+														<div className='grid grid-cols-1 md:grid-cols-2 gap-6 text-xs max-w-5xl'>
+															<div className='space-y-2'>
+																<h4 className='font-semibold text-foreground text-xs uppercase tracking-wider text-muted-foreground/80'>Description</h4>
+																<p className='text-muted-foreground leading-relaxed text-sm'>
+																	{p.description || 'No description available for this plugin.'}
+																</p>
+																{p.plugin_uri && (
+																	<div className='pt-1.5'>
+																		<a
+																			href={p.plugin_uri}
+																			target='_blank'
+																			rel='noopener noreferrer'
+																			className='inline-flex items-center gap-1 text-primary hover:underline font-medium text-xs'
+																		>
+																			Visit plugin site <ExternalLink className='h-3 w-3' />
+																		</a>
+																	</div>
+																)}
+															</div>
+															<div className='space-y-2 md:border-l md:pl-6 border-border/40'>
+																<h4 className='font-semibold text-foreground text-xs uppercase tracking-wider text-muted-foreground/80'>Metadata</h4>
+																<div className='grid grid-cols-2 gap-y-2 gap-x-4 text-xs'>
+																	<span className='font-medium text-muted-foreground'>Slug:</span>
+																	<span className='font-mono font-semibold'>{p.slug}</span>
+																	
+																	<span className='font-medium text-muted-foreground'>Installed Version:</span>
+																	<span className='font-mono'>{p.version}</span>
+																	
+																	{p.latest_version && (
+																		<>
+																			<span className='font-medium text-muted-foreground'>Latest Version:</span>
+																			<span className={`font-mono ${p.update_available ? 'text-yellow-600 dark:text-yellow-400 font-semibold' : ''}`}>
+																				{p.latest_version}
+																			</span>
+																		</>
+																	)}
+
+																	{isBedrock && (
+																		<>
+																			<span className='font-medium text-muted-foreground'>Managed by:</span>
+																			<span className='font-semibold text-foreground/80'>
+																				{p.managed_by_composer ? 'Composer' : p.managed_by_monorepo ? 'Monorepo' : 'Manual Upload'}
+																			</span>
+																		</>
+																	)}
+
+																	{p.composer_constraint && (
+																		<>
+																			<span className='font-medium text-muted-foreground'>Composer Constraint:</span>
+																			<span className='font-mono text-foreground/70'>{p.composer_constraint}</span>
+																		</>
+																	)}
+																</div>
+															</div>
+														</div>
+													</td>
+												</tr>
+											)}
+										</Fragment>
+									);
+								})}
 							</tbody>
 						</table>
 						{filtered.length === 0 && (
@@ -1623,6 +2130,7 @@ export function PluginsTab({
 					envId={selectedEnvId}
 					open={showAddDialog}
 					onClose={() => setShowAddDialog(false)}
+					isBedrock={isBedrock}
 				/>
 			)}
 
@@ -1638,34 +2146,155 @@ export function PluginsTab({
 					title={
 						actionDialogState.action === 'updateAll'
 							? 'Update All Composer Plugins'
-							: actionDialogState.action === 'update'
-								? `Update Plugin: ${actionDialogState.slug}`
-								: `Remove Plugin: ${actionDialogState.slug}`
+							: actionDialogState.action === 'bulk-activate'
+								? `Bulk Activate Plugins (${selectedSlugs.size})`
+								: actionDialogState.action === 'bulk-deactivate'
+									? `Bulk Deactivate Plugins (${selectedSlugs.size})`
+									: actionDialogState.action === 'bulk-update'
+										? `Bulk Update Plugins (${selectedSlugs.size})`
+										: actionDialogState.action === 'bulk-remove'
+											? `Bulk Delete Plugins (${selectedSlugs.size})`
+											: actionDialogState.action === 'update'
+												? `Update Plugin: ${actionDialogState.slug}`
+												: actionDialogState.action === 'remove'
+													? `Remove Plugin: ${actionDialogState.slug}`
+													: actionDialogState.action === 'activate'
+														? `Activate Plugin: ${actionDialogState.slug}`
+														: actionDialogState.action === 'deactivate'
+															? `Deactivate Plugin: ${actionDialogState.slug}`
+															: `Migrate to Composer: ${actionDialogState.slug}`
 					}
 					description={
 						actionDialogState.action === 'updateAll'
 							? 'This will run `composer update` to update all plugins to their latest versions according to your composer.json constraints.'
-							: actionDialogState.action === 'update'
-								? `This will update ${actionDialogState.slug} to the latest version allowed by your constraints.`
-								: `This will remove ${actionDialogState.slug} from your composer.json and delete its files.`
+							: actionDialogState.action === 'bulk-activate'
+								? `This will activate ${selectedSlugs.size} selected plugins in your WordPress installation.`
+								: actionDialogState.action === 'bulk-deactivate'
+									? `This will deactivate ${selectedSlugs.size} selected plugins in your WordPress installation.`
+									: actionDialogState.action === 'bulk-update'
+										? `This will update the selected plugins that have available updates according to your composer.json constraints.`
+										: actionDialogState.action === 'bulk-remove'
+											? `This will permanently delete the selected ${selectedSlugs.size} plugins from your environment.`
+											: actionDialogState.action === 'update'
+												? `This will update ${actionDialogState.slug} to the latest version allowed by your constraints.`
+												: actionDialogState.action === 'remove'
+													? `This will permanently delete ${actionDialogState.slug} files and remove it from your environment.`
+													: actionDialogState.action === 'activate'
+														? `This will activate the plugin ${actionDialogState.slug} in your WordPress installation.`
+														: actionDialogState.action === 'deactivate'
+															? `This will deactivate the plugin ${actionDialogState.slug} in your WordPress installation.`
+															: `This will convert ${actionDialogState.slug} into a composer-managed dependency. A backup of the directory will be kept during the process.`
 					}
 					isPending={
 						actionDialogState.action === 'updateAll'
 							? updateAllMutation.isPending
 							: actionDialogState.action === 'update'
 								? updatePluginMutation.isPending
-								: removePluginMutation.isPending
+								: actionDialogState.action === 'remove'
+									? removePluginMutation.isPending
+									: actionDialogState.action === 'activate' || actionDialogState.action === 'deactivate'
+										? toggleStatusMutation.isPending
+										: migrateToComposerMutation.isPending
 					}
 					onConfirm={(skipSafetyBackup) => {
 						if (actionDialogState.action === 'updateAll') {
 							updateAllMutation.mutate(skipSafetyBackup);
+						} else if (actionDialogState.action === 'bulk-activate') {
+							runBulkToggleStatus(Array.from(selectedSlugs), true, skipSafetyBackup);
+						} else if (actionDialogState.action === 'bulk-deactivate') {
+							runBulkToggleStatus(Array.from(selectedSlugs), false, skipSafetyBackup);
+						} else if (actionDialogState.action === 'bulk-update') {
+							runBulkUpdate(
+								Array.from(selectedSlugs).filter(slug => {
+									const p = scanPluginBySlug.get(slug);
+									return p?.update_available && p?.managed_by_composer;
+								}),
+								skipSafetyBackup
+							);
+						} else if (actionDialogState.action === 'bulk-remove') {
+							runBulkDelete(
+								Array.from(selectedSlugs).filter(slug => {
+									const p = scanPluginBySlug.get(slug);
+									return p && !p.managed_by_monorepo;
+								}),
+								skipSafetyBackup
+							);
 						} else if (actionDialogState.action === 'update' && actionDialogState.slug) {
 							updatePluginMutation.mutate({ slug: actionDialogState.slug, skipSafetyBackup });
 						} else if (actionDialogState.action === 'remove' && actionDialogState.slug) {
 							removePluginMutation.mutate({ slug: actionDialogState.slug, skipSafetyBackup });
+						} else if ((actionDialogState.action === 'activate' || actionDialogState.action === 'deactivate') && actionDialogState.slug) {
+							toggleStatusMutation.mutate({
+								slug: actionDialogState.slug,
+								status: actionDialogState.action === 'activate' ? 'active' : 'inactive',
+								skipSafetyBackup
+							});
+						} else if (actionDialogState.action === 'migrate' && actionDialogState.slug) {
+							migrateToComposerMutation.mutate({ slug: actionDialogState.slug, skipSafetyBackup });
 						}
 						setActionDialogState({ open: false, action: null, slug: null });
 					}}
+				/>
+			)}
+
+			{selectedSlugs.size > 0 && (
+				<BulkActionsBar
+					selectedCount={selectedSlugs.size}
+					onClear={() => setSelectedSlugs(new Set())}
+					actions={
+						bulkProcessing
+							? [
+									{
+										label: bulkActionProgress || 'Processing...',
+										icon: Loader2,
+										onClick: () => {},
+										variant: 'ghost',
+									},
+								]
+							: [
+									{
+										label: 'Activate',
+										icon: CheckCircle2,
+										onClick: () =>
+											setActionDialogState({
+												open: true,
+												action: 'bulk-activate',
+												slug: null,
+											}),
+									},
+									{
+										label: 'Deactivate',
+										icon: RotateCcw,
+										onClick: () =>
+											setActionDialogState({
+												open: true,
+												action: 'bulk-deactivate',
+												slug: null,
+											}),
+									},
+									{
+										label: 'Update',
+										icon: ArrowUpCircle,
+										onClick: () =>
+											setActionDialogState({
+												open: true,
+												action: 'bulk-update',
+												slug: null,
+											}),
+									},
+									{
+										label: 'Delete',
+										icon: Trash2,
+										variant: 'destructive',
+										onClick: () =>
+											setActionDialogState({
+												open: true,
+												action: 'bulk-remove',
+												slug: null,
+											}),
+									},
+								]
+					}
 				/>
 			)}
 		</div>

@@ -74,23 +74,20 @@ async function refreshTokens(): Promise<string | null> {
 	if (_refreshPromise) return _refreshPromise;
 
 	_refreshPromise = (async () => {
-		const { refreshToken, setTokens, logout } = useAuthStore.getState();
-		if (!refreshToken) {
-			logout();
-			return null;
-		}
+		const { setAccessToken, setUser, logout } = useAuthStore.getState();
 		try {
 			const res = await fetch(`${BASE}/auth/refresh`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ refreshToken }),
+				credentials: 'include',
 			});
 			if (!res.ok) {
 				logout();
 				return null;
 			}
 			const data = await res.json();
-			setTokens(data.accessToken, data.refreshToken);
+			setAccessToken(data.accessToken);
+			if (data.user) setUser(data.user);
 			updateSocketToken(data.accessToken as string);
 			return data.accessToken as string;
 		} catch {
@@ -130,6 +127,7 @@ export async function apiFetch<T>(
 	const doFetch = (token: string | null) =>
 		fetch(`${BASE}${path}`, {
 			...init,
+			credentials: 'include',
 			headers: {
 				'Content-Type': 'application/json',
 				...(token ? { Authorization: `Bearer ${token}` } : {}),

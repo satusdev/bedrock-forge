@@ -1,5 +1,5 @@
-import { useParams, useNavigate } from 'react-router-dom';
-import { useState } from 'react';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
 	ArrowLeft,
@@ -9,6 +9,14 @@ import {
 	User2,
 	Pencil,
 	ExternalLink,
+	History,
+	Puzzle,
+	RefreshCw,
+	Undo2,
+	Wrench,
+	GitCompare,
+	Palette,
+	Cpu,
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
@@ -54,12 +62,6 @@ interface Project {
 	created_at: string;
 }
 
-const STATUS_VARIANT = {
-	active: 'default',
-	inactive: 'secondary',
-	archived: 'outline',
-} as const;
-
 function ProjectHeader({
 	project,
 	onEdit,
@@ -69,70 +71,107 @@ function ProjectHeader({
 }) {
 	const navigate = useNavigate();
 
+	const getStatusBadge = (status: string) => {
+		switch (status) {
+			case 'active':
+				return (
+					<Badge className='bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-950/50 transition-colors font-semibold shadow-sm text-xs px-2.5 py-1 capitalize'>
+						Active
+					</Badge>
+				);
+			case 'inactive':
+				return (
+					<Badge className='bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-950/50 transition-colors font-semibold shadow-sm text-xs px-2.5 py-1 capitalize'>
+						Inactive
+					</Badge>
+				);
+			default:
+				return (
+					<Badge className='bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-950/30 dark:text-slate-400 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-950/50 transition-colors font-semibold shadow-sm text-xs px-2.5 py-1 capitalize'>
+						{status}
+					</Badge>
+				);
+		}
+	};
+
 	return (
 		<div className='space-y-4'>
 			<Button
 				variant='ghost'
 				size='sm'
-				className='-ml-1'
+				className='-ml-1 text-muted-foreground hover:text-foreground transition-colors'
 				onClick={() => navigate('/projects')}
 			>
 				<ArrowLeft className='h-4 w-4 mr-1.5' />
 				All Projects
 			</Button>
 
-			<div className='flex flex-wrap items-start gap-4 justify-between'>
+			<div className='flex flex-wrap items-start gap-4 justify-between border-b pb-4'>
 				<div>
 					<div className='flex items-center gap-3 flex-wrap'>
-						<h1 className='text-3xl font-bold tracking-tight'>
+						<h1 className='text-4xl font-extrabold tracking-tight bg-gradient-to-r from-foreground to-foreground/75 bg-clip-text text-transparent'>
 							{project.name}
 						</h1>
-						<Badge
-							variant={STATUS_VARIANT[project.status] ?? 'secondary'}
-							className='text-sm'
-						>
-							{project.status}
-						</Badge>
+						{getStatusBadge(project.status)}
 					</div>
-					<div className='flex items-center gap-1.5 text-muted-foreground text-sm mt-1'>
-						<User2 className='h-3.5 w-3.5' />
-						{project.client.name}
+					<div className='flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors text-sm mt-2'>
+						<div className='flex items-center justify-center h-5 w-5 rounded-full bg-muted/80 text-muted-foreground'>
+							<User2 className='h-3 w-3' />
+						</div>
+						<span className='font-medium'>{project.client.name}</span>
 					</div>
 				</div>
-				<Button variant='outline' size='sm' onClick={onEdit}>
+				<Button variant='outline' size='sm' className='shadow-sm hover:bg-accent/50 transition-colors' onClick={onEdit}>
 					<Pencil className='h-4 w-4 mr-1.5' />
-					Edit Project
+					Edit Project Details
 				</Button>
 			</div>
 
-			<div className='flex flex-wrap gap-3'>
+			<div className='grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 mt-2'>
 				{project.hosting_package && (
-					<div className='flex items-center gap-2 rounded-lg border bg-card px-3 py-2'>
-						<Package className='h-4 w-4 text-muted-foreground' />
+					<div className='flex items-center gap-3.5 rounded-xl border bg-card/45 hover:bg-card/85 transition-all duration-200 shadow-sm p-4 backdrop-blur-sm group'>
+						<div className='p-2.5 rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/30 dark:text-blue-400 border border-blue-100 dark:border-blue-900 group-hover:scale-105 transition-transform duration-200'>
+							<Package className='h-5 w-5' />
+						</div>
 						<div>
-							<p className='text-xs text-muted-foreground'>Hosting</p>
-							<p className='text-sm font-medium'>
+							<p className='text-xs text-muted-foreground font-medium'>Hosting Package</p>
+							<p className='text-sm font-semibold tracking-tight mt-0.5'>
 								{project.hosting_package.name}
+							</p>
+							<p className='text-xs text-muted-foreground/80 mt-0.5'>
+								${project.hosting_package.price_monthly}/mo
 							</p>
 						</div>
 					</div>
 				)}
 				{project.support_package && (
-					<div className='flex items-center gap-2 rounded-lg border bg-card px-3 py-2'>
-						<Shield className='h-4 w-4 text-muted-foreground' />
+					<div className='flex items-center gap-3.5 rounded-xl border bg-card/45 hover:bg-card/85 transition-all duration-200 shadow-sm p-4 backdrop-blur-sm group'>
+						<div className='p-2.5 rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900 group-hover:scale-105 transition-transform duration-200'>
+							<Shield className='h-5 w-5' />
+						</div>
 						<div>
-							<p className='text-xs text-muted-foreground'>Support</p>
-							<p className='text-sm font-medium'>
+							<p className='text-xs text-muted-foreground font-medium'>Support Package</p>
+							<p className='text-sm font-semibold tracking-tight mt-0.5'>
 								{project.support_package.name}
+							</p>
+							<p className='text-xs text-muted-foreground/80 mt-0.5'>
+								${project.support_package.price_monthly}/mo
 							</p>
 						</div>
 					</div>
 				)}
-				<div className='flex items-center gap-2 rounded-lg border bg-card px-3 py-2'>
-					<Globe className='h-4 w-4 text-muted-foreground' />
+				<div className='flex items-center gap-3.5 rounded-xl border bg-card/45 hover:bg-card/85 transition-all duration-200 shadow-sm p-4 backdrop-blur-sm group'>
+					<div className='p-2.5 rounded-xl bg-purple-50 text-purple-600 dark:bg-purple-950/30 dark:text-purple-400 border border-purple-100 dark:border-purple-900 group-hover:scale-105 transition-transform duration-200'>
+						<Globe className='h-5 w-5' />
+					</div>
 					<div>
-						<p className='text-xs text-muted-foreground'>Environments</p>
-						<p className='text-sm font-medium'>{project.environments.length}</p>
+						<p className='text-xs text-muted-foreground font-medium'>Environments</p>
+						<p className='text-sm font-semibold tracking-tight mt-0.5'>
+							{project.environments.length} {project.environments.length === 1 ? 'Environment' : 'Environments'}
+						</p>
+						<p className='text-xs text-muted-foreground/80 mt-0.5 truncate max-w-[200px]'>
+							{project.environments.map(e => e.type).join(', ') || 'None configured'}
+						</p>
 					</div>
 				</div>
 			</div>
@@ -142,12 +181,13 @@ function ProjectHeader({
 
 function HeaderSkeleton() {
 	return (
-		<div className='space-y-4'>
+		<div className='space-y-4 border-b pb-4'>
 			<Skeleton className='h-8 w-32' />
-			<Skeleton className='h-10 w-60' />
-			<div className='flex gap-3'>
-				<Skeleton className='h-14 w-36 rounded-lg' />
-				<Skeleton className='h-14 w-36 rounded-lg' />
+			<Skeleton className='h-10 w-80' />
+			<div className='grid grid-cols-1 sm:grid-cols-3 gap-4 mt-2'>
+				<Skeleton className='h-[76px] rounded-xl' />
+				<Skeleton className='h-[76px] rounded-xl' />
+				<Skeleton className='h-[76px] rounded-xl' />
 			</div>
 		</div>
 	);
@@ -159,9 +199,20 @@ export function ProjectDetailPage() {
 	const projectId = Number(id);
 	const qc = useQueryClient();
 	const [editOpen, setEditOpen] = useState(false);
+	const [searchParams, setSearchParams] = useSearchParams();
+	const currentTab = searchParams.get('tab') || 'environments';
 	const [activatedTabs, setActivatedTabs] = useState<Set<string>>(
-		new Set(['environments']),
+		new Set([currentTab]),
 	);
+
+	useEffect(() => {
+		setActivatedTabs(prev => {
+			if (prev.has(currentTab)) return prev;
+			const next = new Set(prev);
+			next.add(currentTab);
+			return next;
+		});
+	}, [currentTab]);
 
 	const {
 		data: project,
@@ -230,27 +281,85 @@ export function ProjectDetailPage() {
 			<ProjectHeader project={project} onEdit={() => setEditOpen(true)} />
 
 			<Tabs
-				defaultValue='environments'
+				value={currentTab}
 				className='space-y-6'
-				onValueChange={v => setActivatedTabs(prev => new Set([...prev, v]))}
+				onValueChange={v => {
+					setSearchParams(prev => {
+						const next = new URLSearchParams(prev);
+						next.set('tab', v);
+						return next;
+					});
+				}}
 			>
-				<TabsList className='flex-wrap h-auto gap-1'>
-					<TabsTrigger value='environments'>
+				<TabsList className='flex-wrap h-auto gap-1 bg-muted/60 p-1 border border-border/40 rounded-xl shadow-sm backdrop-blur-sm'>
+					<TabsTrigger 
+						value='environments'
+						className='gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm'
+					>
+						<Globe className='h-3.5 w-3.5 opacity-70' />
 						Environments
 						{environments.length > 0 && (
-							<span className='ml-1.5 text-xs opacity-70'>
-								({environments.length})
+							<span className='ml-1 text-xs opacity-60 bg-muted px-1.5 py-0.5 rounded-full font-semibold border border-border/30'>
+								{environments.length}
 							</span>
 						)}
 					</TabsTrigger>
-					<TabsTrigger value='backups'>Backups</TabsTrigger>
-					<TabsTrigger value='plugins'>Plugins</TabsTrigger>
-					<TabsTrigger value='sync'>Sync</TabsTrigger>
-					<TabsTrigger value='restore'>Restore</TabsTrigger>
-					<TabsTrigger value='tools'>Tools</TabsTrigger>
-					<TabsTrigger value='drift'>Drift</TabsTrigger>
-					<TabsTrigger value='themes'>Themes</TabsTrigger>
-					<TabsTrigger value='wp-core'>WP Core</TabsTrigger>
+					<TabsTrigger 
+						value='backups'
+						className='gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm'
+					>
+						<History className='h-3.5 w-3.5 opacity-70' />
+						Backups
+					</TabsTrigger>
+					<TabsTrigger 
+						value='plugins'
+						className='gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm'
+					>
+						<Puzzle className='h-3.5 w-3.5 opacity-70' />
+						Plugins
+					</TabsTrigger>
+					<TabsTrigger 
+						value='sync'
+						className='gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm'
+					>
+						<RefreshCw className='h-3.5 w-3.5 opacity-70' />
+						Sync
+					</TabsTrigger>
+					<TabsTrigger 
+						value='restore'
+						className='gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm'
+					>
+						<Undo2 className='h-3.5 w-3.5 opacity-70' />
+						Restore
+					</TabsTrigger>
+					<TabsTrigger 
+						value='tools'
+						className='gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm'
+					>
+						<Wrench className='h-3.5 w-3.5 opacity-70' />
+						Tools
+					</TabsTrigger>
+					<TabsTrigger 
+						value='drift'
+						className='gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm'
+					>
+						<GitCompare className='h-3.5 w-3.5 opacity-70' />
+						Drift
+					</TabsTrigger>
+					<TabsTrigger 
+						value='themes'
+						className='gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm'
+					>
+						<Palette className='h-3.5 w-3.5 opacity-70' />
+						Themes
+					</TabsTrigger>
+					<TabsTrigger 
+						value='wp-core'
+						className='gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm'
+					>
+						<Cpu className='h-3.5 w-3.5 opacity-70' />
+						WP Core
+					</TabsTrigger>
 				</TabsList>
 
 				<TabsContent value='environments'>

@@ -1,4 +1,4 @@
-import React, { Component, useEffect, lazy, Suspense } from 'react';
+import React, { Component, useEffect, useState, lazy, Suspense } from 'react';
 import {
 	BrowserRouter,
 	Routes,
@@ -221,16 +221,39 @@ function SessionGuard() {
 }
 
 export default function App() {
-	// Re-validate user roles on mount to pick up server-side permission changes
+	const [authReady, setAuthReady] = useState(false);
+
+	// Rehydrate from the httpOnly refresh cookie when possible, then re-validate
+	// roles to pick up server-side permission changes.
 	useEffect(() => {
-		const { accessToken, setUser, logout } = useAuthStore.getState();
-		if (!accessToken) return;
-		api
-			.get<{ id: number; email: string; name: string; roles: string[] }>(
-				'/auth/me',
-			)
-			.then(setUser)
-			.catch(() => logout());
+		const hydrate = async () => {
+			const { accessToken, setAccessToken, setUser, logout } =
+				useAuthStore.getState();
+			try {
+				if (accessToken) {
+					const user = await api.get<{
+						id: number;
+						email: string;
+						name: string;
+						roles: string[];
+					}>('/auth/me');
+					setUser(user);
+					return;
+				}
+
+				const session = await api.post<{
+					accessToken: string;
+					user: { id: number; email: string; name: string; roles: string[] };
+				}>('/auth/refresh', {});
+				setAccessToken(session.accessToken);
+				setUser(session.user);
+			} catch {
+				logout();
+			} finally {
+				setAuthReady(true);
+			}
+		};
+		void hydrate();
 	}, []);
 
 	// Disconnect WebSocket when the user logs out
@@ -241,6 +264,14 @@ export default function App() {
 			}
 		});
 	}, []);
+
+	if (!authReady) {
+		return (
+			<div className='flex h-screen items-center justify-center'>
+				<div className='animate-spin rounded-full h-8 w-8 border-b-2 border-primary' />
+			</div>
+		);
+	}
 
 	return (
 		<ErrorBoundary>
