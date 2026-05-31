@@ -17,7 +17,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { ROLES } from '@bedrock-forge/shared';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { PluginScansService } from './plugin-scans.service';
-import { PluginManageDto, UpdateAllPluginsDto } from './dto/plugin-manage.dto';
+import { PluginManageDto, UpdateAllPluginsDto, TogglePluginStatusDto } from './dto/plugin-manage.dto';
 import { ChangeConstraintDto } from './dto/change-constraint.dto';
 
 @Controller('plugin-scans')
@@ -25,6 +25,11 @@ import { ChangeConstraintDto } from './dto/change-constraint.dto';
 @Roles(ROLES.MANAGER)
 export class PluginScansController {
 	constructor(private readonly svc: PluginScansService) {}
+
+	@Get('search-wp-org')
+	searchWpOrg(@Query('q') query: string) {
+		return this.svc.searchWpOrg(query);
+	}
 
 	@Get('environment/:envId')
 	findByEnv(
@@ -55,6 +60,7 @@ export class PluginScansController {
 			dto.slug,
 			dto.version,
 			dto.skipSafetyBackup,
+			dto.workflow,
 		);
 	}
 
@@ -66,10 +72,40 @@ export class PluginScansController {
 	) {
 		return this.svc.enqueuePluginManage(
 			envId,
-			'remove',
+			'delete',
 			slug,
 			undefined,
 			skipSafetyBackup === 'true',
+		);
+	}
+
+	@Put('environment/:envId/plugins/:slug/status')
+	toggleStatus(
+		@Param('envId', ParseIntPipe) envId: number,
+		@Param('slug') slug: string,
+		@Body() dto: TogglePluginStatusDto,
+	) {
+		return this.svc.enqueuePluginManage(
+			envId,
+			dto.active ? 'activate' : 'deactivate',
+			slug,
+			undefined,
+			dto.skipSafetyBackup,
+		);
+	}
+
+	@Post('environment/:envId/plugins/:slug/migrate')
+	migrateToComposer(
+		@Param('envId', ParseIntPipe) envId: number,
+		@Param('slug') slug: string,
+		@Body() dto: UpdateAllPluginsDto,
+	) {
+		return this.svc.enqueuePluginManage(
+			envId,
+			'migrate-to-composer',
+			slug,
+			undefined,
+			dto.skipSafetyBackup,
 		);
 	}
 

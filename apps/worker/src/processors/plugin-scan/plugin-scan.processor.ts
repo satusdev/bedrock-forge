@@ -15,6 +15,7 @@ import {
 } from '@bedrock-forge/shared';
 import { ConfigService } from '@nestjs/config';
 import { join } from 'path';
+import { buildWpCliPrefix } from '../../utils/processor-utils';
 
 /** Wrap a string in single quotes for safe shell embedding on the remote host. */
 function shellQuote(value: string): string {
@@ -256,7 +257,7 @@ export class PluginScanProcessor extends WorkerHost {
 	// ─────────────────────────────────────────────────────────────────────────
 
 	private async processManage(job: Job) {
-		const payload = job.data as PluginManagePayload;
+		const payload = job.data as PluginManagePayload & { workflow?: 'composer' | 'manual' };
 		const {
 			environmentId,
 			jobExecutionId,
@@ -384,65 +385,218 @@ export class PluginScanProcessor extends WorkerHost {
 
 			await job.updateProgress(10);
 
-			const scriptsPath = this.config.get<string>('scriptsPath')!;
-			const remoteScript = `/tmp/composer_mgr_${job.id}.php`;
-
-			await tracker.track({
-				step: 'Uploading composer-manager script',
-				level: 'info',
-			});
-			const scriptContent = readFileSync(
-				join(scriptsPath, 'composer-manager.php'),
+			// WP-CLI resolves the docroot via --path; for Bedrock the core is at
+			// <root_path>/web/wp — detect by checking if that subdirectory exists.
+			const wpPathResult = await executor.execute(
+				`[ -d ${shellQuote(env.root_path + '/web/wp')} ] && echo bedrock || echo standard`,
+				{ timeout: 10_000 },
 			);
-			await executor.pushFile({
-				remotePath: remoteScript,
-				content: scriptContent,
-			});
-
-			await job.updateProgress(20);
-
-			const pkgArg = slug
-				? ` --package=${shellQuote(`wpackagist-plugin/${slug}`)}`
-				: '';
-			const versionArg = version ? ` --version=${shellQuote(version)}` : '';
-			const constraintArg = payload.constraint
-				? ` --constraint=${shellQuote(payload.constraint)}`
-				: '';
-			const cmd =
-				`php ${remoteScript} --docroot=${shellQuote(env.root_path)}` +
-				` --action=${shellQuote(action)}${pkgArg}${versionArg}${constraintArg}`;
+			const isBedrockLayout = wpPathResult.stdout.trim() === 'bedrock';
+			const wpPath = isBedrockLayout
+				? `${env.root_path}/web/wp`
+				: env.root_path;
 
 			await tracker.track({
-				step: `Running composer ${action}`,
+				step: 'Detected WP layout',
 				level: 'info',
-				detail: slug ?? 'all packages',
+				detail: `${isBedrockLayout ? 'Bedrock (web/wp)' : 'Standard'} at ${wpPath}`,
 			});
 
+			const {
+				prefix: wpPrefix,
+				allowRootFlag,
+				lsphpBin,
+				wpBin,
+			} = await buildWpCliPrefix(executor, wpPath);
+
+			const buildWpCmd = (args: string): string => {
+				let phpAndWp: string;
+				if (lsphpBin && wpBin) {
+					phpAndWp = `${shellQuote(lsphpBin)} ${shellQuote(wpBin)}`;
+				} else if (lsphpBin) {
+					phpAndWp = `env WP_CLI_PHP=${shellQuote(lsphpBin)} wp`;
+				} else {
+					phpAndWp = 'wp';
+				}
+				return [wpPrefix, phpAndWp, args.trim(), allowRootFlag]
+					.filter(Boolean)
+					.join(' ');
+			};
+
+			// Fetch the latest scan to check plugin attributes (like managed_by_composer)
+			const latestScan = await this.prisma.pluginScan.findFirst({
+				where: { environment_id: BigInt(environmentId) },
+				orderBy: { scanned_at: 'desc' },
+			});
+			let isComposerManaged = false;
+			if (latestScan && latestScan.plugins) {
+				const output = latestScan.plugins as any;
+				const pluginsList = Array.isArray(output) ? output : (output.plugins || []);
+				const matchedPlugin = pluginsList.find((p: any) => p.slug === slug);
+				if (matchedPlugin && matchedPlugin.managed_by_composer) {
+					isComposerManaged = true;
+				}
+			}
+
+			let useComposer = false;
+			if (action === 'update-all' || action === 'change-constraint' || action === 'read' || action === 'update') {
+				useComposer = true;
+			} else if (action === 'remove') {
+				useComposer = true;
+			} else if (action === 'add') {
+				useComposer = isBedrockLayout && (!payload.workflow || payload.workflow === 'composer');
+			} else if (action === 'delete') {
+				useComposer = isBedrockLayout && isComposerManaged;
+			} else if (action === 'migrate-to-composer') {
+				useComposer = true;
+			}
+
+			let manageResult: { code: number; stdout: string; stderr: string };
 			const manageStart = Date.now();
-			const manageResult = await executor.execute(cmd, {
-				// composer install can take a while on first run
-				timeout: 10 * 60 * 1000,
-			});
-			await tracker.trackCommand(
-				`composer ${action}`,
-				cmd,
-				manageResult,
-				Date.now() - manageStart,
-			);
+
+			if (useComposer) {
+				const scriptsPath = this.config.get<string>('scriptsPath')!;
+				const remoteScript = `/tmp/composer_mgr_${job.id}.php`;
+
+				await tracker.track({
+					step: 'Uploading composer-manager script',
+					level: 'info',
+				});
+				const scriptContent = readFileSync(
+					join(scriptsPath, 'composer-manager.php'),
+				);
+				await executor.pushFile({
+					remotePath: remoteScript,
+					content: scriptContent,
+				});
+
+				await job.updateProgress(20);
+
+				if (action === 'migrate-to-composer') {
+					if (!isBedrockLayout) {
+						throw new Error('Migration to Composer is only supported in Bedrock environments.');
+					}
+					if (!slug) {
+						throw new Error('Plugin slug is required for migration.');
+					}
+
+					await tracker.track({
+						step: 'Renaming manual plugin directory for backup',
+						level: 'info',
+						detail: slug,
+					});
+
+					const backupDirCmd = `mv ${shellQuote(env.root_path + '/web/app/plugins/' + slug)} ${shellQuote(env.root_path + '/web/app/plugins/' + slug + '_backup')}`;
+					await executor.execute(backupDirCmd);
+
+					const composerCmd = `php ${remoteScript} --docroot=${shellQuote(env.root_path)} --action=add --package=${shellQuote('wpackagist-plugin/' + slug)}`;
+					await tracker.track({
+						step: 'Requiring package via composer',
+						level: 'info',
+						detail: `wpackagist-plugin/${slug}`,
+					});
+
+					manageResult = await executor.execute(composerCmd, { timeout: 10 * 60 * 1000 });
+					await tracker.trackCommand(
+						`composer add wpackagist-plugin/${slug}`,
+						composerCmd,
+						manageResult,
+						Date.now() - manageStart,
+					);
+
+					if (manageResult.code === 0) {
+						await tracker.track({
+							step: 'Cleaning up manual backup',
+							level: 'info',
+						});
+						await executor.execute(`rm -rf ${shellQuote(env.root_path + '/web/app/plugins/' + slug + '_backup')}`);
+					} else {
+						await tracker.track({
+							step: 'Composer failed. Restoring manual plugin backup',
+							level: 'warn',
+							detail: manageResult.stderr,
+						});
+						await executor.execute(`mv ${shellQuote(env.root_path + '/web/app/plugins/' + slug + '_backup')} ${shellQuote(env.root_path + '/web/app/plugins/' + slug)}`);
+						throw new Error(`composer migration failed: ${manageResult.stderr}`);
+					}
+				} else {
+					const pkgArg = slug
+						? ` --package=${shellQuote(`wpackagist-plugin/${slug}`)}`
+						: '';
+					const versionArg = version ? ` --version=${shellQuote(version)}` : '';
+					const constraintArg = payload.constraint
+						? ` --constraint=${shellQuote(payload.constraint)}`
+						: '';
+					const composerAction = action === 'delete' ? 'remove' : action;
+					const cmd =
+						`php ${remoteScript} --docroot=${shellQuote(env.root_path)}` +
+						` --action=${shellQuote(composerAction)}${pkgArg}${versionArg}${constraintArg}`;
+
+					await tracker.track({
+						step: `Running composer ${composerAction}`,
+						level: 'info',
+						detail: slug ?? 'all packages',
+					});
+
+					manageResult = await executor.execute(cmd, {
+						timeout: 10 * 60 * 1000,
+					});
+					await tracker.trackCommand(
+						`composer ${composerAction}`,
+						cmd,
+						manageResult,
+						Date.now() - manageStart,
+					);
+				}
+
+				await executor.execute(`rm -f ${remoteScript}`);
+			} else {
+				// WP-CLI Action
+				let cliArgs = '';
+				if (action === 'add') {
+					if (!slug) throw new Error('Plugin slug is required to install.');
+					const wpVer = version ? ` --version=${shellQuote(version)}` : '';
+					cliArgs = `plugin install ${shellQuote(slug)}${wpVer}`;
+				} else if (action === 'delete') {
+					if (!slug) throw new Error('Plugin slug is required to delete.');
+					cliArgs = `plugin delete ${shellQuote(slug)}`;
+				} else if (action === 'activate') {
+					if (!slug) throw new Error('Plugin slug is required to activate.');
+					cliArgs = `plugin activate ${shellQuote(slug)}`;
+				} else if (action === 'deactivate') {
+					if (!slug) throw new Error('Plugin slug is required to deactivate.');
+					cliArgs = `plugin deactivate ${shellQuote(slug)}`;
+				} else {
+					throw new Error(`Unsupported WP-CLI action: ${action}`);
+				}
+
+				const cmd = buildWpCmd(`${cliArgs} --path=${shellQuote(wpPath)}`);
+
+				await tracker.track({
+					step: `Running wp-cli ${action}`,
+					level: 'info',
+					detail: slug,
+				});
+
+				manageResult = await executor.execute(cmd, { timeout: 2 * 60 * 1000 });
+				await tracker.trackCommand(
+					`wp-cli ${action}`,
+					cmd,
+					manageResult,
+					Date.now() - manageStart,
+				);
+			}
 
 			if (manageResult.code !== 0) {
 				throw new Error(
-					`composer ${action} failed (exit ${manageResult.code}): ${manageResult.stderr}`,
+					`Action ${action} failed (exit ${manageResult.code}): ${manageResult.stderr}`,
 				);
 			}
 
 			await job.updateProgress(70);
-			await executor.execute(`rm -f ${remoteScript}`);
 
 			if (action === 'read') {
 				// Store the full JSON response as a retrievable log entry.
-				// The frontend fetches GET /plugin-scans/execution/:id and parses
-				// the 'composer-read-result' step to display the composer.json viewer.
 				await tracker.track({
 					step: 'composer-read-result',
 					level: 'info',
@@ -450,7 +604,7 @@ export class PluginScanProcessor extends WorkerHost {
 				});
 			} else {
 				// Always trigger a fresh plugin scan after any mutation so the stored
-				// plugin list reflects the updated composer state.
+				// plugin list reflects the updated state.
 				await tracker.track({
 					step: 'Triggering fresh plugin scan',
 					level: 'info',
@@ -467,8 +621,6 @@ export class PluginScanProcessor extends WorkerHost {
 					},
 				});
 
-				// Import the queue lazily to avoid circular DI — the worker already
-				// has the queue registered globally.
 				const { Queue } = await import('bullmq');
 				const redisUrl = this.config.get<string>('redis.url')!;
 				const scanQueue = new Queue(QUEUES.PLUGIN_SCANS, {
@@ -489,7 +641,7 @@ export class PluginScanProcessor extends WorkerHost {
 			});
 
 			await tracker.track({
-				step: `composer ${action} complete`,
+				step: `Action ${action} complete`,
 				level: 'info',
 			});
 		} catch (err: unknown) {
@@ -497,7 +649,7 @@ export class PluginScanProcessor extends WorkerHost {
 			this.logger.error(`Plugin manage job ${job.id} failed: ${msg}`);
 			await tracker
 				.track({
-					step: `composer ${action} failed`,
+					step: `Action ${action} failed`,
 					level: 'error',
 					detail: msg,
 				})

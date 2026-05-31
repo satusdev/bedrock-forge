@@ -64,6 +64,8 @@ if ($composerJsonPath !== null && isset($composerData['extra']['monorepo-sources
         foreach ((array) ($source['require'] ?? []) as $repoSlug) {
             if (is_string($repoSlug) && $repoSlug !== '') {
                 $monorepoSlugs[$repoSlug] = $sourceUrl;
+            } elseif (is_array($repoSlug) && isset($repoSlug['as'])) {
+                $monorepoSlugs[$repoSlug['as']] = $sourceUrl;
             }
         }
     }
@@ -88,6 +90,60 @@ if (!$pluginsDir) {
     exit(1);
 }
 
+// ─── Query Database for Active Plugins ────────────────────────────────────────
+
+// PHP 7.1 compatibility polyfills
+if (!function_exists('str_starts_with')) {
+    function str_starts_with($haystack, $needle) {
+        return (string)$needle !== '' && strncmp($haystack, $needle, strlen($needle)) === 0;
+    }
+}
+if (!function_exists('str_contains')) {
+    function str_contains($haystack, $needle) {
+        return $needle !== '' && strpos($haystack, $needle) !== false;
+    }
+}
+
+$activeList = [];
+$db = loadDb($docroot);
+if ($db) {
+    try {
+        $pdo = connectPdo($db);
+        
+        // Query active_plugins
+        $stmt = $pdo->prepare("SELECT option_value FROM `{$db['prefix']}options` WHERE option_name = 'active_plugins' LIMIT 1");
+        $stmt->execute();
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row && !empty($row['option_value'])) {
+            $unserialized = @unserialize($row['option_value']);
+            if (is_array($unserialized)) {
+                foreach ($unserialized as $pluginFile) {
+                    $activeList[$pluginFile] = true;
+                }
+            }
+        }
+        
+        // Query active_sitewide_plugins from sitemeta if multisite
+        $metaTable = $db['prefix'] . 'sitemeta';
+        $tableCheck = $pdo->query("SHOW TABLES LIKE '{$metaTable}'");
+        if ($tableCheck && $tableCheck->rowCount() > 0) {
+            $stmt = $pdo->prepare("SELECT meta_value FROM `{$metaTable}` WHERE meta_key = 'active_sitewide_plugins' LIMIT 1");
+            $stmt->execute();
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row && !empty($row['meta_value'])) {
+                $unserialized = @unserialize($row['meta_value']);
+                if (is_array($unserialized)) {
+                    foreach (array_keys($unserialized) as $pluginFile) {
+                        $activeList[$pluginFile] = true;
+                    }
+                }
+            }
+        }
+    } catch (Exception $e) {
+        // Fail silently
+    }
+}
+
 // ─── Scan plugins ─────────────────────────────────────────────────────────────
 
 $plugins = [];
@@ -106,11 +162,13 @@ foreach (scandir($pluginsDir) as $entry) {
     }
 
     $headers = [];
+    $mainFile = null;
     foreach ($candidates as $candidate) {
         if (!file_exists($candidate)) continue;
         $content = file_get_contents($candidate, false, null, 0, 8192); // read first 8KB
         if (strpos($content, 'Plugin Name') !== false) {
             $headers = parsePluginHeaders($content);
+            $mainFile = $candidate;
             break;
         }
     }
@@ -121,6 +179,15 @@ foreach (scandir($pluginsDir) as $entry) {
     $currentVersion  = $headers['version'] ?? '0.0.0';
     $latestVersion   = fetchLatestVersion($slug);
     $updateAvailable = $latestVersion !== null && version_compare($latestVersion, $currentVersion, '>');
+
+    $relPath = null;
+    if ($mainFile !== null) {
+        $relPath = substr($mainFile, strlen($pluginsDir) + 1);
+    }
+    $isActive = false;
+    if ($relPath !== null && isset($activeList[$relPath])) {
+        $isActive = true;
+    }
 
     $plugins[] = [
         'slug'                => $slug,
@@ -136,6 +203,7 @@ foreach (scandir($pluginsDir) as $entry) {
         'managed_by_monorepo' => array_key_exists($slug, $monorepoSlugs),
         'monorepo_repo_url'   => $monorepoSlugs[$slug] ?? null,
         'is_mu_plugin'        => false,
+        'status'              => $isActive ? 'active' : 'inactive',
     ];
 }
 
@@ -206,6 +274,7 @@ if ($muPluginsDir) {
             'managed_by_monorepo' => false,
             'monorepo_repo_url'   => null,
             'is_mu_plugin'        => true,
+            'status'              => 'active',
         ];
     }
 }
@@ -253,4 +322,62 @@ function fetchLatestVersion(string $slug): ?string {
     if ($result === false) return null;
     $data = json_decode($result, true);
     return is_array($data) && isset($data['version']) ? $data['version'] : null;
+}
+
+function loadDb(string $docroot): ?array {
+    // Bedrock-style .env
+    foreach (['.env', '.env.local'] as $f) {
+        $envPath = $docroot . '/' . $f;
+        if (file_exists($envPath)) {
+            $lines = file($envPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            $vars = [];
+            foreach ($lines as $line) {
+                if (str_starts_with(trim($line), '#')) continue;
+                [$k, $v] = array_pad(explode('=', $line, 2), 2, '');
+                $vars[trim($k)] = trim($v, " \t\n\r\"'");
+            }
+            if (!empty($vars['DB_NAME'])) {
+                return [
+                    'host'   => $vars['DB_HOST'] ?? '127.0.0.1',
+                    'port'   => $vars['DB_PORT'] ?? '3306',
+                    'user'   => $vars['DB_USER'] ?? $vars['DB_USERNAME'] ?? 'root',
+                    'pass'   => $vars['DB_PASSWORD'] ?? $vars['DB_PASS'] ?? '',
+                    'name'   => $vars['DB_NAME'],
+                    'prefix' => $vars['table_prefix'] ?? 'wp_',
+                ];
+            }
+        }
+    }
+    // Legacy wp-config.php
+    $wpConfig = $docroot . '/wp-config.php';
+    if (file_exists($wpConfig)) {
+        $content = file_get_contents($wpConfig);
+        preg_match("/define\s*\(\s*['\"]DB_NAME['\"]\s*,\s*['\"]([^'\"]+)['\"]/", $content, $nm);
+        preg_match("/define\s*\(\s*['\"]DB_USER['\"]\s*,\s*['\"]([^'\"]+)['\"]/", $content, $usr);
+        preg_match("/define\s*\(\s*['\"]DB_PASSWORD['\"]\s*,\s*['\"]([^'\"]+)['\"]/", $content, $pw);
+        preg_match("/define\s*\(\s*['\"]DB_HOST['\"]\s*,\s*['\"]([^'\"]+)['\"]/", $content, $host);
+        preg_match("/\\\$table_prefix\s*=\s*['\"]([^'\"]+)['\"]/", $content, $pfx);
+        if (!empty($nm[1])) {
+            $hostVal = $host[1] ?? '127.0.0.1';
+            $port    = '3306';
+            if (str_contains($hostVal, ':')) [$hostVal, $port] = explode(':', $hostVal, 2);
+            return [
+                'host'   => $hostVal,
+                'port'   => $port,
+                'user'   => $usr[1]  ?? 'root',
+                'pass'   => $pw[1]   ?? '',
+                'name'   => $nm[1],
+                'prefix' => $pfx[1]  ?? 'wp_',
+            ];
+        }
+    }
+    return null;
+}
+
+function connectPdo(array $db): PDO {
+    $dsn = "mysql:host={$db['host']};port={$db['port']};dbname={$db['name']};charset=utf8mb4";
+    return new PDO($dsn, $db['user'], $db['pass'], [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_TIMEOUT => 10,
+    ]);
 }

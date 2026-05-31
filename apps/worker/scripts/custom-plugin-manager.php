@@ -71,6 +71,13 @@ if (!$repoUrl || !preg_match(
     bail("Invalid or missing --repo-url. Must be a valid git URL.");
 }
 
+// Convert SSH git URL to HTTPS format to bypass firewall/SSH key restrictions
+if (preg_match('/^git@([a-zA-Z0-9._-]+):([a-zA-Z0-9._\/-]+?)(?:\.git)?$/', $repoUrl, $matches)) {
+    $host = $matches[1];
+    $path = $matches[2];
+    $repoUrl = "https://{$host}/{$path}.git";
+}
+
 if (!preg_match('/^[.a-zA-Z0-9\/_-]+$/', $repoPath)) {
     bail("Invalid --repo-path. Must match /^[.a-zA-Z0-9\\/_-]+$/");
 }
@@ -115,9 +122,13 @@ $targetDir = ($type === 'theme')
 // ─── Handle add ───────────────────────────────────────────────────────────────
 
 if ($action === 'add' || $action === 'update') {
-    // Ensure satusdev/monorepo-fetcher is in require
-    if (!isset($composer['require']['satusdev/monorepo-fetcher'])) {
-        $composer['require']['satusdev/monorepo-fetcher'] = 'dev-main';
+    // Ensure satusdev/repo-fetcher is in require
+    if (!isset($composer['require']['satusdev/repo-fetcher'])) {
+        $composer['require']['satusdev/repo-fetcher'] = 'dev-main';
+    }
+    // Clean up legacy package name if present
+    if (isset($composer['require']['satusdev/monorepo-fetcher'])) {
+        unset($composer['require']['satusdev/monorepo-fetcher']);
     }
 
     // Ensure repositories entry for vcs source
@@ -149,6 +160,24 @@ if ($action === 'add' || $action === 'update') {
         $composer['prefer-stable'] = true;
     }
 
+    // Disable use-symlinks to ensure files are copied and readable by the web server
+    if (!isset($composer['extra'])) {
+        $composer['extra'] = [];
+    }
+    $composer['extra']['use-symlinks'] = false;
+
+    // Ensure allow-plugins config allows satusdev/repo-fetcher and satusdev/monorepo-fetcher
+    if (!isset($composer['config'])) {
+        $composer['config'] = [];
+    }
+    if (!isset($composer['config']['allow-plugins'])) {
+        $composer['config']['allow-plugins'] = [];
+    }
+    if (is_array($composer['config']['allow-plugins'])) {
+        $composer['config']['allow-plugins']['satusdev/repo-fetcher'] = true;
+        $composer['config']['allow-plugins']['satusdev/monorepo-fetcher'] = true;
+    }
+
     // Find or create the matching monorepo-source entry.
     // Update is intentionally idempotent: if an existing site was adopted by
     // scan, this rewrites the expected source config before composer refreshes.
@@ -158,12 +187,25 @@ if ($action === 'add' || $action === 'update') {
     foreach ($sources as &$source) {
         if (
             isset($source['url'], $source['path']) &&
-            $source['url'] === $repoUrl &&
+            normalizeGitUrl($source['url']) === normalizeGitUrl($repoUrl) &&
             $source['path'] === $repoPath
         ) {
             $require = $source['require'] ?? [];
-            if (!in_array($slug, $require, true)) {
-                $require[] = $slug;
+            $foundSlug = false;
+            foreach ($require as $req) {
+                if (is_string($req) && $req === $slug) {
+                    $foundSlug = true;
+                    break;
+                } elseif (is_array($req) && isset($req['as']) && $req['as'] === $slug) {
+                    $foundSlug = true;
+                    break;
+                }
+            }
+            if (!$foundSlug) {
+                $require[] = [
+                    'src' => '.',
+                    'as'  => $slug,
+                ];
             }
             $source['require'] = array_values($require);
             $found = true;
@@ -178,7 +220,12 @@ if ($action === 'add' || $action === 'update') {
             'url'     => $repoUrl,
             'path'    => $repoPath,
             'target'  => $targetDir,
-            'require' => [$slug],
+            'require' => [
+                [
+                    'src' => '.',
+                    'as'  => $slug,
+                ]
+            ],
         ];
     }
 
@@ -200,7 +247,14 @@ if ($action === 'add' || $action === 'update') {
 
     $backup = backupComposerState($composerJsonPath);
     writeComposer($composerJsonPath, $composer);
-    runComposer('update satusdev/monorepo-fetcher --no-dev --no-interaction -W', $backup);
+    
+    $out1 = runComposer('update satusdev/repo-fetcher --no-dev --no-interaction -W', $backup, true);
+    
+    // Always trigger a follow-up install to guarantee that any new/updated plugins are fetched and copied by repo-fetcher
+    $out2 = runComposer('install --no-dev --no-interaction', $backup, true);
+    
+    restoreOwnership($composerJsonPath, $targetDir, $composerDir);
+    echo json_encode(['success' => true, 'output' => $out1 . "\n" . $out2], JSON_UNESCAPED_SLASHES);
 }
 
 // ─── Handle remove ────────────────────────────────────────────────────────────
@@ -212,11 +266,23 @@ if ($action === 'remove') {
     foreach ($sources as $i => &$source) {
         if (
             isset($source['url'], $source['path']) &&
-            $source['url'] === $repoUrl &&
+            normalizeGitUrl($source['url']) === normalizeGitUrl($repoUrl) &&
             $source['path'] === $repoPath
         ) {
             $require = $source['require'] ?? [];
-            $filtered = array_values(array_filter($require, fn($s) => $s !== $slug));
+            $filtered = [];
+            foreach ($require as $req) {
+                if (is_string($req)) {
+                    if ($req !== $slug) {
+                        $filtered[] = $req;
+                    }
+                } elseif (is_array($req)) {
+                    $reqSlug = $req['as'] ?? $req['name'] ?? '';
+                    if ($reqSlug !== $slug) {
+                        $filtered[] = $req;
+                    }
+                }
+            }
             if (count($filtered) === 0) {
                 unset($sources[$i]);
             } else {
@@ -238,6 +304,45 @@ if ($action === 'remove') {
 
     if (empty($sources)) {
         unset($composer['extra']['monorepo-sources']);
+        if (isset($composer['extra']['use-symlinks'])) {
+            unset($composer['extra']['use-symlinks']);
+        }
+        if (empty($composer['extra'])) {
+            unset($composer['extra']);
+        }
+        if (isset($composer['require']['satusdev/repo-fetcher'])) {
+            unset($composer['require']['satusdev/repo-fetcher']);
+        }
+        if (isset($composer['require']['satusdev/monorepo-fetcher'])) {
+            unset($composer['require']['satusdev/monorepo-fetcher']);
+        }
+        // Clean up allow-plugins
+        if (isset($composer['config']['allow-plugins']) && is_array($composer['config']['allow-plugins'])) {
+            unset($composer['config']['allow-plugins']['satusdev/repo-fetcher']);
+            unset($composer['config']['allow-plugins']['satusdev/monorepo-fetcher']);
+            if (empty($composer['config']['allow-plugins'])) {
+                unset($composer['config']['allow-plugins']);
+            }
+        }
+        if (isset($composer['config']) && empty($composer['config'])) {
+            unset($composer['config']);
+        }
+        // Clean up the repositories VCS entry if present
+        if (isset($composer['repositories']) && is_array($composer['repositories'])) {
+            foreach ($composer['repositories'] as $idx => $repo) {
+                if (
+                    isset($repo['type'], $repo['url']) &&
+                    $repo['type'] === 'vcs' &&
+                    $repo['url'] === 'https://github.com/satusdev/monorepo-fetcher'
+                ) {
+                    unset($composer['repositories'][$idx]);
+                }
+            }
+            $composer['repositories'] = array_values($composer['repositories']);
+            if (empty($composer['repositories'])) {
+                unset($composer['repositories']);
+            }
+        }
     } else {
         $composer['extra']['monorepo-sources'] = $sources;
     }
@@ -245,6 +350,7 @@ if ($action === 'remove') {
     $backup = backupComposerState($composerJsonPath);
     writeComposer($composerJsonPath, $composer);
     runComposer('install --no-dev --no-interaction', $backup);
+    restoreOwnership($composerJsonPath, $targetDir, $composerDir);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -296,10 +402,15 @@ function restoreComposerState(array $backup): void
 
 function composerCommand(string $args): string
 {
-    return 'COMPOSER_ALLOW_SUPERUSER=1 COMPOSER_NO_INTERACTION=1 composer ' . $args . ' 2>&1';
+    global $ghToken;
+    $prefix = 'COMPOSER_ALLOW_SUPERUSER=1 COMPOSER_NO_INTERACTION=1';
+    if ($ghToken) {
+        $prefix .= ' REPO_FETCHER_TOKEN=' . escapeshellarg($ghToken);
+    }
+    return $prefix . ' composer ' . $args . ' 2>&1';
 }
 
-function runComposer(string $args, ?array $backup = null): void
+function runComposer(string $args, ?array $backup = null, bool $silentOnSuccess = false): string
 {
     // Verify composer is available
     exec(composerCommand('--version'), $verOut, $verCode);
@@ -317,12 +428,68 @@ function runComposer(string $args, ?array $backup = null): void
         if ($backup !== null) {
             restoreComposerState($backup);
         }
+        if (isset($GLOBALS['composerJsonPath'], $GLOBALS['targetDir'], $GLOBALS['composerDir'])) {
+            restoreOwnership($GLOBALS['composerJsonPath'], $GLOBALS['targetDir'], $GLOBALS['composerDir']);
+        }
         fwrite(STDERR, "ERROR: composer failed (exit {$exitCode}):\n{$output}\n");
         echo json_encode(['success' => false, 'error' => "composer failed (exit {$exitCode}): {$output}"], JSON_UNESCAPED_SLASHES);
         exit($exitCode);
     }
 
-    echo json_encode(['success' => true, 'output' => $output], JSON_UNESCAPED_SLASHES);
+    if (!$silentOnSuccess) {
+        echo json_encode(['success' => true, 'output' => $output], JSON_UNESCAPED_SLASHES);
+    }
+    
+    return $output;
+}
+
+function restoreOwnership(string $composerJsonPath, string $targetDir, string $composerDir): void
+{
+    $stat = @stat($composerJsonPath);
+    if (!$stat) {
+        return;
+    }
+    $uid = $stat['uid'];
+    $gid = $stat['gid'];
+
+    $pathsToChown = [
+        $composerJsonPath,
+        $composerDir . '/composer.lock',
+        $composerDir . '/auth.json',
+    ];
+
+    foreach ($pathsToChown as $path) {
+        if (file_exists($path)) {
+            @chown($path, $uid);
+            @chgrp($path, $gid);
+        }
+    }
+
+    $vendorDir = $composerDir . '/vendor';
+    if (is_dir($vendorDir)) {
+        exec(sprintf('chown -R %d:%d %s', $uid, $gid, escapeshellarg($vendorDir)));
+    }
+
+    $absTargetDir = $composerDir . '/' . $targetDir;
+    if (is_dir($absTargetDir)) {
+        exec(sprintf('chown -R %d:%d %s', $uid, $gid, escapeshellarg($absTargetDir)));
+    }
+}
+
+function normalizeGitUrl(string $url): string
+{
+    if (preg_match('/^git@([a-zA-Z0-9._-]+):([a-zA-Z0-9._\/-]+?)(?:\.git)?$/', $url, $matches)) {
+        $url = "https://{$matches[1]}/{$matches[2]}";
+    }
+    $parts = parse_url($url);
+    $host = $parts['host'] ?? '';
+    $path = $parts['path'] ?? '';
+    $path = ltrim($path, '/');
+    if (substr($path, -4) === '.git') {
+        $path = substr($path, 0, -4);
+    }
+    $path = rtrim($path, '/');
+    return $host . '/' . $path;
 }
 
 function bail(string $msg): void

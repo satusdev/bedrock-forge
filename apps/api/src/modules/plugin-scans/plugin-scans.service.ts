@@ -55,10 +55,19 @@ export class PluginScansService {
 
 	async enqueuePluginManage(
 		environmentId: number,
-		action: 'add' | 'remove' | 'update' | 'update-all',
+		action:
+			| 'add'
+			| 'remove'
+			| 'update'
+			| 'update-all'
+			| 'activate'
+			| 'deactivate'
+			| 'delete'
+			| 'migrate-to-composer',
 		slug?: string,
 		version?: string,
 		skipSafetyBackup?: boolean,
+		workflow?: 'composer' | 'manual',
 	) {
 		const bullJobId = randomUUID();
 		const exec = await this.repo.createJobExecution({
@@ -75,11 +84,40 @@ export class PluginScansService {
 				action,
 				slug,
 				version,
+				workflow,
 				skipSafetyBackup: skipSafetyBackup ?? false,
 			},
 			{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
 		);
 		return { jobExecutionId: Number(exec.id), bullJobId: job.id };
+	}
+
+	async searchWpOrg(query: string) {
+		if (!query || !query.trim()) {
+			return [];
+		}
+		try {
+			const res = await fetch(
+				`https://api.wordpress.org/plugins/info/1.2/?action=query_plugins&request[search]=${encodeURIComponent(query)}&request[per_page]=15`,
+			);
+			if (!res.ok) {
+				throw new Error(`WordPress.org API returned status ${res.status}`);
+			}
+			const data = (await res.json()) as { plugins?: any[] };
+			if (!data.plugins || !Array.isArray(data.plugins)) {
+				return [];
+			}
+			return data.plugins.map(p => ({
+				name: p.name || '',
+				slug: p.slug || '',
+				version: p.version || '',
+				author: p.author ? p.author.replace(/<[^>]*>/g, '') : '',
+				short_description: p.short_description || '',
+				homepage: p.homepage || '',
+			}));
+		} catch (err) {
+			return [];
+		}
 	}
 
 	async enqueueConstraintChange(

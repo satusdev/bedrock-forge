@@ -86,6 +86,10 @@ export const PluginManagePayloadSchema = z.object({
 		'update-all',
 		'change-constraint',
 		'read',
+		'activate',
+		'deactivate',
+		'delete',
+		'migrate-to-composer',
 	]),
 	/** wpackagist-plugin/slug — required for add/remove/update/change-constraint, omit for update-all/read */
 	slug: z.string().optional(),
@@ -93,6 +97,8 @@ export const PluginManagePayloadSchema = z.object({
 	version: z.string().optional(),
 	/** New version constraint — only for change-constraint action */
 	constraint: z.string().optional(),
+	/** Workflow to use: composer or manual. Defaults to composer if bedrock, manual otherwise */
+	workflow: z.enum(['composer', 'manual']).optional(),
 	/** Skip safety backup before making changes */
 	skipSafetyBackup: z.boolean().default(false),
 });
@@ -305,6 +311,7 @@ export interface PluginInfo {
 	managed_by_monorepo?: boolean;
 	/** GitHub repo URL for the monorepo source managing this plugin */
 	monorepo_repo_url?: string | null;
+	status: 'active' | 'inactive';
 }
 
 /** Top-level output from plugin-scan.php (new format) */

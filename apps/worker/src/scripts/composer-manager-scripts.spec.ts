@@ -55,6 +55,7 @@ function makeFixture() {
 			'#!/usr/bin/env bash',
 			'printf "ALLOW=%s\\n" "${COMPOSER_ALLOW_SUPERUSER:-}" >> "$COMPOSER_LOG"',
 			'printf "NOINT=%s\\n" "${COMPOSER_NO_INTERACTION:-}" >> "$COMPOSER_LOG"',
+			'printf "TOKEN=%s\\n" "${REPO_FETCHER_TOKEN:-}" >> "$COMPOSER_LOG"',
 			'printf "ARGS:%s\\n" "$*" >> "$COMPOSER_LOG"',
 			'if [ "$1" = "--version" ]; then echo "Composer version fake"; exit 0; fi',
 			'if [ "${FAIL_COMPOSER:-}" = "1" ]; then',
@@ -116,21 +117,56 @@ describe('Composer manager PHP scripts', () => {
 			const source = composerJson.extra['monorepo-sources'][0];
 			const composerLog = readFileSync(fixture.composerLog, 'utf8');
 
-			expect(composerJson.require['satusdev/monorepo-fetcher']).toBe(
+			expect(composerJson.require['satusdev/repo-fetcher']).toBe(
 				'dev-main',
 			);
+			expect(composerJson.extra['use-symlinks']).toBe(false);
+			expect(composerJson.config['allow-plugins']['satusdev/repo-fetcher']).toBe(true);
+			expect(composerJson.config['allow-plugins']['satusdev/monorepo-fetcher']).toBe(true);
 			expect(source).toMatchObject({
 				type: 'plugin',
-				url: 'git@github.com:satusdev/wp-secure-guard.git',
+				url: 'https://github.com/satusdev/wp-secure-guard.git',
 				path: '.',
 				target: 'web/app/plugins',
-				require: ['wp-secure-guard'],
+				require: [
+					{
+						src: '.',
+						as: 'wp-secure-guard',
+					},
+				],
 			});
 			expect(composerLog).toContain('ALLOW=1');
 			expect(composerLog).toContain('NOINT=1');
 			expect(composerLog).toContain(
-				'ARGS:update satusdev/monorepo-fetcher --no-dev --no-interaction -W',
+				'ARGS:update satusdev/repo-fetcher --no-dev --no-interaction -W',
 			);
+			expect(composerLog).toContain(
+				'ARGS:install --no-dev --no-interaction',
+			);
+		} finally {
+			fixture.cleanup();
+		}
+	});
+
+	it('passes REPO_FETCHER_TOKEN to Composer when github-token is provided', () => {
+		const fixture = makeFixture();
+		try {
+			runPhp(
+				customPluginManager,
+				[
+					'--action=add',
+					`--docroot=${fixture.docroot}`,
+					'--slug=wp-secure-guard',
+					'--repo-url=git@github.com:satusdev/wp-secure-guard.git',
+					'--repo-path=.',
+					'--type=plugin',
+					'--github-token=test-token-12345',
+				],
+				fixture.env,
+			);
+
+			const composerLog = readFileSync(fixture.composerLog, 'utf8');
+			expect(composerLog).toContain('TOKEN=test-token-12345');
 		} finally {
 			fixture.cleanup();
 		}
@@ -147,7 +183,12 @@ describe('Composer manager PHP scripts', () => {
 					url: 'git@github.com:satusdev/wp-secure-guard.git',
 					path: '.',
 					target: 'web/app/plugins',
-					require: ['wp-secure-guard'],
+					require: [
+						{
+							src: '.',
+							as: 'wp-secure-guard',
+						},
+					],
 				},
 			];
 			writeFileSync(composerPath, JSON.stringify(composerJson, null, 2) + '\n');
@@ -233,4 +274,70 @@ describe('Composer manager PHP scripts', () => {
 			fixture.cleanup();
 		}
 	});
+
+	it('cleans up repo-fetcher require and repositories VCS config when last source is removed', () => {
+		const fixture = makeFixture();
+		try {
+			const composerPath = join(fixture.projectDir, 'composer.json');
+			const composerJson = JSON.parse(readFileSync(composerPath, 'utf8'));
+
+			composerJson.extra['use-symlinks'] = false;
+			composerJson.extra['monorepo-sources'] = [
+				{
+					type: 'plugin',
+					url: 'git@github.com:satusdev/wp-secure-guard.git',
+					path: '.',
+					target: 'web/app/plugins',
+					require: ['wp-secure-guard'],
+				},
+			];
+			composerJson.require['satusdev/repo-fetcher'] = 'dev-main';
+			composerJson.require['satusdev/monorepo-fetcher'] = 'dev-main';
+			composerJson.config = {
+				'allow-plugins': {
+					'satusdev/repo-fetcher': true,
+					'satusdev/monorepo-fetcher': true,
+				},
+			};
+			composerJson.repositories = [
+				{
+					type: 'vcs',
+					url: 'https://github.com/satusdev/monorepo-fetcher',
+				},
+				{
+					type: 'composer',
+					url: 'https://wpackagist.org',
+				},
+			];
+			writeFileSync(composerPath, JSON.stringify(composerJson, null, 2) + '\n');
+
+			runPhp(
+				customPluginManager,
+				[
+					'--action=remove',
+					`--docroot=${fixture.docroot}`,
+					'--slug=wp-secure-guard',
+					'--repo-url=git@github.com:satusdev/wp-secure-guard.git',
+					'--repo-path=.',
+				],
+				fixture.env,
+			);
+
+			const updated = JSON.parse(readFileSync(composerPath, 'utf8'));
+			expect(updated.extra['monorepo-sources']).toBeUndefined();
+			expect(updated.extra['use-symlinks']).toBeUndefined();
+			expect(updated.require['satusdev/repo-fetcher']).toBeUndefined();
+			expect(updated.require['satusdev/monorepo-fetcher']).toBeUndefined();
+			expect(updated.config).toBeUndefined();
+			expect(updated.repositories).toEqual([
+				{
+					type: 'composer',
+					url: 'https://wpackagist.org',
+				},
+			]);
+		} finally {
+			fixture.cleanup();
+		}
+	});
 });
+

@@ -1,4 +1,4 @@
-import { IsString, IsOptional, MaxLength, Matches } from 'class-validator';
+import { IsString, IsOptional, MaxLength, Matches, IsBoolean } from 'class-validator';
 
 export class PluginManageDto {
 	@IsString()
@@ -21,6 +21,19 @@ export class PluginManageDto {
 		message: 'Invalid version constraint characters',
 	})
 	constraint?: string;
+
+	@IsOptional()
+	@IsString()
+	@Matches(/^(composer|manual)$/)
+	workflow?: 'composer' | 'manual';
+
+	@IsOptional()
+	skipSafetyBackup?: boolean;
+}
+
+export class TogglePluginStatusDto {
+	@IsBoolean()
+	active!: boolean;
 
 	@IsOptional()
 	skipSafetyBackup?: boolean;
