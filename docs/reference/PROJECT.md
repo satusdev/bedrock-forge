@@ -276,9 +276,10 @@ All queues: exponential backoff (base 1s), dead-letter queue (`<name>-dlq`),
   `ENCRYPTION_KEY` env var. Never stored in DB.
 - **SSH keys:** Encrypted at rest. Decrypted in memory only during SSH
   connection. Never returned in API responses.
-- **JWT:** 4h access token + 30d refresh token by default, configurable via
-  `JWT_ACCESS_EXPIRES_IN` and `JWT_REFRESH_EXPIRES_IN`. Refresh tokens stored as
-  bcrypt hash. Rotation on every refresh.
+- **JWT:** 4h access token + 30d refresh session by default, configurable via
+  `JWT_ACCESS_EXPIRES_IN` and `JWT_REFRESH_EXPIRES_IN`. Refresh tokens are
+  delivered as scoped `httpOnly` cookies, stored as SHA-256 hashes server-side,
+  and rotated on every refresh.
 - **Validation:** `ValidationPipe` global with `whitelist: true`,
   `forbidNonWhitelisted: true`, `transform: true`.
 - **Rate limiting:** 5 login attempts/15min (Redis-backed), 100 req/min general.

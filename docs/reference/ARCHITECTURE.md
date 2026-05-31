@@ -126,7 +126,7 @@ are not re-pushed unnecessarily.
 | `User`         | email (unique), name, password_hash (bcrypt)                |
 | `Role`         | name — 4 values: `admin`, `manager`, `maintainer`, `client` |
 | `UserRole`     | composite PK (user_id, role_id) — many-to-many              |
-| `RefreshToken` | token_hash (bcrypt), expires_at, revoked_at                 |
+| `RefreshToken` | token_hash (SHA-256), expires_at, revoked_at                |
 
 ### Client Management (4 models)
 
@@ -271,9 +271,10 @@ key is permanently unreadable without it.
 
 ### JWT Authentication
 
-- **Access tokens:** 15-minute TTL, signed with `JWT_SECRET`
-- **Refresh tokens:** 7-day TTL, signed with `JWT_REFRESH_SECRET`, stored as
-  bcrypt hash with rotation on every refresh
+- **Access tokens:** 4-hour TTL by default, signed with `JWT_SECRET`
+- **Refresh sessions:** 30-day TTL by default. Refresh tokens are delivered as
+  scoped `httpOnly` cookies, stored as SHA-256 hashes server-side, and rotated
+  on every refresh.
 - **Login throttle:** 5 attempts per 15 minutes per IP (Redis counter)
 - **Refresh throttle:** 30 requests per minute
 

@@ -108,7 +108,7 @@ Before adopting, understand the current scope boundaries:
 | Audit & Activity Logs                   | ✅ Implemented     | User action audit trail + per-job execution log (step-by-step, JSONB trace); both paginated            |
 | Problems / Attention Feed               | ✅ Implemented     | Cross-project attention feed: expiring domains, down monitors, outdated plugins, config drift          |
 | Dashboard                               | ✅ Implemented     | Stats summary, live job feed via WebSocket, WP quick actions                                           |
-| Auth — JWT + Refresh Rotation           | ✅ Implemented     | 4-hour access tokens, 30-day refresh tokens (hashed, rotated on use)                                   |
+| Auth — JWT + Refresh Rotation           | ✅ Implemented     | 4-hour access tokens, 30-day refresh sessions via httpOnly cookies; server-side hashes rotate on use   |
 | Auth — RBAC (4-tier)                    | ✅ Implemented     | `admin` > `manager` > `maintainer` > `client`; API guards + frontend navigation; per-role UI gating    |
 | Auth — 2FA / MFA                        | ❌ Not Implemented | No TOTP or MFA. Roadmap.                                                                               |
 | Auth — SSO / Social Login               | ❌ Not Implemented | Not planned                                                                                            |
@@ -249,8 +249,9 @@ implemented.
   Decrypted in memory only during use; never returned in API responses.
 - **Credential parsing:** `wp-config.php` / `.env` values extracted via regex
   only — never sourced, never eval'd, never passed to a shell.
-- **JWT:** 4-hour access tokens + 30-day refresh tokens by default. Refresh
-  tokens stored as bcrypt hashes with rotation on every use.
+- **JWT:** 4-hour access tokens + 30-day refresh sessions by default. Refresh
+  tokens are delivered only as scoped `httpOnly` cookies, stored as SHA-256
+  hashes server-side, and rotated on every refresh.
 - **Rate limiting:** 5 login attempts per 15 minutes (Redis-backed); API
   endpoints rate-limited at 30 req/s with burst 60 at the nginx layer.
 - **RBAC:** 4-tier role hierarchy: `admin` > `manager` > `maintainer` >
@@ -437,6 +438,7 @@ finding and its current resolution status.
 | A4  | RBAC        | `ROLE_HIERARCHY` had `manager` and `maintainer` both at level 2 — comparison was wrong                                                        | Fixed: `admin=4`, `manager=3`, `maintainer=2`, `client=1`                                     |
 | A5  | Types       | `WpDbCredentials` interface not exported from `@bedrock-forge/shared`                                                                         | Added to `packages/shared/src/types.ts`                                                       |
 | A10 | Security    | `AuditInterceptor` read `X-Forwarded-For` (client-injectable) for IP logging                                                                  | Switched to `X-Real-IP` (set by nginx from `$remote_addr`)                                    |
+| S4  | Security    | Refresh tokens returned in JSON response body — XSS could steal them from JS memory                                                           | Refresh tokens now use scoped `httpOnly` cookies and are omitted from API response bodies     |
 | D1  | DX          | `db:generate` not in Turborepo pipeline — manual step required after schema changes                                                           | Added `db:generate` task with correct output caching                                          |
 | D2  | DX          | No `type-check` task in Turborepo — CI had no incremental TS checking                                                                         | Added `type-check` task with `^type-check` dependency                                         |
 | D4  | Ops         | Dev Redis had no password — `docker-compose.dev.yml` ran an open Redis instance                                                               | Added `--requirepass ${REDIS_PASSWORD:?required}` to dev Redis command                        |
@@ -448,7 +450,6 @@ finding and its current resolution status.
 
 | ID  | Area         | Finding                                                                                                | Notes                                                            |
 | --- | ------------ | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
-| S4  | Security     | Refresh tokens returned in JSON response body — XSS can steal them from JS memory                      | httpOnly cookie delivery requires schema + frontend changes      |
 | S6  | Security     | SSH host keys not verified on new connections — no TOFU / known_hosts tracking                         | Requires schema column, UI to trust/reject on first connect      |
 | A1  | Architecture | `EncryptionService` is duplicated — API and Worker maintain separate implementations                   | Extract to `@bedrock-forge/shared` or a dedicated crypto package |
 | A6  | Architecture | `DomainWhoisProcessor` does not create `JobExecution` records — inconsistent with all other processors | Low-effort; requires adding `JobExecutionsService` to the module |
@@ -468,9 +469,6 @@ production hardening improvements.
 
 ### 🔴 High Priority (Core gaps for production use)
 
-- **httpOnly refresh-token cookies** — Refresh tokens are currently returned in
-  JSON and stored client-side. Moving refresh delivery into secure httpOnly
-  cookies would reduce XSS blast radius.
 - **SSH host-key verification** — New SSH connections do not persist or verify
   host fingerprints. Add known-host tracking with an explicit trust/reject UI.
 - **Cross-server backup restore** — Restore currently requires the same
