@@ -17,6 +17,9 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { ROLES, QUEUES } from '@bedrock-forge/shared';
 import Redis from 'ioredis';
+import { access, constants, mkdir, writeFile, unlink } from 'fs/promises';
+import { join } from 'path';
+import { randomUUID } from 'crypto';
 
 @Controller('health')
 export class HealthController implements OnModuleInit, OnModuleDestroy {
@@ -26,9 +29,23 @@ export class HealthController implements OnModuleInit, OnModuleDestroy {
 		private readonly prisma: PrismaService,
 		private readonly config: ConfigService,
 		@InjectQueue(QUEUES.BACKUPS) private readonly backupsQueue: Queue,
+		@InjectQueue(QUEUES.PLUGIN_SCANS) private readonly pluginScansQueue: Queue,
+		@InjectQueue(QUEUES.PLUGIN_UPDATES)
+		private readonly pluginUpdatesQueue: Queue,
+		@InjectQueue(QUEUES.CUSTOM_PLUGINS)
+		private readonly customPluginsQueue: Queue,
+		@InjectQueue(QUEUES.THEME_SCANS) private readonly themeScansQueue: Queue,
+		@InjectQueue(QUEUES.SYNC) private readonly syncQueue: Queue,
+		@InjectQueue(QUEUES.MONITORS) private readonly monitorsQueue: Queue,
+		@InjectQueue(QUEUES.DOMAINS) private readonly domainsQueue: Queue,
+		@InjectQueue(QUEUES.PROJECTS) private readonly projectsQueue: Queue,
 		@InjectQueue(QUEUES.SECURITY) private readonly securityQueue: Queue,
 		@InjectQueue(QUEUES.NOTIFICATIONS)
 		private readonly notificationsQueue: Queue,
+		@InjectQueue(QUEUES.REPORTS) private readonly reportsQueue: Queue,
+		@InjectQueue(QUEUES.WP_ACTIONS) private readonly wpActionsQueue: Queue,
+		@InjectQueue(QUEUES.SYSTEM_BACKUPS)
+		private readonly systemBackupsQueue: Queue,
 	) {}
 
 	onModuleInit(): void {
@@ -91,12 +108,26 @@ export class HealthController implements OnModuleInit, OnModuleDestroy {
 		const redisPing = await this.redisClient.ping().catch(() => null);
 		const redisLatencyMs = Date.now() - t0redis;
 
-		const [backupsCounts, securityCounts, notifCounts] =
-			await Promise.allSettled([
-				this.backupsQueue.getJobCounts(),
-				this.securityQueue.getJobCounts(),
-				this.notificationsQueue.getJobCounts(),
-			]);
+		const queueEntries: [string, Queue][] = [
+			[QUEUES.BACKUPS, this.backupsQueue],
+			[QUEUES.PLUGIN_SCANS, this.pluginScansQueue],
+			[QUEUES.PLUGIN_UPDATES, this.pluginUpdatesQueue],
+			[QUEUES.CUSTOM_PLUGINS, this.customPluginsQueue],
+			[QUEUES.THEME_SCANS, this.themeScansQueue],
+			[QUEUES.SYNC, this.syncQueue],
+			[QUEUES.MONITORS, this.monitorsQueue],
+			[QUEUES.DOMAINS, this.domainsQueue],
+			[QUEUES.PROJECTS, this.projectsQueue],
+			[QUEUES.SECURITY, this.securityQueue],
+			[QUEUES.NOTIFICATIONS, this.notificationsQueue],
+			[QUEUES.REPORTS, this.reportsQueue],
+			[QUEUES.WP_ACTIONS, this.wpActionsQueue],
+			[QUEUES.SYSTEM_BACKUPS, this.systemBackupsQueue],
+		];
+		const queueResults = await Promise.allSettled(
+			queueEntries.map(([, queue]) => queue.getJobCounts()),
+		);
+		const backupStorage = await this.checkBackupStorage();
 
 		const mem = process.memoryUsage();
 
@@ -133,20 +164,21 @@ export class HealthController implements OnModuleInit, OnModuleDestroy {
 			node_version: process.version,
 			app_version: process.env.npm_package_version ?? 'unknown',
 			components: { db, redis: { ...redis, ping: redisPing } },
+			backup_storage: backupStorage,
 			memory: {
 				rss_mb: Math.round(mem.rss / 1024 / 1024),
 				heap_used_mb: Math.round(mem.heapUsed / 1024 / 1024),
 				heap_total_mb: Math.round(mem.heapTotal / 1024 / 1024),
 				external_mb: Math.round(mem.external / 1024 / 1024),
 			},
-			queues: {
-				backups:
-					backupsCounts.status === 'fulfilled' ? backupsCounts.value : null,
-				security:
-					securityCounts.status === 'fulfilled' ? securityCounts.value : null,
-				notifications:
-					notifCounts.status === 'fulfilled' ? notifCounts.value : null,
-			},
+			queues: Object.fromEntries(
+				queueEntries.map(([name], index) => [
+					name,
+					queueResults[index].status === 'fulfilled'
+						? queueResults[index].value
+						: null,
+				]),
+			),
 		};
 
 		if (overall !== 'ok') {
@@ -154,5 +186,24 @@ export class HealthController implements OnModuleInit, OnModuleDestroy {
 		}
 
 		return payload;
+	}
+
+	private async checkBackupStorage() {
+		const path =
+			this.config.get<string>('app.backupStoragePath') ?? '/var/forge/backups';
+		const probe = join(path, `.health-${randomUUID()}`);
+		try {
+			await mkdir(path, { recursive: true });
+			await access(path, constants.R_OK | constants.W_OK);
+			await writeFile(probe, 'ok', { mode: 0o600 });
+			await unlink(probe);
+			return { status: 'ok', path };
+		} catch (err) {
+			return {
+				status: 'error',
+				path,
+				error: err instanceof Error ? err.message : String(err),
+			};
+		}
 	}
 }
