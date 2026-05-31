@@ -10,6 +10,39 @@ import { createServer, type Server } from 'http';
 	return Number(this);
 };
 
+const isProd = process.env.NODE_ENV === 'production';
+if (isProd) {
+	const required: [string, string][] = [
+		['DATABASE_URL', process.env.DATABASE_URL ?? ''],
+		['REDIS_URL', process.env.REDIS_URL ?? ''],
+		['ENCRYPTION_KEY', process.env.ENCRYPTION_KEY ?? ''],
+	];
+	const missing = required.filter(([, v]) => !v).map(([k]) => k);
+	if (missing.length > 0) {
+		console.error(
+			`[Worker] FATAL: Missing required environment variables in production: ${missing.join(', ')}`,
+		);
+		process.exit(1);
+	}
+
+	const placeholders = required
+		.filter(([, v]) => /change_me|forge_password|dev-|test-/i.test(v))
+		.map(([k]) => k);
+	if (placeholders.length > 0) {
+		console.error(
+			`[Worker] FATAL: Placeholder or development secrets are not allowed in production: ${placeholders.join(', ')}`,
+		);
+		process.exit(1);
+	}
+
+	if (!/^[a-f0-9]{64}$/i.test(process.env.ENCRYPTION_KEY ?? '')) {
+		console.error(
+			'[Worker] FATAL: ENCRYPTION_KEY must be exactly 64 hex characters in production.',
+		);
+		process.exit(1);
+	}
+}
+
 process.on('unhandledRejection', (reason: unknown) => {
 	Logger.error('Unhandled promise rejection', String(reason), 'Worker');
 });
