@@ -1,4 +1,5 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import {
 	RefreshCw,
@@ -52,9 +53,26 @@ export function WpCoreTab({ environments }: { environments: Environment[] }) {
 		environments[0]?.id ??
 		null;
 
-	const [selectedEnvId, setSelectedEnvId] = useState<number | null>(
-		defaultEnvId,
-	);
+	const [searchParams, setSearchParams] = useSearchParams();
+	const envParam = searchParams.get('env');
+	const initialEnvId = envParam ? Number(envParam) : null;
+	const validInitialEnv = environments.find(e => e.id === initialEnvId)
+		? initialEnvId
+		: defaultEnvId;
+
+	const [selectedEnvId, setSelectedEnvId] = useState<number | null>(validInitialEnv);
+
+	useEffect(() => {
+		if (selectedEnvId) {
+			setSearchParams(prev => {
+				const next = new URLSearchParams(prev);
+				if (next.get('env') !== String(selectedEnvId)) {
+					next.set('env', String(selectedEnvId));
+				}
+				return next;
+			}, { replace: true });
+		}
+	}, [selectedEnvId, setSearchParams]);
 	const [coreStatus, setCoreStatus] = useState<WpCoreStatus | null>(null);
 	const [updateResult, setUpdateResult] = useState<WpCoreUpdateResult | null>(
 		null,

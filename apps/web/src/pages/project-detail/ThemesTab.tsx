@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, FormEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
 	ScanLine,
@@ -176,9 +177,26 @@ export function ThemesTab({
 		environments[0]?.id ??
 		null;
 
-	const [selectedEnvId, setSelectedEnvId] = useState<number | null>(
-		defaultEnvId,
-	);
+	const [searchParams, setSearchParams] = useSearchParams();
+	const envParam = searchParams.get('env');
+	const initialEnvId = envParam ? Number(envParam) : null;
+	const validInitialEnv = environments.find(e => e.id === initialEnvId)
+		? initialEnvId
+		: defaultEnvId;
+
+	const [selectedEnvId, setSelectedEnvId] = useState<number | null>(validInitialEnv);
+
+	useEffect(() => {
+		if (selectedEnvId) {
+			setSearchParams(prev => {
+				const next = new URLSearchParams(prev);
+				if (next.get('env') !== String(selectedEnvId)) {
+					next.set('env', String(selectedEnvId));
+				}
+				return next;
+			}, { replace: true });
+		}
+	}, [selectedEnvId, setSearchParams]);
 	const [scanning, setScanning] = useState(false);
 	const [managingJobId, setManagingJobId] = useState<string | null>(null);
 	const [showInstallDialog, setShowInstallDialog] = useState(false);

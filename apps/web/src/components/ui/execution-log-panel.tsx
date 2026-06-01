@@ -39,10 +39,10 @@ function LevelIcon({ level }: { level: ExecutionLogEntry['level'] }) {
 		);
 	if (level === 'warn')
 		return (
-			<AlertTriangle className='h-3.5 w-3.5 text-yellow-500 flex-shrink-0 mt-0.5' />
+			<AlertTriangle className='h-3.5 w-3.5 text-warning flex-shrink-0 mt-0.5' />
 		);
 	return (
-		<CheckCircle2 className='h-3.5 w-3.5 text-green-500 flex-shrink-0 mt-0.5' />
+		<CheckCircle2 className='h-3.5 w-3.5 text-success flex-shrink-0 mt-0.5' />
 	);
 }
 
@@ -74,7 +74,7 @@ function EntryRow({
 							entry.level === 'error'
 								? 'text-destructive'
 								: entry.level === 'warn'
-									? 'text-yellow-600 dark:text-yellow-400'
+									? 'text-warning'
 									: 'text-foreground'
 						}`}
 					>
@@ -95,8 +95,8 @@ function EntryRow({
 						<span
 							className={`text-xs font-mono px-1 rounded ${
 								entry.exitCode === 0
-									? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-									: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+									? 'bg-success/10 text-success'
+									: 'bg-destructive/10 text-destructive'
 							}`}
 						>
 							exit {entry.exitCode}
@@ -127,7 +127,7 @@ function EntryRow({
 							</pre>
 						)}
 						{entry.stderr && (
-							<pre className='text-xs bg-red-50 dark:bg-red-950/20 text-red-700 dark:text-red-400 rounded p-2 overflow-x-auto whitespace-pre-wrap break-all max-h-24 overflow-y-auto'>
+							<pre className='text-xs bg-destructive/10 text-destructive rounded p-2 overflow-x-auto whitespace-pre-wrap break-all max-h-24 overflow-y-auto'>
 								{entry.stderr}
 							</pre>
 						)}

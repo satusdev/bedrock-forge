@@ -1,4 +1,5 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
 	RotateCcw,
@@ -192,9 +193,27 @@ export function RestoreTab({
 	environments: Environment[];
 }) {
 	const qc = useQueryClient();
-	const [selectedEnvId, setSelectedEnvId] = useState<number | null>(
-		environments[0]?.id ?? null,
-	);
+	const [searchParams, setSearchParams] = useSearchParams();
+	const envParam = searchParams.get('env');
+	const initialEnvId = envParam ? Number(envParam) : null;
+	const validInitialEnv = environments.find(e => e.id === initialEnvId)
+		? initialEnvId
+		: (environments[0]?.id ?? null);
+
+	const [selectedEnvId, setSelectedEnvId] = useState<number | null>(validInitialEnv);
+
+	useEffect(() => {
+		if (selectedEnvId) {
+			setSearchParams(prev => {
+				const next = new URLSearchParams(prev);
+				if (next.get('env') !== String(selectedEnvId)) {
+					next.set('env', String(selectedEnvId));
+				}
+				return next;
+			}, { replace: true });
+		}
+	}, [selectedEnvId, setSearchParams]);
+
 	const [restoreTarget, setRestoreTarget] = useState<Backup | null>(null);
 	const [jobProgress, setJobProgress] = useState<number | null>(null);
 	const [jobExecutionId, setJobExecutionId] = useState<number | null>(null);

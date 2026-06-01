@@ -113,10 +113,10 @@ function getItemIcon(item: PaletteItem): React.ReactNode {
 		return <Icon className='h-4 w-4 shrink-0 text-muted-foreground' />;
 	}
 	if (item.type === 'client')
-		return <Users className='h-4 w-4 shrink-0 text-blue-500' />;
+		return <Users className='h-4 w-4 shrink-0 text-info' />;
 	if (item.type === 'server')
-		return <Server className='h-4 w-4 shrink-0 text-green-500' />;
-	return <FolderOpen className='h-4 w-4 shrink-0 text-orange-500' />;
+		return <Server className='h-4 w-4 shrink-0 text-success' />;
+	return <FolderOpen className='h-4 w-4 shrink-0 text-warning' />;
 }
 
 function getItemLabel(item: PaletteItem): string {

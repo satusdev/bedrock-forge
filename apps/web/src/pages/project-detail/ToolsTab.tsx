@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
 	RefreshCw,
@@ -129,11 +130,29 @@ const REVERT_OPTIONS = [
 ];
 
 export function ToolsTab({ environments }: { environments: Environment[] }) {
-	const [selectedEnvId, setSelectedEnvId] = useState<number | null>(
-		environments.find(e => e.type === 'production')?.id ??
+	const [searchParams, setSearchParams] = useSearchParams();
+	const envParam = searchParams.get('env');
+	const initialEnvId = envParam ? Number(envParam) : null;
+	const validInitialEnv = environments.find(e => e.id === initialEnvId)
+		? initialEnvId
+		: (environments.find(e => e.type === 'production')?.id ??
 			environments[0]?.id ??
-			null,
-	);
+			null);
+
+	const [selectedEnvId, setSelectedEnvId] = useState<number | null>(validInitialEnv);
+
+	useEffect(() => {
+		if (selectedEnvId) {
+			setSearchParams(prev => {
+				const next = new URLSearchParams(prev);
+				if (next.get('env') !== String(selectedEnvId)) {
+					next.set('env', String(selectedEnvId));
+				}
+				return next;
+			}, { replace: true });
+		}
+	}, [selectedEnvId, setSearchParams]);
+
 	const [debugRevertMin, setDebugRevertMin] = useState('0');
 	const [logType, setLogType] = useState<'debug' | 'php' | 'nginx' | 'apache'>(
 		'debug',

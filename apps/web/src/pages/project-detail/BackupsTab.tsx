@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, Fragment } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
 	HardDrive,
@@ -92,9 +93,27 @@ export function BackupsTab({
 	environments: Environment[];
 }) {
 	const qc = useQueryClient();
-	const [selectedEnvId, setSelectedEnvId] = useState<number | null>(
-		environments[0]?.id ?? null,
-	);
+	const [searchParams, setSearchParams] = useSearchParams();
+	const envParam = searchParams.get('env');
+	const initialEnvId = envParam ? Number(envParam) : null;
+	const validInitialEnv = environments.find(e => e.id === initialEnvId)
+		? initialEnvId
+		: (environments[0]?.id ?? null);
+
+	const [selectedEnvId, setSelectedEnvId] = useState<number | null>(validInitialEnv);
+
+	useEffect(() => {
+		if (selectedEnvId) {
+			setSearchParams(prev => {
+				const next = new URLSearchParams(prev);
+				if (next.get('env') !== String(selectedEnvId)) {
+					next.set('env', String(selectedEnvId));
+				}
+				return next;
+			}, { replace: true });
+		}
+	}, [selectedEnvId, setSearchParams]);
+
 	const [backupType, setBackupType] = useState<
 		'full' | 'db_only' | 'files_only'
 	>('full');
