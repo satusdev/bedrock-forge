@@ -11,6 +11,7 @@ interface UiState {
 }
 
 function applyDarkMode(dark: boolean) {
+	if (typeof document === 'undefined') return;
 	if (dark) {
 		document.documentElement.classList.add('dark');
 	} else {
@@ -18,15 +19,35 @@ function applyDarkMode(dark: boolean) {
 	}
 }
 
+function getInitialDarkMode() {
+	if (typeof window === 'undefined') return false;
+
+	try {
+		const persisted = window.localStorage.getItem('ui-prefs');
+		if (persisted) {
+			const parsed = JSON.parse(persisted) as {
+				state?: { darkMode?: boolean };
+			};
+			if (typeof parsed.state?.darkMode === 'boolean') {
+				applyDarkMode(parsed.state.darkMode);
+				return parsed.state.darkMode;
+			}
+		}
+	} catch {
+		// Fall through to system preference if persisted preferences are invalid.
+	}
+
+	const systemDark =
+		window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
+	applyDarkMode(systemDark);
+	return systemDark;
+}
+
 export const useUiStore = create<UiState>()(
 	persist(
 		(set, get) => ({
 			sidebarCollapsed: false,
-			darkMode:
-				typeof window !== 'undefined'
-					? (window.matchMedia?.('(prefers-color-scheme: dark)').matches ??
-						false)
-					: false,
+			darkMode: getInitialDarkMode(),
 			setSidebarCollapsed: v => set({ sidebarCollapsed: v }),
 			toggleSidebar: () =>
 				set(s => ({ sidebarCollapsed: !s.sidebarCollapsed })),
@@ -47,8 +68,7 @@ export const useUiStore = create<UiState>()(
 				darkMode: s.darkMode,
 			}),
 			onRehydrateStorage: () => state => {
-				// Apply dark mode class immediately on hydration
-				if (state?.darkMode) applyDarkMode(true);
+				applyDarkMode(state?.darkMode ?? getInitialDarkMode());
 			},
 		},
 	),
