@@ -22,12 +22,6 @@ export class HttpExceptionFilter implements ExceptionFilter {
 				? exception.getStatus()
 				: HttpStatus.INTERNAL_SERVER_ERROR;
 
-		if (status >= 500) {
-			this.logger.error(
-				exception instanceof Error ? exception.stack : String(exception),
-			);
-		}
-
 		const raw =
 			exception instanceof HttpException
 				? exception.getResponse()
@@ -37,6 +31,17 @@ export class HttpExceptionFilter implements ExceptionFilter {
 			typeof raw === 'string'
 				? raw
 				: (raw as Record<string, unknown>).message ?? raw;
+
+		if (status >= 400) {
+			this.logger.warn(
+				`HTTP ${status} on ${request.method} ${request.url}: ${JSON.stringify(message)}`,
+			);
+			if (status >= 500) {
+				this.logger.error(
+					exception instanceof Error ? exception.stack : String(exception),
+				);
+			}
+		}
 
 		response.status(status).json({
 			statusCode: status,

@@ -17,7 +17,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { ROLES } from '@bedrock-forge/shared';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { PluginScansService } from './plugin-scans.service';
-import { PluginManageDto, UpdateAllPluginsDto, TogglePluginStatusDto } from './dto/plugin-manage.dto';
+import { PluginManageDto, UpdateAllPluginsDto, TogglePluginStatusDto, UpdatePluginDto } from './dto/plugin-manage.dto';
 import { ChangeConstraintDto } from './dto/change-constraint.dto';
 
 @Controller('plugin-scans')
@@ -94,7 +94,7 @@ export class PluginScansController {
 		);
 	}
 
-	@Post('environment/:envId/plugins/:slug/migrate')
+	@Post('environment/:envId/plugins/:slug/migrate-to-composer')
 	migrateToComposer(
 		@Param('envId', ParseIntPipe) envId: number,
 		@Param('slug') slug: string,
@@ -113,7 +113,7 @@ export class PluginScansController {
 	updatePlugin(
 		@Param('envId', ParseIntPipe) envId: number,
 		@Param('slug') slug: string,
-		@Body() dto: Partial<PluginManageDto>,
+		@Body() dto: UpdatePluginDto,
 	) {
 		return this.svc.enqueuePluginManage(
 			envId,
@@ -168,6 +168,12 @@ export class PluginScansController {
 		return this.svc.listEnvironmentCustomPlugins(envId);
 	}
 
+	/** Check latest GitHub tags for all installed custom plugins and persist results */
+	@Post('environment/:envId/custom-plugins/check-versions')
+	checkCustomPluginVersions(@Param('envId', ParseIntPipe) envId: number) {
+		return this.svc.checkCustomPluginVersions(envId);
+	}
+
 	/** Enqueue install of a custom GitHub plugin on this environment */
 	@Post('environment/:envId/custom-plugins/:customPluginId')
 	installCustomPlugin(
@@ -177,6 +183,15 @@ export class PluginScansController {
 		return this.svc.enqueueCustomPluginManage(envId, customPluginId, 'add');
 	}
 
+	/** Enqueue update of a custom GitHub plugin on this environment */
+	@Put('environment/:envId/custom-plugins/:customPluginId')
+	updateCustomPlugin(
+		@Param('envId', ParseIntPipe) envId: number,
+		@Param('customPluginId', ParseIntPipe) customPluginId: number,
+	) {
+		return this.svc.enqueueCustomPluginManage(envId, customPluginId, 'update');
+	}
+
 	/** Enqueue removal of a custom GitHub plugin from this environment */
 	@Delete('environment/:envId/custom-plugins/:customPluginId')
 	uninstallCustomPlugin(
@@ -184,11 +199,5 @@ export class PluginScansController {
 		@Param('customPluginId', ParseIntPipe) customPluginId: number,
 	) {
 		return this.svc.enqueueCustomPluginManage(envId, customPluginId, 'remove');
-	}
-
-	/** Check latest GitHub tags for all installed custom plugins and persist results */
-	@Post('environment/:envId/custom-plugins/check-versions')
-	checkCustomPluginVersions(@Param('envId', ParseIntPipe) envId: number) {
-		return this.svc.checkCustomPluginVersions(envId);
 	}
 }

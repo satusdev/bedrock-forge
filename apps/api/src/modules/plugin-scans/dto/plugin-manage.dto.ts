@@ -31,6 +31,16 @@ export class PluginManageDto {
 	skipSafetyBackup?: boolean;
 }
 
+export class UpdatePluginDto {
+	@IsOptional()
+	@IsString()
+	@MaxLength(50)
+	version?: string;
+
+	@IsOptional()
+	skipSafetyBackup?: boolean;
+}
+
 export class TogglePluginStatusDto {
 	@IsBoolean()
 	active!: boolean;
@@ -43,3 +53,4 @@ export class UpdateAllPluginsDto {
 	@IsOptional()
 	skipSafetyBackup?: boolean;
 }
+
