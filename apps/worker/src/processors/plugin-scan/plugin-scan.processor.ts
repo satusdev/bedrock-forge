@@ -121,19 +121,32 @@ export class PluginScanProcessor extends WorkerHost {
 
 			await job.updateProgress(30);
 
+			// Detect layout and WP path to resolve correct php binary version
+			const wpPathResult = await executor.execute(
+				`[ -d ${shellQuote(env.root_path + '/web/wp')} ] && echo bedrock || echo standard`,
+				{ timeout: 10_000 },
+			);
+			const isBedrockLayout = wpPathResult.stdout.trim() === 'bedrock';
+			const wpPath = isBedrockLayout
+				? `${env.root_path}/web/wp`
+				: env.root_path;
+
+			const { lsphpBin } = await buildWpCliPrefix(executor, wpPath);
+			const phpCmd = lsphpBin ? lsphpBin : 'php';
+
 			await tracker.track({
 				step: 'Executing plugin scan',
 				level: 'info',
-				detail: `docroot=${env.root_path}`,
+				detail: `docroot=${env.root_path} php=${phpCmd}`,
 			});
 			const scanStart = Date.now();
 			const result = await executor.execute(
-				`php ${remoteScript} --docroot=${env.root_path}`,
+				`${phpCmd} ${remoteScript} --docroot=${env.root_path}`,
 				{ timeout: 5 * 60 * 1000 },
 			);
 			await tracker.trackCommand(
 				'plugin-scan.php',
-				`php ${remoteScript} --docroot=${env.root_path}`,
+				`${phpCmd} ${remoteScript} --docroot=${env.root_path}`,
 				result,
 				Date.now() - scanStart,
 			);
@@ -429,12 +442,18 @@ export class PluginScanProcessor extends WorkerHost {
 				orderBy: { scanned_at: 'desc' },
 			});
 			let isComposerManaged = false;
+			let isPublicDomain = false;
 			if (latestScan && latestScan.plugins) {
 				const output = latestScan.plugins as any;
 				const pluginsList = Array.isArray(output) ? output : (output.plugins || []);
 				const matchedPlugin = pluginsList.find((p: any) => p.slug === slug);
-				if (matchedPlugin && matchedPlugin.managed_by_composer) {
-					isComposerManaged = true;
+				if (matchedPlugin) {
+					if (matchedPlugin.managed_by_composer) {
+						isComposerManaged = true;
+					}
+					if (matchedPlugin.latest_version !== null && matchedPlugin.latest_version !== undefined) {
+						isPublicDomain = true;
+					}
 				}
 			}
 
@@ -478,6 +497,9 @@ export class PluginScanProcessor extends WorkerHost {
 					}
 					if (!slug) {
 						throw new Error('Plugin slug is required for migration.');
+					}
+					if (!isPublicDomain) {
+						throw new Error(`Plugin ${slug} is not available in the public WordPress repository and cannot be migrated to Composer.`);
 					}
 
 					await tracker.track({

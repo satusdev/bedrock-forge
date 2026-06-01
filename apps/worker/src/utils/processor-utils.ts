@@ -180,18 +180,60 @@ export async function buildWpCliPrefix(
 	// The only reliable fix is to call:  lsphpXX /path/to/wp.phar args
 	let lsphpBin: string | null = null;
 	let wpBin: string | null = null;
+
+	// 1. Try to extract domain from wpPath and parse vhost.conf config
 	try {
-		const lsphpResult = await executor.execute(
-			`ls /usr/local/lsws/lsphp*/bin/php 2>/dev/null | sort -V | head -1`,
-		);
-		const bin = lsphpResult.stdout.trim();
-		// Strict path validation — only accept canonical CyberPanel/OpenLiteSpeed paths
-		if (bin && /^\/usr\/local\/lsws\/lsphp\d+\/bin\/php$/.test(bin)) {
-			lsphpBin = bin;
+		let domain: string | null = null;
+		const match = wpPath.match(/\/home\/([^\/]+)\/public_html/);
+		if (match) {
+			domain = match[1];
+		} else {
+			const parts = wpPath.split('/');
+			const idx = parts.indexOf('public_html');
+			if (idx > 0) {
+				domain = parts[idx - 1];
+			}
+		}
+
+		if (domain) {
+			const vhostConfigPath = `/usr/local/lsws/conf/vhosts/${domain}/vhost.conf`;
+			const vhostResult = await executor.execute(
+				`grep -oE '/usr/local/lsws/lsphp[0-9]+/bin/(ls)?php' ${shellQuote(vhostConfigPath)} 2>/dev/null | head -1`,
+			);
+			const vhostPhp = vhostResult.stdout.trim();
+			if (vhostPhp && /^\/usr\/local\/lsws\/lsphp\d+\/bin\/(ls)?php$/.test(vhostPhp)) {
+				const cliPhp = vhostPhp.replace(/\/bin\/lsphp$/, '/bin/php');
+				const checkResult = await executor.execute(`[ -f ${shellQuote(cliPhp)} ] && echo yes || echo no`);
+				if (checkResult.stdout.trim() === 'yes') {
+					lsphpBin = cliPhp;
+				} else {
+					const checkOrigResult = await executor.execute(`[ -f ${shellQuote(vhostPhp)} ] && echo yes || echo no`);
+					if (checkOrigResult.stdout.trim() === 'yes') {
+						lsphpBin = vhostPhp;
+					}
+				}
+			}
 		}
 	} catch {
-		// lsphp not found — proceed without PHP override
+		// Ignore and fallback
 	}
+
+	// 2. Fallback: Find the highest version of OpenLiteSpeed PHP
+	if (!lsphpBin) {
+		try {
+			const lsphpResult = await executor.execute(
+				`ls /usr/local/lsws/lsphp*/bin/php 2>/dev/null | sort -V | tail -1`,
+			);
+			const bin = lsphpResult.stdout.trim();
+			// Strict path validation — only accept canonical CyberPanel/OpenLiteSpeed paths
+			if (bin && /^\/usr\/local\/lsws\/lsphp\d+\/bin\/php$/.test(bin)) {
+				lsphpBin = bin;
+			}
+		} catch {
+			// lsphp not found — proceed without PHP override
+		}
+	}
+
 	if (lsphpBin) {
 		try {
 			const wpResult = await executor.execute(`which wp 2>/dev/null`);
