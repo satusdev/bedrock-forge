@@ -184,7 +184,7 @@ export function BackupTab() {
 		switch (status) {
 			case 'completed':
 				return (
-					<Badge className='bg-green-100 text-green-700 border-green-200 hover:bg-green-100'>
+					<Badge variant='success'>
 						Completed
 					</Badge>
 				);
@@ -192,7 +192,7 @@ export function BackupTab() {
 				return <Badge variant='destructive'>Failed</Badge>;
 			case 'running':
 				return (
-					<Badge className='bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-100'>
+					<Badge variant='info'>
 						<Loader2 className='h-3 w-3 mr-1 animate-spin' />
 						Running
 					</Badge>
@@ -217,7 +217,7 @@ export function BackupTab() {
 				</p>
 
 				{!gdriveStatus?.configured && (
-					<div className='text-sm px-3 py-2 rounded-md bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400'>
+					<div className='text-sm px-3 py-2 rounded-md bg-warning/10 text-warning'>
 						\u26a0 Google Drive is not configured. Go to the Integrations tab to
 						set it up before running system backups.
 					</div>

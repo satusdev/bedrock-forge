@@ -53,7 +53,23 @@ const MOCK_ACTIVITY_DATA = [
 	{ date: 'Sun', backups: 25, syncs: 15, alerts: 0 },
 ];
 
-const HEALTH_COLORS = ['#22c55e', '#eab308', '#ef4444'];
+const DASHBOARD_COLORS = {
+	info: 'hsl(var(--info))',
+	success: 'hsl(var(--success))',
+	warning: 'hsl(var(--warning))',
+	destructive: 'hsl(var(--destructive))',
+	muted: 'hsl(var(--muted))',
+	mutedForeground: 'hsl(var(--muted-foreground))',
+	border: 'hsl(var(--border))',
+	card: 'hsl(var(--card))',
+	cardForeground: 'hsl(var(--card-foreground))',
+};
+
+const HEALTH_COLORS = [
+	DASHBOARD_COLORS.success,
+	DASHBOARD_COLORS.warning,
+	DASHBOARD_COLORS.destructive,
+];
 
 interface JobItem {
 	id: number;
@@ -277,7 +293,7 @@ export function DashboardPage() {
 					value={summary?.projects.total}
 					isLoading={isLoading}
 					href='/projects'
-					icon={<FolderKanban className='h-5 w-5 text-blue-500' />}
+					icon={<FolderKanban className='h-5 w-5 text-info' />}
 					trend='+2 from last week'
 				/>
 				<StatCard
@@ -285,7 +301,7 @@ export function DashboardPage() {
 					value={summary?.servers.total}
 					isLoading={isLoading}
 					href='/servers'
-					icon={<Server className='h-5 w-5 text-purple-500' />}
+					icon={<Server className='h-5 w-5 text-primary' />}
 					trend='All systems operational'
 				/>
 				<StatCard
@@ -299,10 +315,10 @@ export function DashboardPage() {
 					href='/monitors'
 					className={
 						avgUptime !== null && avgUptime !== undefined && avgUptime < 99
-							? 'text-yellow-500'
-							: 'text-green-500'
+							? 'text-warning'
+							: 'text-success'
 					}
-					icon={<Activity className='h-5 w-5 text-green-500' />}
+					icon={<Activity className='h-5 w-5 text-success' />}
 					trend='Last 24 hours'
 				/>
 				<StatCard
@@ -310,8 +326,8 @@ export function DashboardPage() {
 					value='AF-Secure'
 					isLoading={isLoading}
 					href='/security'
-					className='text-blue-500'
-					icon={<Shield className='h-5 w-5 text-blue-500' />}
+					className='text-info'
+					icon={<Shield className='h-5 w-5 text-info' />}
 					trend='3 active hardening rules'
 				/>
 			</div>
@@ -323,7 +339,7 @@ export function DashboardPage() {
 						<CardTitle className='text-base font-semibold'>
 							System Activity
 						</CardTitle>
-						<Zap className='h-4 w-4 text-yellow-500' />
+						<Zap className='h-4 w-4 text-warning' />
 					</CardHeader>
 					<CardContent>
 						<div className='h-[300px] w-full mt-4'>
@@ -331,38 +347,61 @@ export function DashboardPage() {
 								<AreaChart data={MOCK_ACTIVITY_DATA}>
 									<defs>
 										<linearGradient id='colorBackups' x1='0' y1='0' x2='0' y2='1'>
-											<stop offset='5%' stopColor='#3b82f6' stopOpacity={0.3} />
-											<stop offset='95%' stopColor='#3b82f6' stopOpacity={0} />
+											<stop
+												offset='5%'
+												stopColor={DASHBOARD_COLORS.info}
+												stopOpacity={0.28}
+											/>
+											<stop
+												offset='95%'
+												stopColor={DASHBOARD_COLORS.info}
+												stopOpacity={0}
+											/>
 										</linearGradient>
 										<linearGradient id='colorSyncs' x1='0' y1='0' x2='0' y2='1'>
-											<stop offset='5%' stopColor='#10b981' stopOpacity={0.3} />
-											<stop offset='95%' stopColor='#10b981' stopOpacity={0} />
+											<stop
+												offset='5%'
+												stopColor={DASHBOARD_COLORS.success}
+												stopOpacity={0.28}
+											/>
+											<stop
+												offset='95%'
+												stopColor={DASHBOARD_COLORS.success}
+												stopOpacity={0}
+											/>
 										</linearGradient>
 									</defs>
 									<CartesianGrid
 										strokeDasharray='3 3'
 										vertical={false}
-										stroke='#f0f0f0'
+										stroke={DASHBOARD_COLORS.border}
 									/>
 									<XAxis
 										dataKey='date'
 										axisLine={false}
 										tickLine={false}
-										tick={{ fontSize: 12, fill: '#888' }}
+										tick={{
+											fontSize: 12,
+											fill: DASHBOARD_COLORS.mutedForeground,
+										}}
 										dy={10}
 									/>
 									<YAxis hide />
 									<Tooltip
 										contentStyle={{
 											borderRadius: '8px',
-											border: 'none',
-											boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+											border: `1px solid ${DASHBOARD_COLORS.border}`,
+											backgroundColor: DASHBOARD_COLORS.card,
+											color: DASHBOARD_COLORS.cardForeground,
+											boxShadow: '0 12px 24px hsl(var(--foreground) / 0.12)',
 										}}
+										labelStyle={{ color: DASHBOARD_COLORS.cardForeground }}
+										itemStyle={{ color: DASHBOARD_COLORS.cardForeground }}
 									/>
 									<Area
 										type='monotone'
 										dataKey='backups'
-										stroke='#3b82f6'
+										stroke={DASHBOARD_COLORS.info}
 										strokeWidth={3}
 										fillOpacity={1}
 										fill='url(#colorBackups)'
@@ -370,7 +409,7 @@ export function DashboardPage() {
 									<Area
 										type='monotone'
 										dataKey='syncs'
-										stroke='#10b981'
+										stroke={DASHBOARD_COLORS.success}
 										strokeWidth={3}
 										fillOpacity={1}
 										fill='url(#colorSyncs)'
@@ -380,11 +419,11 @@ export function DashboardPage() {
 						</div>
 						<div className='flex items-center gap-6 mt-4 justify-center text-xs text-muted-foreground'>
 							<div className='flex items-center gap-2'>
-								<span className='h-2 w-2 rounded-full bg-blue-500' />
+								<span className='h-2 w-2 rounded-full bg-info' />
 								Backups Created
 							</div>
 							<div className='flex items-center gap-2'>
-								<span className='h-2 w-2 rounded-full bg-green-500' />
+								<span className='h-2 w-2 rounded-full bg-success' />
 								Environment Syncs
 							</div>
 						</div>
@@ -423,10 +462,17 @@ export function DashboardPage() {
 												/>
 											))
 										) : (
-											<Cell fill='#e5e7eb' />
+											<Cell fill={DASHBOARD_COLORS.muted} />
 										)}
 									</Pie>
-									<Tooltip />
+									<Tooltip
+										contentStyle={{
+											borderRadius: '8px',
+											border: `1px solid ${DASHBOARD_COLORS.border}`,
+											backgroundColor: DASHBOARD_COLORS.card,
+											color: DASHBOARD_COLORS.cardForeground,
+										}}
+									/>
 								</PieChart>
 							</ResponsiveContainer>
 							<div className='absolute inset-0 flex flex-col items-center justify-center pointer-events-none'>
@@ -441,7 +487,7 @@ export function DashboardPage() {
 						<div className='w-full space-y-2 mt-4'>
 							<div className='flex items-center justify-between text-xs'>
 								<div className='flex items-center gap-2'>
-									<div className='h-2 w-2 rounded-full bg-green-500' />
+									<div className='h-2 w-2 rounded-full bg-success' />
 									<span>Healthy</span>
 								</div>
 								<span className='font-semibold'>
@@ -450,7 +496,7 @@ export function DashboardPage() {
 							</div>
 							<div className='flex items-center justify-between text-xs'>
 								<div className='flex items-center gap-2'>
-									<div className='h-2 w-2 rounded-full bg-yellow-500' />
+									<div className='h-2 w-2 rounded-full bg-warning' />
 									<span>Warning</span>
 								</div>
 								<span className='font-semibold'>
@@ -459,7 +505,7 @@ export function DashboardPage() {
 							</div>
 							<div className='flex items-center justify-between text-xs'>
 								<div className='flex items-center gap-2'>
-									<div className='h-2 w-2 rounded-full bg-red-500' />
+									<div className='h-2 w-2 rounded-full bg-destructive' />
 									<span>Critical</span>
 								</div>
 								<span className='font-semibold'>
@@ -473,9 +519,9 @@ export function DashboardPage() {
 
 			<div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
 				{/* Attention Items */}
-				<Card className='border-amber-500/20 bg-amber-500/[0.02]'>
+				<Card className='border-warning/25 bg-warning/5'>
 					<CardHeader className='pb-3'>
-						<CardTitle className='text-base font-semibold flex items-center gap-2 text-amber-600'>
+						<CardTitle className='text-base font-semibold flex items-center gap-2 text-warning'>
 							<AlertTriangle className='h-4 w-4' />
 							Priority Attention
 						</CardTitle>
@@ -490,8 +536,8 @@ export function DashboardPage() {
 									<div
 										className={`mt-1 h-2 w-2 rounded-full shrink-0 ${
 											item.severity === 'critical'
-												? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]'
-												: 'bg-amber-500'
+												? 'bg-destructive shadow-sm'
+												: 'bg-warning'
 										}`}
 									/>
 									<div className='flex-1 min-w-0'>
@@ -538,7 +584,7 @@ export function DashboardPage() {
 									</div>
 									<div className='h-2 bg-muted rounded-full overflow-hidden'>
 										<div
-											className='h-full bg-blue-500 transition-all duration-1000'
+											className='h-full bg-info transition-all duration-1000'
 											style={{ width: `${job.progress}%` }}
 										/>
 									</div>
@@ -581,10 +627,10 @@ export function DashboardPage() {
 									<div
 										className={`h-2 w-2 rounded-full ${
 											job.status === 'completed'
-												? 'bg-green-500'
+												? 'bg-success'
 												: job.status === 'failed'
-													? 'bg-red-500'
-													: 'bg-blue-500 animate-pulse'
+													? 'bg-destructive'
+													: 'bg-info animate-pulse'
 										}`}
 									/>
 									<div>
@@ -633,7 +679,7 @@ function StatCard({
 					<ArrowUpRight className='h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity' />
 				</div>
 				<div className='mt-3'>
-					<p className='text-2xl font-bold tracking-tight'>
+					<p className={`text-2xl font-bold tracking-tight ${className}`}>
 						{isLoading ? <Skeleton className='h-8 w-16' /> : value ?? '—'}
 					</p>
 					<p className='text-xs font-medium text-muted-foreground mt-1'>

@@ -34,12 +34,11 @@ import { getFixAction, formatScanType } from './utils';
 
 export function SeverityBadge({ severity }: { severity: Severity }) {
 	const variants: Record<Severity, string> = {
-		critical: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
-		high: 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300',
-		medium:
-			'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300',
-		low: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
-		info: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
+		critical: 'bg-destructive/10 text-destructive',
+		high: 'bg-destructive/10 text-destructive',
+		medium: 'bg-warning/10 text-warning',
+		low: 'bg-info/10 text-info',
+		info: 'bg-muted text-muted-foreground',
 	};
 	return (
 		<span
@@ -66,12 +65,12 @@ export function ScoreRing({ score }: { score: number | null }) {
 	}
 	const color =
 		score >= 80
-			? '#22c55e'
+			? 'hsl(var(--success))'
 			: score >= 60
-				? '#eab308'
+				? 'hsl(var(--warning))'
 				: score >= 40
-					? '#f97316'
-					: '#ef4444';
+					? 'hsl(var(--warning))'
+					: 'hsl(var(--destructive))';
 	const r = 22;
 	const circ = 2 * Math.PI * r;
 	const dash = (score / 100) * circ;
@@ -120,27 +119,27 @@ export function SummaryBadges({ summary }: { summary: ScanSummary }) {
 	return (
 		<div className='flex gap-1 flex-wrap'>
 			{summary.critical > 0 && (
-				<span className='text-xs bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300 px-1.5 py-0.5 rounded font-semibold'>
+				<span className='text-xs bg-destructive/10 text-destructive px-1.5 py-0.5 rounded font-semibold'>
 					{summary.critical} critical
 				</span>
 			)}
 			{summary.high > 0 && (
-				<span className='text-xs bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300 px-1.5 py-0.5 rounded font-semibold'>
+				<span className='text-xs bg-destructive/10 text-destructive px-1.5 py-0.5 rounded font-semibold'>
 					{summary.high} high
 				</span>
 			)}
 			{summary.medium > 0 && (
-				<span className='text-xs bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300 px-1.5 py-0.5 rounded'>
+				<span className='text-xs bg-warning/10 text-warning px-1.5 py-0.5 rounded'>
 					{summary.medium} med
 				</span>
 			)}
 			{summary.low > 0 && (
-				<span className='text-xs bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 px-1.5 py-0.5 rounded'>
+				<span className='text-xs bg-info/10 text-info px-1.5 py-0.5 rounded'>
 					{summary.low} low
 				</span>
 			)}
 			{summary.info > 0 && (
-				<span className='text-xs bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 px-1.5 py-0.5 rounded'>
+				<span className='text-xs bg-muted text-muted-foreground px-1.5 py-0.5 rounded'>
 					{summary.info} info
 				</span>
 			)}
@@ -154,15 +153,15 @@ export function SummaryBadges({ summary }: { summary: ScanSummary }) {
 
 export function StatusDot({ status }: { status: string }) {
 	const classes: Record<string, string> = {
-		completed: 'bg-green-500',
-		failed: 'bg-red-500',
-		running: 'bg-yellow-400 animate-pulse',
-		pending: 'bg-gray-400',
-		queued: 'bg-gray-400',
+		completed: 'bg-success',
+		failed: 'bg-destructive',
+		running: 'bg-warning animate-pulse',
+		pending: 'bg-muted-foreground',
+		queued: 'bg-muted-foreground',
 	};
 	return (
 		<span
-			className={`inline-block w-2 h-2 rounded-full ${classes[status] ?? 'bg-gray-400'}`}
+			className={`inline-block w-2 h-2 rounded-full ${classes[status] ?? 'bg-muted-foreground'}`}
 			aria-label={`Status: ${status}`}
 		/>
 	);
@@ -226,9 +225,9 @@ export function FindingItem({
 				aria-hidden='true'
 			/>
 		),
-		low: <Info className='h-4 w-4 text-blue-500 shrink-0' aria-hidden='true' />,
+		low: <Info className='h-4 w-4 text-info shrink-0' aria-hidden='true' />,
 		info: (
-			<Info className='h-4 w-4 text-gray-400 shrink-0' aria-hidden='true' />
+			<Info className='h-4 w-4 text-muted-foreground shrink-0' aria-hidden='true' />
 		),
 	};
 	const hasMetadata =

@@ -106,9 +106,9 @@ export function HardenDialog({
 			: null;
 
 	const statusColor = (s: string) => {
-		if (s === 'applied') return 'bg-green-100 text-green-800';
-		if (s === 'skipped') return 'bg-gray-100 text-gray-700';
-		return 'bg-red-100 text-red-800';
+		if (s === 'applied') return 'bg-success/10 text-success';
+		if (s === 'skipped') return 'bg-muted text-muted-foreground';
+		return 'bg-destructive/10 text-destructive';
 	};
 
 	const handleClose = () => {
@@ -194,7 +194,7 @@ export function HardenDialog({
 								return (
 									<p className='text-xs text-muted-foreground'>
 										{applied > 0 && (
-											<span className='text-green-600 font-medium'>
+											<span className='text-success font-medium'>
 												{applied} applied
 											</span>
 										)}

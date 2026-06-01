@@ -90,11 +90,11 @@ export function AdvancedTab() {
 
 	return (
 		<div className='space-y-6 max-w-4xl'>
-			<Card className='overflow-hidden border-slate-200 dark:border-slate-800 shadow-sm'>
-				<CardHeader className='bg-slate-50/50 dark:bg-slate-900/50 pb-4'>
+			<Card className='overflow-hidden shadow-sm'>
+				<CardHeader className='bg-muted/40 pb-4'>
 					<div className='flex items-center gap-3'>
-						<div className='p-2 bg-slate-100 dark:bg-slate-800 rounded-lg'>
-							<Plus className='h-5 w-5 text-slate-600 dark:text-slate-400' />
+						<div className='p-2 bg-muted rounded-lg'>
+							<Plus className='h-5 w-5 text-muted-foreground' />
 						</div>
 						<div>
 							<CardTitle className='text-lg'>Quick Register</CardTitle>
@@ -144,7 +144,7 @@ export function AdvancedTab() {
 				</CardContent>
 			</Card>
 
-			<Card className='overflow-hidden border-slate-200 dark:border-slate-800'>
+			<Card className='overflow-hidden'>
 				<CardHeader className='pb-2'>
 					<div className='flex items-center justify-between'>
 						<div className='flex items-center gap-2'>
@@ -175,7 +175,7 @@ export function AdvancedTab() {
 									className='flex items-center justify-between px-6 py-4 hover:bg-muted/20 transition-colors'
 								>
 									<div className='flex-1 min-w-0 pr-4'>
-										<p className='font-mono text-xs font-bold text-slate-600 dark:text-slate-400'>
+										<p className='font-mono text-xs font-bold text-muted-foreground'>
 											{key}
 										</p>
 										{editKey === key ? (

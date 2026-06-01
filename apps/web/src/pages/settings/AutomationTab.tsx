@@ -28,11 +28,11 @@ export function AutomationTab() {
 	return (
 		<div className='space-y-6 max-w-4xl'>
 			{/* Safety Settings */}
-			<Card className='overflow-hidden border-green-100 dark:border-green-900/30'>
-				<CardHeader className='bg-green-50/50 dark:bg-green-950/20 pb-4'>
+			<Card className='overflow-hidden'>
+				<CardHeader className='bg-muted/40 pb-4'>
 					<div className='flex items-center gap-3'>
-						<div className='p-2 bg-green-100 dark:bg-green-900/30 rounded-lg'>
-							<Shield className='h-5 w-5 text-green-600 dark:text-green-400' />
+						<div className='p-2 bg-success/10 rounded-lg'>
+							<Shield className='h-5 w-5 text-success' />
 						</div>
 						<div>
 							<CardTitle className='text-lg'>Safety & Safeguards</CardTitle>
@@ -64,18 +64,17 @@ export function AutomationTab() {
 								})
 							}
 							disabled={isLoading || updateMutation.isPending}
-							className='data-[state=checked]:bg-green-600'
 						/>
 					</div>
 				</CardContent>
 			</Card>
 
 			{/* Retention Settings */}
-			<Card className='overflow-hidden border-blue-100 dark:border-blue-900/30'>
-				<CardHeader className='bg-blue-50/50 dark:bg-blue-950/20 pb-4'>
+			<Card className='overflow-hidden'>
+				<CardHeader className='bg-muted/40 pb-4'>
 					<div className='flex items-center gap-3'>
-						<div className='p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg'>
-							<Clock className='h-5 w-5 text-blue-600 dark:text-blue-400' />
+						<div className='p-2 bg-info/10 rounded-lg'>
+							<Clock className='h-5 w-5 text-info' />
 						</div>
 						<div>
 							<CardTitle className='text-lg'>Retention & Cleanup</CardTitle>
@@ -140,18 +139,17 @@ export function AutomationTab() {
 								})
 							}
 							disabled={isLoading || updateMutation.isPending}
-							className='data-[state=checked]:bg-blue-600'
 						/>
 					</div>
 				</CardContent>
 			</Card>
 
 			{/* Advanced Automation */}
-			<Card className='overflow-hidden border-amber-100 dark:border-amber-900/30'>
-				<CardHeader className='bg-amber-50/50 dark:bg-amber-950/20 pb-4'>
+			<Card className='overflow-hidden'>
+				<CardHeader className='bg-muted/40 pb-4'>
 					<div className='flex items-center gap-3'>
-						<div className='p-2 bg-amber-100 dark:bg-amber-900/30 rounded-lg'>
-							<Zap className='h-5 w-5 text-amber-600 dark:text-amber-400' />
+						<div className='p-2 bg-warning/10 rounded-lg'>
+							<Zap className='h-5 w-5 text-warning' />
 						</div>
 						<div>
 							<CardTitle className='text-lg'>Advanced Automation</CardTitle>
@@ -179,13 +177,12 @@ export function AutomationTab() {
 								})
 							}
 							disabled={isLoading || updateMutation.isPending}
-							className='data-[state=checked]:bg-amber-600'
 						/>
 					</div>
 
-					<div className='mt-2 flex items-start gap-3 p-3 rounded-lg bg-amber-50/50 dark:bg-amber-950/10 border border-amber-200/50'>
-						<AlertCircle className='h-4 w-4 text-amber-600 mt-0.5' />
-						<p className='text-[11px] text-amber-800 dark:text-amber-400'>
+					<div className='mt-2 flex items-start gap-3 p-3 rounded-lg bg-warning/10 border border-warning/20'>
+						<AlertCircle className='h-4 w-4 text-warning mt-0.5' />
+						<p className='text-[11px] text-warning'>
 							<strong>Note:</strong> Auto-updates are only attempted for plugins maintained by Bedrock Forge to ensure stability.
 						</p>
 					</div>

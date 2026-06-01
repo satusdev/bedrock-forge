@@ -53,22 +53,22 @@ export function OverviewTab({ data }: { data: OverviewData }) {
 							</div>
 						</CardContent>
 					</Card>
-					<Card className='border-red-200/50 dark:border-red-900/50 bg-red-50/30 dark:bg-red-900/10'>
+					<Card className='border-destructive/20 bg-destructive/5'>
 						<CardContent className='p-6'>
-							<p className='text-sm font-medium text-red-800 dark:text-red-300'>
+							<p className='text-sm font-medium text-destructive'>
 								Critical Threats
 							</p>
-							<p className='text-3xl font-bold mt-2 text-red-600 dark:text-red-400 tracking-tight'>
+							<p className='text-3xl font-bold mt-2 text-destructive tracking-tight'>
 								{totals.critical}
 							</p>
 						</CardContent>
 					</Card>
-					<Card className='border-orange-200/50 dark:border-orange-900/50 bg-orange-50/30 dark:bg-orange-900/10'>
+					<Card className='border-warning/20 bg-warning/5'>
 						<CardContent className='p-6'>
-							<p className='text-sm font-medium text-orange-800 dark:text-orange-300'>
+							<p className='text-sm font-medium text-warning'>
 								High Risk Findings
 							</p>
-							<p className='text-3xl font-bold mt-2 text-orange-500 tracking-tight'>
+							<p className='text-3xl font-bold mt-2 text-warning tracking-tight'>
 								{totals.high}
 							</p>
 						</CardContent>

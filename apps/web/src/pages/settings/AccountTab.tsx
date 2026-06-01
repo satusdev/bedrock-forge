@@ -91,11 +91,11 @@ export function AccountTab() {
 
 	return (
 		<div className='space-y-6 max-w-4xl'>
-			<Card className='overflow-hidden border-indigo-100 dark:border-indigo-900/30'>
-				<CardHeader className='bg-indigo-50/50 dark:bg-indigo-950/20 pb-4'>
+			<Card className='overflow-hidden'>
+				<CardHeader className='bg-muted/40 pb-4'>
 					<div className='flex items-center gap-3'>
-						<div className='p-2 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg'>
-							<Lock className='h-5 w-5 text-indigo-600 dark:text-indigo-400' />
+						<div className='p-2 bg-primary/10 rounded-lg'>
+							<Lock className='h-5 w-5 text-primary' />
 						</div>
 						<div>
 							<CardTitle className='text-lg'>Security Credentials</CardTitle>
@@ -155,7 +155,6 @@ export function AccountTab() {
 						<Button 
 							type='submit' 
 							disabled={changePasswordMutation.isPending}
-							className='bg-indigo-600 hover:bg-indigo-700 shadow-md shadow-indigo-200 dark:shadow-none'
 						>
 							{changePasswordMutation.isPending
 								? 'Saving\u2026'
@@ -165,12 +164,12 @@ export function AccountTab() {
 				</CardContent>
 			</Card>
 
-			<Card className='overflow-hidden border-slate-200 dark:border-slate-800'>
-				<CardHeader className='bg-slate-50/50 dark:bg-slate-900/50 pb-4'>
+			<Card className='overflow-hidden'>
+				<CardHeader className='bg-muted/40 pb-4'>
 					<div className='flex items-center justify-between'>
 						<div className='flex items-center gap-3'>
-							<div className='p-2 bg-slate-100 dark:bg-slate-800 rounded-lg'>
-								<Fingerprint className='h-5 w-5 text-slate-600 dark:text-slate-400' />
+							<div className='p-2 bg-muted rounded-lg'>
+								<Fingerprint className='h-5 w-5 text-muted-foreground' />
 							</div>
 							<div>
 								<CardTitle className='text-lg'>Global SSH Key</CardTitle>
@@ -178,7 +177,7 @@ export function AccountTab() {
 							</div>
 						</div>
 						{sshKeyStatus?.has_key && (
-							<Badge className='bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 border-green-200 dark:border-green-800 gap-1.5 px-3 py-1'>
+							<Badge variant='success' className='gap-1.5 px-3 py-1'>
 								<ShieldCheck className='h-3.5 w-3.5' />
 								Configured
 							</Badge>
@@ -202,7 +201,7 @@ export function AccountTab() {
 						<Textarea
 							id='global-ssh-key'
 							rows={6}
-							className='font-mono text-xs resize-y bg-muted/20 focus-visible:ring-slate-400'
+							className='font-mono text-xs resize-y bg-muted/20'
 							placeholder='-----BEGIN OPENSSH PRIVATE KEY-----'
 							value={sshKeyValue}
 							onChange={e => setSshKeyValue(e.target.value)}
@@ -213,7 +212,6 @@ export function AccountTab() {
 						<Button
 							onClick={() => setSshKey.mutate(sshKeyValue)}
 							disabled={setSshKey.isPending || sshKeyValue.trim().length < 20}
-							className='bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600'
 						>
 							{setSshKey.isPending ? 'Saving\u2026' : 'Save SSH Key'}
 						</Button>

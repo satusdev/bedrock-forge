@@ -96,13 +96,11 @@ export function FindingsTab({
 	};
 
 	const sevColors: Record<Severity, string> = {
-		critical:
-			'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300 border-red-300',
-		high: 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300 border-orange-300',
-		medium:
-			'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300 border-yellow-300',
-		low: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 border-blue-300',
-		info: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 border-gray-300',
+		critical: 'bg-destructive/10 text-destructive border-destructive/30',
+		high: 'bg-destructive/10 text-destructive border-destructive/30',
+		medium: 'bg-warning/10 text-warning border-warning/30',
+		low: 'bg-info/10 text-info border-info/30',
+		info: 'bg-muted text-muted-foreground border-border',
 	};
 
 	return (

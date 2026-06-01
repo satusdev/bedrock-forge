@@ -99,11 +99,11 @@ export function IntegrationsTab() {
 				</TabsContent>
 
 				<TabsContent value='storage'>
-			<Card className='overflow-hidden border-blue-100 dark:border-blue-900/30'>
-				<CardHeader className='bg-blue-50/50 dark:bg-blue-950/20 pb-4'>
+			<Card className='overflow-hidden'>
+				<CardHeader className='bg-muted/40 pb-4'>
 					<div className='flex items-center gap-3'>
-						<div className='p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg'>
-							<Cloud className='h-5 w-5 text-blue-600 dark:text-blue-400' />
+						<div className='p-2 bg-info/10 rounded-lg'>
+							<Cloud className='h-5 w-5 text-info' />
 						</div>
 						<div>
 							<CardTitle className='text-lg'>Storage Providers</CardTitle>
@@ -186,7 +186,7 @@ export function IntegrationsTab() {
 							<Textarea
 								id='gdrive-token'
 								rows={4}
-								className='font-mono text-[11px] resize-none bg-background shadow-inner focus-visible:ring-blue-500/30'
+								className='font-mono text-[11px] resize-none bg-background shadow-inner'
 								placeholder='{"access_token":"ya29.xxx", ...}'
 								value={gdriveToken}
 								onChange={e => {
@@ -199,7 +199,7 @@ export function IntegrationsTab() {
 						<div className='flex flex-wrap items-center gap-3 pt-2'>
 							<Button
 								size='sm'
-								className='bg-blue-600 hover:bg-blue-700 text-white transition-all shadow-md active:scale-95'
+								className='transition-all shadow-md shadow-primary/15 active:scale-95'
 								onClick={handleSaveAndTest}
 								disabled={
 									saveGdrive.isPending ||
@@ -252,12 +252,14 @@ export function IntegrationsTab() {
 							<div
 								className={`text-xs px-4 py-3 rounded-xl border flex items-center gap-3 animate-in fade-in slide-in-from-top-2 duration-300 ${
 									gdriveTestResult.success
-										? 'bg-green-50/50 border-green-200 text-green-700 dark:bg-green-950/20 dark:border-green-900/50 dark:text-green-400'
-										: 'bg-red-50/50 border-red-200 text-red-700 dark:bg-red-950/20 dark:border-red-900/50 dark:text-red-400'
+										? 'bg-success/10 border-success/20 text-success'
+										: 'bg-destructive/10 border-destructive/20 text-destructive'
 								}`}
 							>
 								<div className={`h-6 w-6 rounded-full flex items-center justify-center shrink-0 ${
-									gdriveTestResult.success ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
+									gdriveTestResult.success
+										? 'bg-success/10 text-success'
+										: 'bg-destructive/10 text-destructive'
 								}`}>
 									{gdriveTestResult.success ? <Check className='h-4 w-4' /> : <CloudOff className='h-4 w-4' />}
 								</div>

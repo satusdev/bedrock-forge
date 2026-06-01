@@ -75,19 +75,19 @@ function ProjectHeader({
 		switch (status) {
 			case 'active':
 				return (
-					<Badge className='bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-950/50 transition-colors font-semibold shadow-sm text-xs px-2.5 py-1 capitalize'>
+					<Badge variant='success' className='font-semibold shadow-sm text-xs px-2.5 py-1 capitalize'>
 						Active
 					</Badge>
 				);
 			case 'inactive':
 				return (
-					<Badge className='bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-950/50 transition-colors font-semibold shadow-sm text-xs px-2.5 py-1 capitalize'>
+					<Badge variant='warning' className='font-semibold shadow-sm text-xs px-2.5 py-1 capitalize'>
 						Inactive
 					</Badge>
 				);
 			default:
 				return (
-					<Badge className='bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-950/30 dark:text-slate-400 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-950/50 transition-colors font-semibold shadow-sm text-xs px-2.5 py-1 capitalize'>
+					<Badge variant='secondary' className='font-semibold shadow-sm text-xs px-2.5 py-1 capitalize'>
 						{status}
 					</Badge>
 				);
@@ -130,7 +130,7 @@ function ProjectHeader({
 			<div className='grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 mt-2'>
 				{project.hosting_package && (
 					<div className='flex items-center gap-3.5 rounded-xl border bg-card/45 hover:bg-card/85 transition-all duration-200 shadow-sm p-4 backdrop-blur-sm group'>
-						<div className='p-2.5 rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/30 dark:text-blue-400 border border-blue-100 dark:border-blue-900 group-hover:scale-105 transition-transform duration-200'>
+						<div className='p-2.5 rounded-xl bg-info/10 text-info border border-info/20 group-hover:scale-105 transition-transform duration-200'>
 							<Package className='h-5 w-5' />
 						</div>
 						<div>
