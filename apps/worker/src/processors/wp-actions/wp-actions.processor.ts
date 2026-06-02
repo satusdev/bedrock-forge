@@ -10,6 +10,7 @@ import { createRemoteExecutor } from '@bedrock-forge/remote-executor';
 import { QUEUES, JOB_TYPES, DEFAULT_JOB_OPTIONS } from '@bedrock-forge/shared';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
+import { buildWpCliPrefix } from '../../utils/processor-utils';
 
 export interface WpFixActionPayload {
 	environmentId: number;
@@ -121,7 +122,16 @@ export class WpActionsProcessor extends WorkerHost {
 				content: readFileSync(join(scriptsPath, 'wp-actions.php')),
 			});
 			await job.updateProgress(40);
-			const cmd = `php ${remoteScript} --docroot=${shellQuote(env.root_path ?? '')} --action=${shellQuote(action)}`;
+			const wpPath = await this.resolveWpPath(executor, env.root_path ?? '');
+			const wpCli = await this.buildWpCliContext(executor, wpPath);
+			const phpCmd = wpCli.lsphpBin ? shellQuote(wpCli.lsphpBin) : 'php';
+			const envPrefix = wpCli.lsphpBin
+				? `env WP_CLI_PHP=${shellQuote(wpCli.lsphpBin)}`
+				: '';
+			const cmd = [envPrefix, phpCmd, shellQuote(remoteScript)]
+				.filter(Boolean)
+				.join(' ') +
+				` --docroot=${shellQuote(env.root_path ?? '')} --wp-path=${shellQuote(wpPath)} --action=${shellQuote(action)}`;
 			const t0 = Date.now();
 			const result = await executor.execute(cmd, { timeout: 60_000 });
 			await executor
@@ -134,6 +144,11 @@ export class WpActionsProcessor extends WorkerHost {
 				result,
 				Date.now() - t0,
 			);
+			if (result.code !== 0) {
+				throw new Error(
+					`wp-actions.php failed (exit ${result.code}): ${result.stderr || result.stdout}`,
+				);
+			}
 			await job.updateProgress(100);
 			await this.prisma.jobExecution.update({
 				where: { id: BigInt(jobExecutionId) },
@@ -442,15 +457,29 @@ export class WpActionsProcessor extends WorkerHost {
 			const { executor, env } = await this.connectToEnv(environmentId, tracker);
 			await job.updateProgress(20);
 			const wpPath = await this.resolveWpPath(executor, env.root_path ?? '');
+			const wpCli = await this.buildWpCliContext(executor, wpPath);
+			const buildWpCmd = (args: string) => this.buildWpCmd(wpCli, args);
 			const versionResult = await executor.execute(
-				`wp core version --path=${shellQuote(wpPath)}`,
+				buildWpCmd(`core version --skip-plugins --path=${shellQuote(wpPath)}`),
 				{ timeout: 30_000 },
 			);
+			if (versionResult.code !== 0) {
+				throw new Error(
+					`wp core version failed (exit ${versionResult.code}): ${versionResult.stderr}`,
+				);
+			}
 			const currentVersion = versionResult.stdout.trim();
 			const checkResult = await executor.execute(
-				`wp core check-update --format=json --path=${shellQuote(wpPath)}`,
+				buildWpCmd(
+					`core check-update --format=json --skip-plugins --path=${shellQuote(wpPath)}`,
+				),
 				{ timeout: 30_000 },
 			);
+			if (checkResult.code !== 0) {
+				throw new Error(
+					`wp core check-update failed (exit ${checkResult.code}): ${checkResult.stderr}`,
+				);
+			}
 			let updates: unknown[] = [];
 			try {
 				updates = JSON.parse(checkResult.stdout.trim()) as unknown[];
@@ -507,8 +536,12 @@ export class WpActionsProcessor extends WorkerHost {
 			const { executor, env } = await this.connectToEnv(environmentId, tracker);
 			await job.updateProgress(20);
 			const wpPath = await this.resolveWpPath(executor, env.root_path ?? '');
+			const wpCli = await this.buildWpCliContext(executor, wpPath);
+			const buildWpCmd = (args: string) => this.buildWpCmd(wpCli, args);
 			// Step 1: Update core files
-			const updateCmd = `wp core update --path=${shellQuote(wpPath)}`;
+			const updateCmd = buildWpCmd(
+				`core update --skip-plugins --path=${shellQuote(wpPath)}`,
+			);
 			const t0 = Date.now();
 			const updateResult = await executor.execute(updateCmd, {
 				timeout: 5 * 60_000,
@@ -526,7 +559,9 @@ export class WpActionsProcessor extends WorkerHost {
 			}
 			await job.updateProgress(70);
 			// Step 2: Run DB schema upgrades
-			const dbUpdateCmd = `wp core update-db --path=${shellQuote(wpPath)}`;
+			const dbUpdateCmd = buildWpCmd(
+				`core update-db --skip-plugins --path=${shellQuote(wpPath)}`,
+			);
 			const t1 = Date.now();
 			const dbUpdateResult = await executor.execute(dbUpdateCmd, {
 				timeout: 60_000,
@@ -544,9 +579,14 @@ export class WpActionsProcessor extends WorkerHost {
 			}
 			// Fetch the final version
 			const versionResult = await executor.execute(
-				`wp core version --path=${shellQuote(wpPath)}`,
+				buildWpCmd(`core version --skip-plugins --path=${shellQuote(wpPath)}`),
 				{ timeout: 15_000 },
 			);
+			if (versionResult.code !== 0) {
+				throw new Error(
+					`wp core version failed (exit ${versionResult.code}): ${versionResult.stderr}`,
+				);
+			}
 			const newVersion = versionResult.stdout.trim();
 			const result = {
 				updated: true,
@@ -580,6 +620,35 @@ export class WpActionsProcessor extends WorkerHost {
 			);
 			throw err;
 		}
+	}
+
+	private async buildWpCliContext(
+		executor: Awaited<
+			ReturnType<
+				typeof import('@bedrock-forge/remote-executor').createRemoteExecutor
+			>
+		>,
+		wpPath: string,
+	) {
+		return buildWpCliPrefix(executor, wpPath);
+	}
+
+	private buildWpCmd(
+		context: Awaited<ReturnType<WpActionsProcessor['buildWpCliContext']>>,
+		args: string,
+	): string {
+		let phpAndWp: string;
+		if (context.lsphpBin && context.wpBin) {
+			phpAndWp = `${shellQuote(context.lsphpBin)} ${shellQuote(context.wpBin)}`;
+		} else if (context.lsphpBin) {
+			phpAndWp = `env WP_CLI_PHP=${shellQuote(context.lsphpBin)} wp`;
+		} else {
+			phpAndWp = 'wp';
+		}
+
+		return [context.prefix, phpAndWp, args.trim(), context.allowRootFlag]
+			.filter(Boolean)
+			.join(' ');
 	}
 
 	private async resolveWpPath(

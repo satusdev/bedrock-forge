@@ -230,7 +230,7 @@ export class SecurityEnvironmentScanProcessor {
 
 		// 1. Get plugin list via remote script (reuse existing logic if possible, or just run wp-cli)
 		const { stdout: pluginListRaw } = await executor.execute(
-			`wp plugin list --format=json --path=${rootPath} 2>/dev/null || true`,
+			`wp plugin list --format=json --skip-plugins --path=${rootPath} 2>/dev/null || true`,
 			{ timeout: 30000 },
 		);
 

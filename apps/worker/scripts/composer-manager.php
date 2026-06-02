@@ -200,7 +200,30 @@ function restoreComposerState(array $backup): void
 
 function composerCommand(string $args): string
 {
-    return 'COMPOSER_ALLOW_SUPERUSER=1 COMPOSER_NO_INTERACTION=1 composer ' . $args . ' 2>&1';
+    return 'COMPOSER_ALLOW_SUPERUSER=1 COMPOSER_NO_INTERACTION=1 ' . composerExecutable() . ' ' . $args . ' 2>&1';
+}
+
+function composerExecutable(): string
+{
+    $composerPath = trim(shell_exec('command -v composer 2>/dev/null') ?? '');
+    if ($composerPath === '') {
+        return 'composer';
+    }
+
+    $firstBytes = is_readable($composerPath)
+        ? (file_get_contents($composerPath, false, null, 0, 256) ?: '')
+        : '';
+    $looksLikePhp =
+        substr($composerPath, -5) === '.phar' ||
+        substr($firstBytes, 0, 5) === '<?php' ||
+        preg_match('/^#!.*\bphp\b/i', $firstBytes) === 1;
+
+    if ($looksLikePhp) {
+        $phpBin = defined('PHP_BINARY') && PHP_BINARY ? PHP_BINARY : 'php';
+        return escapeshellarg($phpBin) . ' ' . escapeshellarg($composerPath);
+    }
+
+    return escapeshellarg($composerPath);
 }
 
 function runComposer(string $args, ?array $backup = null): void

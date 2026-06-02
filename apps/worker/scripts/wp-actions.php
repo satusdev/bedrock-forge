@@ -3,14 +3,16 @@
  * wp-actions.php — WordPress quick fix/action runner
  *
  * Args:
- *   --docroot   Absolute path to WordPress root
+ *   --docroot   Absolute path to site root
+ *   --wp-path   Optional absolute WordPress core path for WP-CLI (Bedrock: web/wp)
  *   --action    flush_rewrite | clear_cache | fix_permissions | disable_plugins | enable_plugins
  *
  * Output: JSON { success, action, message, details }
  */
 
-$opts = getopt('', ['docroot:', 'action:']);
+$opts = getopt('', ['docroot:', 'wp-path::', 'action:']);
 $docroot  = rtrim($opts['docroot'] ?? '', '/');
+$wpPath   = rtrim($opts['wp-path'] ?? $docroot, '/');
 $action   = $opts['action'] ?? '';
 
 if (!$docroot || !$action) {
@@ -21,12 +23,16 @@ if (!is_dir($docroot)) {
     out(false, $action, "Docroot not found: $docroot");
 }
 
+if (!$wpPath || !is_dir($wpPath)) {
+    out(false, $action, "WP path not found: $wpPath");
+}
+
 switch ($action) {
     case 'flush_rewrite':
-        flushRewrite($docroot);
+        flushRewrite($docroot, $wpPath);
         break;
     case 'clear_cache':
-        clearCache($docroot);
+        clearCache($docroot, $wpPath);
         break;
     case 'fix_permissions':
         fixPermissions($docroot);
@@ -43,13 +49,13 @@ switch ($action) {
 
 // ─── Action implementations ──────────────────────────────────────────────────
 
-function flushRewrite(string $docroot): void {
+function flushRewrite(string $docroot, string $wpPath): void {
     $details = [];
 
     // Try WP-CLI first
-    $wpCli = findWpCli($docroot);
+    $wpCli = findWpCli($wpPath);
     if ($wpCli) {
-        $cmd = escapeshellarg($wpCli) . ' rewrite flush --path=' . escapeshellarg($docroot) . ' 2>&1';
+        $cmd = wpCliCommand($wpCli, 'rewrite flush --skip-plugins --path=' . escapeshellarg($wpPath));
         exec($cmd, $wpcliOut, $rc);
         if ($rc === 0) {
             out(true, 'flush_rewrite', 'Rewrite rules flushed via WP-CLI', implode("\n", $wpcliOut));
@@ -70,12 +76,12 @@ function flushRewrite(string $docroot): void {
     out(true, 'flush_rewrite', 'Rewrite rules flushed via SQL fallback', implode('; ', $details));
 }
 
-function clearCache(string $docroot): void {
+function clearCache(string $docroot, string $wpPath): void {
     $details = [];
 
-    $wpCli = findWpCli($docroot);
+    $wpCli = findWpCli($wpPath);
     if ($wpCli) {
-        $cmd = escapeshellarg($wpCli) . ' cache flush --path=' . escapeshellarg($docroot) . ' 2>&1';
+        $cmd = wpCliCommand($wpCli, 'cache flush --skip-plugins --path=' . escapeshellarg($wpPath));
         exec($cmd, $wpcliOut, $rc);
         if ($rc === 0) {
             out(true, 'clear_cache', 'Object cache flushed via WP-CLI', implode("\n", $wpcliOut));
@@ -152,6 +158,15 @@ function findWpCli(string $docroot): ?string {
     }
     $which = trim(shell_exec('which wp 2>/dev/null') ?? '');
     return $which ?: null;
+}
+
+function wpCliCommand(string $wpCli, string $args): string {
+    $wpCliPhp = getenv('WP_CLI_PHP') ?: '';
+    if ($wpCliPhp !== '') {
+        return escapeshellarg($wpCliPhp) . ' ' . escapeshellarg($wpCli) . ' ' . $args . ' 2>&1';
+    }
+
+    return escapeshellarg($wpCli) . ' ' . $args . ' 2>&1';
 }
 
 function loadDb(string $docroot): ?array {

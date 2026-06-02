@@ -890,7 +890,7 @@ export async function runBackdoorSearch(
 	);
 	if (wpCliCheck.trim() === 'found') {
 		const { stdout: checksums, code } = await exec.execute(
-			`wp core verify-checksums --path=${q(rootPath)} --format=json 2>/dev/null || true`,
+			`wp core verify-checksums --path=${q(rootPath)} --format=json --skip-plugins 2>/dev/null || true`,
 			{ timeout: 60000 },
 		);
 		if (code !== 0 && checksums.trim()) {

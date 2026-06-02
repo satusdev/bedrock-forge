@@ -192,7 +192,7 @@ export class ThemeScanProcessor extends WorkerHost {
 			const fields =
 				'name,status,version,update_version,update,title,description,author';
 			let cmd = buildWpCmd(
-				`theme list --format=json --fields=${fields} --path=${shellQuote(wpPath)}`,
+				`theme list --format=json --fields=${fields} --skip-plugins --path=${shellQuote(wpPath)}`,
 			);
 
 			await tracker.track({
@@ -217,7 +217,7 @@ export class ThemeScanProcessor extends WorkerHost {
 					detail: 'WP-CLI rejected one or more requested fields',
 				});
 				cmd = buildWpCmd(
-					`theme list --format=json --path=${shellQuote(wpPath)}`,
+					`theme list --format=json --skip-plugins --path=${shellQuote(wpPath)}`,
 				);
 				scanStart = Date.now();
 				result = await executor.execute(cmd, { timeout: 3 * 60 * 1_000 });
@@ -389,29 +389,29 @@ export class ThemeScanProcessor extends WorkerHost {
 				case 'activate':
 					if (!slug) throw new Error('slug required for theme activate');
 					cmd = buildWpCmd(
-						`theme activate ${shellQuote(slug)} --path=${shellQuote(wpPath)}`,
+						`theme activate ${shellQuote(slug)} --skip-plugins --path=${shellQuote(wpPath)}`,
 					);
 					break;
 				case 'install':
 					if (!slug) throw new Error('slug required for theme install');
 					cmd = buildWpCmd(
-						`theme install ${shellQuote(slug)} --path=${shellQuote(wpPath)}`,
+						`theme install ${shellQuote(slug)} --skip-plugins --path=${shellQuote(wpPath)}`,
 					);
 					break;
 				case 'delete':
 					if (!slug) throw new Error('slug required for theme delete');
 					cmd = buildWpCmd(
-						`theme delete ${shellQuote(slug)} --path=${shellQuote(wpPath)}`,
+						`theme delete ${shellQuote(slug)} --skip-plugins --path=${shellQuote(wpPath)}`,
 					);
 					break;
 				case 'update':
 					if (!slug) throw new Error('slug required for theme update');
 					cmd = buildWpCmd(
-						`theme update ${shellQuote(slug)} --path=${shellQuote(wpPath)}`,
+						`theme update ${shellQuote(slug)} --skip-plugins --path=${shellQuote(wpPath)}`,
 					);
 					break;
 				case 'update-all':
-					cmd = buildWpCmd(`theme update --all --path=${shellQuote(wpPath)}`);
+					cmd = buildWpCmd(`theme update --all --skip-plugins --path=${shellQuote(wpPath)}`);
 					break;
 				default:
 					throw new Error(`Unknown theme action: ${String(action)}`);

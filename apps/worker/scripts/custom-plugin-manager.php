@@ -295,8 +295,16 @@ if ($action === 'remove') {
     unset($source);
 
     if (!$modified) {
-        // Plugin not found in any source — treat as already removed, succeed silently
-        echo json_encode(['success' => true, 'output' => 'Plugin was not registered in composer.json'], JSON_UNESCAPED_SLASHES);
+        // Source is already absent. Still delete leftover copied files so removal
+        // is authoritative from the dashboard's point of view.
+        $deleted = deleteManagedTarget($composerDir, $targetDir, $slug);
+        echo json_encode(
+            [
+                'success' => true,
+                'output' => 'Plugin was not registered in composer.json' . ($deleted ? "\nDeleted leftover target directory." : ''),
+            ],
+            JSON_UNESCAPED_SLASHES
+        );
         exit(0);
     }
 
@@ -349,8 +357,16 @@ if ($action === 'remove') {
 
     $backup = backupComposerState($composerJsonPath);
     writeComposer($composerJsonPath, $composer);
-    runComposer('install --no-dev --no-interaction', $backup);
+    $out = runComposer('install --no-dev --no-interaction', $backup, true);
+    $deleted = deleteManagedTarget($composerDir, $targetDir, $slug);
     restoreOwnership($composerJsonPath, $targetDir, $composerDir);
+    echo json_encode(
+        [
+            'success' => true,
+            'output' => $out . ($deleted ? "\nDeleted target directory." : ''),
+        ],
+        JSON_UNESCAPED_SLASHES
+    );
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -407,7 +423,30 @@ function composerCommand(string $args): string
     if ($ghToken) {
         $prefix .= ' REPO_FETCHER_TOKEN=' . escapeshellarg($ghToken);
     }
-    return $prefix . ' composer ' . $args . ' 2>&1';
+    return $prefix . ' ' . composerExecutable() . ' ' . $args . ' 2>&1';
+}
+
+function composerExecutable(): string
+{
+    $composerPath = trim(shell_exec('command -v composer 2>/dev/null') ?? '');
+    if ($composerPath === '') {
+        return 'composer';
+    }
+
+    $firstBytes = is_readable($composerPath)
+        ? (file_get_contents($composerPath, false, null, 0, 256) ?: '')
+        : '';
+    $looksLikePhp =
+        substr($composerPath, -5) === '.phar' ||
+        substr($firstBytes, 0, 5) === '<?php' ||
+        preg_match('/^#!.*\bphp\b/i', $firstBytes) === 1;
+
+    if ($looksLikePhp) {
+        $phpBin = defined('PHP_BINARY') && PHP_BINARY ? PHP_BINARY : 'php';
+        return escapeshellarg($phpBin) . ' ' . escapeshellarg($composerPath);
+    }
+
+    return escapeshellarg($composerPath);
 }
 
 function runComposer(string $args, ?array $backup = null, bool $silentOnSuccess = false): string
@@ -474,6 +513,45 @@ function restoreOwnership(string $composerJsonPath, string $targetDir, string $c
     if (is_dir($absTargetDir)) {
         exec(sprintf('chown -R %d:%d %s', $uid, $gid, escapeshellarg($absTargetDir)));
     }
+}
+
+function deleteManagedTarget(string $composerDir, string $targetDir, string $slug): bool
+{
+    if (!preg_match('/^[a-z0-9_-]+$/', $slug)) {
+        bail("Refusing to delete invalid slug: {$slug}");
+    }
+
+    $allowedTargets = [
+        'web/app/plugins',
+        'wp-content/plugins',
+        'web/app/themes',
+        'wp-content/themes',
+    ];
+    if (!in_array($targetDir, $allowedTargets, true)) {
+        bail("Refusing to delete outside managed plugin/theme directories: {$targetDir}");
+    }
+
+    $base = realpath($composerDir . '/' . $targetDir);
+    if ($base === false || !is_dir($base)) {
+        return false;
+    }
+
+    $target = $base . DIRECTORY_SEPARATOR . $slug;
+    if (!is_dir($target)) {
+        return false;
+    }
+
+    $realTarget = realpath($target);
+    if ($realTarget === false || strpos($realTarget, $base . DIRECTORY_SEPARATOR) !== 0) {
+        bail("Refusing to delete unsafe target path: {$target}");
+    }
+
+    exec('rm -rf ' . escapeshellarg($realTarget), $out, $code);
+    if ($code !== 0) {
+        bail("Failed to delete target directory: {$realTarget}");
+    }
+
+    return true;
 }
 
 function normalizeGitUrl(string $url): string

@@ -14,6 +14,7 @@ import {
 	CustomPluginManagePayload,
 } from '@bedrock-forge/shared';
 import { ConfigService } from '@nestjs/config';
+import { buildWpCliPrefix } from '../../utils/processor-utils';
 
 /** Wrap a string in single quotes for safe shell embedding on the remote host. */
 function shellQuote(value: string): string {
@@ -123,12 +124,23 @@ export class CustomPluginProcessor extends WorkerHost {
 
 			await job.updateProgress(20);
 
+			const wpPathResult = await executor.execute(
+				`[ -d ${shellQuote(env.root_path + '/web/wp')} ] && echo bedrock || echo standard`,
+				{ timeout: 10_000 },
+			);
+			const wpPath =
+				wpPathResult.stdout.trim() === 'bedrock'
+					? `${env.root_path}/web/wp`
+					: env.root_path;
+			const { lsphpBin } = await buildWpCliPrefix(executor, wpPath);
+			const phpCmd = lsphpBin ? shellQuote(lsphpBin) : 'php';
+
 			const tokenArg = githubToken
 				? ` --github-token=${shellQuote(githubToken)}`
 				: '';
 
 			const cmd = [
-				`php ${remoteScript}`,
+				`${phpCmd} ${shellQuote(remoteScript)}`,
 				`--action=${action}`,
 				`--docroot=${shellQuote(env.root_path)}`,
 				`--slug=${shellQuote(slug)}`,
@@ -143,7 +155,7 @@ export class CustomPluginProcessor extends WorkerHost {
 			await tracker.track({
 				step: `Running custom-plugin-manager --action=${action}`,
 				level: 'info',
-				detail: slug,
+				detail: `${slug} php=${lsphpBin ?? 'php'}`,
 			});
 
 			const manageStart = Date.now();

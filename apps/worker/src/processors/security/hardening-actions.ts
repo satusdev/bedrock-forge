@@ -742,7 +742,7 @@ async function forceReinstallCore(
 	webRoot: string,
 ): Promise<HardeningActionResult> {
 	const action = 'FORCE_REINSTALL_CORE';
-	const cmd = `wp core download --version=$(wp core version --path="${webRoot}" --allow-root) --force --path="${webRoot}" --allow-root`;
+	const cmd = `wp core download --version=$(wp core version --path="${webRoot}" --skip-plugins --allow-root) --force --path="${webRoot}" --skip-plugins --allow-root`;
 	const runCmd = await run(exec, cmd);
 	if (runCmd.code !== 0)
 		return fail(action, runCmd.stderr || 'wp core download failed');
@@ -754,7 +754,7 @@ async function updateAllPlugins(
 	webRoot: string,
 ): Promise<HardeningActionResult> {
 	const action = 'UPDATE_ALL_PLUGINS';
-	const cmd = `wp plugin update --all --path="${webRoot}" --allow-root`;
+	const cmd = `wp plugin update --all --path="${webRoot}" --skip-plugins --allow-root`;
 	const runCmd = await run(exec, cmd);
 	if (runCmd.code !== 0)
 		return fail(action, runCmd.stderr || 'wp plugin update failed');
