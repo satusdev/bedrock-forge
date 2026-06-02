@@ -36,6 +36,65 @@ function normalizeGithubRepoUrl(
 	return trimmed.replace(/\.git$/i, '').toLowerCase();
 }
 
+function parseVersion(value: string | null | undefined): number[] | null {
+	if (!value) return null;
+	const match = value.trim().match(/^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?/i);
+	if (!match) return null;
+	return [
+		Number(match[1] ?? 0),
+		Number(match[2] ?? 0),
+		Number(match[3] ?? 0),
+	];
+}
+
+function compareVersions(a: string | null | undefined, b: string | null | undefined): number {
+	const left = parseVersion(a);
+	const right = parseVersion(b);
+	if (!left || !right) return 0;
+	for (let i = 0; i < 3; i++) {
+		if (left[i] > right[i]) return 1;
+		if (left[i] < right[i]) return -1;
+	}
+	return 0;
+}
+
+function caretConstraintFor(version: string): string | null {
+	const parsed = parseVersion(version);
+	if (!parsed) return null;
+	return `^${parsed[0]}.${parsed[1]}`;
+}
+
+function constraintAllowsVersion(
+	constraint: string | null | undefined,
+	version: string | null | undefined,
+): boolean {
+	const parsed = parseVersion(version);
+	if (!constraint || !parsed) return false;
+	const normalized = constraint.trim();
+	const exact = parseVersion(normalized);
+
+	if (/^\^/.test(normalized)) {
+		const base = parseVersion(normalized.slice(1));
+		if (!base) return false;
+		if (base[0] === 0) {
+			return parsed[0] === base[0] && parsed[1] === base[1];
+		}
+		return parsed[0] === base[0] && compareVersions(version, normalized.slice(1)) >= 0;
+	}
+
+	if (/^~/.test(normalized)) {
+		const base = parseVersion(normalized.slice(1));
+		if (!base) return false;
+		return parsed[0] === base[0] && parsed[1] === base[1];
+	}
+
+	if (exact) {
+		return compareVersions(version, normalized) === 0;
+	}
+
+	return false;
+}
+
 // concurrency=2: plugin scans are SSH+PHP — moderate I/O, two at a time is safe.
 @Processor(QUEUES.PLUGIN_SCANS, { concurrency: 2 })
 export class PluginScanProcessor extends WorkerHost {
@@ -232,13 +291,15 @@ export class PluginScanProcessor extends WorkerHost {
 			where: { type: 'plugin' },
 			select: { id: true, slug: true, repo_url: true },
 		});
-		if (catalog.length === 0 || plugins.length === 0) return;
+		if (catalog.length === 0) return;
 
 		const catalogBySlug = new Map(
 			catalog.map((plugin) => [plugin.slug, plugin]),
 		);
+		const detectedCatalogIds = new Set<bigint>();
 		for (const plugin of plugins) {
 			if (plugin.is_mu_plugin) continue;
+			if (!plugin.managed_by_monorepo) continue;
 			const catalogPlugin = catalogBySlug.get(plugin.slug);
 			if (!catalogPlugin) continue;
 
@@ -246,6 +307,7 @@ export class PluginScanProcessor extends WorkerHost {
 			const catalogRepo = normalizeGithubRepoUrl(catalogPlugin.repo_url);
 			if (scannedRepo && catalogRepo && scannedRepo !== catalogRepo) continue;
 
+			detectedCatalogIds.add(catalogPlugin.id);
 			await this.prisma.environmentCustomPlugin.upsert({
 				where: {
 					environment_id_custom_plugin_id: {
@@ -260,6 +322,18 @@ export class PluginScanProcessor extends WorkerHost {
 					environment_id: environmentId,
 					custom_plugin_id: catalogPlugin.id,
 					installed_version: plugin.version || null,
+				},
+			});
+		}
+
+		const staleCatalogIds = catalog
+			.map((plugin) => plugin.id)
+			.filter((id) => !detectedCatalogIds.has(id));
+		if (staleCatalogIds.length > 0) {
+			await this.prisma.environmentCustomPlugin.deleteMany({
+				where: {
+					environment_id: environmentId,
+					custom_plugin_id: { in: staleCatalogIds },
 				},
 			});
 		}
@@ -421,6 +495,7 @@ export class PluginScanProcessor extends WorkerHost {
 				lsphpBin,
 				wpBin,
 			} = await buildWpCliPrefix(executor, wpPath);
+			const phpCmd = lsphpBin ? shellQuote(lsphpBin) : 'php';
 
 			const buildWpCmd = (args: string): string => {
 				let phpAndWp: string;
@@ -443,10 +518,11 @@ export class PluginScanProcessor extends WorkerHost {
 			});
 			let isComposerManaged = false;
 			let isPublicDomain = false;
+			let matchedPlugin: PluginInfo | undefined;
 			if (latestScan && latestScan.plugins) {
 				const output = latestScan.plugins as any;
 				const pluginsList = Array.isArray(output) ? output : (output.plugins || []);
-				const matchedPlugin = pluginsList.find((p: any) => p.slug === slug);
+				matchedPlugin = pluginsList.find((p: any) => p.slug === slug);
 				if (matchedPlugin) {
 					if (matchedPlugin.managed_by_composer) {
 						isComposerManaged = true;
@@ -511,7 +587,7 @@ export class PluginScanProcessor extends WorkerHost {
 					const backupDirCmd = `mv ${shellQuote(env.root_path + '/web/app/plugins/' + slug)} ${shellQuote(env.root_path + '/web/app/plugins/' + slug + '_backup')}`;
 					await executor.execute(backupDirCmd);
 
-					const composerCmd = `php ${remoteScript} --docroot=${shellQuote(env.root_path)} --action=add --package=${shellQuote('wpackagist-plugin/' + slug)}`;
+					const composerCmd = `${phpCmd} ${shellQuote(remoteScript)} --docroot=${shellQuote(env.root_path)} --action=add --package=${shellQuote('wpackagist-plugin/' + slug)}`;
 					await tracker.track({
 						step: 'Requiring package via composer',
 						level: 'info',
@@ -546,12 +622,34 @@ export class PluginScanProcessor extends WorkerHost {
 						? ` --package=${shellQuote(`wpackagist-plugin/${slug}`)}`
 						: '';
 					const versionArg = version ? ` --version=${shellQuote(version)}` : '';
-					const constraintArg = payload.constraint
-						? ` --constraint=${shellQuote(payload.constraint)}`
+					let composerAction = action === 'delete' ? 'remove' : action;
+					let nextConstraint = payload.constraint;
+					if (
+						action === 'update' &&
+						slug &&
+						matchedPlugin?.latest_version &&
+						matchedPlugin?.version &&
+						compareVersions(matchedPlugin.latest_version, matchedPlugin.version) > 0 &&
+						!constraintAllowsVersion(
+							matchedPlugin.composer_constraint,
+							matchedPlugin.latest_version,
+						)
+					) {
+						nextConstraint = caretConstraintFor(matchedPlugin.latest_version) ?? undefined;
+						if (nextConstraint) {
+							composerAction = 'change-constraint';
+							await tracker.track({
+								step: 'Widening composer constraint',
+								level: 'info',
+								detail: `${slug}: ${matchedPlugin.composer_constraint ?? '(none)'} → ${nextConstraint}`,
+							});
+						}
+					}
+					const constraintArg = nextConstraint
+						? ` --constraint=${shellQuote(nextConstraint)}`
 						: '';
-					const composerAction = action === 'delete' ? 'remove' : action;
 					const cmd =
-						`php ${remoteScript} --docroot=${shellQuote(env.root_path)}` +
+						`${phpCmd} ${shellQuote(remoteScript)} --docroot=${shellQuote(env.root_path)}` +
 						` --action=${shellQuote(composerAction)}${pkgArg}${versionArg}${constraintArg}`;
 
 					await tracker.track({
@@ -592,7 +690,7 @@ export class PluginScanProcessor extends WorkerHost {
 					throw new Error(`Unsupported WP-CLI action: ${action}`);
 				}
 
-				const cmd = buildWpCmd(`${cliArgs} --path=${shellQuote(wpPath)}`);
+				const cmd = buildWpCmd(`${cliArgs} --skip-plugins --path=${shellQuote(wpPath)}`);
 
 				await tracker.track({
 					step: `Running wp-cli ${action}`,
@@ -613,6 +711,42 @@ export class PluginScanProcessor extends WorkerHost {
 				throw new Error(
 					`Action ${action} failed (exit ${manageResult.code}): ${manageResult.stderr}`,
 				);
+			}
+
+			if (
+				action === 'update' &&
+				slug &&
+				matchedPlugin?.latest_version &&
+				compareVersions(matchedPlugin.latest_version, matchedPlugin.version) > 0
+			) {
+				const verifyCmd = buildWpCmd(
+					`plugin get ${shellQuote(slug)} --field=version --skip-plugins --path=${shellQuote(wpPath)}`,
+				);
+				const verifyStart = Date.now();
+				const verifyResult = await executor.execute(verifyCmd, {
+					timeout: 60_000,
+				});
+				await tracker.trackCommand(
+					`wp-cli verify ${slug} version`,
+					verifyCmd,
+					verifyResult,
+					Date.now() - verifyStart,
+				);
+				if (verifyResult.code !== 0) {
+					throw new Error(
+						`Could not verify ${slug} after update: ${verifyResult.stderr || verifyResult.stdout}`,
+					);
+				}
+
+				const installedVersion = verifyResult.stdout.trim();
+				if (
+					installedVersion &&
+					compareVersions(installedVersion, matchedPlugin.latest_version) < 0
+				) {
+					throw new Error(
+						`Composer finished without updating ${slug}. Installed ${installedVersion}, latest ${matchedPlugin.latest_version}. Check composer constraints and lockfile output.`,
+					);
+				}
 			}
 
 			await job.updateProgress(70);

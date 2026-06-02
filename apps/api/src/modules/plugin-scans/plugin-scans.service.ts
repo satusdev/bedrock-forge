@@ -85,7 +85,7 @@ export class PluginScansService {
 				slug,
 				version,
 				workflow,
-				skipSafetyBackup: skipSafetyBackup ?? false,
+				skipSafetyBackup: skipSafetyBackup ?? true,
 			},
 			{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
 		);

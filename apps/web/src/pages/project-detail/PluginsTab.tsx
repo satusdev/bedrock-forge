@@ -15,9 +15,6 @@ import {
 	Code2,
 	Calendar,
 	Clock,
-	Github,
-	Download,
-	AlertTriangle,
 	GitBranch,
 	Search,
 	ChevronDown,
@@ -151,7 +148,7 @@ function AddPluginDialog({
 	const qc = useQueryClient();
 	const [slug, setSlug] = useState('');
 	const [version, setVersion] = useState('');
-	const [skipSafetyBackup, setSkipSafetyBackup] = useState(false);
+	const [skipSafetyBackup, setSkipSafetyBackup] = useState(true);
 	const [workflow, setWorkflow] = useState<'composer' | 'manual'>('composer');
 
 	const [searchQuery, setSearchQuery] = useState('');
@@ -205,7 +202,7 @@ function AddPluginDialog({
 			setVersion('');
 			setSearchQuery('');
 			setWorkflow('composer');
-			setSkipSafetyBackup(false);
+			setSkipSafetyBackup(true);
 			onClose();
 		},
 		onError: () =>
@@ -379,7 +376,7 @@ function ConfirmPluginActionDialog({
 	description: string;
 	isPending: boolean;
 }) {
-	const [skipSafetyBackup, setSkipSafetyBackup] = useState(false);
+	const [skipSafetyBackup, setSkipSafetyBackup] = useState(true);
 
 	return (
 		<Dialog open={open} onOpenChange={v => !v && onClose()}>
@@ -802,6 +799,21 @@ export function PluginsTab({
 
 	useSubscribeEnvironment(selectedEnvId);
 
+	const invalidatePluginState = (envId: number | null | undefined) => {
+		if (!envId) return;
+		qc.invalidateQueries({ queryKey: ['plugin-scans', envId] });
+		qc.invalidateQueries({ queryKey: ['env-custom-plugins', envId] });
+		qc.invalidateQueries({ queryKey: ['custom-plugins'] });
+	};
+
+	const waitForFollowUpScan = (envId: number | null | undefined) => {
+		if (!envId) return;
+		setScanning(true);
+		scanningEnvIdRef.current = envId;
+		scanJobIdRef.current = null;
+		scanStartedAtRef.current = Date.now();
+	};
+
 	useWebSocketEvent('job:completed', data => {
 		const event = data as {
 			queueName: string;
@@ -812,11 +824,11 @@ export function PluginsTab({
 		// Handle custom-plugins queue separately before the plugin-scans guard
 		if (event.queueName === 'custom-plugins') {
 			if (event.jobId != null && event.jobId === customJobIdRef.current) {
+				const envId = event.environmentId ?? selectedEnvId;
 				setCustomJobId(null);
 				customJobIdRef.current = null;
-				qc.invalidateQueries({
-					queryKey: ['env-custom-plugins', selectedEnvId],
-				});
+				invalidatePluginState(envId);
+				waitForFollowUpScan(envId);
 				setLastJobStatus('completed');
 			}
 			return;
@@ -824,16 +836,17 @@ export function PluginsTab({
 
 		if (event.queueName !== 'plugin-scans') return;
 
+		const isTrackedScanJob =
+			event.jobId != null && event.jobId === scanJobIdRef.current;
 		const isScanJob =
-			event.environmentId === scanningEnvIdRef.current ||
-			(event.jobId != null && event.jobId === scanJobIdRef.current);
+			event.environmentId === scanningEnvIdRef.current || isTrackedScanJob;
 		if (isScanJob) {
 			const envId = event.environmentId ?? scanningEnvIdRef.current;
 			setScanning(false);
 			scanningEnvIdRef.current = null;
 			scanJobIdRef.current = null;
-			qc.invalidateQueries({ queryKey: ['plugin-scans', envId] });
-			setLastJobStatus('completed');
+			invalidatePluginState(envId);
+			if (isTrackedScanJob) setLastJobStatus('completed');
 		}
 
 		const isManageJob =
@@ -842,7 +855,8 @@ export function PluginsTab({
 			setManagingJobId(null);
 			managingJobIdRef.current = null;
 			const envId = event.environmentId ?? selectedEnvId;
-			qc.invalidateQueries({ queryKey: ['plugin-scans', envId] });
+			invalidatePluginState(envId);
+			waitForFollowUpScan(envId);
 			setLastJobStatus('completed');
 		}
 
@@ -890,8 +904,12 @@ export function PluginsTab({
 
 		if (event.queueName === 'custom-plugins') {
 			if (event.jobId != null && event.jobId === customJobIdRef.current) {
+				invalidatePluginState(event.environmentId ?? selectedEnvId);
 				setCustomJobId(null);
 				customJobIdRef.current = null;
+				setScanning(false);
+				scanningEnvIdRef.current = null;
+				scanJobIdRef.current = null;
 				setLastJobStatus('failed');
 				setLastJobError(event.error ?? 'An unexpected error occurred');
 				toast({
@@ -905,27 +923,40 @@ export function PluginsTab({
 
 		if (event.queueName !== 'plugin-scans') return;
 
+		const isTrackedScanJob =
+			event.jobId != null && event.jobId === scanJobIdRef.current;
 		const isScanJob =
-			event.environmentId === scanningEnvIdRef.current ||
-			(event.jobId != null && event.jobId === scanJobIdRef.current);
+			event.environmentId === scanningEnvIdRef.current || isTrackedScanJob;
 		if (isScanJob) {
 			setScanning(false);
 			scanningEnvIdRef.current = null;
 			scanJobIdRef.current = null;
-			setLastJobStatus('failed');
-			setLastJobError(event.error ?? 'An unexpected error occurred');
-			toast({
-				title: 'Plugin scan failed',
-				description: event.error ?? 'An unexpected error occurred',
-				variant: 'destructive',
-			});
+			if (isTrackedScanJob) {
+				setLastJobStatus('failed');
+				setLastJobError(event.error ?? 'An unexpected error occurred');
+				toast({
+					title: 'Plugin scan failed',
+					description: event.error ?? 'An unexpected error occurred',
+					variant: 'destructive',
+				});
+			} else {
+				toast({
+					title: 'Plugin refresh failed',
+					description: event.error ?? 'The action completed, but the follow-up scan failed.',
+					variant: 'destructive',
+				});
+			}
 		}
 
 		const isManageJob =
 			event.jobId != null && event.jobId === managingJobIdRef.current;
 		if (isManageJob) {
+			invalidatePluginState(event.environmentId ?? selectedEnvId);
 			setManagingJobId(null);
 			managingJobIdRef.current = null;
+			setScanning(false);
+			scanningEnvIdRef.current = null;
+			scanJobIdRef.current = null;
 			setLastJobStatus('failed');
 			setLastJobError(event.error ?? 'An unexpected error occurred');
 			toast({
@@ -966,7 +997,7 @@ export function PluginsTab({
 		queryFn: () => api.get<CustomPlugin[]>('/custom-plugins'),
 	});
 
-	const { data: envCustomPlugins = [], isLoading: isLoadingCustom } = useQuery<
+	const { data: envCustomPlugins = [] } = useQuery<
 		EnvironmentCustomPlugin[]
 	>({
 		queryKey: ['env-custom-plugins', selectedEnvId],
@@ -977,8 +1008,9 @@ export function PluginsTab({
 			),
 	});
 
-	const installedCustomIds = new Set(
-		envCustomPlugins.map(e => e.custom_plugin_id),
+	const customCatalogBySlug = new Map(customCatalog.map(plugin => [plugin.slug, plugin]));
+	const envCustomBySlug = new Map(
+		envCustomPlugins.map(entry => [entry.custom_plugin.slug, entry]),
 	);
 
 	useEffect(() => {
@@ -1047,7 +1079,7 @@ export function PluginsTab({
 		mutationFn: ({ slug, skipSafetyBackup }: { slug: string; skipSafetyBackup: boolean }) =>
 			api.delete<{ jobExecutionId: number; bullJobId: string }>(
 				`/plugin-scans/environment/${selectedEnvId}/plugins/${slug}`,
-				{ data: { skipSafetyBackup } },
+				{ skipSafetyBackup },
 			),
 		onSuccess: (data, { slug }) => {
 			const jobId = data?.bullJobId ?? null;
@@ -1142,25 +1174,6 @@ export function PluginsTab({
 			toast({ title: 'Failed to queue migration', variant: 'destructive' }),
 	});
 
-	const installCustomMutation = useMutation({
-		mutationFn: (customPluginId: number) =>
-			api.post<{ jobExecutionId: number; bullJobId: string }>(
-				`/plugin-scans/environment/${selectedEnvId}/custom-plugins/${customPluginId}`,
-				{},
-			),
-		onSuccess: (data, id) => {
-			const jobId = data?.bullJobId ?? null;
-			setCustomJobId(jobId);
-			customJobIdRef.current = jobId;
-			handleJobQueued(data);
-			toast({
-				title: 'Install queued',
-				description: 'Plugin will be installed via monorepo-fetcher.',
-			});
-		},
-		onError: () => toast({ title: 'Install failed', variant: 'destructive' }),
-	});
-
 	const uninstallCustomMutation = useMutation({
 		mutationFn: (customPluginId: number) =>
 			api.delete<{ jobExecutionId: number; bullJobId: string }>(
@@ -1173,7 +1186,7 @@ export function PluginsTab({
 			handleJobQueued(data);
 			toast({
 				title: 'Uninstall queued',
-				description: 'Plugin will be removed via monorepo-fetcher.',
+				description: 'Plugin will be removed via GitHub source.',
 			});
 		},
 		onError: () => toast({ title: 'Uninstall failed', variant: 'destructive' }),
@@ -1192,7 +1205,7 @@ export function PluginsTab({
 			handleJobQueued(data);
 			toast({
 				title: 'Update queued',
-				description: 'Plugin will be updated via monorepo-fetcher.',
+				description: 'Plugin will be updated via GitHub source.',
 			});
 		},
 		onError: () => toast({ title: 'Update failed', variant: 'destructive' }),
@@ -1329,7 +1342,18 @@ export function PluginsTab({
 	const manualCount = plugins.filter(
 		p => !p.managed_by_composer && !p.managed_by_monorepo,
 	).length;
-	const updatesAvailable = plugins.filter(p => p.update_available).length;
+	const hasUpdate = (plugin: Plugin) => {
+		const customEntry = envCustomBySlug.get(plugin.slug);
+		if (
+			plugin.managed_by_monorepo &&
+			customEntry?.latest_version &&
+			plugin.version !== customEntry.latest_version
+		) {
+			return true;
+		}
+		return plugin.update_available;
+	};
+	const updatesAvailable = plugins.filter(hasUpdate).length;
 	const filtered = plugins.filter(p => {
 		if (pluginFilter === 'wpackagist' && !p.managed_by_composer) return false;
 		if (pluginFilter === 'monorepo' && !p.managed_by_monorepo) return false;
@@ -1340,7 +1364,7 @@ export function PluginsTab({
 			return false;
 		if (statusFilter === 'active' && p.status !== 'active') return false;
 		if (statusFilter === 'inactive' && p.status !== 'inactive') return false;
-		if (updateFilter === 'updates' && !p.update_available) return false;
+		if (updateFilter === 'updates' && !hasUpdate(p)) return false;
 
 		if (search) {
 			const q = search.toLowerCase();
@@ -1361,6 +1385,9 @@ export function PluginsTab({
 		changeConstraintMutation.isPending ||
 		toggleStatusMutation.isPending ||
 		migrateToComposerMutation.isPending ||
+		!!customJobId ||
+		updateCustomMutation.isPending ||
+		uninstallCustomMutation.isPending ||
 		bulkProcessing;
 
 	return (
@@ -1433,6 +1460,21 @@ export function PluginsTab({
 							)}
 							Update All
 						</Button>
+						{monorepoManaged > 0 && (
+							<Button
+								size='sm'
+								variant='outline'
+								onClick={() => checkVersionsMutation.mutate()}
+								disabled={!selectedEnvId || checkVersionsMutation.isPending}
+							>
+								{checkVersionsMutation.isPending ? (
+									<Loader2 className='h-4 w-4 mr-1.5 animate-spin' />
+								) : (
+									<RefreshCw className='h-4 w-4 mr-1.5' />
+								)}
+								Check GitHub Versions
+							</Button>
+						)}
 					</>
 				)}
 
@@ -1608,7 +1650,7 @@ export function PluginsTab({
 									[
 										['all', 'All', plugins.length],
 										['wpackagist', 'Composer', composerManaged],
-										['monorepo', 'Monorepo', monorepoManaged],
+										['monorepo', 'GitHub', monorepoManaged],
 										['manual', 'Manual', manualCount],
 									] as [typeof pluginFilter, string, number][]
 								).map(([key, label, count]) => (
@@ -1719,6 +1761,14 @@ export function PluginsTab({
 								{filtered.map((p, i) => {
 									const isSelected = selectedSlugs.has(p.slug);
 									const isExpanded = expandedSlugs.has(p.slug);
+									const customPlugin = customCatalogBySlug.get(p.slug);
+									const customEntry = envCustomBySlug.get(p.slug);
+									const customLatest = customEntry?.latest_version ?? null;
+									const customUpdateAvailable =
+										p.managed_by_monorepo &&
+										!!customLatest &&
+										p.version !== customLatest;
+									const updateAvailable = p.update_available || customUpdateAvailable;
 									return (
 										<Fragment key={`${p.slug}-${i}`}>
 											<tr className={`hover:bg-muted/20 transition-colors ${isSelected ? 'bg-primary/5' : ''}`}>
@@ -1818,10 +1868,10 @@ export function PluginsTab({
 													)}
 												</td>
 												<td className='px-4 py-3'>
-													{p.update_available ? (
+													{updateAvailable ? (
 														<span className='flex items-center gap-1 text-yellow-600 dark:text-yellow-400 text-xs font-medium'>
 															<ArrowUpCircle className='h-3.5 w-3.5 shrink-0' />
-															{p.latest_version ?? 'Update available'}
+															{customLatest ?? p.latest_version ?? 'Update available'}
 														</span>
 													) : (
 														<span className='flex items-center gap-1 text-green-600 dark:text-green-400 text-xs'>
@@ -1853,7 +1903,7 @@ export function PluginsTab({
 																className='text-xs gap-1 w-fit bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/30 dark:text-purple-400 dark:border-purple-800'
 															>
 																<GitBranch className='h-2.5 w-2.5' />
-																monorepo
+																GitHub
 															</Badge>
 														) : (
 															<span className='text-xs text-muted-foreground'>
@@ -1939,17 +1989,16 @@ export function PluginsTab({
 															</Button>
 														)}
 
-														{/* Monorepo custom plugin updates */}
-														{isBedrock && p.managed_by_monorepo && p.update_available && (
+														{/* GitHub custom plugin updates */}
+														{isBedrock && p.managed_by_monorepo && customUpdateAvailable && (
 															<Button
 																size='sm'
 																variant='ghost'
 																className='h-7 px-2 text-xs text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/20'
 																disabled={isManaging || updateCustomMutation.isPending}
 																onClick={() => {
-																	const cp = customCatalog.find(c => c.slug === p.slug);
-																	if (cp) {
-																		updateCustomMutation.mutate(cp.id);
+																	if (customPlugin) {
+																		updateCustomMutation.mutate(customPlugin.id);
 																	} else {
 																		toast({
 																			title: 'Cannot update plugin',
@@ -1964,8 +2013,29 @@ export function PluginsTab({
 															</Button>
 														)}
 
-														{/* Delete Action (only if not monorepo) */}
-														{!p.managed_by_monorepo && (
+														{/* Delete Action */}
+														{p.managed_by_monorepo ? (
+															<Button
+																size='sm'
+																variant='ghost'
+																className='h-7 px-2 text-xs text-destructive hover:text-destructive hover:bg-destructive/5'
+																disabled={isManaging}
+																onClick={() => {
+																	if (customPlugin) {
+																		uninstallCustomMutation.mutate(customPlugin.id);
+																	} else {
+																		toast({
+																			title: 'Cannot remove plugin',
+																			description: 'Matching custom plugin record not found in catalog.',
+																			variant: 'destructive',
+																		});
+																	}
+																}}
+																title='Remove custom plugin'
+															>
+																<Trash2 className='h-3 w-3' />
+															</Button>
+														) : (
 															<Button
 																size='sm'
 																variant='ghost'
@@ -2026,7 +2096,7 @@ export function PluginsTab({
 																		<>
 																			<span className='font-medium text-muted-foreground'>Managed by:</span>
 																			<span className='font-semibold text-foreground/80'>
-																				{p.managed_by_composer ? 'Composer' : p.managed_by_monorepo ? 'Monorepo' : 'Manual Upload'}
+																					{p.managed_by_composer ? 'Composer' : p.managed_by_monorepo ? 'GitHub' : 'Manual Upload'}
 																			</span>
 																		</>
 																	)}
@@ -2055,157 +2125,6 @@ export function PluginsTab({
 						)}
 					</div>
 				</>
-			)}
-
-			{/* Custom GitHub Plugins section */}
-			{(customCatalog.length > 0 || envCustomPlugins.length > 0) && (
-				<div className='border rounded-lg overflow-hidden'>
-					<div className='flex items-center gap-2 px-4 py-2.5 border-b bg-muted/20'>
-						<Github className='h-4 w-4 text-muted-foreground' />
-						<span className='text-sm font-medium'>Custom GitHub Plugins</span>
-						{envCustomPlugins.length > 0 && (
-							<Badge variant='secondary' className='text-xs'>
-								{envCustomPlugins.length}
-							</Badge>
-						)}
-						<Button
-							size='sm'
-							variant='ghost'
-							className='ml-auto h-7 px-2 text-xs'
-							onClick={() => checkVersionsMutation.mutate()}
-							disabled={
-								checkVersionsMutation.isPending ||
-								isLoadingCustom ||
-								envCustomPlugins.length === 0
-							}
-							title='Check latest versions on GitHub'
-						>
-							{checkVersionsMutation.isPending ? (
-								<Loader2 className='h-3 w-3 mr-1.5 animate-spin' />
-							) : (
-								<RefreshCw className='h-3 w-3 mr-1.5' />
-							)}
-							Check Versions
-						</Button>
-					</div>
-					<table className='w-full text-sm'>
-						<thead className='border-b bg-muted/30'>
-							<tr>
-								<th className='text-left px-4 py-2.5 font-medium text-xs'>
-									Plugin
-								</th>
-								<th className='text-left px-4 py-2.5 font-medium text-xs'>
-									On Disk
-								</th>
-								<th className='text-left px-4 py-2.5 font-medium text-xs'>
-									Latest
-								</th>
-								<th className='w-24 px-4 py-2.5' />
-							</tr>
-						</thead>
-						<tbody className='divide-y'>
-							{customCatalog.map(cp => {
-								const envEntry = envCustomPlugins.find(
-									e => e.custom_plugin_id === cp.id,
-								);
-								const isInstalled = !!envEntry;
-								const scanPlugin = scanPluginBySlug.get(cp.slug);
-								const diskVersion =
-									scanPlugin?.version ?? envEntry?.installed_version;
-								const isOutdated =
-									diskVersion != null &&
-									envEntry?.latest_version != null &&
-									diskVersion !== envEntry.latest_version;
-								const isThisJobPending = !!customJobId;
-								return (
-									<tr key={cp.id} className='hover:bg-muted/10'>
-										<td className='px-4 py-2.5'>
-											<div className='flex items-center gap-2'>
-												<span className='font-medium'>{cp.name}</span>
-												<Badge variant='outline' className='text-xs capitalize'>
-													{cp.type}
-												</Badge>
-												{isOutdated && (
-													<Badge className='text-xs bg-amber-500/20 text-amber-700 dark:text-amber-400 border-amber-500/30'>
-														<AlertTriangle className='h-2.5 w-2.5 mr-1' />
-														Update available
-													</Badge>
-												)}
-											</div>
-											<p className='text-xs text-muted-foreground font-mono mt-0.5'>
-												{cp.slug}
-											</p>
-										</td>
-										<td className='px-4 py-2.5 font-mono text-xs text-muted-foreground'>
-											{isInstalled ? (diskVersion ?? 'dev') : '—'}
-										</td>
-										<td className='px-4 py-2.5 font-mono text-xs text-muted-foreground'>
-											{isInstalled ? (envEntry.latest_version ?? '—') : '—'}
-										</td>
-										<td className='px-4 py-2.5'>
-											<div className='flex items-center gap-1'>
-												{isInstalled && isOutdated && (
-													<Button
-														size='sm'
-														variant='ghost'
-														className='h-7 px-2 text-xs text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/20'
-														disabled={isThisJobPending}
-														onClick={() => updateCustomMutation.mutate(cp.id)}
-														title='Update plugin'
-													>
-														<ArrowUpCircle className='h-3.5 w-3.5' />
-													</Button>
-												)}
-												{isInstalled ? (
-													<Button
-														size='sm'
-														variant='ghost'
-														className='h-7 px-2 text-xs text-destructive hover:text-destructive'
-														disabled={isThisJobPending}
-														onClick={() => uninstallCustomMutation.mutate(cp.id)}
-														title='Uninstall'
-													>
-														{isThisJobPending ? (
-															<Loader2 className='h-3 w-3 animate-spin' />
-														) : (
-															<Trash2 className='h-3 w-3' />
-														)}
-													</Button>
-												) : (
-													<Button
-														size='sm'
-														variant='ghost'
-														className='h-7 px-2 text-xs'
-														disabled={isThisJobPending}
-														onClick={() => installCustomMutation.mutate(cp.id)}
-														title='Install'
-													>
-														{isThisJobPending ? (
-															<Loader2 className='h-3 w-3 animate-spin' />
-														) : (
-															<Download className='h-3 w-3' />
-														)}
-													</Button>
-												)}
-											</div>
-										</td>
-									</tr>
-								);
-							})}
-							{customCatalog.length === 0 && (
-								<tr>
-									<td
-										colSpan={4}
-										className='px-4 py-6 text-center text-sm text-muted-foreground'
-									>
-										No custom plugins registered. Add them in Settings → Custom
-										GitHub Plugins.
-									</td>
-								</tr>
-							)}
-						</tbody>
-					</table>
-				</div>
 			)}
 
 			{/* Must-Use Plugins section */}

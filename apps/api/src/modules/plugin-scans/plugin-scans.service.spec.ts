@@ -48,4 +48,31 @@ describe('PluginScansService', () => {
 			jobExecutionId: 12,
 		});
 	});
+
+	it('defaults plugin management jobs to skip safety backup', async () => {
+		const repo = makeRepo();
+		const queue = makeQueue();
+		const svc = new PluginScansService(
+			repo as any,
+			queue as any,
+			makeQueue() as any,
+			{} as any,
+		);
+
+		repo.createJobExecution.mockResolvedValue({ id: BigInt(21) });
+		queue.add.mockResolvedValue({ id: 'manage-1' });
+
+		await svc.enqueuePluginManage(3, 'delete', 'elementor');
+
+		expect(queue.add).toHaveBeenCalledWith(
+			expect.any(String),
+			expect.objectContaining({
+				environmentId: 3,
+				action: 'delete',
+				slug: 'elementor',
+				skipSafetyBackup: true,
+			}),
+			expect.any(Object),
+		);
+	});
 });

@@ -27,8 +27,8 @@ export class PluginScansController {
 	constructor(private readonly svc: PluginScansService) {}
 
 	@Get('search-wp-org')
-	searchWpOrg(@Query('q') query: string) {
-		return this.svc.searchWpOrg(query);
+	searchWpOrg(@Query('query') query?: string, @Query('q') q?: string) {
+		return this.svc.searchWpOrg(query ?? q ?? '');
 	}
 
 	@Get('environment/:envId')
@@ -69,13 +69,16 @@ export class PluginScansController {
 		@Param('envId', ParseIntPipe) envId: number,
 		@Param('slug') slug: string,
 		@Query('skipSafetyBackup') skipSafetyBackup?: string,
+		@Body() body?: { skipSafetyBackup?: boolean; data?: { skipSafetyBackup?: boolean } },
 	) {
 		return this.svc.enqueuePluginManage(
 			envId,
 			'delete',
 			slug,
 			undefined,
-			skipSafetyBackup === 'true',
+			body?.skipSafetyBackup ??
+				body?.data?.skipSafetyBackup ??
+				skipSafetyBackup === 'true',
 		);
 	}
 
