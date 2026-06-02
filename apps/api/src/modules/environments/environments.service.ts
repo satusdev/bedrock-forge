@@ -16,6 +16,7 @@ import { ServersService } from '../servers/servers.service';
 import {
 	createRemoteExecutor,
 	credentialParser,
+	type RemoteExecutorService,
 } from '@bedrock-forge/remote-executor';
 import { MonitorsService } from '../monitors/monitors.service';
 import { DomainsService } from '../domains/domains.service';
@@ -286,6 +287,12 @@ export class EnvironmentsService {
 			});
 
 			// ── Step 3: build command ─────────────────────────────────────────
+			const phpBinary = await detectRemotePhpBinary(
+				executor,
+				env.root_path ?? '',
+			);
+			const phpCmdPrefix =
+				phpBinary === 'php' ? 'php' : shellEscape(phpBinary);
 			let phpCmd: string;
 			if (creds) {
 				// Write creds to a temp file (600) so the password is never
@@ -301,11 +308,11 @@ export class EnvironmentsService {
 				await executor.execute(
 					`echo ${shellEscape(credsB64)} | base64 -d > ${shellEscape(remoteCredsFile)} && chmod 600 ${shellEscape(remoteCredsFile)}`,
 				);
-				phpCmd = `php ${remoteScript} --creds-file=${shellEscape(remoteCredsFile)}`;
+				phpCmd = `${phpCmdPrefix} ${shellEscape(remoteScript)} --creds-file=${shellEscape(remoteCredsFile)}`;
 			} else {
 				// Credentials not pre-resolved — let the PHP script search for
 				// .env / wp-config.php on the remote filesystem as a last resort.
-				phpCmd = `php ${remoteScript} --docroot=${shellEscape(env.root_path ?? '')}`;
+				phpCmd = `${phpCmdPrefix} ${shellEscape(remoteScript)} --docroot=${shellEscape(env.root_path ?? '')}`;
 			}
 
 			const result = await executor.execute(phpCmd, { timeout: 30_000 });
@@ -316,14 +323,31 @@ export class EnvironmentsService {
 				);
 			}
 
-			const parsed = JSON.parse(result.stdout.trim()) as {
-				users?: WpUser[];
-				error?: string;
-			};
+			let parsed: { users?: WpUser[]; error?: string };
+			try {
+				parsed = JSON.parse(result.stdout.trim()) as {
+					users?: WpUser[];
+					error?: string;
+				};
+			} catch (err) {
+				throw new InternalServerErrorException(
+					`wp-users returned invalid JSON: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
 			if (parsed.error) {
 				throw new InternalServerErrorException(`wp-users: ${parsed.error}`);
 			}
 			return parsed.users ?? [];
+		} catch (err) {
+			if (
+				err instanceof BadRequestException ||
+				err instanceof InternalServerErrorException
+			) {
+				throw err;
+			}
+			throw new InternalServerErrorException(
+				`wp-users SSH check failed: ${err instanceof Error ? err.message : String(err)}`,
+			);
 		} finally {
 			await executor
 				.execute(`rm -f ${shellEscape(remoteScript)}`)
@@ -457,4 +481,52 @@ export class EnvironmentsService {
 
 function shellEscape(value: string): string {
 	return "'" + value.replace(/'/g, "'\\''") + "'";
+}
+
+async function detectRemotePhpBinary(
+	executor: Pick<RemoteExecutorService, 'execute'>,
+	rootPath: string,
+): Promise<string> {
+	const root = rootPath.replace(/\/+$/, '');
+	const domain = root.match(/\/home\/([^/]+)\/public_html(?:\/|$)/)?.[1];
+
+	if (domain) {
+		try {
+			const vhostPath = `/usr/local/lsws/conf/vhosts/${domain}/vhost.conf`;
+			const result = await executor.execute(
+				`grep -oE '/usr/local/lsws/lsphp[0-9]+/bin/(ls)?php' ${shellEscape(vhostPath)} 2>/dev/null | head -1`,
+			);
+			const vhostPhp = result.stdout.trim();
+			if (
+				vhostPhp &&
+				/^\/usr\/local\/lsws\/lsphp\d+\/bin\/(ls)?php$/.test(vhostPhp)
+			) {
+				const cliPhp = vhostPhp.replace(/\/bin\/lsphp$/, '/bin/php');
+				const check = await executor.execute(
+					`[ -x ${shellEscape(cliPhp)} ] && echo yes || echo no`,
+				);
+				if (check.stdout.trim() === 'yes') return cliPhp;
+				const originalCheck = await executor.execute(
+					`[ -x ${shellEscape(vhostPhp)} ] && echo yes || echo no`,
+				);
+				if (originalCheck.stdout.trim() === 'yes') return vhostPhp;
+			}
+		} catch {
+			// Fall back to probing installed OpenLiteSpeed PHP binaries.
+		}
+	}
+
+	try {
+		const result = await executor.execute(
+			`ls /usr/local/lsws/lsphp*/bin/php 2>/dev/null | sort -V | tail -1`,
+		);
+		const bin = result.stdout.trim();
+		if (bin && /^\/usr\/local\/lsws\/lsphp\d+\/bin\/php$/.test(bin)) {
+			return bin;
+		}
+	} catch {
+		// Fall back to PATH php below.
+	}
+
+	return 'php';
 }

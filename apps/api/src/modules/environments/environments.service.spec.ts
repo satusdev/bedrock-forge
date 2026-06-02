@@ -1,10 +1,19 @@
 import { Test } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
+import { createRemoteExecutor } from '@bedrock-forge/remote-executor';
 import { EnvironmentsService } from './environments.service';
 import { EnvironmentsRepository } from './environments.repository';
 import { ServersService } from '../servers/servers.service';
 import { MonitorsService } from '../monitors/monitors.service';
 import { DomainsService } from '../domains/domains.service';
+
+jest.mock('@bedrock-forge/remote-executor', () => ({
+	createRemoteExecutor: jest.fn(),
+	credentialParser: {
+		parse: jest.fn(),
+		parseEnvFile: jest.fn(),
+	},
+}));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -22,7 +31,10 @@ function makeRepo() {
 }
 
 function makeServersService() {
-	return { scanProjects: jest.fn() };
+	return {
+		getServerSshConfig: jest.fn(),
+		scanProjects: jest.fn(),
+	};
 }
 
 function makeMonitorsService() {
@@ -259,6 +271,152 @@ describe('EnvironmentsService', () => {
 
 			expect(results).toHaveLength(1);
 			expect(results[0].path).toBe('/on-server-3');
+		});
+	});
+
+	describe('getWpUsers', () => {
+		const creds = {
+			dbHost: 'localhost',
+			dbUser: 'wp_user',
+			dbPassword: 'secret',
+			dbName: 'wp_db',
+		};
+
+		function mockExecutor(
+			implementation: (command: string) => Promise<{
+				code: number;
+				stdout: string;
+				stderr: string;
+			}>,
+		) {
+			const executor = {
+				execute: jest.fn(implementation),
+				pushFile: jest.fn().mockResolvedValue(undefined),
+			};
+			(createRemoteExecutor as jest.Mock).mockReturnValue(executor);
+			serversService.getServerSshConfig.mockResolvedValue({
+				host: '127.0.0.1',
+				port: 22,
+				username: 'root',
+				privateKey: 'key',
+			});
+			return executor;
+		}
+
+		beforeEach(() => {
+			repo.findById.mockResolvedValue(
+				makeEnv({ root_path: '/home/example.com/public_html' }),
+			);
+			repo.getDbCredentials.mockResolvedValue(creds);
+		});
+
+		it('runs the remote scanner with detected OpenLiteSpeed PHP', async () => {
+			const executor = mockExecutor(async command => {
+				if (command.includes('grep -oE')) {
+					return {
+						code: 0,
+						stdout: '/usr/local/lsws/lsphp83/bin/php',
+						stderr: '',
+					};
+				}
+				if (command.includes("[ -x '/usr/local/lsws/lsphp83/bin/php' ]")) {
+					return { code: 0, stdout: 'yes', stderr: '' };
+				}
+				if (command.includes('base64 -d')) {
+					return { code: 0, stdout: '', stderr: '' };
+				}
+				if (command.includes('bf-wp-users')) {
+					return {
+						code: 0,
+						stdout: JSON.stringify({
+							users: [
+								{
+									id: 1,
+									user_login: 'admin',
+									user_email: 'admin@example.com',
+									display_name: 'Admin',
+									user_registered: '2026-01-01 00:00:00',
+									roles: ['administrator'],
+								},
+							],
+						}),
+						stderr: '',
+					};
+				}
+				return { code: 0, stdout: '', stderr: '' };
+			});
+
+			const result = await svc.getWpUsers(1);
+
+			expect(result).toHaveLength(1);
+			expect(
+				executor.execute.mock.calls.some(([command]) =>
+					command.startsWith(
+						"'/usr/local/lsws/lsphp83/bin/php' '/tmp/bf-wp-users-",
+					),
+				),
+			).toBe(true);
+		});
+
+		it('falls back to PATH php when no OpenLiteSpeed PHP is detected', async () => {
+			const executor = mockExecutor(async command => {
+				if (command.includes('grep -oE') || command.includes('ls /usr/local/lsws')) {
+					return { code: 0, stdout: '', stderr: '' };
+				}
+				if (command.includes('base64 -d')) {
+					return { code: 0, stdout: '', stderr: '' };
+				}
+				if (command.includes('bf-wp-users')) {
+					return { code: 0, stdout: JSON.stringify({ users: [] }), stderr: '' };
+				}
+				return { code: 0, stdout: '', stderr: '' };
+			});
+
+			await svc.getWpUsers(1);
+
+			expect(
+				executor.execute.mock.calls.some(([command]) =>
+					command.startsWith("php '/tmp/bf-wp-users-"),
+				),
+			).toBe(true);
+		});
+
+		it('throws a clear error when the scanner exits non-zero', async () => {
+			mockExecutor(async command => {
+				if (command.includes('grep -oE') || command.includes('ls /usr/local/lsws')) {
+					return { code: 0, stdout: '', stderr: '' };
+				}
+				if (command.includes('base64 -d')) {
+					return { code: 0, stdout: '', stderr: '' };
+				}
+				if (command.includes('bf-wp-users')) {
+					return { code: 1, stdout: '', stderr: 'PDO driver missing' };
+				}
+				return { code: 0, stdout: '', stderr: '' };
+			});
+
+			await expect(svc.getWpUsers(1)).rejects.toThrow(
+				'wp-users scan failed: PDO driver missing',
+			);
+		});
+
+		it('throws a clear error when the scanner returns invalid JSON', async () => {
+			mockExecutor(async command => {
+				if (command.includes('grep -oE') || command.includes('ls /usr/local/lsws')) {
+					return { code: 0, stdout: '', stderr: '' };
+				}
+				if (command.includes('base64 -d')) {
+					return { code: 0, stdout: '', stderr: '' };
+				}
+				if (command.includes('bf-wp-users')) {
+					return { code: 0, stdout: '<br>warning', stderr: '' };
+				}
+				return { code: 0, stdout: '', stderr: '' };
+			});
+
+			await expect(svc.getWpUsers(1)).rejects.toThrow(
+				'wp-users returned invalid JSON',
+			);
 		});
 	});
 });
