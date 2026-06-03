@@ -2026,7 +2026,8 @@ export function PluginsTab({
 																}}
 																title='Edit version constraint'
 															>
-																<Pencil className='h-3 w-3' />
+																<Pencil className='h-3 w-3 mr-1' />
+																Constraint
 															</Button>
 														)}
 
@@ -2046,8 +2047,8 @@ export function PluginsTab({
 															</Button>
 														)}
 
-														{/* Composer-specific Updates */}
-														{isBedrock && p.managed_by_composer && p.update_available && (
+														{/* Public plugin updates */}
+														{updateAvailable && !p.managed_by_monorepo && (
 															<Button
 																size='sm'
 																variant='ghost'
@@ -2056,9 +2057,10 @@ export function PluginsTab({
 																onClick={() =>
 																	setActionDialogState({ open: true, action: 'update', slug: p.slug })
 																}
-																title='Update via composer'
+																title={p.managed_by_composer ? 'Update via Composer' : 'Update via WP-CLI'}
 															>
-																<RotateCcw className='h-3 w-3' />
+																<RotateCcw className='h-3 w-3 mr-1' />
+																Update
 															</Button>
 														)}
 
@@ -2082,7 +2084,8 @@ export function PluginsTab({
 																}}
 																title='Update custom plugin'
 															>
-																<RotateCcw className='h-3 w-3' />
+																<RotateCcw className='h-3 w-3 mr-1' />
+																Update
 															</Button>
 														)}
 
@@ -2106,7 +2109,8 @@ export function PluginsTab({
 																}}
 																title='Remove custom plugin'
 															>
-																<Trash2 className='h-3 w-3' />
+																<Trash2 className='h-3 w-3 mr-1' />
+																Remove
 															</Button>
 														) : (
 															<Button
@@ -2119,7 +2123,8 @@ export function PluginsTab({
 																}
 																title={p.managed_by_composer ? 'Remove via Composer' : 'Delete plugin files'}
 															>
-																<Trash2 className='h-3 w-3' />
+																<Trash2 className='h-3 w-3 mr-1' />
+																Remove
 															</Button>
 														)}
 													</div>
@@ -2346,7 +2351,7 @@ export function PluginsTab({
 										: actionDialogState.action === 'bulk-remove'
 											? `This will permanently delete the selected ${selectedSlugs.size} plugins from your environment.`
 											: actionDialogState.action === 'update'
-												? `This will update ${actionDialogState.slug} to the latest version allowed by your constraints.`
+												? `This will update ${actionDialogState.slug} to the latest available version for its source.`
 												: actionDialogState.action === 'remove'
 													? `This will permanently delete ${actionDialogState.slug} files and remove it from your environment.`
 													: actionDialogState.action === 'activate'
@@ -2377,7 +2382,7 @@ export function PluginsTab({
 							runBulkUpdate(
 								Array.from(selectedSlugs).filter(slug => {
 									const p = scanPluginBySlug.get(slug);
-									return p?.update_available && p?.managed_by_composer;
+									return p?.update_available && !p?.managed_by_monorepo;
 								}),
 								skipSafetyBackup
 							);

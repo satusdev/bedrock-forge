@@ -31,6 +31,11 @@ export class PluginScansController {
 		return this.svc.searchWpOrg(query ?? q ?? '');
 	}
 
+	@Get('inventory')
+	getInventory() {
+		return this.svc.getInventory();
+	}
+
 	@Get('environment/:envId')
 	findByEnv(
 		@Param('envId', ParseIntPipe) envId: number,

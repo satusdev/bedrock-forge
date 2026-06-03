@@ -29,6 +29,88 @@ export class PluginScansRepository {
 		});
 	}
 
+	async getInventory() {
+		const environments = await this.prisma.environment.findMany({
+			include: {
+				project: {
+					select: {
+						id: true,
+						name: true,
+						client: { select: { id: true, name: true } },
+					},
+				},
+				server: { select: { id: true, name: true, ip_address: true } },
+				plugin_scans: {
+					orderBy: { scanned_at: 'desc' },
+					take: 1,
+				},
+			},
+			orderBy: { created_at: 'desc' },
+		});
+
+		const items: Array<Record<string, unknown>> = [];
+		let environmentsScanned = 0;
+
+		for (const environment of environments) {
+			const latestScan = environment.plugin_scans[0];
+			if (!latestScan) continue;
+			environmentsScanned += 1;
+
+			const output = latestScan.plugins as any;
+			const plugins = Array.isArray(output) ? output : output?.plugins;
+			if (!Array.isArray(plugins)) continue;
+
+			for (const plugin of plugins) {
+				const version = plugin.version ? String(plugin.version) : null;
+				const latestVersion =
+					plugin.latest_version != null ? String(plugin.latest_version) : null;
+				items.push({
+					environment: {
+						id: Number(environment.id),
+						type: environment.type,
+						url: environment.url,
+					},
+					project: {
+						id: Number(environment.project.id),
+						name: environment.project.name,
+					},
+					client: {
+						id: Number(environment.project.client.id),
+						name: environment.project.client.name,
+					},
+					server: {
+						id: Number(environment.server.id),
+						name: environment.server.name,
+						ip_address: environment.server.ip_address,
+					},
+					scan_id: Number(latestScan.id),
+					scanned_at: latestScan.scanned_at,
+					slug: plugin.slug ?? '',
+					name: plugin.name ?? plugin.slug ?? '',
+					version,
+					status: plugin.status ?? null,
+					author: plugin.author ?? null,
+					latest_version: latestVersion,
+					update_available:
+						plugin.update_available === true ||
+						(!!version && !!latestVersion && version !== latestVersion),
+					source: plugin.managed_by_monorepo
+						? 'github'
+						: plugin.managed_by_composer
+							? 'composer'
+							: 'manual',
+					composer_constraint: plugin.composer_constraint ?? null,
+				});
+			}
+		}
+
+		return {
+			items,
+			total: items.length,
+			environments_scanned: environmentsScanned,
+		};
+	}
+
 	createJobExecution(data: {
 		environment_id: bigint;
 		queue_name: string;

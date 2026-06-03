@@ -534,8 +534,10 @@ export class PluginScanProcessor extends WorkerHost {
 			}
 
 			let useComposer = false;
-			if (action === 'update-all' || action === 'change-constraint' || action === 'read' || action === 'update') {
+			if (action === 'update-all' || action === 'change-constraint' || action === 'read') {
 				useComposer = true;
+			} else if (action === 'update') {
+				useComposer = isBedrockLayout && isComposerManaged;
 			} else if (action === 'remove') {
 				useComposer = true;
 			} else if (action === 'add') {
@@ -677,6 +679,9 @@ export class PluginScanProcessor extends WorkerHost {
 					if (!slug) throw new Error('Plugin slug is required to install.');
 					const wpVer = version ? ` --version=${shellQuote(version)}` : '';
 					cliArgs = `plugin install ${shellQuote(slug)}${wpVer}`;
+				} else if (action === 'update') {
+					if (!slug) throw new Error('Plugin slug is required to update.');
+					cliArgs = `plugin update ${shellQuote(slug)}`;
 				} else if (action === 'delete') {
 					if (!slug) throw new Error('Plugin slug is required to delete.');
 					cliArgs = `plugin delete ${shellQuote(slug)}`;
@@ -744,7 +749,7 @@ export class PluginScanProcessor extends WorkerHost {
 					compareVersions(installedVersion, matchedPlugin.latest_version) < 0
 				) {
 					throw new Error(
-						`Composer finished without updating ${slug}. Installed ${installedVersion}, latest ${matchedPlugin.latest_version}. Check composer constraints and lockfile output.`,
+						`${useComposer ? 'Composer' : 'WP-CLI'} finished without updating ${slug}. Installed ${installedVersion}, latest ${matchedPlugin.latest_version}. Check ${useComposer ? 'composer constraints and lockfile output' : 'the wp-cli output and WordPress.org availability'}.`,
 					);
 				}
 			}

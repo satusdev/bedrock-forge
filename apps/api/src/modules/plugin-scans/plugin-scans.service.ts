@@ -25,6 +25,10 @@ export class PluginScansService {
 		return this.repo.findByEnvironment(BigInt(envId), query);
 	}
 
+	getInventory() {
+		return this.repo.getInventory();
+	}
+
 	async enqueueScan(environmentId: number) {
 		const bullJobId = randomUUID();
 		const exec = await this.repo.createJobExecution({
