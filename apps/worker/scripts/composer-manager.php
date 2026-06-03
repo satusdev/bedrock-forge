@@ -128,7 +128,7 @@ if ($action === 'add') {
     $spec = $version
         ? escapeshellarg($package) . ':' . escapeshellarg($version)
         : escapeshellarg($package);
-    runComposer("require {$spec} --no-interaction --no-dev -W");
+    runComposer("require {$spec} --no-interaction --update-no-dev -W");
 
 } elseif ($action === 'remove') {
     runComposer('remove ' . escapeshellarg($package) . ' --no-interaction');

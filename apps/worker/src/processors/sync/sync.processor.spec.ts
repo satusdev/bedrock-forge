@@ -464,6 +464,117 @@ describe('SyncProcessor', () => {
 		});
 	});
 
+	// ── rsync file push handling ──────────────────────────────────────────────
+
+	describe('pushFilesViaRsync()', () => {
+		function makeRsyncArgs(result: {
+			code: number;
+			stdout?: string;
+			stderr?: string;
+		}) {
+			const sourceExecutor = {
+				pushFile: jest.fn().mockResolvedValue(undefined),
+				execute: jest.fn().mockImplementation((cmd: string) => {
+					if (cmd.startsWith('chmod ') || cmd.startsWith('rm -f ')) {
+						return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+					}
+					if (cmd.startsWith('rsync ')) {
+						return Promise.resolve({
+							stdout: '',
+							stderr: '',
+							...result,
+						});
+					}
+					return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+				}),
+			};
+			const tracker = {
+				track: jest.fn().mockResolvedValue(undefined),
+				trackCommand: jest.fn().mockResolvedValue(undefined),
+			};
+			const targetEnv = {
+				server: {
+					ip_address: '203.0.113.10',
+					ssh_port: 22,
+					ssh_user: 'target-user',
+					name: 'target',
+					ssh_private_key_encrypted: null,
+				},
+			};
+
+			return { sourceExecutor, tracker, targetEnv };
+		}
+
+		it('disables permission reconciliation for rsync transfers', async () => {
+			const { sourceExecutor, tracker, targetEnv } = makeRsyncArgs({
+				code: 0,
+			});
+
+			await (processor as any).pushFilesViaRsync(
+				makeJob(JOB_TYPES.SYNC_PUSH, { jobExecutionId: 1 }),
+				'/source/site',
+				'/target/site',
+				targetEnv,
+				sourceExecutor,
+				tracker,
+			);
+
+			const rsyncCall = (sourceExecutor.execute as jest.Mock).mock.calls
+				.map(([cmd]) => String(cmd))
+				.find(cmd => cmd.startsWith('rsync '));
+			expect(rsyncCall).toContain('--no-perms');
+			expect(rsyncCall).toContain('--no-owner');
+			expect(rsyncCall).toContain('--no-group');
+		});
+
+		it('treats rsync code 23 as non-fatal when output is permission-only', async () => {
+			const { sourceExecutor, tracker, targetEnv } = makeRsyncArgs({
+				code: 23,
+				stderr:
+					'rsync: [generator] failed to set permissions on "/target/web/wp-config.php": Operation not permitted (1)\n' +
+					'rsync error: some files/attrs were not transferred (see previous errors) (code 23)',
+			});
+
+			await expect(
+				(processor as any).pushFilesViaRsync(
+					makeJob(JOB_TYPES.SYNC_PUSH, { jobExecutionId: 1 }),
+					'/source/site',
+					'/target/site',
+					targetEnv,
+					sourceExecutor,
+					tracker,
+				),
+			).resolves.toBeUndefined();
+
+			expect(tracker.track).toHaveBeenCalledWith(
+				expect.objectContaining({
+					step: expect.stringContaining('some attrs skipped'),
+					level: 'warn',
+				}),
+			);
+		});
+
+		it('fails rsync code 23 when output contains real transfer errors', async () => {
+			const { sourceExecutor, tracker, targetEnv } = makeRsyncArgs({
+				code: 23,
+				stderr:
+					'rsync: [sender] send_files failed to open "/source/site/web/app/plugins/plugin.php": Permission denied (13)\n' +
+					'rsync error: some files/attrs were not transferred (see previous errors) (code 23)',
+			});
+
+			await expect(
+				(processor as any).pushFilesViaRsync(
+					makeJob(JOB_TYPES.SYNC_PUSH, { jobExecutionId: 1 }),
+					'/source/site',
+					'/target/site',
+					targetEnv,
+					sourceExecutor,
+					tracker,
+				),
+			).rejects.toThrow('rsync failed (exit 23)');
+		});
+	});
+
 	// ── flushWordPressCaches fallback cleanup ─────────────────────────────────
 
 	describe('flushWordPressCaches() fallback cleanup', () => {
@@ -518,6 +629,12 @@ describe('SyncProcessor', () => {
 			const executor = {
 				pushFile: jest.fn().mockResolvedValue(undefined),
 				execute: jest.fn().mockImplementation((cmd: string) => {
+					if (cmd.includes('plugin is-active elementor'))
+						return Promise.resolve({
+							code: 1,
+							stdout: '',
+							stderr: 'Plugin is not active.',
+						});
 					if (cmd.includes('stat -c'))
 						return Promise.resolve({
 							code: 0,
@@ -572,6 +689,141 @@ describe('SyncProcessor', () => {
 			expect(wpCacheFlushCall).toContain('lsphp81/bin/php');
 			expect(wpCacheFlushCall).toContain('/usr/local/bin/wp');
 			expect(wpCacheFlushCall).not.toContain('env WP_CLI_PHP=');
+		});
+
+		it('skips Elementor CSS flush when Elementor is not active', async () => {
+			const executor = {
+				pushFile: jest.fn().mockResolvedValue(undefined),
+				execute: jest.fn().mockImplementation((cmd: string) => {
+					if (cmd.includes('plugin is-active elementor'))
+						return Promise.resolve({
+							code: 1,
+							stdout: '',
+							stderr: 'Plugin is not active.',
+						});
+					if (cmd.includes('stat -c'))
+						return Promise.resolve({
+							code: 0,
+							stdout: 'siteowner',
+							stderr: '',
+						});
+					if (cmd.includes('lsws/lsphp'))
+						return Promise.resolve({
+							code: 0,
+							stdout: '/usr/local/lsws/lsphp81/bin/php',
+							stderr: '',
+						});
+					if (cmd.includes('which wp'))
+						return Promise.resolve({
+							code: 0,
+							stdout: '/usr/local/bin/wp',
+							stderr: '',
+						});
+					return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+				}),
+			};
+			const tracker = { track: jest.fn().mockResolvedValue(undefined) } as any;
+			const creds = {
+				dbHost: 'localhost',
+				dbUser: 'user',
+				dbPassword: 'pass',
+				dbName: 'testdb',
+			};
+			const layout = {
+				corePath: '/var/www/html/web/wp',
+				contentPath: '/var/www/html/web/app',
+				isBedrock: true,
+			};
+
+			await (processor as any).flushWordPressCaches(
+				executor,
+				creds,
+				layout,
+				tracker,
+				'Clone',
+				false,
+			);
+
+			const calls = (executor.execute as jest.Mock).mock.calls.map(([cmd]) =>
+				String(cmd),
+			);
+			expect(calls.some(cmd => cmd.includes('elementor flush-css'))).toBe(false);
+			expect(tracker.track).toHaveBeenCalledWith(
+				expect.objectContaining({
+					step: 'Clone: Elementor CSS flush skipped',
+					level: 'info',
+				}),
+			);
+		});
+
+		it('resets Elementor CSS cache when active Elementor CLI flush fails', async () => {
+			const executor = {
+				pushFile: jest.fn().mockResolvedValue(undefined),
+				execute: jest.fn().mockImplementation((cmd: string) => {
+					if (cmd.includes('plugin is-active elementor'))
+						return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+					if (cmd.includes('elementor flush-css'))
+						return Promise.resolve({
+							code: 1,
+							stdout: '',
+							stderr: 'Elementor CLI failed',
+						});
+					if (cmd.includes('stat -c'))
+						return Promise.resolve({
+							code: 0,
+							stdout: 'siteowner',
+							stderr: '',
+						});
+					if (cmd.includes('lsws/lsphp'))
+						return Promise.resolve({
+							code: 0,
+							stdout: '/usr/local/lsws/lsphp81/bin/php',
+							stderr: '',
+						});
+					if (cmd.includes('which wp'))
+						return Promise.resolve({
+							code: 0,
+							stdout: '/usr/local/bin/wp',
+							stderr: '',
+						});
+					return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+				}),
+			};
+			const tracker = { track: jest.fn().mockResolvedValue(undefined) } as any;
+			const creds = {
+				dbHost: 'localhost',
+				dbUser: 'user',
+				dbPassword: 'pass',
+				dbName: 'testdb',
+			};
+			const layout = {
+				corePath: '/var/www/html/web/wp',
+				contentPath: '/var/www/html/web/app',
+				isBedrock: true,
+			};
+
+			await (processor as any).flushWordPressCaches(
+				executor,
+				creds,
+				layout,
+				tracker,
+				'Clone',
+				false,
+			);
+
+			const calls = (executor.execute as jest.Mock).mock.calls.map(([cmd]) =>
+				String(cmd),
+			);
+			expect(calls.some(cmd => cmd.includes('elementor flush-css'))).toBe(true);
+			expect(
+				calls.some(cmd => cmd.includes('/uploads/elementor/css')),
+			).toBe(true);
+			expect(tracker.track).toHaveBeenCalledWith(
+				expect.objectContaining({
+					step: 'Clone: Elementor CSS cache reset for auto-regeneration',
+					level: 'warn',
+				}),
+			);
 		});
 
 		it('removes WordPress object cache drop-in when WP-CLI is unavailable', async () => {

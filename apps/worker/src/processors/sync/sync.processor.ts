@@ -1236,6 +1236,7 @@ export class SyncProcessor extends WorkerHost {
 			'--delete',
 			'--no-owner',
 			'--no-group',
+			'--no-perms',
 			'--ignore-errors', // don't abort if a root-owned file can't have attrs set
 			'--timeout=300',
 			excludeFlags,
@@ -1249,7 +1250,7 @@ export class SyncProcessor extends WorkerHost {
 			step: 'Syncing site files via rsync',
 			level: 'info',
 			detail: `${sourceRoot} → ${targetEnv.server.ip_address}:${targetRoot} (excluding: ${loggedExcludes})`,
-			command: 'rsync -az --delete [excludes] (key redacted)',
+			command: 'rsync -az --delete --no-perms [excludes] (key redacted)',
 		});
 
 		const rsyncStart = Date.now();
@@ -1260,7 +1261,7 @@ export class SyncProcessor extends WorkerHost {
 
 		await tracker.trackCommand(
 			'rsync site files',
-			'rsync -az --delete [excludes] (key redacted)',
+			'rsync -az --delete --no-perms [excludes] (key redacted)',
 			rsyncResult,
 			Date.now() - rsyncStart,
 		);
@@ -1271,16 +1272,24 @@ export class SyncProcessor extends WorkerHost {
 		// excluded from the transfer itself; rsync is only failing to reconcile
 		// metadata on the destination copy. Treat as a non-fatal warning.
 		const RSYNC_PARTIAL = 23; // partial transfer / some attrs not set
-		if (rsyncResult.code !== 0 && rsyncResult.code !== RSYNC_PARTIAL) {
+		const rsyncOutput = rsyncResult.stderr || rsyncResult.stdout || '';
+		const isPermissionOnlyPartial =
+			rsyncResult.code === RSYNC_PARTIAL &&
+			this.isRsyncPermissionOnlyPartial(rsyncOutput);
+
+		if (
+			rsyncResult.code !== 0 &&
+			(rsyncResult.code !== RSYNC_PARTIAL || !isPermissionOnlyPartial)
+		) {
 			throw new Error(
 				`rsync failed (exit ${rsyncResult.code}): ${rsyncResult.stderr || rsyncResult.stdout}`,
 			);
 		}
 
-		if (rsyncResult.code === RSYNC_PARTIAL) {
+		if (isPermissionOnlyPartial) {
 			// Extract the permission-error lines for the warning detail so the user
 			// knows exactly which root-owned files were skipped.
-			const permLines = (rsyncResult.stderr || rsyncResult.stdout || '')
+			const permLines = rsyncOutput
 				.split('\n')
 				.filter(l => l.includes('Operation not permitted') || l.includes('failed to set permissions'))
 				.join(' | ')
@@ -1299,6 +1308,23 @@ export class SyncProcessor extends WorkerHost {
 				detail: rsyncResult.stdout.trim() || 'Done',
 			});
 		}
+	}
+
+	private isRsyncPermissionOnlyPartial(output: string): boolean {
+		const meaningfulLines = output
+			.split('\n')
+			.map(line => line.trim())
+			.filter(line => line.length > 0)
+			.filter(line => !/^rsync error: .*code 23\b/.test(line));
+
+		return (
+			meaningfulLines.length > 0 &&
+			meaningfulLines.every(
+				line =>
+					line.includes('Operation not permitted') ||
+					line.includes('failed to set permissions'),
+			)
+		);
 	}
 
 	/**
@@ -1911,34 +1937,54 @@ export class SyncProcessor extends WorkerHost {
 			// those CSS files are already correct on disk after the URL sed-replace.
 			// When files were NOT synced (db-only), regenerate or delete the stale
 			// CSS so Elementor rebuilds it from the freshly-imported database.
+			let cssFlushSummary = 'rewrite rules and OPcache flushed (WP-CLI)';
 			if (!skipElementorCssFlush) {
-				// Must run WITHOUT --skip-plugins so Elementor is loaded and can write
-				// its generated CSS files. Falls back to deleting the cache dir so
-				// Elementor auto-regenerates on the next page visit.
-				const elFlush = await executor
-					.execute(wp(`elementor flush-css --path=${shellQuote(corePath)}`))
+				const elementorActive = await executor
+					.execute(
+						wp(
+							`plugin is-active elementor --path=${shellQuote(corePath)} --skip-themes --skip-plugins`,
+						),
+					)
 					.catch(() => ({ code: 1, stdout: '', stderr: '' }));
-				if (elFlush.code !== 0) {
-					// CLI failed (Elementor fatal, not installed, etc.) — nuke the CSS dir
-					// so Elementor rebuilds it fresh on the next front-end request.
-					await executor
-						.execute(
-							`rm -rf ${shellQuote(contentPath)}/uploads/elementor/css 2>/dev/null; true`,
-						)
-						.catch(() => {});
+
+				if (elementorActive.code !== 0) {
 					await tracker.track({
-						step: `${label}: Elementor flush-css failed — removed CSS cache for auto-regeneration`,
-						level: 'warn',
-						detail: (
-							elFlush.stderr ||
-							elFlush.stdout ||
-							'command failed'
-						).slice(0, 200),
+						step: `${label}: Elementor CSS flush skipped`,
+						level: 'info',
+						detail: 'Elementor is not active on this environment.',
 					});
+				} else {
+					// Must run WITHOUT --skip-plugins so Elementor is loaded and can write
+					// its generated CSS files. Falls back to deleting the cache dir so
+					// Elementor auto-regenerates on the next page visit.
+					const elFlush = await executor
+						.execute(wp(`elementor flush-css --path=${shellQuote(corePath)}`))
+						.catch(() => ({ code: 1, stdout: '', stderr: '' }));
+					if (elFlush.code === 0) {
+						cssFlushSummary = 'rewrite rules, OPcache, and Elementor CSS flushed (WP-CLI)';
+					} else {
+						// CLI failed (Elementor fatal, not installed, etc.) — nuke the CSS dir
+						// so Elementor rebuilds it fresh on the next front-end request.
+						await executor
+							.execute(
+								`rm -rf ${shellQuote(contentPath)}/uploads/elementor/css 2>/dev/null; true`,
+							)
+							.catch(() => {});
+						cssFlushSummary = 'rewrite rules, OPcache, and Elementor CSS cache reset';
+						await tracker.track({
+							step: `${label}: Elementor CSS cache reset for auto-regeneration`,
+							level: 'warn',
+							detail: (
+								elFlush.stderr ||
+								elFlush.stdout ||
+								'Elementor CLI command failed'
+							).slice(0, 200),
+						});
+					}
 				}
 			}
 			await tracker.track({
-				step: `${label}: rewrite rules, OPcache, and Elementor CSS flushed (WP-CLI)`,
+				step: `${label}: ${cssFlushSummary}`,
 				level: 'info',
 			});
 

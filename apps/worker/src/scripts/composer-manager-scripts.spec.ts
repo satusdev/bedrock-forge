@@ -204,6 +204,29 @@ describe('Composer manager PHP scripts', () => {
 		}
 	});
 
+	it('uses update-no-dev when requiring Composer-managed WordPress plugins', () => {
+		const fixture = makeFixture('php');
+		try {
+			runPhp(
+				composerManager,
+				[
+					`--docroot=${fixture.docroot}`,
+					'--action=add',
+					'--package=wpackagist-plugin/new-plugin',
+				],
+				fixture.env,
+			);
+
+			const composerLog = readFileSync(fixture.composerLog, 'utf8');
+			expect(composerLog).toContain(
+				'ARGS:require wpackagist-plugin/new-plugin --no-interaction --update-no-dev -W',
+			);
+			expect(composerLog).not.toContain('ARGS:require wpackagist-plugin/new-plugin --no-interaction --no-dev -W');
+		} finally {
+			fixture.cleanup();
+		}
+	});
+
 	it('passes custom plugin Composer work through PHP-based composer launchers', () => {
 		const fixture = makeFixture('php');
 		try {
