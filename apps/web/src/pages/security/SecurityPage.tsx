@@ -5,10 +5,6 @@ import {
 	ServerIcon,
 	FolderKanban,
 	ListFilter,
-	ShieldAlert,
-	FileText,
-	Lock,
-	Monitor,
 	RefreshCw,
 	Clock,
 } from 'lucide-react';
@@ -17,16 +13,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PageHeader } from '@/components/crud';
 import { api } from '@/lib/api-client';
 import type { OverviewData } from './types';
-import { ClipboardListIcon } from './components';
 import { OverviewTab } from './tabs/OverviewTab';
 import { ServerSecurityTab } from './tabs/ServerSecurityTab';
 import { ProjectSecurityTab } from './tabs/ProjectSecurityTab';
-import { SecurityLogsTab } from './tabs/SecurityLogsTab';
-import { RecommendationsTab } from './tabs/RecommendationsTab';
 import { FindingsTab } from './tabs/FindingsTab';
-import { SecurityReportTab } from './tabs/SecurityReportTab';
-import { ForgeSecurityTab } from './tabs/ForgeSecurityTab';
-import { SessionsTab } from './tabs/SessionsTab';
 import { ServerSchedulesTab, ProjectSchedulesTab } from './tabs/ScheduleTabs';
 import { SecurityScanProgress } from './components/SecurityScanProgress';
 
@@ -75,33 +65,13 @@ export function SecurityPage() {
 						<FolderKanban className='h-3.5 w-3.5 mr-1.5' />
 						Projects
 					</TabsTrigger>
-					<TabsTrigger value='logs'>
-						<ClipboardListIcon className='h-3.5 w-3.5 mr-1.5' />
-						SSH Logs
-					</TabsTrigger>
-					<TabsTrigger value='recommendations'>
-						<ShieldAlert className='h-3.5 w-3.5 mr-1.5' />
-						Recommendations
-					</TabsTrigger>
 					<TabsTrigger value='findings'>
 						<ListFilter className='h-3.5 w-3.5 mr-1.5' />
 						Findings
 					</TabsTrigger>
-					<TabsTrigger value='report'>
-						<FileText className='h-3.5 w-3.5 mr-1.5' />
-						Report
-					</TabsTrigger>
 					<TabsTrigger value='schedules'>
 						<Clock className='h-3.5 w-3.5 mr-1.5' />
 						Schedules
-					</TabsTrigger>
-					<TabsTrigger value='forge-security'>
-						<Lock className='h-3.5 w-3.5 mr-1.5' />
-						Forge Security
-					</TabsTrigger>
-					<TabsTrigger value='sessions'>
-						<Monitor className='h-3.5 w-3.5 mr-1.5' />
-						Sessions
 					</TabsTrigger>
 				</TabsList>
 
@@ -123,20 +93,8 @@ export function SecurityPage() {
 							<TabsContent value='projects'>
 								<ProjectSecurityTab data={overview} />
 							</TabsContent>
-							<TabsContent value='logs'>
-								<SecurityLogsTab servers={overview.servers} />
-							</TabsContent>
-							<TabsContent value='recommendations'>
-								<RecommendationsTab data={overview} />
-							</TabsContent>
 							<TabsContent value='findings'>
 								<FindingsTab
-									servers={overview.servers}
-									environments={overview.environments}
-								/>
-							</TabsContent>
-							<TabsContent value='report'>
-								<SecurityReportTab
 									servers={overview.servers}
 									environments={overview.environments}
 								/>
@@ -157,12 +115,6 @@ export function SecurityPage() {
 							</TabsContent>
 						</>
 					)}
-					<TabsContent value='forge-security'>
-						<ForgeSecurityTab />
-					</TabsContent>
-					<TabsContent value='sessions'>
-						<SessionsTab />
-					</TabsContent>
 				</div>
 			</Tabs>
 		</div>
