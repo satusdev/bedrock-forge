@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import {
 	RefreshCw,
 	Loader2,
@@ -47,6 +47,14 @@ interface WpCoreUpdateResult {
 	db_update_output: string;
 }
 
+interface WpJobLog<T> {
+	id: number;
+	status: 'queued' | 'active' | 'completed' | 'failed' | 'dead_letter' | string;
+	execution_log: T | null;
+	last_error?: string | null;
+	completed_at?: string | null;
+}
+
 export function WpCoreTab({ environments }: { environments: Environment[] }) {
 	const defaultEnvId =
 		environments.find(e => e.type === 'production')?.id ??
@@ -79,6 +87,8 @@ export function WpCoreTab({ environments }: { environments: Environment[] }) {
 	);
 	const [checkJobId, setCheckJobId] = useState<string | null>(null);
 	const [updateJobId, setUpdateJobId] = useState<string | null>(null);
+	const [checkExecId, setCheckExecId] = useState<number | null>(null);
+	const [updateExecId, setUpdateExecId] = useState<number | null>(null);
 
 	const checkJobIdRef = useRef<string | null>(null);
 	const updateJobIdRef = useRef<string | null>(null);
@@ -101,6 +111,7 @@ export function WpCoreTab({ environments }: { environments: Environment[] }) {
 		if (isCheckJob) {
 			const execId = checkExecIdRef.current;
 			setCheckJobId(null);
+			setCheckExecId(null);
 			checkJobIdRef.current = null;
 			checkExecIdRef.current = null;
 
@@ -134,6 +145,7 @@ export function WpCoreTab({ environments }: { environments: Environment[] }) {
 		if (isUpdateJob) {
 			const execId = updateExecIdRef.current;
 			setUpdateJobId(null);
+			setUpdateExecId(null);
 			updateJobIdRef.current = null;
 			updateExecIdRef.current = null;
 
@@ -189,6 +201,7 @@ export function WpCoreTab({ environments }: { environments: Environment[] }) {
 
 		if (event.jobId != null && event.jobId === checkJobIdRef.current) {
 			setCheckJobId(null);
+			setCheckExecId(null);
 			checkJobIdRef.current = null;
 			checkExecIdRef.current = null;
 			toast({
@@ -200,6 +213,7 @@ export function WpCoreTab({ environments }: { environments: Environment[] }) {
 
 		if (event.jobId != null && event.jobId === updateJobIdRef.current) {
 			setUpdateJobId(null);
+			setUpdateExecId(null);
 			updateJobIdRef.current = null;
 			updateExecIdRef.current = null;
 			toast({
@@ -220,6 +234,7 @@ export function WpCoreTab({ environments }: { environments: Environment[] }) {
 			const jobId = data?.bullJobId ?? null;
 			setCheckJobId(jobId);
 			checkJobIdRef.current = jobId;
+			setCheckExecId(data?.jobExecutionId ?? null);
 			checkExecIdRef.current = data?.jobExecutionId ?? null;
 			setCoreStatus(null);
 			setUpdateResult(null);
@@ -239,6 +254,7 @@ export function WpCoreTab({ environments }: { environments: Environment[] }) {
 			const jobId = data?.bullJobId ?? null;
 			setUpdateJobId(jobId);
 			updateJobIdRef.current = jobId;
+			setUpdateExecId(data?.jobExecutionId ?? null);
 			updateExecIdRef.current = data?.jobExecutionId ?? null;
 			toast({ title: 'Core update queued' });
 		},
@@ -249,6 +265,80 @@ export function WpCoreTab({ environments }: { environments: Environment[] }) {
 	const isChecking = !!checkJobId || checkMutation.isPending;
 	const isUpdating = !!updateJobId || updateMutation.isPending;
 	const isBusy = isChecking || isUpdating;
+
+	const { data: checkJobLog } = useQuery<WpJobLog<WpCoreStatus>>({
+		queryKey: ['wp-core-check-job', checkExecId],
+		queryFn: () => api.get(`/job-executions/${checkExecId}/log`),
+		enabled: checkExecId !== null && !!checkJobId,
+		refetchInterval: checkJobId ? 2_000 : false,
+		staleTime: 0,
+	});
+
+	const { data: updateJobLog } = useQuery<WpJobLog<WpCoreUpdateResult>>({
+		queryKey: ['wp-core-update-job', updateExecId],
+		queryFn: () => api.get(`/job-executions/${updateExecId}/log`),
+		enabled: updateExecId !== null && !!updateJobId,
+		refetchInterval: updateJobId ? 2_000 : false,
+		staleTime: 0,
+	});
+
+	useEffect(() => {
+		if (!checkJobLog) return;
+		if (checkJobLog.status === 'completed') {
+			setCheckJobId(null);
+			setCheckExecId(null);
+			checkJobIdRef.current = null;
+			checkExecIdRef.current = null;
+			if (checkJobLog.execution_log) {
+				setCoreStatus(checkJobLog.execution_log);
+			}
+		} else if (
+			checkJobLog.status === 'failed' ||
+			checkJobLog.status === 'dead_letter'
+		) {
+			setCheckJobId(null);
+			setCheckExecId(null);
+			checkJobIdRef.current = null;
+			checkExecIdRef.current = null;
+			toast({
+				title: 'Core check failed',
+				description: checkJobLog.last_error ?? 'An unexpected error occurred',
+				variant: 'destructive',
+			});
+		}
+	}, [checkJobLog?.status, checkJobLog?.last_error]);
+
+	useEffect(() => {
+		if (!updateJobLog) return;
+		if (updateJobLog.status === 'completed') {
+			setUpdateJobId(null);
+			setUpdateExecId(null);
+			updateJobIdRef.current = null;
+			updateExecIdRef.current = null;
+			if (updateJobLog.execution_log) {
+				const result = updateJobLog.execution_log;
+				setUpdateResult(result);
+				setCoreStatus(prev =>
+					prev && result.new_version
+						? { ...prev, current_version: result.new_version, updates: [] }
+						: prev,
+				);
+			}
+		} else if (
+			updateJobLog.status === 'failed' ||
+			updateJobLog.status === 'dead_letter'
+		) {
+			setUpdateJobId(null);
+			setUpdateExecId(null);
+			updateJobIdRef.current = null;
+			updateExecIdRef.current = null;
+			toast({
+				title: 'Core update failed',
+				description: updateJobLog.last_error ?? 'An unexpected error occurred',
+				variant: 'destructive',
+			});
+		}
+	}, [updateJobLog?.status, updateJobLog?.last_error]);
 
 	const hasUpdate = coreStatus != null && (coreStatus.updates?.length ?? 0) > 0;
 	const latestVersion = coreStatus?.updates?.[0]?.version ?? null;
