@@ -197,7 +197,7 @@ describe('Composer manager PHP scripts', () => {
 			expect(composerLog).toContain(`PHP_BINARY=${phpBinary}`);
 			expect(composerLog).toContain('ALLOW=1');
 			expect(composerLog).toContain(
-				'ARGS:update wpackagist-plugin/sample-plugin --no-interaction --no-dev',
+				'ARGS:update wpackagist-plugin/sample-plugin --no-interaction --no-dev -W',
 			);
 		} finally {
 			fixture.cleanup();

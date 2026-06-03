@@ -134,7 +134,7 @@ if ($action === 'add') {
     runComposer('remove ' . escapeshellarg($package) . ' --no-interaction');
 
 } elseif ($action === 'update') {
-    runComposer('update ' . escapeshellarg($package) . ' --no-interaction --no-dev');
+    runComposer('update ' . escapeshellarg($package) . ' --no-interaction --no-dev -W');
 
 } elseif ($action === 'update-all') {
     runComposer('update --no-interaction --no-dev');
@@ -157,7 +157,7 @@ if ($action === 'add') {
     );
     file_put_contents($composerJson, $newContent . "\n");
     // Run composer update for the specific package to resolve and install the new constraint
-    runComposer('update ' . escapeshellarg($package) . ' --no-interaction --no-dev', $backup);
+    runComposer('update ' . escapeshellarg($package) . ' --no-interaction --no-dev -W', $backup);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

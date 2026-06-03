@@ -110,6 +110,14 @@ interface EnvironmentCustomPlugin {
 	custom_plugin: CustomPlugin;
 }
 
+interface JobExecutionLogStatus {
+	id: number;
+	status: 'queued' | 'active' | 'completed' | 'failed' | 'dead_letter' | string;
+	execution_log: Array<{ step: string; detail?: string }> | null;
+	last_error?: string | null;
+	completed_at?: string | null;
+}
+
 function parseScanPlugins(scan: PluginScan | undefined): {
 	isBedrock: boolean;
 	plugins: Plugin[];
@@ -772,6 +780,7 @@ export function PluginsTab({
 	const [lastJobExecutionId, setLastJobExecutionId] = useState<number | null>(null);
 	const [showLogPanel, setShowLogPanel] = useState<boolean>(false);
 	const [lastJobStatus, setLastJobStatus] = useState<'idle' | 'running' | 'completed' | 'failed'>('idle');
+	const [lastJobKind, setLastJobKind] = useState<'action' | 'scan'>('action');
 	const [lastJobError, setLastJobError] = useState<string | null>(null);
 	const [showAddDialog, setShowAddDialog] = useState(false);
 	const [actionDialogState, setActionDialogState] = useState<{
@@ -806,12 +815,45 @@ export function PluginsTab({
 		qc.invalidateQueries({ queryKey: ['custom-plugins'] });
 	};
 
-	const waitForFollowUpScan = (envId: number | null | undefined) => {
+	const waitForFollowUpScan = (
+		envId: number | null | undefined,
+		startedAtMs = Date.now(),
+	) => {
 		if (!envId) return;
 		setScanning(true);
 		scanningEnvIdRef.current = envId;
 		scanJobIdRef.current = null;
-		scanStartedAtRef.current = Date.now();
+		scanStartedAtRef.current = startedAtMs;
+	};
+
+	const completeTrackedAction = (
+		envId: number | null | undefined,
+		refreshStartedAtMs = Date.now(),
+	) => {
+		setManagingJobId(null);
+		managingJobIdRef.current = null;
+		setCustomJobId(null);
+		customJobIdRef.current = null;
+		invalidatePluginState(envId);
+		waitForFollowUpScan(envId, refreshStartedAtMs);
+		setLastJobStatus('completed');
+		setLastJobError(null);
+	};
+
+	const failTrackedAction = (
+		envId: number | null | undefined,
+		error: string | null | undefined,
+	) => {
+		setManagingJobId(null);
+		managingJobIdRef.current = null;
+		setCustomJobId(null);
+		customJobIdRef.current = null;
+		setScanning(false);
+		scanningEnvIdRef.current = null;
+		scanJobIdRef.current = null;
+		invalidatePluginState(envId);
+		setLastJobStatus('failed');
+		setLastJobError(error ?? 'An unexpected error occurred');
 	};
 
 	useWebSocketEvent('job:completed', data => {
@@ -824,12 +866,7 @@ export function PluginsTab({
 		// Handle custom-plugins queue separately before the plugin-scans guard
 		if (event.queueName === 'custom-plugins') {
 			if (event.jobId != null && event.jobId === customJobIdRef.current) {
-				const envId = event.environmentId ?? selectedEnvId;
-				setCustomJobId(null);
-				customJobIdRef.current = null;
-				invalidatePluginState(envId);
-				waitForFollowUpScan(envId);
-				setLastJobStatus('completed');
+				completeTrackedAction(event.environmentId ?? selectedEnvId);
 			}
 			return;
 		}
@@ -852,12 +889,7 @@ export function PluginsTab({
 		const isManageJob =
 			event.jobId != null && event.jobId === managingJobIdRef.current;
 		if (isManageJob) {
-			setManagingJobId(null);
-			managingJobIdRef.current = null;
-			const envId = event.environmentId ?? selectedEnvId;
-			invalidatePluginState(envId);
-			waitForFollowUpScan(envId);
-			setLastJobStatus('completed');
+			completeTrackedAction(event.environmentId ?? selectedEnvId);
 		}
 
 		// Composer read result: fetch execution log to get the reader content
@@ -904,14 +936,7 @@ export function PluginsTab({
 
 		if (event.queueName === 'custom-plugins') {
 			if (event.jobId != null && event.jobId === customJobIdRef.current) {
-				invalidatePluginState(event.environmentId ?? selectedEnvId);
-				setCustomJobId(null);
-				customJobIdRef.current = null;
-				setScanning(false);
-				scanningEnvIdRef.current = null;
-				scanJobIdRef.current = null;
-				setLastJobStatus('failed');
-				setLastJobError(event.error ?? 'An unexpected error occurred');
+				failTrackedAction(event.environmentId ?? selectedEnvId, event.error);
 				toast({
 					title: 'Custom plugin operation failed',
 					description: event.error ?? 'An unexpected error occurred',
@@ -951,14 +976,7 @@ export function PluginsTab({
 		const isManageJob =
 			event.jobId != null && event.jobId === managingJobIdRef.current;
 		if (isManageJob) {
-			invalidatePluginState(event.environmentId ?? selectedEnvId);
-			setManagingJobId(null);
-			managingJobIdRef.current = null;
-			setScanning(false);
-			scanningEnvIdRef.current = null;
-			scanJobIdRef.current = null;
-			setLastJobStatus('failed');
-			setLastJobError(event.error ?? 'An unexpected error occurred');
+			failTrackedAction(event.environmentId ?? selectedEnvId, event.error);
 			toast({
 				title: 'Plugin operation failed',
 				description: event.error ?? 'An unexpected error occurred',
@@ -992,6 +1010,57 @@ export function PluginsTab({
 
 	const latestScan = scans?.items[0];
 
+	const { data: lastJobLog } = useQuery<JobExecutionLogStatus>({
+		queryKey: ['execution-log', lastJobExecutionId],
+		queryFn: () =>
+			api.get<JobExecutionLogStatus>(
+				`/job-executions/${lastJobExecutionId}/log`,
+			),
+		enabled:
+			lastJobExecutionId != null &&
+			(lastJobStatus === 'running' || !!managingJobId || !!customJobId),
+		staleTime: 0,
+		refetchInterval:
+			lastJobStatus === 'running' || !!managingJobId || !!customJobId
+				? 2_000
+				: false,
+	});
+
+	useEffect(() => {
+		if (!lastJobLog) return;
+		const envId = selectedEnvId;
+		if (lastJobLog.status === 'completed') {
+			if (lastJobKind === 'scan') {
+				setScanning(false);
+				scanningEnvIdRef.current = null;
+				scanJobIdRef.current = null;
+				invalidatePluginState(envId);
+				setLastJobStatus('completed');
+				setLastJobError(null);
+			} else {
+				completeTrackedAction(
+					envId,
+					lastJobLog.completed_at
+						? new Date(lastJobLog.completed_at).getTime()
+						: Date.now(),
+				);
+			}
+		} else if (
+			lastJobLog.status === 'failed' ||
+			lastJobLog.status === 'dead_letter'
+		) {
+			if (lastJobKind === 'scan') {
+				setScanning(false);
+				scanningEnvIdRef.current = null;
+				scanJobIdRef.current = null;
+				setLastJobStatus('failed');
+				setLastJobError(lastJobLog.last_error ?? 'An unexpected error occurred');
+			} else {
+				failTrackedAction(envId, lastJobLog.last_error);
+			}
+		}
+	}, [lastJobLog?.status, lastJobLog?.last_error, selectedEnvId, lastJobKind]);
+
 	const { data: customCatalog = [] } = useQuery<CustomPlugin[]>({
 		queryKey: ['custom-plugins'],
 		queryFn: () => api.get<CustomPlugin[]>('/custom-plugins'),
@@ -1024,9 +1093,13 @@ export function PluginsTab({
 		}
 	}, [scanning, latestScan?.scanned_at]);
 
-	const handleJobQueued = (data: { jobExecutionId?: number; bullJobId?: string }) => {
+	const handleJobQueued = (
+		data: { jobExecutionId?: number; bullJobId?: string },
+		kind: 'action' | 'scan' = 'action',
+	) => {
 		const execId = data?.jobExecutionId ?? null;
 		setLastJobExecutionId(execId);
+		setLastJobKind(kind);
 		if (execId) {
 			setLastJobStatus('running');
 			setLastJobError(null);
@@ -1045,7 +1118,7 @@ export function PluginsTab({
 			scanningEnvIdRef.current = selectedEnvId;
 			scanJobIdRef.current = data?.bullJobId ?? null;
 			scanStartedAtRef.current = Date.now();
-			handleJobQueued(data);
+			handleJobQueued(data, 'scan');
 			toast({
 				title: 'Plugin scan queued',
 				description:

@@ -142,7 +142,13 @@ export class JobExecutionsRepository {
 	async findLog(id: number) {
 		return this.prisma.jobExecution.findUniqueOrThrow({
 			where: { id: BigInt(id) },
-			select: { id: true, status: true, execution_log: true },
+			select: {
+				id: true,
+				status: true,
+				execution_log: true,
+				last_error: true,
+				completed_at: true,
+			},
 		});
 	}
 
