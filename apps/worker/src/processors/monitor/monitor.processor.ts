@@ -1,5 +1,6 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Job, Queue } from 'bullmq';
 import * as https from 'https';
@@ -21,6 +22,16 @@ interface SslCheckResult {
 	issuer: string | null;
 }
 
+type LighthouseStrategy = 'mobile' | 'desktop';
+
+interface LighthouseAuditPayload {
+	auditId: number;
+	environmentId: number;
+	url: string;
+	strategy: LighthouseStrategy;
+	jobExecutionId?: number;
+}
+
 // concurrency=3: HTTP pings are I/O-bound and fast — 3 concurrent is safe.
 @Processor(QUEUES.MONITORS, { concurrency: 3 })
 export class MonitorProcessor extends WorkerHost {
@@ -28,6 +39,7 @@ export class MonitorProcessor extends WorkerHost {
 
 	constructor(
 		private readonly prisma: PrismaService,
+		private readonly config: ConfigService,
 		@InjectQueue(QUEUES.NOTIFICATIONS)
 		private readonly notificationsQueue: Queue,
 	) {
@@ -35,6 +47,11 @@ export class MonitorProcessor extends WorkerHost {
 	}
 
 	async process(job: Job) {
+		if (job.name === JOB_TYPES.LIGHTHOUSE_AUDIT) {
+			await this.processLighthouseAudit(job.data as LighthouseAuditPayload);
+			return;
+		}
+
 		const { monitorId } = job.data;
 		const timeout = 30_000;
 		const checkedAt = new Date();
@@ -327,6 +344,181 @@ export class MonitorProcessor extends WorkerHost {
 	}
 
 	// ── Private helpers ───────────────────────────────────────────────────────
+
+	private async processLighthouseAudit(payload: LighthouseAuditPayload) {
+		const startedAt = new Date();
+		await Promise.all([
+			this.prisma.lighthouseAudit.update({
+				where: { id: BigInt(payload.auditId) },
+				data: { status: 'running', started_at: startedAt },
+			}),
+			payload.jobExecutionId
+				? this.prisma.jobExecution.update({
+						where: { id: BigInt(payload.jobExecutionId) },
+						data: { status: 'active', started_at: startedAt, progress: 10 },
+					})
+				: Promise.resolve(),
+		]);
+
+		try {
+			const result = await this.fetchPageSpeed(payload.url, payload.strategy);
+			const mapped = this.mapPageSpeedResult(result);
+			await this.prisma.lighthouseAudit.update({
+				where: { id: BigInt(payload.auditId) },
+				data: {
+					status: 'completed',
+					performance_score: mapped.performanceScore,
+					accessibility_score: mapped.accessibilityScore,
+					best_practices_score: mapped.bestPracticesScore,
+					seo_score: mapped.seoScore,
+					fcp_ms: mapped.fcpMs,
+					lcp_ms: mapped.lcpMs,
+					cls: mapped.cls,
+					tbt_ms: mapped.tbtMs,
+					speed_index_ms: mapped.speedIndexMs,
+					opportunities: mapped.opportunities,
+					summary: mapped.summary,
+					raw_result: mapped.rawResult,
+					completed_at: new Date(),
+				},
+			});
+			if (payload.jobExecutionId) {
+				await this.prisma.jobExecution.update({
+					where: { id: BigInt(payload.jobExecutionId) },
+					data: {
+						status: 'completed',
+						progress: 100,
+						completed_at: new Date(),
+						execution_log: [
+							{
+								timestamp: new Date().toISOString(),
+								level: 'info',
+								step: 'Lighthouse audit complete',
+								detail: `${payload.strategy} score ${mapped.performanceScore ?? 'n/a'}`,
+							},
+						],
+					},
+				});
+			}
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			await Promise.all([
+				this.prisma.lighthouseAudit.update({
+					where: { id: BigInt(payload.auditId) },
+					data: {
+						status: 'failed',
+						error_message: message,
+						completed_at: new Date(),
+					},
+				}),
+				payload.jobExecutionId
+					? this.prisma.jobExecution.update({
+							where: { id: BigInt(payload.jobExecutionId) },
+							data: {
+								status: 'failed',
+								progress: 100,
+								last_error: message,
+								completed_at: new Date(),
+								execution_log: [
+									{
+										timestamp: new Date().toISOString(),
+										level: 'error',
+										step: 'Lighthouse audit failed',
+										detail: message,
+									},
+								],
+							},
+						})
+					: Promise.resolve(),
+			]);
+			throw err;
+		}
+	}
+
+	private async fetchPageSpeed(url: string, strategy: LighthouseStrategy) {
+		const endpoint = new URL(
+			'https://www.googleapis.com/pagespeedonline/v5/runPagespeed',
+		);
+		endpoint.searchParams.set('url', url);
+		endpoint.searchParams.set('strategy', strategy);
+		for (const category of [
+			'performance',
+			'accessibility',
+			'best-practices',
+			'seo',
+		]) {
+			endpoint.searchParams.append('category', category);
+		}
+		const apiKey = this.config.get<string>('pagespeed.apiKey');
+		if (apiKey) endpoint.searchParams.set('key', apiKey);
+
+		const res = await fetch(endpoint, { signal: AbortSignal.timeout(120_000) });
+		const body = await res.json().catch(() => null);
+		if (!res.ok) {
+			const message =
+				body?.error?.message ??
+				`PageSpeed request failed with HTTP ${res.status}`;
+			throw new Error(message);
+		}
+		return body;
+	}
+
+	private mapPageSpeedResult(result: any) {
+		const lighthouse = result?.lighthouseResult ?? {};
+		const categories = lighthouse.categories ?? {};
+		const audits = lighthouse.audits ?? {};
+		const score = (category: string) => {
+			const raw = categories[category]?.score;
+			return typeof raw === 'number' ? Math.round(raw * 100) : null;
+		};
+		const numericAudit = (id: string) => {
+			const value = audits[id]?.numericValue;
+			return typeof value === 'number' ? Math.round(value) : null;
+		};
+		const clsValue = audits['cumulative-layout-shift']?.numericValue;
+		const opportunities = Object.values(audits)
+			.filter((audit: any) => audit?.details?.type === 'opportunity')
+			.map((audit: any) => ({
+				id: audit.id,
+				title: audit.title,
+				description: audit.description,
+				score: audit.score,
+				displayValue: audit.displayValue,
+				numericValue: audit.numericValue,
+			}))
+			.slice(0, 10);
+
+		return {
+			performanceScore: score('performance'),
+			accessibilityScore: score('accessibility'),
+			bestPracticesScore: score('best-practices'),
+			seoScore: score('seo'),
+			fcpMs: numericAudit('first-contentful-paint'),
+			lcpMs: numericAudit('largest-contentful-paint'),
+			cls: typeof clsValue === 'number' ? clsValue : null,
+			tbtMs: numericAudit('total-blocking-time'),
+			speedIndexMs: numericAudit('speed-index'),
+			opportunities,
+			summary: {
+				fetchTime: lighthouse.fetchTime,
+				finalUrl: lighthouse.finalDisplayedUrl ?? lighthouse.finalUrl,
+				requestedUrl: result?.id,
+			},
+			rawResult: {
+				id: result?.id,
+				analysisUTCTimestamp: result?.analysisUTCTimestamp,
+				lighthouseVersion: lighthouse.lighthouseVersion,
+				categories,
+				audits: {
+					'first-contentful-paint': audits['first-contentful-paint'],
+					'largest-contentful-paint': audits['largest-contentful-paint'],
+					'cumulative-layout-shift': audits['cumulative-layout-shift'],
+					'total-blocking-time': audits['total-blocking-time'],
+					'speed-index': audits['speed-index'],
+				},
+			},
+		};
+	}
 
 	private checkHttp(url: string, timeout: number): Promise<HttpCheckResult> {
 		return new Promise((resolve, reject) => {

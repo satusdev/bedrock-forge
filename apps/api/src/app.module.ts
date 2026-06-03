@@ -40,6 +40,7 @@ import { CustomPluginsModule } from './modules/custom-plugins/custom-plugins.mod
 import { SystemBackupsModule } from './modules/system-backups/system-backups.module';
 import { ThemeScansModule } from './modules/theme-scans/theme-scans.module';
 import { SecurityModule } from './modules/security/security.module';
+import { LighthouseModule } from './modules/lighthouse/lighthouse.module';
 import { IpAllowlistMiddleware } from './common/middleware/ip-allowlist.middleware';
 import { SettingsRepository } from './modules/settings/settings.repository';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
@@ -141,6 +142,7 @@ import appConfig from './config/app.config';
 		SystemBackupsModule,
 		ThemeScansModule,
 		SecurityModule,
+		LighthouseModule,
 	],
 	providers: [
 		// Global rate limiting — 100 req/min per IP (ThrottlerModule configured above)

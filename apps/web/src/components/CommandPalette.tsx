@@ -20,6 +20,7 @@ import {
 	FileText,
 	Bell,
 	Activity,
+	Gauge,
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { useAuthStore } from '@/store/auth.store';
@@ -60,6 +61,7 @@ const STATIC_PAGES: StaticItem[] = [
 	{ type: 'page', label: 'Backups', path: '/backups', icon: HardDrive },
 	{ type: 'page', label: 'Domains', path: '/domains', icon: Globe },
 	{ type: 'page', label: 'Monitors', path: '/monitors', icon: Activity },
+	{ type: 'page', label: 'Lighthouse', path: '/lighthouse', icon: Gauge },
 	{ type: 'page', label: 'Activity', path: '/activity', icon: ClipboardList },
 	{ type: 'page', label: 'Problems', path: '/problems', icon: AlertTriangle },
 	{ type: 'page', label: 'Settings', path: '/settings', icon: Settings },

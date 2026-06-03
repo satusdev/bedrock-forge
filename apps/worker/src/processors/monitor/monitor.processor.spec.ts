@@ -1,8 +1,9 @@
 import { Test } from '@nestjs/testing';
 import { getQueueToken } from '@nestjs/bullmq';
+import { ConfigService } from '@nestjs/config';
 import { MonitorProcessor } from './monitor.processor';
 import { PrismaService } from '../../prisma/prisma.service';
-import { QUEUES } from '@bedrock-forge/shared';
+import { JOB_TYPES, QUEUES } from '@bedrock-forge/shared';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -25,6 +26,9 @@ type MockPrisma = {
 		create: jest.Mock;
 		update: jest.Mock;
 	};
+	lighthouseAudit: {
+		update: jest.Mock;
+	};
 };
 
 function makePrisma(): MockPrisma {
@@ -45,6 +49,9 @@ function makePrisma(): MockPrisma {
 		},
 		jobExecution: {
 			create: jest.fn().mockResolvedValue({ id: BigInt(99) }),
+			update: jest.fn().mockResolvedValue({}),
+		},
+		lighthouseAudit: {
 			update: jest.fn().mockResolvedValue({}),
 		},
 	};
@@ -89,6 +96,7 @@ describe('MonitorProcessor', () => {
 			providers: [
 				MonitorProcessor,
 				{ provide: PrismaService, useValue: prisma },
+				{ provide: ConfigService, useValue: { get: jest.fn() } },
 				{ provide: getQueueToken(QUEUES.NOTIFICATIONS), useValue: notifQueue },
 			],
 		}).compile();
@@ -357,5 +365,70 @@ describe('MonitorProcessor', () => {
 		await processor.process(job);
 
 		expect(prisma.jobExecution.update).not.toHaveBeenCalled();
+	});
+
+	it('stores PageSpeed scores for Lighthouse audit jobs', async () => {
+		jest.spyOn(processor as any, 'fetchPageSpeed').mockResolvedValue({
+			id: 'https://example.test/',
+			analysisUTCTimestamp: '2026-06-03T08:00:00.000Z',
+			lighthouseResult: {
+				lighthouseVersion: '12.0.0',
+				fetchTime: '2026-06-03T08:00:00.000Z',
+				finalDisplayedUrl: 'https://example.test/',
+				categories: {
+					performance: { score: 0.91 },
+					accessibility: { score: 0.88 },
+					'best-practices': { score: 1 },
+					seo: { score: 0.96 },
+				},
+				audits: {
+					'first-contentful-paint': { numericValue: 1200 },
+					'largest-contentful-paint': { numericValue: 2400 },
+					'cumulative-layout-shift': { numericValue: 0.035 },
+					'total-blocking-time': { numericValue: 80 },
+					'speed-index': { numericValue: 1800 },
+					'unused-javascript': {
+						id: 'unused-javascript',
+						title: 'Reduce unused JavaScript',
+						score: 0.5,
+						displayValue: '20 KiB',
+						numericValue: 20000,
+						details: { type: 'opportunity' },
+					},
+				},
+			},
+		});
+
+		await processor.process({
+			name: JOB_TYPES.LIGHTHOUSE_AUDIT,
+			data: {
+				auditId: 7,
+				environmentId: 5,
+				url: 'https://example.test/',
+				strategy: 'mobile',
+				jobExecutionId: 9,
+			},
+		} as any);
+
+		expect(prisma.lighthouseAudit.update).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: { id: BigInt(7) },
+				data: expect.objectContaining({
+					status: 'completed',
+					performance_score: 91,
+					accessibility_score: 88,
+					best_practices_score: 100,
+					seo_score: 96,
+					lcp_ms: 2400,
+					cls: 0.035,
+				}),
+			}),
+		);
+		expect(prisma.jobExecution.update).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: { id: BigInt(9) },
+				data: expect.objectContaining({ status: 'completed', progress: 100 }),
+			}),
+		);
 	});
 });

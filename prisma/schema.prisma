@@ -253,6 +253,7 @@ model Environment {
   security_scans            SecurityScan[]
   security_scan_schedules   SecurityScanSchedule?
   finding_acks              SecurityFindingAck[]
+  lighthouse_audits         LighthouseAudit[]
 
   @@index([project_id])
   @@index([server_id])
@@ -394,6 +395,7 @@ model Monitor {
   environment     Environment     @relation(fields: [environment_id], references: [id], onDelete: Cascade)
   monitor_results MonitorResult[]
   monitor_logs    MonitorLog[]
+  lighthouse_audits LighthouseAudit[]
 
   @@map("monitors")
 }
@@ -442,6 +444,55 @@ model MonitorResult {
   @@index([monitor_id])
   @@index([checked_at])
   @@map("monitor_results")
+}
+
+enum LighthouseAuditStatus {
+  queued
+  running
+  completed
+  failed
+}
+
+enum LighthouseStrategy {
+  mobile
+  desktop
+}
+
+model LighthouseAudit {
+  id               BigInt                @id @default(autoincrement())
+  environment_id   BigInt
+  monitor_id       BigInt?
+  job_execution_id BigInt?
+  url              String
+  strategy         LighthouseStrategy    @default(mobile)
+  status           LighthouseAuditStatus @default(queued)
+  performance_score    Int?
+  accessibility_score  Int?
+  best_practices_score Int?
+  seo_score            Int?
+  fcp_ms          Int?
+  lcp_ms          Int?
+  cls             Decimal? @db.Decimal(8, 4)
+  tbt_ms          Int?
+  speed_index_ms  Int?
+  opportunities   Json?
+  summary         Json?
+  raw_result      Json?
+  error_message   String?
+  started_at      DateTime? @db.Timestamptz()
+  completed_at    DateTime? @db.Timestamptz()
+  created_at      DateTime  @default(now()) @db.Timestamptz()
+
+  environment Environment   @relation(fields: [environment_id], references: [id], onDelete: Cascade)
+  monitor     Monitor?      @relation(fields: [monitor_id], references: [id], onDelete: SetNull)
+  job_execution JobExecution? @relation(fields: [job_execution_id], references: [id], onDelete: SetNull)
+
+  @@index([environment_id])
+  @@index([monitor_id])
+  @@index([job_execution_id])
+  @@index([status])
+  @@index([created_at])
+  @@map("lighthouse_audits")
 }
 
 model PluginUpdateSchedule {
@@ -534,6 +585,7 @@ model JobExecution {
   server         Server?        @relation(fields: [server_id], references: [id])
   backups        Backup[]
   system_backups SystemBackup[]
+  lighthouse_audits LighthouseAudit[]
 
   @@index([environment_id])
   @@index([server_id])

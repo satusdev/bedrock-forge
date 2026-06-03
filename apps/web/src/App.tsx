@@ -46,6 +46,9 @@ const DomainsPage = lazy(() =>
 const MonitorsPage = lazy(() =>
 	import('@/pages/MonitorsPage').then(m => ({ default: m.MonitorsPage })),
 );
+const LighthousePage = lazy(() =>
+	import('@/pages/LighthousePage').then(m => ({ default: m.LighthousePage })),
+);
 const MonitorDetailPage = lazy(() =>
 	import('@/pages/MonitorDetailPage').then(m => ({
 		default: m.MonitorDetailPage,
@@ -304,6 +307,7 @@ export default function App() {
 							<Route path='projects/:id' element={<ProjectDetailPage />} />
 							<Route path='backups' element={<BackupsPage />} />
 							<Route path='monitors' element={<MonitorsPage />} />
+							<Route path='lighthouse' element={<LighthousePage />} />
 							<Route path='monitors/:id' element={<MonitorDetailPage />} />
 							<Route path='activity' element={<ActivityPage />} />
 							<Route

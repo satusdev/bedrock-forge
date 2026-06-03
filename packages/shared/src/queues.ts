@@ -46,6 +46,7 @@ export const JOB_TYPES = {
 
 	// Monitors
 	MONITOR_CHECK: 'monitor:check',
+	LIGHTHOUSE_AUDIT: 'lighthouse:audit',
 
 	// Domains
 	DOMAIN_WHOIS: 'domain:whois',

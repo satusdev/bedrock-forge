@@ -32,6 +32,7 @@ const ROUTE_LABELS: Record<string, string> = {
 	projects: 'Projects',
 	backups: 'Backups',
 	monitors: 'Monitors',
+	lighthouse: 'Lighthouse',
 	domains: 'Domains',
 	settings: 'Settings',
 	users: 'Users & Roles',

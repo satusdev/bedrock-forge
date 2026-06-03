@@ -18,6 +18,7 @@ import {
 	HardDrive,
 	Globe,
 	Activity,
+	Gauge,
 	ClipboardList,
 	Settings,
 	Moon,
@@ -63,6 +64,7 @@ const NAV_GROUPS: NavGroup[] = [
 		items: [
 			{ to: '/backups', label: 'Backups', icon: HardDrive },
 			{ to: '/monitors', label: 'Monitors', icon: Activity },
+			{ to: '/lighthouse', label: 'Lighthouse', icon: Gauge },
 			{ to: '/domains', label: 'Domains', icon: Globe },
 			{
 				to: '/security',

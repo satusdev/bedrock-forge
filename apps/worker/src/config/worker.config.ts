@@ -13,4 +13,7 @@ export default () => ({
 			process.env.RCLONE_CONFIG_PATH ?? '/home/node/.config/rclone/rclone.conf',
 		remoteName: process.env.RCLONE_REMOTE_NAME ?? 'gdrive',
 	},
+	pagespeed: {
+		apiKey: process.env.PAGESPEED_API_KEY,
+	},
 });
