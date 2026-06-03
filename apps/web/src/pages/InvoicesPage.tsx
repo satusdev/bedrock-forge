@@ -280,7 +280,7 @@ function GenerateDialog({
 
 	const { data: clientsData } = useQuery({
 		queryKey: ['clients-invoice-dialog'],
-		queryFn: () => api.get<{ items: DialogClient[] }>('/clients?limit=200'),
+		queryFn: () => api.get<{ items: DialogClient[] }>('/clients?limit=100'),
 		enabled: open,
 		staleTime: 60_000,
 	});
@@ -647,7 +647,7 @@ export function InvoicesPage() {
 
 	const { data: clientsForFilter } = useQuery({
 		queryKey: ['clients-filter'],
-		queryFn: () => api.get<{ items: DialogClient[] }>('/clients?limit=200'),
+		queryFn: () => api.get<{ items: DialogClient[] }>('/clients?limit=100'),
 		staleTime: 120_000,
 	});
 

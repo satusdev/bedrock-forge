@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { RefreshCw, Loader2, Trash2, Plus } from 'lucide-react';
+import { AlertCircle, RefreshCw, Loader2, Trash2, Plus } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
-import { api } from '@/lib/api-client';
+import { ApiError, api } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -32,6 +32,7 @@ import {
 	SERVER_HARDENING_ACTIONS,
 	ENVIRONMENT_HARDENING_ACTIONS,
 	SCAN_TYPES_BY_KIND,
+	SCAN_TYPE_DESCRIPTIONS,
 	SCAN_TYPE_LABELS,
 } from './constants';
 
@@ -287,8 +288,15 @@ export function ScanDialog({
 			queryClient.invalidateQueries({ queryKey: ['security'] });
 			onClose();
 		},
-		onError: () => {
-			toast({ title: 'Failed to queue scan', variant: 'destructive' });
+		onError: (err: Error) => {
+			toast({
+				title: 'Failed to queue scan',
+				description:
+					err instanceof ApiError
+						? err.message
+						: 'The scan could not be queued. Check the selected scan types.',
+				variant: 'destructive',
+			});
 		},
 	});
 
@@ -299,23 +307,47 @@ export function ScanDialog({
 
 	return (
 		<Dialog open={open} onOpenChange={v => !v && onClose()}>
-			<DialogContent className='max-w-sm'>
+			<DialogContent className='max-w-md'>
 				<DialogHeader>
-					<DialogTitle>Run Security Scan — {targetName}</DialogTitle>
+					<DialogTitle>Run Security Scan</DialogTitle>
 				</DialogHeader>
-				<div className='space-y-2 py-2'>
+				<div className='rounded-md border bg-muted/30 px-3 py-2 text-sm'>
+					<p className='font-medium truncate'>{targetName}</p>
+					<p className='text-xs text-muted-foreground'>
+						{targetType === 'server'
+							? 'SSH, hardening, and malware checks'
+							: 'WordPress, malware, backdoor, and plugin checks'}
+					</p>
+				</div>
+				<div className='grid gap-2 py-2'>
 					{allTypes.map(t => (
-						<label key={t} className='flex items-center gap-3 cursor-pointer'>
+						<label
+							key={t}
+							className='flex items-start gap-3 cursor-pointer rounded-md border p-3 hover:bg-muted/40'
+						>
 							<input
 								type='checkbox'
 								checked={selected.includes(t)}
 								onChange={() => toggle(t)}
-								className='rounded'
+								className='rounded mt-0.5'
 							/>
-							<span className='text-sm'>{t.replace(/_/g, ' ')}</span>
+							<span className='min-w-0'>
+								<span className='block text-sm font-medium'>
+									{SCAN_TYPE_LABELS[t] ?? t.replace(/_/g, ' ')}
+								</span>
+								<span className='block text-xs text-muted-foreground'>
+									{SCAN_TYPE_DESCRIPTIONS[t] ?? 'Run this security check.'}
+								</span>
+							</span>
 						</label>
 					))}
 				</div>
+				{selected.length === 0 && (
+					<div className='flex items-center gap-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning'>
+						<AlertCircle className='h-3.5 w-3.5' />
+						Select at least one scan type.
+					</div>
+				)}
 				<DialogFooter>
 					<Button variant='outline' onClick={onClose}>
 						Cancel
@@ -324,7 +356,14 @@ export function ScanDialog({
 						onClick={() => mutation.mutate(selected)}
 						disabled={selected.length === 0 || mutation.isPending}
 					>
-						{mutation.isPending ? 'Queuing…' : 'Start Scan'}
+						{mutation.isPending ? (
+							<>
+								<Loader2 className='h-3.5 w-3.5 mr-1.5 animate-spin' />
+								Queuing…
+							</>
+						) : (
+							'Start Scan'
+						)}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

@@ -18,7 +18,7 @@ export function useClientsList(
 		queryKey: ['clients-list'],
 		queryFn: () =>
 			api
-				.get<{ items: ClientListItem[] }>('/clients?limit=200')
+				.get<{ items: ClientListItem[] }>('/clients?limit=100')
 				.then(r => r.items),
 		staleTime: 60_000,
 		...options,

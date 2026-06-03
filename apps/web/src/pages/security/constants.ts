@@ -18,6 +18,16 @@ export const SCAN_TYPE_LABELS: Record<string, string> = {
 	PLUGIN_AUDIT: 'Plugin Audit',
 };
 
+export const SCAN_TYPE_DESCRIPTIONS: Record<string, string> = {
+	SSH_AUDIT: 'Review SSH configuration, auth logs, and brute-force signals.',
+	SERVER_HARDENING: 'Check server hardening posture and risky permissions.',
+	MALWARE_SCAN: 'Search common server paths for suspicious files.',
+	WP_AUDIT: 'Check WordPress users, core, config, and baseline posture.',
+	PROJECT_MALWARE: 'Search the WordPress tree for suspicious code patterns.',
+	BACKDOOR_SEARCH: 'Look for common PHP backdoor signatures and obfuscation.',
+	PLUGIN_AUDIT: 'Review plugin versions and known risky plugin signals.',
+};
+
 export const SCAN_FINDINGS_INITIAL_LIMIT = 3;
 
 export const SCAN_TYPES_BY_KIND = {

@@ -13,15 +13,15 @@ const ALL_SCAN_TYPES: SecurityScanType[] = [
 export class TriggerServerScanDto {
 	@IsArray()
 	@ArrayMinSize(1)
-	@IsEnum(['SSH_AUDIT', 'SERVER_HARDENING', 'MALWARE_SCAN'], { each: true })
+	@IsEnum(SERVER_SCAN_TYPES, { each: true })
 	types!: ('SSH_AUDIT' | 'SERVER_HARDENING' | 'MALWARE_SCAN')[];
 }
 
 export class TriggerEnvironmentScanDto {
 	@IsArray()
 	@ArrayMinSize(1)
-	@IsEnum(['WP_AUDIT', 'PROJECT_MALWARE'], { each: true })
-	types!: ('WP_AUDIT' | 'PROJECT_MALWARE')[];
+	@IsEnum(ENVIRONMENT_SCAN_TYPES, { each: true })
+	types!: SecurityScanType[];
 }
 
 export { ALL_SCAN_TYPES };

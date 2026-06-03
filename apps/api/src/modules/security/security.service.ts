@@ -122,7 +122,7 @@ export class SecurityService {
 
 	async triggerEnvironmentScan(
 		environmentId: number,
-		types: ('WP_AUDIT' | 'PROJECT_MALWARE')[],
+		types: SecurityScanType[],
 	) {
 		const env = await this.repo.findEnvironmentById(BigInt(environmentId));
 		if (!env)
