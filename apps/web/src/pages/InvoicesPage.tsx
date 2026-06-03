@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
+import { useBillingSettings } from '@/hooks/useBillingSettings';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -120,10 +121,6 @@ const MONTHS = [
 	'Dec',
 ] as const;
 
-function fmt(amount: string) {
-	return `$${parseFloat(amount).toFixed(2)}`;
-}
-
 function fmtDate(iso: string) {
 	return new Date(iso).toLocaleDateString();
 }
@@ -138,7 +135,13 @@ function fmtPeriod(start: string, end: string) {
 	return startStr === endStr ? startStr : `${startStr} – ${endStr}`;
 }
 
-function InvoiceDetailPanel({ inv }: { inv: Invoice }) {
+function InvoiceDetailPanel({
+	inv,
+	formatMoney,
+}: {
+	inv: Invoice;
+	formatMoney: (amount: string | number) => string;
+}) {
 	const hostingName =
 		inv.hosting_package?.name ?? inv.hosting_package_snapshot ?? null;
 	const supportName =
@@ -156,11 +159,11 @@ function InvoiceDetailPanel({ inv }: { inv: Invoice }) {
 
 	const hostingMonthly =
 		parseFloat(String(inv.hosting_amount)) > 0
-			? (parseFloat(String(inv.hosting_amount)) / numMonths).toFixed(2)
+			? parseFloat(String(inv.hosting_amount)) / numMonths
 			: null;
 	const supportMonthly =
 		parseFloat(String(inv.support_amount)) > 0
-			? (parseFloat(String(inv.support_amount)) / numMonths).toFixed(2)
+			? parseFloat(String(inv.support_amount)) / numMonths
 			: null;
 
 	return (
@@ -198,22 +201,22 @@ function InvoiceDetailPanel({ inv }: { inv: Invoice }) {
 					{hostingMonthly && (
 						<div className='flex justify-between gap-2'>
 							<span className='text-muted-foreground'>
-								${hostingMonthly}/mo × {numMonths}
+								{formatMoney(hostingMonthly)}/mo × {numMonths}
 							</span>
-							<span>{fmt(inv.hosting_amount)}</span>
+							<span>{formatMoney(inv.hosting_amount)}</span>
 						</div>
 					)}
 					{supportMonthly && (
 						<div className='flex justify-between gap-2'>
 							<span className='text-muted-foreground'>
-								${supportMonthly}/mo × {numMonths}
+								{formatMoney(supportMonthly)}/mo × {numMonths}
 							</span>
-							<span>{fmt(inv.support_amount)}</span>
+							<span>{formatMoney(inv.support_amount)}</span>
 						</div>
 					)}
 					<div className='flex justify-between gap-2 border-t pt-1.5'>
 						<span className='font-medium'>Total</span>
-						<span className='font-semibold'>{fmt(inv.total_amount)}</span>
+						<span className='font-semibold'>{formatMoney(inv.total_amount)}</span>
 					</div>
 				</div>
 
@@ -632,6 +635,7 @@ function GenerateDialog({
 
 export function InvoicesPage() {
 	const qc = useQueryClient();
+	const { formatMoney } = useBillingSettings();
 	const [page, setPage] = useState(1);
 	const [statusFilter, setStatusFilter] = useState<string>('');
 	const [yearFilter, setYearFilter] = useState<string>('');
@@ -736,16 +740,16 @@ export function InvoicesPage() {
 		},
 		{
 			header: 'Hosting',
-			render: inv => <span>{fmt(inv.hosting_amount)}</span>,
+			render: inv => <span>{formatMoney(inv.hosting_amount)}</span>,
 		},
 		{
 			header: 'Support',
-			render: inv => <span>{fmt(inv.support_amount)}</span>,
+			render: inv => <span>{formatMoney(inv.support_amount)}</span>,
 		},
 		{
 			header: 'Total',
 			render: inv => (
-				<span className='font-semibold'>{fmt(inv.total_amount)}</span>
+				<span className='font-semibold'>{formatMoney(inv.total_amount)}</span>
 			),
 		},
 		{
@@ -887,7 +891,9 @@ export function InvoicesPage() {
 				}
 				onRowClick={toggleExpand}
 				expandedRowKey={expandedId}
-				renderExpandedRow={inv => <InvoiceDetailPanel inv={inv} />}
+				renderExpandedRow={inv => (
+					<InvoiceDetailPanel inv={inv} formatMoney={formatMoney} />
+				)}
 				renderActions={inv => (
 					<DropdownMenu>
 						<DropdownMenuTrigger asChild>

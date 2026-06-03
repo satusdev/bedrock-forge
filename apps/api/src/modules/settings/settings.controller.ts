@@ -19,7 +19,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { ROLES } from '@bedrock-forge/shared';
 import { SettingsService } from './settings.service';
 import { SetGdriveDto } from './dto/gdrive-settings.dto';
-import { IsString, MinLength } from 'class-validator';
+import { IsString, MinLength, Matches } from 'class-validator';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { writeFile, unlink, mkdir } from 'fs/promises';
@@ -36,6 +36,16 @@ class SetSettingDto {
 
 class SetSshKeyDto {
 	@IsString() @MinLength(20) key!: string;
+}
+
+class SetBillingSettingsDto {
+	@IsString()
+	@Matches(/^[A-Za-z]{3}$/)
+	currency_code!: string;
+
+	@IsString()
+	@MinLength(2)
+	currency_locale!: string;
 }
 
 interface RcloneOAuthToken {
@@ -65,6 +75,18 @@ export class SettingsController {
 	/** Returns all non-sensitive settings as a key:value map. */
 	@Get() getAll() {
 		return this.svc.getAllPublic();
+	}
+
+	@Get('public/billing')
+	@Roles(ROLES.MANAGER)
+	getBillingSettings() {
+		return this.svc.getBillingSettings();
+	}
+
+	@Put('billing')
+	@HttpCode(HttpStatus.NO_CONTENT)
+	async setBillingSettings(@Body() dto: SetBillingSettingsDto) {
+		await this.svc.setBillingSettings(dto);
 	}
 
 	// ── Global SSH Key ──────────────────────────────────────────────────────

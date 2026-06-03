@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { SettingsRepository } from './settings.repository';
 import { EncryptionService } from '../../common/encryption/encryption.service';
 
@@ -70,5 +70,37 @@ export class SettingsService {
 		const settings = await this.repo.findAll();
 		const visible = settings.filter(s => !SENSITIVE_KEYS.has(s.key));
 		return Object.fromEntries(visible.map(s => [s.key, s.value]));
+	}
+
+	async getBillingSettings() {
+		const all = await this.getAllPublic();
+		return {
+			currency_code: all['billing.currency_code'] ?? 'USD',
+			currency_locale: all['billing.currency_locale'] ?? 'en-US',
+		};
+	}
+
+	async setBillingSettings(input: {
+		currency_code: string;
+		currency_locale: string;
+	}) {
+		const currency = input.currency_code.trim().toUpperCase();
+		const locale = input.currency_locale.trim();
+		if (!/^[A-Z]{3}$/.test(currency)) {
+			throw new BadRequestException('Currency code must be a 3-letter ISO code');
+		}
+		try {
+			new Intl.NumberFormat(locale, {
+				style: 'currency',
+				currency,
+			}).format(1);
+		} catch {
+			throw new BadRequestException('Invalid currency or locale');
+		}
+		await Promise.all([
+			this.set('billing.currency_code', currency),
+			this.set('billing.currency_locale', locale),
+		]);
+		return { currency_code: currency, currency_locale: locale };
 	}
 }

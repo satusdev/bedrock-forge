@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
+import { useBillingSettings } from '@/hooks/useBillingSettings';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -369,6 +370,7 @@ function SupportFormDialog({
 
 function HostingTab() {
 	const qc = useQueryClient();
+	const { formatMoney } = useBillingSettings();
 	const [createOpen, setCreateOpen] = useState(false);
 	const [editTarget, setEditTarget] = useState<HostingPackage | null>(null);
 	const [deleteTarget, setDeleteTarget] = useState<HostingPackage | null>(null);
@@ -402,7 +404,7 @@ function HostingTab() {
 		},
 		{
 			header: 'Price/mo',
-			render: p => <span>${parseFloat(p.price_monthly).toFixed(2)}</span>,
+			render: p => <span>{formatMoney(p.price_monthly)}</span>,
 		},
 		{
 			header: 'Storage',
@@ -513,6 +515,7 @@ function HostingTab() {
 
 function SupportTab() {
 	const qc = useQueryClient();
+	const { formatMoney } = useBillingSettings();
 	const [createOpen, setCreateOpen] = useState(false);
 	const [editTarget, setEditTarget] = useState<SupportPackage | null>(null);
 	const [deleteTarget, setDeleteTarget] = useState<SupportPackage | null>(null);
@@ -546,7 +549,7 @@ function SupportTab() {
 		},
 		{
 			header: 'Price/mo',
-			render: p => <span>${parseFloat(p.price_monthly).toFixed(2)}</span>,
+			render: p => <span>{formatMoney(p.price_monthly)}</span>,
 		},
 		{
 			header: 'Response SLA',

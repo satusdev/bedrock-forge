@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
+import { useBillingSettings } from '@/hooks/useBillingSettings';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -57,10 +58,6 @@ interface InvoiceDetail {
 	support_package_snapshot: string | null;
 }
 
-function fmt(amount: string) {
-	return `$${parseFloat(amount).toFixed(2)}`;
-}
-
 function fmtDate(iso: string) {
 	return new Date(iso).toLocaleDateString('en-US', {
 		year: 'numeric',
@@ -88,6 +85,7 @@ export function InvoiceDetailPage() {
 	const { id } = useParams<{ id: string }>();
 	const navigate = useNavigate();
 	const qc = useQueryClient();
+	const { formatMoney } = useBillingSettings();
 
 	const { data: invoice, isLoading, isError } = useQuery<InvoiceDetail>({
 		queryKey: ['invoice', id],
@@ -288,10 +286,10 @@ export function InvoiceDetailPage() {
 									<p className='text-xs text-muted-foreground'>Hosting Package</p>
 								</div>
 								<span className='text-right text-muted-foreground tabular-nums'>
-									${(hostingAmt / months).toFixed(2)}
+									{formatMoney(hostingAmt / months)}
 								</span>
 								<span className='text-right text-muted-foreground tabular-nums'>{months}</span>
-								<span className='text-right font-medium tabular-nums'>{fmt(invoice.hosting_amount)}</span>
+								<span className='text-right font-medium tabular-nums'>{formatMoney(invoice.hosting_amount)}</span>
 							</div>
 						)}
 
@@ -302,17 +300,17 @@ export function InvoiceDetailPage() {
 									<p className='text-xs text-muted-foreground'>Support Package</p>
 								</div>
 								<span className='text-right text-muted-foreground tabular-nums'>
-									${(supportAmt / months).toFixed(2)}
+									{formatMoney(supportAmt / months)}
 								</span>
 								<span className='text-right text-muted-foreground tabular-nums'>{months}</span>
-								<span className='text-right font-medium tabular-nums'>{fmt(invoice.support_amount)}</span>
+								<span className='text-right font-medium tabular-nums'>{formatMoney(invoice.support_amount)}</span>
 							</div>
 						)}
 
 						{/* Total */}
 						<div className='grid grid-cols-[1fr_auto] gap-4 px-4 py-3 border-t bg-muted/30'>
 							<span className='font-semibold text-sm'>Total</span>
-							<span className='text-right text-lg font-bold tabular-nums'>${totalAmt.toFixed(2)}</span>
+							<span className='text-right text-lg font-bold tabular-nums'>{formatMoney(totalAmt)}</span>
 						</div>
 					</div>
 				</div>
