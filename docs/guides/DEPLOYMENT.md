@@ -164,7 +164,7 @@ docker compose logs -f forge
 docker compose ps
 
 # Check API health endpoint
-curl http://localhost:3000/health
+curl http://localhost:3001/health
 ```
 
 The API exposes a health endpoint at `GET /health` which returns

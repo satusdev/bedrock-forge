@@ -5,8 +5,11 @@
 ## System Overview
 
 Bedrock Forge is a self-hosted WordPress management dashboard. It connects to
-managed WordPress servers via SSH and performs all remote operations through a
-connection pool — no agent, no wp-cli, no sidecar process on managed servers.
+managed WordPress servers via SSH and performs remote operations through a
+connection pool. No permanent agent or sidecar process is installed on managed
+servers. WP-CLI is used for workflows where WordPress provides the safest
+interface, such as theme management, WordPress core updates, cache cleanup, and
+selected plugin actions.
 
 ```
                          ┌────────────────────────────────────────────┐
@@ -16,7 +19,7 @@ Browser ─────────────►  │  ┌──────�
          HTTP + WS       │  │  NestJS API      │  │  BullMQ Worker │  │
                          │  │  :3000           │  │  (no HTTP port)│  │
                          │  │                  │  │                │  │
-                         │  │  REST routes     │  │  13 processors │  │
+                         │  │  REST routes     │  │  Worker jobs   │  │
                          │  │  WebSocket GW    │  │  SSH pool      │  │
                          │  │  Rate limiting   │  │  rclone        │  │
                          │  │  JWT auth        │  │  whois         │  │
@@ -27,7 +30,7 @@ Browser ─────────────►  │  ┌──────�
                          ┌──────────▼──┐          ┌────────▼──────────┐
                          │  PostgreSQL  │          │  Redis 7          │
                          │  :5432       │          │  BullMQ queues    │
-                         │  35 tables   │          │  WS pub/sub       │
+                         │  Prisma data │          │  WS pub/sub       │
                          └─────────────┘          │  Rate limiting    │
                                                    └───────────────────┘
 
@@ -42,7 +45,7 @@ Browser ─────────────►  │  ┌──────�
                 ┌──────────────────────────────────────────┐
                 │  WordPress / Bedrock installations       │
                 │  No agent installed — SSH only           │
-                │  PHP scripts pushed on-demand            │
+                │  PHP/WP helpers pushed on-demand         │
                 └──────────────────────────────────────────┘
 ```
 
@@ -63,21 +66,22 @@ NestJS 11 REST server. Responsible for:
 **Does not** touch managed servers directly. All remote work is delegated to the
 Worker process via queues.
 
-30 feature modules, each following `controller → service → repository` — Prisma
-access is isolated to `*.repository.ts` files only.
+Feature modules follow `controller -> service -> repository`; Prisma access is
+isolated to `*.repository.ts` files only.
 
 ### Worker (`apps/worker`)
 
 NestJS standalone context running BullMQ consumers. Responsible for:
 
-- Executing all long-running operations: backups, syncs, plugin scans, monitor
-  checks, WHOIS lookups, provisioning, notifications, reports
+- Executing all long-running operations: backups, syncs, plugin/theme scans, WP
+  actions, security scans, Lighthouse audits, monitor checks, WHOIS lookups,
+  provisioning, notifications, and reports
 - Maintaining the SSH connection pool (max 15 concurrent per server)
 - Uploading backup archives to Google Drive via `rclone`
 - Publishing job progress events to Redis pub/sub (consumed by the API WebSocket
   gateway)
 
-13 processor modules. No HTTP port exposed.
+No public HTTP port is exposed by the worker.
 
 ### Web (`web` container)
 
@@ -100,14 +104,18 @@ All SSH operations use the `@bedrock-forge/remote-executor` package:
   `wp-config.php` or Bedrock `.env` files using regex patterns. **Never sources,
   evals, or shells out the credential file.**
 
-### PHP Scripts
+### Remote Helper Scripts
 
-Two minimal PHP scripts are maintained in `apps/worker/scripts/`:
+Remote helper scripts are maintained in `apps/worker/scripts/`:
 
-| Script            | Purpose                                                                                                |
-| ----------------- | ------------------------------------------------------------------------------------------------------ |
-| `backup.php`      | Creates a WordPress backup archive (full, DB-only, or files-only) and reports progress via stdout JSON |
-| `plugin-scan.php` | Reads the WordPress plugin registry and returns structured JSON (no wp-cli)                            |
+| Script                      | Purpose                                                                       |
+| --------------------------- | ----------------------------------------------------------------------------- |
+| `backup.php`                | Creates WordPress backup archives and reports progress.                       |
+| `plugin-scan.php`           | Reads plugin registry and Composer metadata.                                  |
+| `composer-manager.php`      | Adds, removes, updates, and changes constraints for Composer-managed plugins. |
+| `custom-plugin-manager.php` | Installs, updates, and removes custom GitHub plugins/themes.                  |
+| `wp-actions.php`            | Runs selected WP-CLI backed maintenance, logs, cleanup, and core workflows.   |
+| `wp-users.php`              | Reads WordPress users for environment inspection.                             |
 
 Scripts are pushed to a temp path on the remote server, executed, and then
 cleaned up. They are versioned in `execution_scripts` table so cached versions
@@ -117,7 +125,9 @@ are not re-pushed unnecessarily.
 
 ## Database Schema
 
-35 models across 7 domains. All migrations in `prisma/migrations/`.
+The Prisma schema is grouped across identity, infrastructure, operations,
+security, monitoring, billing, notifications, and system domains. All
+migrations live in `prisma/migrations/`.
 
 ### Identity & Access (4 models)
 
@@ -205,7 +215,7 @@ Redis pub/sub.
 | `custom-plugins` | `custom-plugin:manage`                                                                                                                  | 1           | 3       | 10 min  |
 | `theme-scans`    | `theme-scan:run`, `theme:manage`                                                                                                        | 2           | 3       | 5 min   |
 | `sync`           | `sync:clone`, `sync:push`                                                                                                               | 1           | 3       | 30 min  |
-| `monitors`       | `monitor:check` (repeatable)                                                                                                            | 3           | 2       | 30 s    |
+| `monitors`       | `monitor:check` (repeatable), `lighthouse:audit`                                                                                        | 3           | 2       | varies  |
 | `domains`        | `domain:whois`, `domain:ssl-check`                                                                                                      | 2           | 3       | 30 s    |
 | `projects`       | `project:create-bedrock`                                                                                                                | 1           | 2       | 20 min  |
 | `notifications`  | `notification:send`                                                                                                                     | 3           | 3       | 30 s    |
@@ -213,17 +223,19 @@ Redis pub/sub.
 | `wp-actions`     | `wp:fix-action`, `wp:debug-toggle`, `wp:debug-revert`, `wp:logs-fetch`, `wp:cron-list`, `wp:cleanup`, `wp:core-check`, `wp:core-update` | 2           | 3       | 5 min   |
 | `system-backups` | `system-backup:create`                                                                                                                  | 1           | 3       | 30 min  |
 
-All queues: exponential backoff (base 1 s), dead-letter queue (`<name>-dlq`),
-`removeOnComplete: 1000`, `removeOnFail: 5000`.
+Default jobs use exponential backoff with retained completed/failed job history
+(`removeOnComplete: 1000`, `removeOnFail: 5000`). Some scheduled/internal jobs
+override those retention counts.
 
 Job payloads are validated at enqueue time with Zod schemas (defined in
 `@bedrock-forge/shared`).
 
-### Dead-Letter Queues
+### Failed Jobs
 
-Failed jobs that exhaust all retries are moved to `<queue>-dlq`. The Activity
-page shows dead-letter jobs with their last error. Manual re-enqueue is planned
-for a future release.
+BullMQ failed jobs remain accessible through the original queue's failed job
+set. The Activity page and job execution views expose failed/dead-letter status
+from Forge's `job_executions` records where that status is tracked. Separate
+`<queue>-dlq` queues are not currently implemented.
 
 ---
 

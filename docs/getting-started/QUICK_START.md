@@ -1,7 +1,6 @@
 # Quick Start
 
-Get Bedrock Forge running and manage your first WordPress site in under 5
-minutes.
+Get Bedrock Forge running and connect your first WordPress site.
 
 ---
 
@@ -9,7 +8,7 @@ minutes.
 
 - Docker Engine 24+ and Docker Compose v2+
 - `curl` installed (used by the health check in `install.sh`)
-- A Linux server you can SSH into (for adding your first managed site)
+- A Linux server you can SSH into
 - 2 GB RAM minimum on the machine running Bedrock Forge
 
 ---
@@ -38,16 +37,16 @@ cd bedrock-forge
 
 ## Step 2 — Open the Dashboard
 
-Navigate to **http://localhost:3000**
+Navigate to **http://localhost:3002**
 
 Log in with the default admin credentials:
 
-| Field    | Value                                |
-| -------- | ------------------------------------ |
-| Email    | `admin@bedrockforge.local`           |
-| Password | printed at the end of `./install.sh` |
+| Field    | Value                      |
+| -------- | -------------------------- |
+| Email    | `admin@bedrockforge.local` |
+| Password | `admin123`                 |
 
-> **Change this password immediately** via Settings → Users after your first
+> **Change this password immediately** via Settings -> Users after your first
 > login.
 
 ---
@@ -86,7 +85,7 @@ port, and key.
 5. Click **Save**
 
 Bedrock Forge will attempt to read WordPress DB credentials from `wp-config.php`
-or `.env` in the root path.
+or Bedrock `.env` in the root path.
 
 ---
 
@@ -106,20 +105,23 @@ Settings, it is also uploaded automatically.
 
 ---
 
-## Step 6 — Scan Plugins
+## Step 6 — Scan Plugins and Themes
 
-1. Open the project → **Plugins** tab
+1. Open the project -> **Plugins** tab
 2. Click **Scan Plugins**
 
 A minimal PHP script is pushed to the server and executed. Results appear within
 seconds showing all installed plugins with name, version, and active/inactive
 status.
 
+Then open **Themes** and run a theme scan. Theme actions use WP-CLI on the
+remote environment.
+
 ---
 
 ## Step 7 — Set Up Uptime Monitoring
 
-1. Click **Monitors** in the left sidebar → **Add Monitor**
+1. Click **Monitors** in the left sidebar -> **Add Monitor**
 2. Select the environment you want to monitor
 3. Set the **interval** (default: 10 minutes)
 4. Click **Enable**
@@ -131,16 +133,21 @@ and uptime percentage on the Monitor detail page.
 
 ## What's Next
 
-- Configure **backup schedules** (daily/weekly/monthly) on the Environment
-  detail page
-- Add **Google Drive** credentials in **Settings** → **Storage** for off-site
-  backup uploads
-- Add **Slack notifications** in **Settings** → **Notifications** to get alerted
-  on backup failures and site outages
+- Configure **backup schedules** from the project backup workflow.
+- Add **Google Drive** credentials in **Settings -> Integrations** for off-site
+  backup uploads.
+- Add **Slack notifications** in **Settings -> Integrations** to get alerted on
+  failures and outages.
+- Configure **Settings -> Billing** if you need EUR, LYD, GBP, or another
+  display currency.
+- Use **Settings -> Plugins** for the custom GitHub plugin catalog and
+  cross-environment installed plugin inventory.
+- Run **Security** scans and schedules for servers and WordPress environments.
+- Run **Lighthouse** audits to track performance scores.
 - Add more servers, projects, and clients
 - Invite team members via **Users & Roles** (admin only)
 
 ---
 
-See [INSTALLATION.md](INSTALLATION.md) for advanced setup options, development
-mode, and environment variable reference.
+See [INSTALLATION.md](INSTALLATION.md) for setup details and
+[../guides/USAGE.md](../guides/USAGE.md) for the full operator guide.

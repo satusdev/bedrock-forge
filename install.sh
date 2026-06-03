@@ -71,7 +71,7 @@ docker compose exec forge node prisma/seed.js
 
 echo ""
 echo "Setup complete!"
-echo "   → http://localhost:3000"
+echo "   → http://localhost:3002"
 echo "   Admin: admin@bedrockforge.local / admin123"
 echo ""
 echo "   Logs:    docker compose logs -f forge"

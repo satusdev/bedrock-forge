@@ -1,9 +1,9 @@
-# Bedrock Forge 2.0
+# Bedrock Forge Project Reference
 
 ## Architecture Overview
 
-Self-hosted WordPress management dashboard. Replaces ManageWP/MainWP. Deploy in
-one command.
+Self-hosted WordPress operations dashboard for managing WordPress and Bedrock
+sites over SSH.
 
 **Core decisions:**
 
@@ -15,8 +15,9 @@ one command.
   calls from controllers)
 - Global SSH connection pool via `ssh2` (max 15 concurrent per server). No
   agent, no Go binary.
-- Zero `wp-cli`. Two tiny PHP scripts pushed on demand: `backup.php` +
-  `plugin-scan.php`
+- No permanent remote agent. Helper scripts are pushed on demand, and WP-CLI is
+  used only for workflows that need WordPress-native operations such as
+  theme/core actions, cache cleanup, and selected plugin workflows.
 - Zero `.env` sourcing. Credential extraction is regex-only via
   `CredentialParserService`.
 - AES-256-GCM encryption for all credentials at rest
@@ -189,7 +190,7 @@ src/modules/<feature>/
 
 ---
 
-## Domain Model (26 Tables)
+## Domain Model
 
 ### Identity & Access
 
@@ -256,17 +257,18 @@ src/modules/<feature>/
 | `backups`        | `create`, `restore`                                                      | 3/server    | 3       | 30min   |
 | `plugin-scans`   | `run`                                                                    | 5           | 3       | 5min    |
 | `sync`           | `clone`, `push`                                                          | 2/server    | 3       | 15min   |
-| `monitors`       | `check`                                                                  | 10          | 2       | 30s     |
+| `monitors`       | `monitor:check`, `lighthouse:audit`                                      | varies      | varies  | varies  |
 | `domains`        | `whois`                                                                  | 10          | 3       | 30s     |
 | `projects`       | `create-bedrock`                                                         | 2/server    | 2       | 20min   |
 | `notifications`  | `send`                                                                   | 20          | 3       | 30s     |
-| `reports`        | `weekly-report`, `security:report-generate`                              | 1           | 3       | 5min    |
+| `reports`        | `report:generate`, `security:report-generate`                            | 1           | 3       | varies  |
 | `security`       | `server-scan`, `environment-scan`, `server-harden`, `environment-harden` | 4           | 3       | 15min   |
 | `system-backups` | `system-backup:create`, `system-backup:scheduled`                        | 1           | 2       | 20min   |
 | `theme-scans`    | `theme-scan:run`, `theme-scan:manage`                                    | 3           | 3       | 10min   |
 
-All queues: exponential backoff (base 1s), dead-letter queue (`<name>-dlq`),
-`removeOnComplete: 1000`, `removeOnFail: 5000`.
+Default jobs use exponential backoff with retained completed/failed job history.
+Separate `<queue>-dlq` queues are not currently implemented; failed jobs remain
+available through BullMQ failed job history and Forge `job_executions` records.
 
 ---
 
@@ -333,8 +335,8 @@ icon-only on md breakpoint.
 uptime, server count) + quick action buttons + recent job activity feed (live
 via WebSocket).
 
-**Project detail:** Tabbed view — Environments | Backups | Plugins | Sync |
-Restore.
+**Project detail:** Tabbed view for Environments, Backups, Plugins, Sync,
+Restore, Tools, Drift, Themes, and WP Core.
 
 **Live updates:** Backup progress bars, toast notifications for job
 completion/failure, activity feed — all via WebSocket subscription with TanStack

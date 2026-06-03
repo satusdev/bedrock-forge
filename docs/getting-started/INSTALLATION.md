@@ -52,16 +52,16 @@ cd bedrock-forge
    - `POSTGRES_PASSWORD` and `REDIS_PASSWORD`
 3. Runs `docker compose build`
 4. Runs `docker compose up -d`
-5. Polls `http://localhost:3000/health` until the API is ready (up to 90
+5. Polls `http://localhost:3001/health` until the API is ready (up to 90
    seconds)
 6. Seeds the database: roles, admin user, sample tags, starter packages
 
 After completion the terminal prints:
 
 ```
-URL:      http://localhost:3000
+URL:      http://localhost:3002
 Email:    admin@bedrockforge.local
-Password: <printed during install>
+Password: admin123
 ```
 
 **Change the admin password immediately after first login.**
@@ -129,6 +129,7 @@ The easiest way to develop locally is using the included dev launcher, which han
 ```
 
 This starts:
+
 - **API** on `:3000` (NestJS with hot reload)
 - **Worker** (NestJS standalone, hot reload)
 - **Web** on `:5173` (Vite dev server, proxies `/api` → `:3000` and `/ws` → `:3000`)
@@ -214,13 +215,15 @@ Per-environment overrides are available in the environment settings page.
 
 | Service                   | Internal Port | External Port (default) |
 | ------------------------- | ------------- | ----------------------- |
-| API (+ serves web SPA)    | 3000          | 3001                    |
+| API                       | 3000          | 3001                    |
 | Web (nginx reverse proxy) | 80            | 3002                    |
 | PostgreSQL                | 5432          | not exposed             |
 | Redis                     | 6379          | not exposed             |
 
 In production, put a reverse proxy (nginx, Caddy, HAProxy) in front of port
-`3002` and handle TLS termination there.
+`3002` and handle TLS termination there. The API is reachable through the web
+proxy at `/api`; direct port `3001` is mainly for health checks and local
+operations.
 
 ---
 

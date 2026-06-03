@@ -1,6 +1,6 @@
 <div align="center">
   <h1>Bedrock Forge</h1>
-  <p>Self-hosted WordPress infrastructure management platform — CyberPanel-centric, SSH-native, queue-driven</p>
+  <p>Self-hosted WordPress operations dashboard for teams managing Bedrock and standard WordPress sites over SSH.</p>
 </div>
 
 <div align="center">
@@ -17,271 +17,96 @@
 
 ---
 
-## What Is Bedrock Forge?
+## What It Is
 
-Bedrock Forge is a **self-hosted WordPress infrastructure management platform**,
-designed as a single-operator or small-team alternative to ManageWP/MainWP. It
-manages multiple WordPress/Bedrock environments across multiple Linux servers
-through SSH — no agent installed on managed servers. Core backup, sync, and
-plugin inventory workflows do not require wp-cli; theme and WordPress core
-actions use wp-cli when those actions are requested.
+Bedrock Forge is a single-tenant, self-hosted management platform for WordPress
+infrastructure. It is built for operators who manage multiple client sites,
+staging/production environments, backups, plugin updates, security checks,
+performance audits, and recurring maintenance from one dashboard.
 
-**Built for CyberPanel-hosted Bedrock stacks.** Standard WordPress
-(`wp-config.php`) is supported for backups, plugin scanning, and sync.
-CyberPanel-specific features (auto-login, site provisioning, database creation)
-require CyberPanel.
+It connects to managed servers over SSH. No permanent agent is installed on the
+remote server. Worker jobs push small helper scripts when needed, run the
+operation, stream progress back to the UI, and clean up after themselves.
 
-**This is v0.2.x — solidly functional.** Core infrastructure, RBAC, operational
-workflows, and UI are all complete. Several advanced/edge-case features remain
-roadmap only. See the [Feature Status](#feature-status) table for the precise
-picture.
+The app is especially useful for CyberPanel-hosted Bedrock projects, but it also
+supports standard WordPress layouts for many operations.
 
----
+## What It Can Do Today
 
-## What It Is NOT (Yet)
+| Area                 | Current capability                                                                                                                                                                                           |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Servers              | Store encrypted SSH credentials, test connectivity, inspect server health, use CyberPanel helpers where configured.                                                                                          |
+| Clients and projects | Track clients, projects, environments, domains, tags, packages, invoices, and activity.                                                                                                                      |
+| Environments         | Manage production/staging/dev environments, root paths, backup paths, protected DB tables, and WP DB credential discovery.                                                                                   |
+| Backups              | Create full, database-only, and files-only backups; schedule backups; upload to Google Drive via rclone; restore to the same environment.                                                                    |
+| Sync and restore     | Clone/push database and files between environments with safety backups, URL replacement, cache cleanup, and protected table support.                                                                         |
+| Plugins              | Scan installed plugins, view Composer/manual/GitHub source, activate/deactivate, install, update, remove, change Composer constraints, schedule Composer updates, and manage a custom GitHub plugin catalog. |
+| Themes               | Scan, install, update, activate, and delete themes through WP-CLI worker jobs.                                                                                                                               |
+| WordPress core       | Check current core version and run core updates through WP-CLI worker jobs.                                                                                                                                  |
+| Tools                | Run cleanup, debug toggles, WP cron inspection, log fetches, and other environment operations.                                                                                                               |
+| Security             | Run server and WordPress environment scans, schedule scans, review findings, acknowledge findings, apply hardening actions, and configure SSH/file-change alerts.                                            |
+| Monitoring           | HTTP uptime checks, SSL expiry checks, DNS checks, keyword/content checks, response history, incident logs, and notifications.                                                                               |
+| Lighthouse           | Queue and review Lighthouse performance audits for environments, including mobile/desktop strategy history.                                                                                                  |
+| Domains              | Track domain WHOIS expiry and SSL expiry.                                                                                                                                                                    |
+| Billing              | Define hosting/support packages, generate invoices, track invoice status, and configure display currency/locale.                                                                                             |
+| Notifications        | Slack delivery, in-app notification records, notification logs, and weekly reports.                                                                                                                          |
+| Platform ops         | Audit logs, job execution logs, system backups, command palette, dark mode, RBAC, and a cross-project problems feed.                                                                                         |
 
-Before adopting, understand the current scope boundaries:
+## What It Does Not Do Yet
 
-- **Not multi-tenant.** One installation serves one team. There is no per-team
-  data isolation or workspace separation.
-- **Not a payment processor.** Billing is invoice tracking only — no Stripe, no
-  payment gateway.
-- **No 2FA/MFA.** Authentication is JWT only. TOTP is not implemented.
-- **No email notifications.** Alerts are Slack-only. No SMTP integration exists.
-- **Plugin auto-updates are Bedrock/Composer-only.** Scheduled updates exist for
-  Composer-managed Bedrock environments, with a pre-flight DB backup when Google
-  Drive is configured.
-- **No incremental backups.** All backups are full-snapshot operations (full,
-  DB-only, or files-only).
-- **No cross-server restore.** Restore runs only within the same environment.
-  Restoring a backup to a different server is not implemented.
-- **Google Drive is the only remote backup target.** S3, SFTP, and other rclone
-  targets are not wired into the UI.
-- **Advanced monitoring is HTTP-centric.** SSL expiry, DNS resolution, and
-  keyword/content checks exist, but TCP, ping, header matching, and synthetic
-  browser checks are not implemented.
-- **Reports are Slack-only.** Weekly summary reports are delivered to a Slack
-  channel. No email, PDF, or in-app export.
+These are current boundaries, not bugs:
 
----
+- No multi-tenant workspace isolation. One Forge install is for one team.
+- No payment processing. Billing tracks invoices only; it does not charge cards
+  or integrate with Stripe/PayPal.
+- No invoice PDF export.
+- No 2FA/MFA or SSO.
+- No email, Discord, Telegram, or generic webhook notification delivery.
+- No incremental backups. Backups are full snapshots by selected scope.
+- No cross-server restore from an existing backup record. Restores target the
+  originating environment.
+- Google Drive is the only remote backup target wired into the UI.
+- CyberPanel automation is CyberPanel-specific. cPanel, Plesk, DirectAdmin,
+  CloudPanel, and RunCloud are not integrated.
+- WordPress Multisite is not documented or tested.
+- SSH host key trust/known-host verification is not implemented yet.
+- External vulnerability-feed sync such as WPScan/CVE ingestion is not wired
+  as a production feed.
+- Lighthouse audits require the worker host to have the needed browser/audit
+  runtime available in the deployed image.
 
-## Feature Status
+## How It Works
 
-> Status definitions: **Implemented** = backend + frontend complete and tested.
-> **Partial** = backend exists, frontend incomplete or feature has gaps. **Not
-> Implemented** = planned, stubbed, or roadmap only.
+Bedrock Forge runs as a Docker Compose stack:
 
-| Feature                                 | Status             | Notes                                                                                                  |
-| --------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------ |
-| Server Management                       | ✅ Implemented     | SSH key vault (AES-256-GCM), CyberPanel auto-login, server scanning; admin-only create/edit            |
-| Project & Client Management             | ✅ Implemented     | Client -> Project -> Environment hierarchy, tags, bulk import; admin-only create/edit clients          |
-| Environment Management                  | ✅ Implemented     | Multi-env per project, DB credential vault, env scanning, protected tables, environment tags           |
-| Backup — Create & Schedule              | ✅ Implemented     | Full / DB-only / files-only; daily/weekly/monthly schedules; Google Drive upload via rclone            |
-| Backup — Retention Policies             | ✅ Implemented     | Count-based and age-based pruning on schedule configuration                                            |
-| Backup — Restore (same environment)     | ✅ Implemented     | Restore to source environment with real-time progress streaming                                        |
-| Backup — Cross-server Restore           | ❌ Not Implemented | Restore is scoped to the originating environment only                                                  |
-| Backup — Incremental                    | ❌ Not Implemented | All backups are full snapshots; block-level incrementals are roadmap                                   |
-| Backup — S3 / SFTP targets              | ❌ Not Implemented | Only Google Drive is wired; other rclone-compatible targets are roadmap                                |
-| System Backups                          | ✅ Implemented     | Forge self-backup records, manual create, schedules, and downloads                                     |
-| Plugin Scanning                         | ✅ Implemented     | On-demand scan via PHP script; returns structured inventory and Composer metadata                      |
-| Plugin — Enable / Disable / Delete      | ✅ Implemented     | Direct management from plugin detail page                                                              |
-| Plugin — Install / Remove / Update      | ✅ Implemented     | Composer-based add/remove/update, update-all, and constraint changes for Bedrock environments          |
-| Plugin — Scheduled Auto-updates         | ✅ Implemented     | Repeatable scheduled Composer update jobs with DB backup pre-flight and post-update scan               |
-| Plugin — Vulnerability Scanning         | ⚠️ Partial         | Local/shared vulnerability matching exists; external CVE/WPScan feed integration remains roadmap       |
-| Custom Plugin Catalog                   | ✅ Implemented     | GitHub-backed custom plugin catalog and per-environment install/remove workflow                        |
-| Theme Management                        | ✅ Implemented     | Theme scan, install, activate, and delete via wp-cli-backed worker jobs                                |
-| WordPress Core Updates                  | ✅ Implemented     | Core version check and update actions via wp-cli-backed worker jobs                                    |
-| Environment Sync                        | ✅ Implemented     | Files via rsync, DB via mysqldump; dry-run mode; conflict detection; safety backup before clone        |
-| Config Drift Detection                  | ✅ Implemented     | Compares active `.env` against last committed config; flags mismatches in project detail               |
-| Uptime Monitoring — HTTP checks         | ✅ Implemented     | Configurable interval, response time, uptime %, down/up/degraded logging; incident log with pagination |
-| Uptime Monitoring — SSL / DNS / Content | ✅ Implemented     | Certificate expiry, DNS resolution, and keyword/content checks with monitor logs and notifications     |
-| Domain WHOIS                            | ✅ Implemented     | Expiry tracking, cached WHOIS data, expiry alerts; SSL standalone check                                |
-| Bedrock Provisioning (CyberPanel)       | ✅ Implemented     | End-to-end queue job: CyberPanel site + DB creation, Bedrock install, environment clone                |
-| Invoices & Billing                      | ✅ Implemented     | Yearly invoice generation, draft/sent/paid/overdue/cancelled statuses, bulk operations                 |
-| Invoice PDF Export                      | ❌ Not Implemented | Invoices are data records only; no PDF generation                                                      |
-| Payment Processing                      | ❌ Not Implemented | No payment gateway integration                                                                         |
-| Slack Notifications                     | ✅ Implemented     | Per-event channel subscriptions, delivery logs with pagination, error capture                          |
-| Notification Inbox                      | ✅ Implemented     | User notification records, unread count, mark-read, and read-all endpoints                             |
-| Email / Discord / Webhook Notifications | ❌ Not Implemented | Roadmap only; Discord/webhook fields are not production delivery channels yet                          |
-| Weekly Reports                          | ✅ Implemented     | Generated by BullMQ `report:generate` job, delivered to Slack channel                                  |
-| Security Center                         | ✅ Implemented     | Server/env scans, schedules, findings, acknowledgements, reports, hardening jobs, SSH/file alerts      |
-| Audit & Activity Logs                   | ✅ Implemented     | User action audit trail + per-job execution log (step-by-step, JSONB trace); both paginated            |
-| Problems / Attention Feed               | ✅ Implemented     | Cross-project attention feed: expiring domains, down monitors, outdated plugins, config drift          |
-| Dashboard                               | ✅ Implemented     | Stats summary, live job feed via WebSocket, WP quick actions                                           |
-| Auth — JWT + Refresh Rotation           | ✅ Implemented     | 4-hour access tokens, 30-day refresh sessions via httpOnly cookies; server-side hashes rotate on use   |
-| Auth — RBAC (4-tier)                    | ✅ Implemented     | `admin` > `manager` > `maintainer` > `client`; API guards + frontend navigation; per-role UI gating    |
-| Auth — 2FA / MFA                        | ❌ Not Implemented | No TOTP or MFA. Roadmap.                                                                               |
-| Auth — SSO / Social Login               | ❌ Not Implemented | Not planned                                                                                            |
-| Dark Mode                               | ✅ Implemented     | Per-session toggle in sidebar; preference stored in UI store (Zustand)                                 |
-| Package Management                      | ✅ Implemented     | Hosting and support package definitions linked to projects for billing; both tabs paginated            |
-| Command Palette                         | ✅ Implemented     | Global search (Cmd+K / Ctrl+K): pages, clients, servers, projects; role-filtered results               |
-| Multi-tenant Workspaces                 | ❌ Not Implemented | Single-tenant per installation                                                                         |
+- `web`: nginx serving the React/Vite dashboard and proxying `/api` and `/ws`
+- `forge`: NestJS API plus BullMQ worker runtime
+- `postgres`: application database
+- `redis`: queues, pub/sub, rate limiting, and realtime job updates
 
----
+Long-running operations are queued. The API validates and enqueues jobs; the
+worker executes remote SSH work and writes step-by-step job logs. The frontend
+subscribes to WebSocket updates and polls job execution logs where needed.
 
-## Recently Completed
+Remote server access is SSH-native:
 
-These improvements are present in the current codebase and are now reflected in
-the feature matrix above:
-
-- **Security center expansion:** scheduled server/environment scans, aggregated
-  findings, acknowledgement workflow, security reports, hardening jobs,
-  attack-watch polling, and per-server SSH login/file-change alert settings.
-- **Monitoring expansion:** SSL certificate expiry tracking, DNS resolution
-  checks, keyword/content matching, richer monitor logs, and alert events for
-  SSL/DNS/keyword failures.
-- **WordPress operations:** theme scan/install/activate/delete and WordPress
-  core check/update jobs, both exposed in the project detail workflow.
-- **Plugin operations:** Composer update-all scheduling with pre-flight DB
-  backup support and post-update plugin scan refresh.
-- **Platform operations:** Forge system backup scheduling, notification inbox,
-  custom plugin catalog management, environment tags, and security finding
-  acknowledgements.
-
----
-
-## Architecture
-
-Four Docker Compose services. Minimal footprint — runs on a 4 GB RAM VPS.
-
-```
-┌───────────────────────────────────────────────────────────┐
-│  forge (single container)                                 │
-│  ├─ NestJS 11 API  :3000                                  │
-│  │   REST routes, JWT auth, rate limiting, WebSocket GW   │
-│  └─ BullMQ Worker (no HTTP port)                          │
-│      ├─ 14 processor modules                              │
-│      ├─ SSH connection pool (ssh2, max 15/server)         │
-│      ├─ rclone → Google Drive                             │
-│      └─ whois (system command)                            │
-└────────┬──────────────────────────────────────────────────┘
-         │
-    ┌────▼──────┐   ┌──────────────────────────┐
-    │ postgres  │   │ redis 7                  │
-    │ :5432     │   │ BullMQ queues            │
-    │ 40 models │   │ WebSocket pub/sub        │
-    └───────────┘   │ Rate limiting            │
-                    └──────────────────────────┘
-
-┌──────────────────────────────────┐
-│ web (nginx container)            │
-│ :80 → React SPA static files     │
-│ /api/* → proxy → forge:3000      │
-│ /ws    → upgrade → forge:3000    │
-└──────────────────────────────────┘
-
-  Managed servers (any Linux host with SSH access)
-┌──────────────────────────────────────────────────┐
-│ WordPress / Bedrock sites                        │
-│ No agent installed — SSH only                    │
-│ Helper scripts pushed on-demand, then cleaned    │
-│ wp-cli used only for theme/core actions          │
-└──────────────────────────────────────────────────┘
-```
-
-### Remote Execution Model
-
-All SSH operations go through `@bedrock-forge/remote-executor`:
-
-- **`SshPoolManager`** — Connection pool keyed by server ID. Max 15 concurrent
-  connections per server.
-- **`RemoteExecutorService`** — Executes commands, pushes files (SFTP), pulls
-  files. Stall detection via 5-minute timeout + heartbeat.
-- **`CredentialParserService`** — Extracts WordPress DB credentials from
-  `wp-config.php` (standard WP) or `.env` (Bedrock) using regex only. Files are
-  never sourced, eval'd, or passed to a shell.
-
-### Queue System
-
-Every long-running operation is a BullMQ job. Controllers enqueue; the worker
-executes. Real-time progress streams to the frontend via WebSocket + Redis
-pub/sub.
-
-| Queue            | Job Types                                                                                                                    | Retries | Timeout |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------- | ------- |
-| `backups`        | `backup:create`, `backup:restore`, `backup:scheduled`, `backup:delete-file`                                                  | 3       | 30 min  |
-| `plugin-scans`   | `plugin-scan:run`, `plugin:manage`                                                                                           | 3       | 5 min   |
-| `plugin-updates` | `plugin:scheduled-update`                                                                                                    | 3       | 10 min  |
-| `custom-plugins` | `custom-plugin:manage`                                                                                                       | 3       | 10 min  |
-| `theme-scans`    | `theme-scan:run`, `theme:manage`                                                                                             | 3       | 5 min   |
-| `sync`           | `sync:clone`, `sync:push`                                                                                                    | 3       | 30 min  |
-| `monitors`       | `monitor:check` (repeatable)                                                                                                 | 2       | 30 s    |
-| `domains`        | `domain:whois`, `domain:ssl-check`                                                                                           | 3       | 30 s    |
-| `projects`       | `project:create-bedrock`                                                                                                     | 2       | 20 min  |
-| `notifications`  | `notification:send`                                                                                                          | 3       | 30 s    |
-| `reports`        | `report:generate`                                                                                                            | 3       | 2 min   |
-| `wp-actions`     | `wp:fix-action`, `wp:debug-toggle`, `wp:debug-revert`, `wp:logs-fetch`, `wp:cron-list`, `wp:cleanup`, `wp:core-check/update` | 3       | 5 min   |
-| `system-backups` | `system-backup:create`, `system-backup:scheduled`                                                                            | 3       | 30 min  |
-| `security`       | `security:server-scan`, `security:environment-scan`, scheduled scans, reports, hardening, attack watch, alert polling        | 3       | varies  |
-
-All queues use exponential backoff (base 1 s by default; long-running backup
-and sync jobs use a 5-minute initial backoff). Failed jobs are retained in
-BullMQ for inspection; separate dead-letter queue consumers are not currently
-implemented.
-
----
-
-## Tech Stack
-
-| Layer            | Technology                                                            |
-| ---------------- | --------------------------------------------------------------------- |
-| Runtime          | Node.js 22                                                            |
-| Backend          | NestJS 11, TypeScript 5, REST API                                     |
-| ORM              | Prisma 7                                                              |
-| Database         | PostgreSQL 16 (40 Prisma models, 10 enums)                            |
-| Queue            | BullMQ 5 + Redis 7                                                    |
-| Remote execution | `ssh2` connection pool (no agent; wp-cli only for theme/core actions) |
-| Frontend         | React 19 + Vite 5                                                     |
-| UI components    | shadcn/ui + Tailwind CSS 4                                            |
-| Server state     | TanStack Query v5                                                     |
-| Client state     | Zustand (UI/session)                                                  |
-| Forms            | React Hook Form + Zod                                                 |
-| Real-time        | NestJS WebSocket Gateway + Redis pub/sub                              |
-| Monorepo         | pnpm workspaces + Turborepo                                           |
-| Containers       | Docker Compose                                                        |
-
----
-
-## Security
-
-- **Credential encryption:** AES-256-GCM at rest. SSH keys, CyberPanel
-  credentials, WordPress DB credentials, and Slack tokens are encrypted.
-  Decrypted in memory only during use; never returned in API responses.
-- **Credential parsing:** `wp-config.php` / `.env` values extracted via regex
-  only — never sourced, never eval'd, never passed to a shell.
-- **JWT:** 4-hour access tokens + 30-day refresh sessions by default. Refresh
-  tokens are delivered only as scoped `httpOnly` cookies, stored as SHA-256
-  hashes server-side, and rotated on every refresh.
-- **Rate limiting:** 5 login attempts per 15 minutes (Redis-backed); API
-  endpoints rate-limited at 30 req/s with burst 60 at the nginx layer.
-- **RBAC:** 4-tier role hierarchy: `admin` > `manager` > `maintainer` >
-  `client`. Guards on both API routes and frontend navigation. `admin` is
-  required for all create/update operations on servers, clients, users, and
-  settings. `manager` can view all data and trigger operational actions
-  (backups, scans, monitors). `maintainer` can view all operational data and
-  change their own password. `client` is a soft permission tier — no
-  database-level row isolation per client user. User roles are re-validated from
-  the server on every app mount to prevent stale localStorage grants.
-- **Input validation:** Global `ValidationPipe` with `whitelist: true` and
-  `forbidNonWhitelisted: true`. All inputs validated via `class-validator` DTOs.
-  `root_path` enforces a strict allowlist regex to prevent path traversal.
-- **Encrypted settings:** Sensitive `AppSetting` values (SSH keys, GitHub
-  tokens, Slack tokens) are AES-256-GCM encrypted at write time via
-  `SettingsService` and transparently decrypted on read.
-- **Audit IP accuracy:** Nginx passes `$remote_addr` as `X-Real-IP`; the audit
-  interceptor reads that header only — `X-Forwarded-For` is ignored to prevent
-  client IP spoofing in logs.
-- **HTTP headers:** `server_tokens off`, Helmet, custom CSP, `X-Frame-Options`,
-  `X-Content-Type-Options` — all headers applied consistently across static
-  assets and API proxy locations.
-- **Remote execution:** All SSH operations route through `RemoteExecutorService`
-  — no `child_process.exec`, no shell spawning, no `eval`.
-
----
+- Credentials are encrypted at rest with AES-256-GCM.
+- WordPress DB credentials are parsed from `wp-config.php` or Bedrock `.env`
+  using regex-based parsing, not shell sourcing.
+- Helper PHP scripts are pushed on demand for backup, scan, Composer, custom
+  plugin, WP users, and WP action workflows.
+- WP-CLI is used for actions where WordPress itself provides the safest API,
+  such as theme management, core updates, cache cleanup, and selected plugin
+  operations.
 
 ## Quick Start
 
-**Prerequisites:** Docker, Docker Compose, `curl`
+Prerequisites:
+
+- Docker Engine 24+
+- Docker Compose v2+
+- `curl`
+- `openssl`
 
 ```bash
 git clone https://github.com/satusdev/bedrock-forge.git
@@ -289,252 +114,95 @@ cd bedrock-forge
 ./install.sh
 ```
 
-`install.sh` auto-generates all secrets, builds the image, starts all services,
-runs migrations, and seeds the database (roles, admin user, default tags and
-packages). No manual `.env` editing required on first run.
+Production Docker ports:
 
-Open **http://localhost:3000**. Admin credentials are printed at the end of
-install output.
+| URL                            | Purpose          |
+| ------------------------------ | ---------------- |
+| `http://localhost:3002`        | Web dashboard    |
+| `http://localhost:3001/health` | API health check |
 
-> **Change the default admin password immediately after first login.**
+Default seeded admin:
 
-See [docs/getting-started/QUICK_START.md](docs/getting-started/QUICK_START.md)
-for a walkthrough of adding your first server, project, backup, and monitor.
+| Field    | Value                      |
+| -------- | -------------------------- |
+| Email    | `admin@bedrockforge.local` |
+| Password | `admin123`                 |
 
----
+Change the admin password immediately after first login.
 
-## Development Setup
+## Common Workflows
 
-The easiest way to develop locally is using the included dev launcher, which handles secret generation and starts a hot-reloading full-stack environment in Docker:
+1. Add a server in **Servers** with SSH host, user, port, and private key.
+2. Add a client and project in **Clients** or **Projects**.
+3. Add one or more environments under the project with URL, root path, backup
+   path, and server.
+4. Run a backup from **Project -> Backups**.
+5. Run a plugin scan from **Project -> Plugins**.
+6. Configure monitoring from **Monitors** and security schedules from
+   **Security**.
+7. Use **Activity** or the project execution log panel when a queued job needs
+   inspection.
 
-```bash
-./dev.sh
-```
-
-This starts:
-
-- **API** on `:3000` (hot-reloading)
-- **Worker** (hot-reloading)
-- **Web** on `:5173` (hot-reloading, proxies `/api` → `:3000`)
-- **Postgres & Redis**
-
-Alternatively, for manual setup without Docker containers for the app services:
-
-```bash
-# Prerequisites: Node.js 22, pnpm 9+
-docker compose -f docker-compose.dev.yml up -d postgres redis
-
-pnpm install
-cp .env.example .env
-# Fill in: DATABASE_URL, REDIS_URL, ENCRYPTION_KEY, JWT_SECRET
-
-pnpm db:generate
-pnpm db:migrate
-pnpm dev
-```
-
-See [docs/guides/DEVELOPMENT.md](docs/guides/DEVELOPMENT.md) for module
-conventions, testing, and code standards.
-
----
-
-## Docker Operations
-
-| Script         | npm alias            | What it does                                                                |
-| -------------- | -------------------- | --------------------------------------------------------------------------- |
-| `./install.sh` | `pnpm docker:setup`  | First-time: build → start → migrate → seed                                  |
-| `./update.sh`  | `pnpm docker:update` | Rebuild image, rolling restart, auto-migrate (data preserved)               |
-| `./reset.sh`   | `pnpm docker:reset`  | **Destructive.** Wipe all volumes, regenerate secrets, rebuild from scratch |
-
-```bash
-pnpm docker:seed          # Seed database (idempotent)
-pnpm docker:migrate       # Apply pending migrations without restart
-pnpm docker:shell         # Shell into forge container
-pnpm docker:ps            # Show running service status
-pnpm docker:logs          # Tail forge logs
-pnpm docker:logs:all      # Tail all service logs
-pnpm docker:restart       # Restart forge container (no rebuild)
-```
-
----
-
-## Environment Variables
-
-Auto-generated by `install.sh`. Only needed for manual setup.
-
-| Variable               | Description                                    | Required |
-| ---------------------- | ---------------------------------------------- | -------- |
-| `DATABASE_URL`         | PostgreSQL connection string                   | ✅       |
-| `REDIS_PASSWORD`       | Redis auth password                            | ✅       |
-| `REDIS_URL`            | Redis connection string                        | ✅       |
-| `JWT_SECRET`           | JWT signing secret                             | ✅       |
-| `JWT_REFRESH_SECRET`   | Refresh token signing secret                   | ✅       |
-| `ENCRYPTION_KEY`       | AES-256-GCM key — 64 hex characters (32 bytes) | ✅       |
-| `POSTGRES_DB`          | Postgres database name                         | ✅       |
-| `POSTGRES_USER`        | Postgres user                                  | ✅       |
-| `POSTGRES_PASSWORD`    | Postgres password                              | ✅       |
-| `NODE_ENV`             | `production` or `development`                  |          |
-| `API_PORT`             | API listen port (default: `3000`)              |          |
-| `CORS_ORIGIN`          | Allowed CORS origin for production             |          |
-| `BACKUP_STORAGE_PATH`  | Local temp path for backup archives            |          |
-| `SCRIPTS_PATH`         | Override PHP scripts directory                 |          |
-| `GDRIVE_CLIENT_ID`     | Google Drive OAuth client ID                   |          |
-| `GDRIVE_CLIENT_SECRET` | Google Drive OAuth client secret               |          |
-| `GDRIVE_TOKEN`         | rclone token JSON                              |          |
-| `GDRIVE_FOLDER_ID`     | Default Google Drive backup folder             |          |
-
----
-
-## Project Structure
-
-```
-bedrock-forge/
-├── apps/
-│   ├── api/                    # NestJS 11 REST API + WebSocket gateway
-│   │   └── src/modules/        # 31 feature modules (controller -> service -> repository)
-│   ├── worker/                 # 14 BullMQ processor modules + remote PHP helpers
-│   │   └── scripts/            # backup, scan, WP action, Composer, cleanup helpers
-│   └── web/                    # React 19 SPA (25 top-level pages, all lazy-loaded)
-│       └── src/pages/          # Page-level workflows and project/security tabs
-├── packages/
-│   ├── shared/                 # Queue names, roles, Zod schemas
-│   └── remote-executor/        # SSH pool + credential parser
-├── prisma/
-│   ├── schema.prisma           # 40-model schema, 10 enums
-│   └── migrations/
-├── docs/
-│   ├── getting-started/
-│   ├── guides/
-│   └── reference/
-├── Dockerfile                  # 4-stage build
-├── docker-compose.yml          # Production
-├── docker-compose.dev.yml      # Development
-├── install.sh                  # First-time setup
-├── update.sh                   # Rolling update
-└── reset.sh                    # Destructive reset
-```
-
----
-
-## Security & Reliability Audit
-
-A full system audit was performed on 2026-04-28. The table below tracks every
-finding and its current resolution status.
-
-### ✅ Addressed
-
-| ID  | Area        | Finding                                                                                                                                       | Resolution                                                                                    |
-| --- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| S1  | Security    | `root_path` DTO had no regex validator — path traversal / shell injection possible                                                            | Added `@Matches(/^[a-zA-Z0-9\/_\-.]+$/)` to `EnvironmentDto`                                  |
-| S2  | Security    | MySQL CLI fallback in `CreateBedrockProcessor` vulnerable to backtick injection                                                               | Strict `safeIdentifier` regex validation before any CLI use                                   |
-| S3  | Security    | GitHub API token stored in plaintext in `app_settings`                                                                                        | Added to `SENSITIVE_KEYS`; auto-encrypt on write, decrypt on read; worker decrypts before use |
-| S5  | Security    | Dev seed credentials baked into Vite production bundle via `VITE_DEV_*` env vars                                                              | Hardcoded strings gated on `import.meta.env.DEV` only — never in production bundle            |
-| R1  | Reliability | System backup staging area had no persistent Docker volume                                                                                    | `forge-system-backups` named volume added to `docker-compose.yml`                             |
-| R2  | Reliability | Worker SSH pool never destroyed on `SIGTERM` — connections leaked on deploy/restart                                                           | `sshPoolManager.destroy()` registered on `SIGTERM` and `SIGINT`                               |
-| R3  | Reliability | `runCommand()` timeout did not call `stream.destroy()` — SSH channels leaked                                                                  | `channelRef?.destroy()` added before reject in timeout handler                                |
-| R4  | Reliability | `sftpGet()` (in-memory pull) had no stall timeout                                                                                             | Activity-based stall timer added — identical pattern to `sftpGetToFile`                       |
-| A2  | DB          | 5 missing indexes: `MonitorResult(monitor_id)`, `Domain(expires_at, ssl_expires_at)`, `JobExecution(bull_job_id)`, `RefreshToken(revoked_at)` | Indexes added in schema + migration `20260428100000_add_missing_indexes`                      |
-| A3  | Frontend    | Roles cached in `localStorage` never refreshed — stale grants possible after a role change                                                    | `App.tsx` calls `GET /auth/me` on mount and updates the Zustand store (or logs out)           |
-| A4  | RBAC        | `ROLE_HIERARCHY` had `manager` and `maintainer` both at level 2 — comparison was wrong                                                        | Fixed: `admin=4`, `manager=3`, `maintainer=2`, `client=1`                                     |
-| A5  | Types       | `WpDbCredentials` interface not exported from `@bedrock-forge/shared`                                                                         | Added to `packages/shared/src/types.ts`                                                       |
-| A10 | Security    | `AuditInterceptor` read `X-Forwarded-For` (client-injectable) for IP logging                                                                  | Switched to `X-Real-IP` (set by nginx from `$remote_addr`)                                    |
-| S4  | Security    | Refresh tokens returned in JSON response body — XSS could steal them from JS memory                                                           | Refresh tokens now use scoped `httpOnly` cookies and are omitted from API response bodies     |
-| D1  | DX          | `db:generate` not in Turborepo pipeline — manual step required after schema changes                                                           | Added `db:generate` task with correct output caching                                          |
-| D2  | DX          | No `type-check` task in Turborepo — CI had no incremental TS checking                                                                         | Added `type-check` task with `^type-check` dependency                                         |
-| D4  | Ops         | Dev Redis had no password — `docker-compose.dev.yml` ran an open Redis instance                                                               | Added `--requirepass ${REDIS_PASSWORD:?required}` to dev Redis command                        |
-| D5  | Nginx       | Security headers applied only at server level — nginx does not inherit `add_header` into nested `location` blocks                             | Headers repeated explicitly in `/api/` and static assets `location ~*` blocks                 |
-| D6  | Nginx       | Missing `server_tokens off` and API-level rate limiting                                                                                       | Added `server_tokens off` and `limit_req zone=api burst=60 nodelay`                           |
-| D7  | Docs        | `ARCHITECTURE.md` had stale counts (27 models, 8 processors, 8 queues, 3-tier RBAC, missing models)                                           | Fully updated to match current codebase                                                       |
-
-### ⏳ Still Pending
-
-| ID  | Area         | Finding                                                                                                | Notes                                                            |
-| --- | ------------ | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
-| S6  | Security     | SSH host keys not verified on new connections — no TOFU / known_hosts tracking                         | Requires schema column, UI to trust/reject on first connect      |
-| A1  | Architecture | `EncryptionService` is duplicated — API and Worker maintain separate implementations                   | Extract to `@bedrock-forge/shared` or a dedicated crypto package |
-| A6  | Architecture | `DomainWhoisProcessor` does not create `JobExecution` records — inconsistent with all other processors | Low-effort; requires adding `JobExecutionsService` to the module |
-| A7  | Architecture | `QueueEvents` listeners registered per-queue rather than via a shared factory                          | Refactor opportunity — reduces boilerplate across 14 queues      |
-| A8  | Architecture | Several repositories call `findMany({})` with no row cap — unbounded result sets                       | Add max-row guard (e.g. 10 000) to all bare `findAll` calls      |
-| A9  | Architecture | Pagination `take` param is not clamped — callers can request arbitrarily large pages                   | Clamp to a configured max (e.g. 200) in query DTOs               |
-| D3  | DX           | No Jest coverage thresholds configured — coverage can silently drop                                    | Add `coverageThreshold` to `jest.config.js`                      |
-| D8  | DX           | Test coverage thin for worker processors, settings encryption, and role guard                          | Expand unit test suite                                           |
-
----
-
-## Missing Capabilities & Planned Work
-
-The following backlog reflects the current codebase after the latest feature
-audit. Items listed here are not covered end-to-end today, or are known
-production hardening improvements.
-
-### 🔴 High Priority (Core gaps for production use)
-
-- **SSH host-key verification** — New SSH connections do not persist or verify
-  host fingerprints. Add known-host tracking with an explicit trust/reject UI.
-- **Cross-server backup restore** — Restore currently requires the same
-  environment as the source. Restoring to a different server or environment is
-  not supported.
-- **2FA / TOTP authentication** — No second factor for any role. All accounts
-  are password-only.
-- **Email notifications (SMTP)** — All alerts are Slack-only. Operators without
-  Slack have no out-of-band alerting.
-
-### 🟡 Medium Priority (Important for broader adoption)
-
-- **S3-compatible backup storage** — Only Google Drive is wired. Backblaze B2,
-  Wasabi, MinIO, Amazon S3 (all rclone-compatible) require UI integration.
-- **Invoice PDF export** — Invoices are database records only; no rendered PDF
-  output.
-- **External vulnerability intelligence** — Local/shared vulnerability matching
-  exists, but there is no CVE/WPScan feed sync, freshness policy, or admin UI
-  for feed status.
-- **Shared encryption package** — API and Worker still maintain separate
-  encryption service implementations.
-- **Pagination and row caps** — Several endpoints need hard max limits to avoid
-  unbounded `findMany` or oversized `take` requests.
-- **Incremental backups** — All backups are full snapshots. rsync-based
-  incrementals are roadmap.
-- **Bulk operations** — No multi-select for backup, scan, or sync across
-  multiple environments at once.
-
-### ⚪ Low Priority / Enhancements
-
-- **Discord / Telegram / webhook notifications** — Additional notification
-  channels beyond Slack.
-- **Multi-tenant workspaces** — Data is not isolated between operator teams.
-  Single-tenant per installation.
-- **White-label / custom branding** — No logo, color, or domain customization.
-- **WordPress Multisite support** — Not tested or documented.
-- **Cloud provider provisioning** — DigitalOcean, Hetzner, Vultr, AWS Lightsail
-  VPS creation (shell scripts exist for Hetzner; no integrated UI).
-- **Panel integrations** — cPanel/WHM, Plesk, DirectAdmin, CloudPanel, RunCloud
-  are roadmap only. CyberPanel is the only supported panel.
-
----
+See [docs/guides/USAGE.md](docs/guides/USAGE.md) for a fuller operator guide.
 
 ## Documentation
 
-| Document                                                                     | Description                                               |
-| ---------------------------------------------------------------------------- | --------------------------------------------------------- |
-| [docs/getting-started/QUICK_START.md](docs/getting-started/QUICK_START.md)   | First server, project, backup, and monitor in 5 minutes   |
-| [docs/getting-started/INSTALLATION.md](docs/getting-started/INSTALLATION.md) | System requirements, Docker setup, env vars               |
-| [docs/reference/ARCHITECTURE.md](docs/reference/ARCHITECTURE.md)             | System design, data model, queue system, security model   |
-| [docs/guides/DEVELOPMENT.md](docs/guides/DEVELOPMENT.md)                     | Adding modules, tests, code conventions, local dev        |
-| [docs/guides/DEPLOYMENT.md](docs/guides/DEPLOYMENT.md)                       | Production deployment, SSL, updating, server requirements |
+| Document                                             | Purpose                                                              |
+| ---------------------------------------------------- | -------------------------------------------------------------------- |
+| [Quick Start](docs/getting-started/QUICK_START.md)   | First local install and first site workflow.                         |
+| [Installation](docs/getting-started/INSTALLATION.md) | Docker setup, environment variables, ports, and reverse proxy notes. |
+| [Usage Guide](docs/guides/USAGE.md)                  | How to use the app day to day and what each area is for.             |
+| [Deployment](docs/guides/DEPLOYMENT.md)              | Remote deployment, updates, SSL, backup strategy, and rollback.      |
+| [Development](docs/guides/DEVELOPMENT.md)            | Local development, module patterns, worker patterns, and tests.      |
+| [Architecture](docs/reference/ARCHITECTURE.md)       | System design, services, queues, schema, security model.             |
+| [Project Reference](docs/reference/PROJECT.md)       | Extended engineering reference and implementation notes.             |
 
----
+## Development
 
-## Contributing
+```bash
+pnpm install
+./dev.sh
+```
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/my-feature`
-3. Follow module conventions in
-   [docs/guides/DEVELOPMENT.md](docs/guides/DEVELOPMENT.md)
-4. Run `pnpm build && pnpm lint` before submitting
-5. Open a pull request against `main`
+Manual development flow:
 
----
+```bash
+docker compose -f docker-compose.dev.yml up -d postgres redis
+pnpm install
+cp .env.example .env
+pnpm db:generate
+pnpm db:migrate
+pnpm db:seed
+pnpm dev
+```
+
+Open the dev dashboard at `http://localhost:5173`.
+
+Useful checks:
+
+```bash
+pnpm --filter @bedrock-forge/api lint
+pnpm --filter @bedrock-forge/api test
+pnpm --filter @bedrock-forge/web lint
+pnpm --filter @bedrock-forge/web build
+pnpm --filter @bedrock-forge/worker build
+pnpm --filter @bedrock-forge/worker test
+```
+
+## Production Operations
+
+```bash
+./update.sh          # rebuild/restart Forge and apply migrations
+./reset.sh           # destructive reset: wipes volumes and regenerates secrets
+docker compose ps
+docker compose logs -f forge
+```
+
+Back up both:
+
+- PostgreSQL data, because it stores all records and encrypted credentials.
+- `.env`, because `ENCRYPTION_KEY` is required to decrypt stored credentials.
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+MIT - see [LICENSE](LICENSE) for details.
