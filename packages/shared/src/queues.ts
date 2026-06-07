@@ -70,6 +70,7 @@ export const JOB_TYPES = {
 	WP_CLEANUP: 'wp:cleanup',
 	WP_CORE_CHECK: 'wp:core-check',
 	WP_CORE_UPDATE: 'wp:core-update',
+	WP_MAINTENANCE_MODE: 'wp:maintenance-mode',
 
 	// Theme scans
 	THEME_SCAN_RUN: 'theme-scan:run',

@@ -59,6 +59,14 @@ export interface WpCoreUpdatePayload {
 	jobExecutionId: number;
 }
 
+export interface WpMaintenanceModePayload {
+	environmentId: number;
+	jobExecutionId: number;
+	enabled: boolean;
+	revertAfterMinutes?: number;
+	message?: string;
+}
+
 @Processor(QUEUES.WP_ACTIONS, { concurrency: 2 })
 export class WpActionsProcessor extends WorkerHost {
 	private readonly logger = new Logger(WpActionsProcessor.name);
@@ -89,6 +97,8 @@ export class WpActionsProcessor extends WorkerHost {
 				return this.processCoreCheck(job);
 			case JOB_TYPES.WP_CORE_UPDATE:
 				return this.processCoreUpdate(job);
+			case JOB_TYPES.WP_MAINTENANCE_MODE:
+				return this.processMaintenanceMode(job);
 			default:
 				throw new Error(`Unknown wp-actions job type: ${job.name}`);
 		}
@@ -616,6 +626,128 @@ export class WpActionsProcessor extends WorkerHost {
 				job.id ?? '',
 				tracker,
 				'wp:core-update',
+				err,
+			);
+			throw err;
+		}
+	}
+
+	private async processMaintenanceMode(job: Job): Promise<unknown> {
+		const { environmentId, jobExecutionId, enabled, revertAfterMinutes, message } =
+			job.data as WpMaintenanceModePayload;
+		const tracker = new StepTracker(
+			this.prisma,
+			BigInt(jobExecutionId),
+			this.logger,
+			job.id ?? '',
+		);
+		try {
+			await this.prisma.jobExecution.update({
+				where: { id: BigInt(jobExecutionId) },
+				data: { status: 'active', started_at: new Date() },
+			});
+			await tracker.track({
+				step: `WP Maintenance: ${enabled ? 'enable' : 'disable'}`,
+				level: 'info',
+				detail: `env=${environmentId}`,
+			});
+			const { executor, env } = await this.connectToEnv(environmentId, tracker);
+			await job.updateProgress(20);
+			const wpPath = await this.resolveWpPath(executor, env.root_path ?? '');
+			const wpCli = await this.buildWpCliContext(executor, wpPath);
+			const action = enabled ? 'activate' : 'deactivate';
+			const wpCmd = this.buildWpCmd(
+				wpCli,
+				`maintenance-mode ${action} --skip-plugins --path=${shellQuote(wpPath)}`,
+			);
+			const t0 = Date.now();
+			const wpResult = await executor.execute(wpCmd, { timeout: 30_000 });
+			await tracker.trackCommand(
+				`wp maintenance-mode ${action}`,
+				wpCmd,
+				wpResult,
+				Date.now() - t0,
+			);
+
+			let source = 'wp-cli';
+			if (wpResult.code !== 0) {
+				source = 'file';
+				const maintenancePath = `${wpPath}/.maintenance`;
+				const fallbackCmd = enabled
+					? `printf '%s\\n' ${shellQuote(
+							`<?php $upgrading = time(); /* ${message ?? 'Maintenance enabled by Bedrock Forge'} */`,
+						)} > ${shellQuote(maintenancePath)}`
+					: `rm -f ${shellQuote(maintenancePath)}`;
+				const fallback = await executor.execute(fallbackCmd, {
+					timeout: 20_000,
+				});
+				await tracker.trackCommand(
+					`maintenance fallback ${enabled ? 'enable' : 'disable'}`,
+					fallbackCmd,
+					fallback,
+					0,
+				);
+				if (fallback.code !== 0) {
+					throw new Error(
+						`maintenance fallback failed (exit ${fallback.code}): ${fallback.stderr}`,
+					);
+				}
+			}
+
+			if (enabled && revertAfterMinutes && revertAfterMinutes > 0) {
+				const { Queue } = await import('bullmq');
+				const redisUrl = this.config.get<string>('redis.url')!;
+				const wpActionsQueue = new Queue(QUEUES.WP_ACTIONS, {
+					connection: { url: redisUrl },
+				});
+				const revertExec = await this.prisma.jobExecution.create({
+					data: {
+						queue_name: QUEUES.WP_ACTIONS,
+						job_type: JOB_TYPES.WP_MAINTENANCE_MODE,
+						bull_job_id: randomUUID(),
+						environment_id: BigInt(environmentId),
+						status: 'queued',
+						payload: {
+							environmentId,
+							enabled: false,
+							scheduledAt: new Date().toISOString(),
+						} as object,
+					},
+				});
+				await wpActionsQueue.add(
+					JOB_TYPES.WP_MAINTENANCE_MODE,
+					{
+						environmentId,
+						jobExecutionId: Number(revertExec.id),
+						enabled: false,
+					},
+					{ ...DEFAULT_JOB_OPTIONS, delay: revertAfterMinutes * 60 * 1000 },
+				);
+				await wpActionsQueue.close();
+				await tracker.track({
+					step: `Maintenance auto-disable scheduled in ${revertAfterMinutes}m`,
+					level: 'info',
+				});
+			}
+
+			const result = { success: true, enabled, source };
+			await job.updateProgress(100);
+			await this.prisma.jobExecution.update({
+				where: { id: BigInt(jobExecutionId) },
+				data: {
+					status: 'completed',
+					completed_at: new Date(),
+					progress: 100,
+					execution_log: result,
+				},
+			});
+			return result;
+		} catch (err: unknown) {
+			await this.failJob(
+				jobExecutionId,
+				job.id ?? '',
+				tracker,
+				'wp:maintenance-mode',
 				err,
 			);
 			throw err;

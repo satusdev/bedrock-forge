@@ -1,4 +1,4 @@
-import { IsEnum, IsBoolean, IsOptional, IsInt, Min, Max, IsIn } from 'class-validator';
+import { IsEnum, IsBoolean, IsOptional, IsInt, Min, Max, IsIn, IsString } from 'class-validator';
 import { Transform } from 'class-transformer';
 
 export class WpFixActionDto {
@@ -28,4 +28,19 @@ export class WpLogsQueryDto {
 	@Min(1)
 	@Max(500)
 	lines?: number;
+}
+
+export class WpMaintenanceModeDto {
+	@IsBoolean()
+	enabled!: boolean;
+
+	@IsOptional()
+	@IsInt()
+	@Min(0)
+	@Max(480)
+	revert_after_minutes?: number;
+
+	@IsOptional()
+	@IsString()
+	message?: string;
 }

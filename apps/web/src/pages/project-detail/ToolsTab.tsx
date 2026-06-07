@@ -11,6 +11,7 @@ import {
 	Trash2,
 	Play,
 	CalendarClock,
+	ShieldAlert,
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
@@ -47,6 +48,13 @@ interface DebugStatus {
 	success: boolean;
 	was_enabled?: boolean;
 	now_enabled?: boolean;
+}
+
+interface MaintenanceStatus {
+	success: boolean;
+	enabled: boolean;
+	output?: string;
+	source?: string;
 }
 
 interface LogResult {
@@ -154,6 +162,7 @@ export function ToolsTab({ environments }: { environments: Environment[] }) {
 	}, [selectedEnvId, setSearchParams]);
 
 	const [debugRevertMin, setDebugRevertMin] = useState('0');
+	const [maintenanceRevertMin, setMaintenanceRevertMin] = useState('0');
 	const [logType, setLogType] = useState<'debug' | 'php' | 'nginx' | 'apache'>(
 		'debug',
 	);
@@ -218,6 +227,18 @@ export function ToolsTab({ environments }: { environments: Environment[] }) {
 	const debugEnabled =
 		debugStatus?.now_enabled ?? debugStatus?.was_enabled ?? false;
 
+	const {
+		data: maintenanceStatus,
+		isLoading: maintenanceLoading,
+		refetch: refetchMaintenance,
+	} = useQuery<MaintenanceStatus>({
+		queryKey: ['wp-maintenance-status', selectedEnvId],
+		queryFn: () => api.get(`${envBaseUrl}/maintenance-status`),
+		enabled: !!selectedEnvId,
+		staleTime: 30_000,
+		retry: false,
+	});
+
 	// ── Mutations ─────────────────────────────────────────────────────────────
 	const fixMutation = useMutation({
 		mutationFn: ({ action }: { action: string }) =>
@@ -244,6 +265,21 @@ export function ToolsTab({ environments }: { environments: Environment[] }) {
 		onSuccess: (_, { enabled }) => {
 			toast({ title: `WP_DEBUG ${enabled ? 'enable' : 'disable'} queued` });
 			void refetchDebug();
+		},
+		onError: () => toast({ title: 'Failed', variant: 'destructive' }),
+	});
+
+	const maintenanceMutation = useMutation({
+		mutationFn: ({ enabled }: { enabled: boolean }) =>
+			api.post(`${envBaseUrl}/maintenance-mode`, {
+				enabled,
+				revert_after_minutes: parseInt(maintenanceRevertMin, 10) || 0,
+			}),
+		onSuccess: (_, { enabled }) => {
+			toast({
+				title: `Maintenance mode ${enabled ? 'enable' : 'disable'} queued`,
+			});
+			void refetchMaintenance();
 		},
 		onError: () => toast({ title: 'Failed', variant: 'destructive' }),
 	});
@@ -459,6 +495,81 @@ export function ToolsTab({ environments }: { environments: Environment[] }) {
 							<RefreshCw className='h-3.5 w-3.5 mr-1' />
 							Refresh
 						</Button>
+					</div>
+				</CardContent>
+			</Card>
+
+			{/* Maintenance Mode */}
+			<Card>
+				<CardHeader className='pb-3'>
+					<CardTitle className='flex items-center gap-2 text-base'>
+						<ShieldAlert className='h-4 w-4' />
+						Maintenance Mode
+					</CardTitle>
+					<CardDescription>
+						Take WordPress temporarily offline and restore access automatically
+					</CardDescription>
+				</CardHeader>
+				<CardContent>
+					<div className='flex flex-wrap items-center gap-6'>
+						<div className='flex items-center gap-3'>
+							{maintenanceLoading ? (
+								<Skeleton className='h-6 w-12 rounded-full' />
+							) : (
+								<Switch
+									checked={maintenanceStatus?.enabled ?? false}
+									onCheckedChange={v =>
+										maintenanceMutation.mutate({ enabled: v })
+									}
+									disabled={maintenanceMutation.isPending || !selectedEnvId}
+								/>
+							)}
+							<Label className='text-sm'>
+								Mode{' '}
+								<Badge
+									variant={
+										maintenanceStatus?.enabled ? 'destructive' : 'secondary'
+									}
+									className='text-xs ml-1'
+								>
+									{maintenanceStatus?.enabled ? 'ACTIVE' : 'inactive'}
+								</Badge>
+							</Label>
+						</div>
+						<div className='flex items-center gap-2'>
+							<Label className='text-sm text-muted-foreground shrink-0'>
+								Auto-disable:
+							</Label>
+							<Select
+								value={maintenanceRevertMin}
+								onValueChange={setMaintenanceRevertMin}
+							>
+								<SelectTrigger className='w-36'>
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									{REVERT_OPTIONS.map(o => (
+										<SelectItem key={o.value} value={o.value}>
+											{o.label}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						</div>
+						<Button
+							variant='ghost'
+							size='sm'
+							onClick={() => void refetchMaintenance()}
+							disabled={maintenanceLoading || !selectedEnvId}
+						>
+							<RefreshCw className='h-3.5 w-3.5 mr-1' />
+							Refresh
+						</Button>
+						{maintenanceStatus?.source && (
+							<span className='text-xs text-muted-foreground'>
+								{maintenanceStatus.source}
+							</span>
+						)}
 					</div>
 				</CardContent>
 			</Card>

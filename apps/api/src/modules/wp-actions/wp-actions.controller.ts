@@ -19,6 +19,7 @@ import {
 	WpFixActionDto,
 	WpDebugModeDto,
 	WpLogsQueryDto,
+	WpMaintenanceModeDto,
 } from './dto/wp-actions.dto';
 
 @Controller('environments/:id/wp-actions')
@@ -48,6 +49,22 @@ export class WpActionsController {
 		@Body() dto: WpDebugModeDto,
 	) {
 		return this.svc.enqueueDebugMode(id, dto);
+	}
+
+	/** Synchronously check WordPress maintenance mode status via SSH */
+	@Get('maintenance-status')
+	maintenanceStatus(@Param('id', ParseIntPipe) id: number) {
+		return this.svc.getMaintenanceStatus(id);
+	}
+
+	/** Enqueue maintenance mode enable/disable */
+	@Post('maintenance-mode')
+	@HttpCode(HttpStatus.ACCEPTED)
+	maintenanceMode(
+		@Param('id', ParseIntPipe) id: number,
+		@Body() dto: WpMaintenanceModeDto,
+	) {
+		return this.svc.enqueueMaintenanceMode(id, dto);
 	}
 
 	/** Synchronously fetch log file lines via SSH */

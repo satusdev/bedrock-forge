@@ -14,6 +14,7 @@ import {
 	WpFixActionDto,
 	WpDebugModeDto,
 	WpLogsQueryDto,
+	WpMaintenanceModeDto,
 } from './dto/wp-actions.dto';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -181,6 +182,44 @@ export class WpActionsService {
 		return { jobExecutionId: Number(exec.id), bullJobId };
 	}
 
+	async enqueueMaintenanceMode(envId: number, dto: WpMaintenanceModeDto) {
+		const env = await this.requireEnv(envId);
+		const bullJobId = randomUUID();
+		const exec = await this.repo.createJobExecution({
+			queue_name: QUEUES.WP_ACTIONS,
+			job_type: JOB_TYPES.WP_MAINTENANCE_MODE,
+			bull_job_id: bullJobId,
+			environment_id: env.id,
+			payload: {
+				environmentId: envId,
+				enabled: dto.enabled,
+				revertAfterMinutes: dto.revert_after_minutes,
+				message: dto.message,
+			},
+		});
+		try {
+			await this.wpActionsQueue.add(
+				JOB_TYPES.WP_MAINTENANCE_MODE,
+				{
+					environmentId: envId,
+					enabled: dto.enabled,
+					revertAfterMinutes: dto.revert_after_minutes,
+					message: dto.message,
+					jobExecutionId: Number(exec.id),
+				},
+				{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
+			);
+		} catch (err) {
+			const errMsg = err instanceof Error ? err.message : String(err);
+			await this.repo.updateJobExecution(exec.id, {
+				status: 'failed',
+				last_error: errMsg,
+			});
+			throw err;
+		}
+		return { jobExecutionId: Number(exec.id), bullJobId };
+	}
+
 	// ─── Synchronous SSH calls ────────────────────────────────────────────────
 
 	async getDebugStatus(envId: number) {
@@ -253,6 +292,32 @@ export class WpActionsService {
 		}
 	}
 
+	async getMaintenanceStatus(envId: number) {
+		const { executor, env } = await this.connectToEnv(envId);
+		const wpPath = await this.resolveWpPathForStatus(executor, env.root_path ?? '');
+		const cmd = `wp maintenance-mode status --skip-plugins --path=${shellQuote(wpPath)} --allow-root`;
+		const result = await executor.execute(cmd, { timeout: 20_000 });
+		const output = `${result.stdout}\n${result.stderr}`.trim();
+		if (result.code === 0) {
+			return {
+				success: true,
+				enabled: /active|enabled|on/i.test(output),
+				output,
+				source: 'wp-cli',
+			};
+		}
+		const fileCheck = await executor.execute(
+			`test -f ${shellQuote(wpPath + '/.maintenance')} && echo active || echo inactive`,
+			{ timeout: 10_000 },
+		);
+		return {
+			success: true,
+			enabled: fileCheck.stdout.trim() === 'active',
+			output: output || fileCheck.stdout.trim(),
+			source: 'file',
+		};
+	}
+
 	// ─── Helpers ──────────────────────────────────────────────────────────────
 
 	private async requireEnv(envId: number) {
@@ -277,6 +342,19 @@ export class WpActionsService {
 		);
 		const executor = createRemoteExecutor(sshConfig);
 		return { executor, env };
+	}
+
+	private async resolveWpPathForStatus(
+		executor: Awaited<ReturnType<typeof createRemoteExecutor>>,
+		rootPath: string,
+	): Promise<string> {
+		const bedrockCheck = await executor.execute(
+			`[ -d ${shellQuote(rootPath + '/web/wp')} ] && echo bedrock || echo standard`,
+			{ timeout: 10_000 },
+		);
+		return bedrockCheck.stdout.trim() === 'bedrock'
+			? `${rootPath}/web/wp`
+			: rootPath;
 	}
 }
 
