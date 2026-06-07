@@ -367,33 +367,36 @@ describe('MonitorProcessor', () => {
 		expect(prisma.jobExecution.update).not.toHaveBeenCalled();
 	});
 
-	it('stores PageSpeed scores for Lighthouse audit jobs', async () => {
-		jest.spyOn(processor as any, 'fetchPageSpeed').mockResolvedValue({
-			id: 'https://example.test/',
-			analysisUTCTimestamp: '2026-06-03T08:00:00.000Z',
-			lighthouseResult: {
-				lighthouseVersion: '12.0.0',
-				fetchTime: '2026-06-03T08:00:00.000Z',
-				finalDisplayedUrl: 'https://example.test/',
-				categories: {
-					performance: { score: 0.91 },
-					accessibility: { score: 0.88 },
-					'best-practices': { score: 1 },
-					seo: { score: 0.96 },
-				},
-				audits: {
-					'first-contentful-paint': { numericValue: 1200 },
-					'largest-contentful-paint': { numericValue: 2400 },
-					'cumulative-layout-shift': { numericValue: 0.035 },
-					'total-blocking-time': { numericValue: 80 },
-					'speed-index': { numericValue: 1800 },
-					'unused-javascript': {
-						id: 'unused-javascript',
-						title: 'Reduce unused JavaScript',
-						score: 0.5,
-						displayValue: '20 KiB',
-						numericValue: 20000,
-						details: { type: 'opportunity' },
+	it('stores Lighthouse scores for audit jobs', async () => {
+		jest.spyOn(processor as any, 'runLighthouseAudit').mockResolvedValue({
+			provider: 'local',
+			result: {
+				id: 'https://example.test/',
+				analysisUTCTimestamp: '2026-06-03T08:00:00.000Z',
+				lighthouseResult: {
+					lighthouseVersion: '12.0.0',
+					fetchTime: '2026-06-03T08:00:00.000Z',
+					finalDisplayedUrl: 'https://example.test/',
+					categories: {
+						performance: { score: 0.91 },
+						accessibility: { score: 0.88 },
+						'best-practices': { score: 1 },
+						seo: { score: 0.96 },
+					},
+					audits: {
+						'first-contentful-paint': { numericValue: 1200 },
+						'largest-contentful-paint': { numericValue: 2400 },
+						'cumulative-layout-shift': { numericValue: 0.035 },
+						'total-blocking-time': { numericValue: 80 },
+						'speed-index': { numericValue: 1800 },
+						'unused-javascript': {
+							id: 'unused-javascript',
+							title: 'Reduce unused JavaScript',
+							score: 0.5,
+							displayValue: '20 KiB',
+							numericValue: 20000,
+							details: { type: 'opportunity' },
+						},
 					},
 				},
 			},
@@ -428,6 +431,48 @@ describe('MonitorProcessor', () => {
 			expect.objectContaining({
 				where: { id: BigInt(9) },
 				data: expect.objectContaining({ status: 'completed', progress: 100 }),
+			}),
+		);
+	});
+
+	it('records PageSpeed quota failures clearly', async () => {
+		jest
+			.spyOn(processor as any, 'runLighthouseAudit')
+			.mockRejectedValue(
+				new Error(
+					'PageSpeed quota exceeded. Switch LIGHTHOUSE_PROVIDER=local or wait for Google quota reset.',
+				),
+			);
+
+		await expect(
+			processor.process({
+				name: JOB_TYPES.LIGHTHOUSE_AUDIT,
+				data: {
+					auditId: 8,
+					environmentId: 5,
+					url: 'https://example.test/',
+					strategy: 'mobile',
+					jobExecutionId: 10,
+				},
+			} as any),
+		).rejects.toThrow('PageSpeed quota exceeded');
+
+		expect(prisma.lighthouseAudit.update).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: { id: BigInt(8) },
+				data: expect.objectContaining({
+					status: 'failed',
+					error_message: expect.stringContaining('PageSpeed quota exceeded'),
+				}),
+			}),
+		);
+		expect(prisma.jobExecution.update).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: { id: BigInt(10) },
+				data: expect.objectContaining({
+					status: 'failed',
+					last_error: expect.stringContaining('PageSpeed quota exceeded'),
+				}),
 			}),
 		);
 	});

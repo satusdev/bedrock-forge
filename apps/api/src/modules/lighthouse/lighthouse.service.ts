@@ -33,6 +33,14 @@ export class LighthouseService {
 		}
 		const url = dto.url ?? env.url;
 		const strategy = dto.strategy ?? 'mobile';
+		const running = await this.repo.findRunning(env.id, strategy);
+		if (running) {
+			return {
+				auditId: running.id,
+				jobExecutionId: running.job_execution_id,
+				reused: true,
+			};
+		}
 
 		const execution = await this.repo.createJobExecution({
 			queue_name: QUEUES.MONITORS,
@@ -71,4 +79,3 @@ export class LighthouseService {
 		};
 	}
 }
-

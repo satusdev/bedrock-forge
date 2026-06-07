@@ -10,6 +10,15 @@ import {
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
+import {
+	CartesianGrid,
+	Line,
+	LineChart,
+	ResponsiveContainer,
+	Tooltip,
+	XAxis,
+	YAxis,
+} from 'recharts';
 import { PageHeader } from '@/components/crud';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -119,6 +128,21 @@ export function LighthousePage() {
 	});
 
 	const topAudits = latest.slice(0, 4);
+	const trendData = [...history]
+		.filter(audit => audit.status === 'completed')
+		.reverse()
+		.map(audit => ({
+			date: new Date(audit.created_at).toLocaleDateString(undefined, {
+				month: 'short',
+				day: 'numeric',
+			}),
+			performance: audit.performance_score,
+			accessibility: audit.accessibility_score,
+			seo: audit.seo_score,
+			lcp: audit.lcp_ms,
+			cls: audit.cls === null ? null : Number(audit.cls),
+			tbt: audit.tbt_ms,
+		}));
 
 	return (
 		<div className='space-y-5'>
@@ -240,6 +264,57 @@ export function LighthousePage() {
 				)}
 			</section>
 
+			<section className='grid gap-3 xl:grid-cols-2'>
+				<div className='border rounded-lg p-4'>
+					<div className='mb-4'>
+						<h2 className='text-sm font-semibold'>Score trends</h2>
+					</div>
+					<div className='h-72'>
+						{trendData.length ? (
+							<ResponsiveContainer width='100%' height='100%'>
+								<LineChart data={trendData}>
+									<CartesianGrid strokeDasharray='3 3' className='stroke-muted' />
+									<XAxis dataKey='date' tickLine={false} axisLine={false} fontSize={12} />
+									<YAxis domain={[0, 100]} tickLine={false} axisLine={false} fontSize={12} />
+									<Tooltip />
+									<Line type='monotone' dataKey='performance' stroke='hsl(var(--primary))' strokeWidth={2} dot={false} connectNulls />
+									<Line type='monotone' dataKey='accessibility' stroke='hsl(var(--success))' strokeWidth={2} dot={false} connectNulls />
+									<Line type='monotone' dataKey='seo' stroke='hsl(var(--warning))' strokeWidth={2} dot={false} connectNulls />
+								</LineChart>
+							</ResponsiveContainer>
+						) : (
+							<div className='flex h-full items-center justify-center text-sm text-muted-foreground'>
+								No completed audits to chart.
+							</div>
+						)}
+					</div>
+				</div>
+
+				<div className='border rounded-lg p-4'>
+					<div className='mb-4'>
+						<h2 className='text-sm font-semibold'>Core web vitals</h2>
+					</div>
+					<div className='h-72'>
+						{trendData.length ? (
+							<ResponsiveContainer width='100%' height='100%'>
+								<LineChart data={trendData}>
+									<CartesianGrid strokeDasharray='3 3' className='stroke-muted' />
+									<XAxis dataKey='date' tickLine={false} axisLine={false} fontSize={12} />
+									<YAxis tickLine={false} axisLine={false} fontSize={12} />
+									<Tooltip />
+									<Line type='monotone' dataKey='lcp' stroke='hsl(var(--primary))' strokeWidth={2} dot={false} connectNulls />
+									<Line type='monotone' dataKey='tbt' stroke='hsl(var(--destructive))' strokeWidth={2} dot={false} connectNulls />
+								</LineChart>
+							</ResponsiveContainer>
+						) : (
+							<div className='flex h-full items-center justify-center text-sm text-muted-foreground'>
+								No completed audits to chart.
+							</div>
+						)}
+					</div>
+				</div>
+			</section>
+
 			<section className='border rounded-lg overflow-hidden'>
 				<div className='px-4 py-3 border-b flex items-center gap-2'>
 					<Activity className='h-4 w-4 text-muted-foreground' />
@@ -304,4 +379,3 @@ function Score({ label, value }: { label: string; value: number | null }) {
 		</div>
 	);
 }
-

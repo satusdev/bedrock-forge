@@ -23,6 +23,7 @@ interface SslCheckResult {
 }
 
 type LighthouseStrategy = 'mobile' | 'desktop';
+type LighthouseProvider = 'auto' | 'local' | 'pagespeed';
 
 interface LighthouseAuditPayload {
 	auditId: number;
@@ -361,8 +362,11 @@ export class MonitorProcessor extends WorkerHost {
 		]);
 
 		try {
-			const result = await this.fetchPageSpeed(payload.url, payload.strategy);
-			const mapped = this.mapPageSpeedResult(result);
+			const { result, provider } = await this.runLighthouseAudit(
+				payload.url,
+				payload.strategy,
+			);
+			const mapped = this.mapLighthouseResult(result);
 			await this.prisma.lighthouseAudit.update({
 				where: { id: BigInt(payload.auditId) },
 				data: {
@@ -394,14 +398,17 @@ export class MonitorProcessor extends WorkerHost {
 								timestamp: new Date().toISOString(),
 								level: 'info',
 								step: 'Lighthouse audit complete',
-								detail: `${payload.strategy} score ${mapped.performanceScore ?? 'n/a'}`,
+								detail: `${provider} ${payload.strategy} score ${mapped.performanceScore ?? 'n/a'}`,
 							},
 						],
 					},
 				});
 			}
 		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
+			const message =
+				err instanceof Error
+					? err.message
+					: String(err);
 			await Promise.all([
 				this.prisma.lighthouseAudit.update({
 					where: { id: BigInt(payload.auditId) },
@@ -455,15 +462,98 @@ export class MonitorProcessor extends WorkerHost {
 		const res = await fetch(endpoint, { signal: AbortSignal.timeout(120_000) });
 		const body = await res.json().catch(() => null);
 		if (!res.ok) {
-			const message =
+			const rawMessage =
 				body?.error?.message ??
 				`PageSpeed request failed with HTTP ${res.status}`;
+			const message = /quota/i.test(rawMessage)
+				? `PageSpeed quota exceeded. Switch LIGHTHOUSE_PROVIDER=local or wait for Google quota reset. ${rawMessage}`
+				: rawMessage;
 			throw new Error(message);
 		}
 		return body;
 	}
 
-	private mapPageSpeedResult(result: any) {
+	private async runLighthouseAudit(
+		url: string,
+		strategy: LighthouseStrategy,
+	): Promise<{ provider: 'local' | 'pagespeed'; result: any }> {
+		const provider = String(
+			this.config.get<string>('pagespeed.provider') ?? 'auto',
+		).toLowerCase() as LighthouseProvider;
+		if (!['auto', 'local', 'pagespeed'].includes(provider)) {
+			throw new Error(
+				`Invalid LIGHTHOUSE_PROVIDER=${provider}. Use auto, local, or pagespeed.`,
+			);
+		}
+
+		if (provider !== 'pagespeed') {
+			try {
+				return {
+					provider: 'local',
+					result: await this.runLocalLighthouse(url, strategy),
+				};
+			} catch (err) {
+				if (provider === 'local') throw err;
+				this.logger.warn(
+					`Local Lighthouse failed, falling back to PageSpeed: ${
+						err instanceof Error ? err.message : String(err)
+					}`,
+				);
+			}
+		}
+
+		const apiKey = this.config.get<string>('pagespeed.apiKey');
+		if (!apiKey && provider === 'auto') {
+			throw new Error(
+				'Local Lighthouse failed and PAGESPEED_API_KEY is not configured for fallback.',
+			);
+		}
+		return {
+			provider: 'pagespeed',
+			result: await this.fetchPageSpeed(url, strategy),
+		};
+	}
+
+	private async runLocalLighthouse(url: string, strategy: LighthouseStrategy) {
+		const mod = await import('lighthouse');
+		const lighthouse = mod.default;
+		const chromePath = this.config.get<string>('pagespeed.chromePath');
+		const result = await lighthouse(
+			url,
+			{
+				output: 'json',
+				logLevel: 'error',
+				onlyCategories: [
+					'performance',
+					'accessibility',
+					'best-practices',
+					'seo',
+				],
+				formFactor: strategy,
+				screenEmulation:
+					strategy === 'desktop'
+						? { disabled: true }
+						: undefined,
+				chromeFlags: [
+					'--headless=new',
+					'--no-sandbox',
+					'--disable-dev-shm-usage',
+					'--disable-gpu',
+				],
+				chromePath,
+			} as any,
+		);
+		if (!result?.lhr) {
+			throw new Error('Local Lighthouse returned no report');
+		}
+		return {
+			id: result.lhr.requestedUrl ?? url,
+			analysisUTCTimestamp: result.lhr.fetchTime,
+			lighthouseResult: result.lhr,
+		};
+	}
+
+	private mapLighthouseResult(result: any) {
 		const lighthouse = result?.lighthouseResult ?? {};
 		const categories = lighthouse.categories ?? {};
 		const audits = lighthouse.audits ?? {};

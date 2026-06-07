@@ -15,5 +15,10 @@ export default () => ({
 	},
 	pagespeed: {
 		apiKey: process.env.PAGESPEED_API_KEY,
+		provider: process.env.LIGHTHOUSE_PROVIDER ?? 'auto',
+		chromePath:
+			process.env.LIGHTHOUSE_CHROME_PATH ??
+			process.env.CHROME_PATH ??
+			'/usr/bin/chromium-browser',
 	},
 });

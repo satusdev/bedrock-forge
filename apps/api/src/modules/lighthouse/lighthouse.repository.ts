@@ -70,6 +70,28 @@ export class LighthouseRepository {
 		return row ? this.serializeAudit(row) : null;
 	}
 
+	async findRunning(environmentId: bigint, strategy: 'mobile' | 'desktop') {
+		const row = await this.prisma.lighthouseAudit.findFirst({
+			where: {
+				environment_id: environmentId,
+				strategy,
+				status: { in: ['queued', 'running'] },
+			},
+			orderBy: { created_at: 'desc' },
+			include: {
+				environment: {
+					select: {
+						id: true,
+						type: true,
+						url: true,
+						project: { select: { id: true, name: true } },
+					},
+				},
+			},
+		});
+		return row ? this.serializeAudit(row) : null;
+	}
+
 	createJobExecution(data: {
 		queue_name: string;
 		job_type: string;

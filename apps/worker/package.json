@@ -19,6 +19,7 @@
 		"@prisma/client": "^7.5.0",
 		"@slack/web-api": "^7.15.0",
 		"bullmq": "^5.0.0",
+		"lighthouse": "^13.3.0",
 		"pdfmake": "^0.3.7",
 		"pg": "^8.13.0",
 		"reflect-metadata": "^0.2.0",
