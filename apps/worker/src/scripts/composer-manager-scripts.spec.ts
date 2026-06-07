@@ -250,7 +250,7 @@ describe('Composer manager PHP scripts', () => {
 			const composerLog = readFileSync(fixture.composerLog, 'utf8');
 			expect(composerLog).toContain(`PHP_BINARY=${phpBinary}`);
 			expect(composerLog).toContain(
-				'ARGS:update satusdev/repo-fetcher --no-dev --no-interaction -W',
+				'ARGS:update satusdev/repo-fetcher --no-interaction --update-no-dev -W',
 			);
 		} finally {
 			fixture.cleanup();
@@ -300,7 +300,7 @@ describe('Composer manager PHP scripts', () => {
 			expect(composerLog).toContain('ALLOW=1');
 			expect(composerLog).toContain('NOINT=1');
 			expect(composerLog).toContain(
-				'ARGS:update satusdev/repo-fetcher --no-dev --no-interaction -W',
+				'ARGS:update satusdev/repo-fetcher --no-interaction --update-no-dev -W',
 			);
 			expect(composerLog).toContain(
 				'ARGS:install --no-dev --no-interaction',

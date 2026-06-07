@@ -248,7 +248,7 @@ if ($action === 'add' || $action === 'update') {
     $backup = backupComposerState($composerJsonPath);
     writeComposer($composerJsonPath, $composer);
     
-    $out1 = runComposer('update satusdev/repo-fetcher --no-dev --no-interaction -W', $backup, true);
+    $out1 = runComposer('update satusdev/repo-fetcher --no-interaction --update-no-dev -W', $backup, true);
     
     // Always trigger a follow-up install to guarantee that any new/updated plugins are fetched and copied by repo-fetcher
     $out2 = runComposer('install --no-dev --no-interaction', $backup, true);
