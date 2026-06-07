@@ -24,6 +24,7 @@ export type EnvironmentType = (typeof ENVIRONMENT_TYPES)[number];
 const ABSOLUTE_SAFE_PATH_REGEX =
 	/^\/(?!.*(?:^|\/)\.\.(?:\/|$))[a-zA-Z0-9/_\-.]+$/;
 const TABLE_NAME_REGEX = /^[A-Za-z0-9_$]+$/;
+const POST_TYPE_REGEX = /^[A-Za-z0-9_-]+$/;
 
 export class UpsertDbCredentialsDto {
 	@IsString() @IsNotEmpty() @MaxLength(100) dbName!: string;
@@ -94,6 +95,12 @@ export class CreateEnvironmentDto {
 	@IsOptional()
 	@IsArray()
 	@IsString({ each: true })
+	@MaxLength(100, { each: true })
+	@Matches(POST_TYPE_REGEX, {
+		each: true,
+		message:
+			'protected_post_types entries may only contain letters, numbers, underscores, and hyphens',
+	})
 	protected_post_types?: string[];
 }
 

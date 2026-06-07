@@ -95,4 +95,26 @@ describe('CreateEnvironmentDto', () => {
 			]),
 		);
 	});
+
+	it('accepts valid protected custom post type slugs', async () => {
+		const errors = await validateDto({
+			...validEnvironment,
+			protected_post_types: ['project', 'course', 'lesson_type', 'lesson-type'],
+		});
+
+		expect(errors).toHaveLength(0);
+	});
+
+	it('rejects unsafe protected custom post type slugs', async () => {
+		const errors = await validateDto({
+			...validEnvironment,
+			protected_post_types: ['project', 'project;DROP'],
+		});
+
+		expect(errors).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ property: 'protected_post_types' }),
+			]),
+		);
+	});
 });

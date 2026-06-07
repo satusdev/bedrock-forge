@@ -552,6 +552,29 @@ describe('SyncProcessor', () => {
 			expect(rsyncCall).toContain('--no-group');
 		});
 
+		it('excludes protected upload files from rsync transfer and deletion', async () => {
+			const { sourceExecutor, tracker, targetEnv } = makeRsyncArgs({
+				code: 0,
+			});
+
+			await (processor as any).pushFilesViaRsync(
+				makeJob(JOB_TYPES.SYNC_PUSH, { jobExecutionId: 1 }),
+				'/source/site',
+				'/target/site',
+				targetEnv,
+				sourceExecutor,
+				tracker,
+				['web/app/uploads/2026/01/project.jpg'],
+			);
+
+			const rsyncCall = (sourceExecutor.execute as jest.Mock).mock.calls
+				.map(([cmd]) => String(cmd))
+				.find(cmd => cmd.startsWith('rsync '));
+			expect(rsyncCall).toContain(
+				"--exclude='/web/app/uploads/2026/01/project.jpg'",
+			);
+		});
+
 		it('treats rsync code 23 as non-fatal when output is permission-only', async () => {
 			const { sourceExecutor, tracker, targetEnv } = makeRsyncArgs({
 				code: 23,
@@ -1153,6 +1176,18 @@ describe('SyncProcessor', () => {
 		const postTypes = ['course', 'lesson'];
 		const tgtMycnf = '/tmp/my.cnf';
 
+		it('extracts original and generated upload paths from attachment metadata', () => {
+			const output = [
+				'10\t_wp_attached_file\t2026/01/project.jpg',
+				'10\t_wp_attachment_metadata\ta:2:{s:4:"file";s:19:"2026/01/project.jpg";s:5:"sizes";a:1:{s:9:"thumbnail";a:1:{s:4:"file";s:21:"project-150x150.jpg";}}}',
+			].join('\n');
+
+			expect((processor as any).extractProtectedUploadPaths(output)).toEqual([
+				'2026/01/project.jpg',
+				'2026/01/project-150x150.jpg',
+			]);
+		});
+
 		describe('backupProtectedPostTypes', () => {
 			it('returns null if postTypes list is empty', async () => {
 				const executor = { execute: jest.fn() } as any;
@@ -1208,7 +1243,7 @@ describe('SyncProcessor', () => {
 					postTypes,
 					tracker,
 				);
-				expect(res).toBe('wp_');
+				expect(res).toEqual({ prefix: 'wp_', uploadPaths: [] });
 				expect(executor.pushFile).not.toHaveBeenCalled();
 				expect(tracker.track).toHaveBeenCalledWith(
 					expect.objectContaining({
@@ -1218,8 +1253,14 @@ describe('SyncProcessor', () => {
 			});
 
 			it('creates backup and returns prefix if backup table does not exist', async () => {
+				let pushedSql = '';
 				const executor = {
-					pushFile: jest.fn().mockResolvedValue(undefined),
+					pushFile: jest.fn().mockImplementation(({ content }) => {
+						pushedSql = Buffer.isBuffer(content)
+							? content.toString('utf8')
+							: String(content);
+						return Promise.resolve(undefined);
+					}),
 					execute: jest.fn().mockImplementation((cmd: string) => {
 						if (cmd.includes('SHOW TABLES') && cmd.includes('wp_posts')) {
 							return Promise.resolve({ code: 0, stdout: 'wp_posts', stderr: '' });
@@ -1238,8 +1279,11 @@ describe('SyncProcessor', () => {
 					postTypes,
 					tracker,
 				);
-				expect(res).toBe('wp_');
+				expect(res).toEqual({ prefix: 'wp_', uploadPaths: [] });
 				expect(executor.pushFile).toHaveBeenCalled();
+				expect(pushedSql).toContain("a.post_type = 'attachment'");
+				expect(pushedSql).toContain('forge_backup_term_taxonomy');
+				expect(pushedSql).toContain('forge_backup_terms');
 				expect(tracker.track).toHaveBeenCalledWith(
 					expect.objectContaining({
 						step: expect.stringContaining('backing up target post types'),
@@ -1312,8 +1356,14 @@ describe('SyncProcessor', () => {
 			});
 
 			it('performs restore and tracks success when query succeeds', async () => {
+				let pushedSql = '';
 				const executor = {
-					pushFile: jest.fn().mockResolvedValue(undefined),
+					pushFile: jest.fn().mockImplementation(({ content }) => {
+						pushedSql = Buffer.isBuffer(content)
+							? content.toString('utf8')
+							: String(content);
+						return Promise.resolve(undefined);
+					}),
 					execute: jest.fn().mockImplementation((cmd: string) => {
 						if (cmd.includes('SHOW TABLES') && cmd.includes('wp_forge_backup_posts')) {
 							return Promise.resolve({ code: 0, stdout: 'wp_forge_backup_posts', stderr: '' });
@@ -1331,6 +1381,11 @@ describe('SyncProcessor', () => {
 					tracker,
 				);
 				expect(executor.pushFile).toHaveBeenCalled();
+				expect(pushedSql).toContain("a.post_type = 'attachment'");
+				expect(pushedSql).toContain('ID IN (SELECT ID FROM `wp_forge_backup_posts`)');
+				expect(pushedSql).toContain('REPLACE INTO `wp_terms`');
+				expect(pushedSql).toContain('REPLACE INTO `wp_term_taxonomy`');
+				expect(pushedSql).toContain('INSERT IGNORE INTO `wp_term_relationships`');
 				expect(tracker.track).toHaveBeenCalledWith(
 					expect.objectContaining({
 						step: expect.stringContaining('restored successfully'),

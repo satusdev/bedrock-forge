@@ -190,16 +190,17 @@ Use this when you want to **keep** the target's existing content for a custom po
 
 * **When to use**: You have staging-specific projects, courses, lessons, or test content that you never want wiped out by a production sync.
 * **How it works** (full lifecycle):
-  1. **Pre-import backup**: Before the dump is imported, Forge connects to the target DB, auto-detects the table prefix, and copies all rows for the protected post types from `posts`, `postmeta`, `term_relationships`, `comments`, and `commentmeta` — including their revisions — into temporary `_forge_backup_*` tables.
+  1. **Pre-import backup**: Before the dump is imported, Forge connects to the target DB, auto-detects the table prefix, and copies all rows for the protected post types from `posts`, `postmeta`, `term_relationships`, `term_taxonomy`, `terms`, `comments`, and `commentmeta` — including their revisions and directly attached media — into temporary `_forge_backup_*` tables.
   2. **Safe import**: Forge skips the `DROP DATABASE` step so the backup tables survive the incoming dump.
-  3. **Post-import restore**: After import, Forge deletes all rows for the protected post types that arrived from the source (posts + revisions + all their related data), then re-inserts the original target rows from the backup tables, and finally drops the backup tables.
+  3. **Post-import restore**: After import, Forge deletes all rows for the protected post types that arrived from the source (posts, revisions, directly attached media, taxonomy links, comments, and metadata), then re-inserts the original target rows from the backup tables, and finally drops the backup tables.
+  4. **File sync protection**: During database+files sync, Forge excludes upload files referenced by the protected post type's directly attached media from rsync/tar overwrite and deletion.
 * **Configuration**: Enter a comma-separated list of custom post type slugs in the **Protected Custom Post Types** field of the Environment settings modal.
 
 ```
 project, course, lesson
 ```
 
-> **Important**: This preserves post type **content** on the target. The post type **registration** (code / plugin) must still exist on both environments — this only controls which database rows survive the sync.
+> **Important**: This preserves post type **content** on the target. The post type **registration** (code / plugin) must still exist on both environments. Media protection is based on WordPress attachment rows directly attached to the protected posts; arbitrary URLs embedded in builder content are not guaranteed unless they resolve to those attachments.
 
 > **Note**: Protected Custom Post Types and SQL Protection Queries are not mutually exclusive. You could protect `course` posts on staging while also running sanitization queries for WooCommerce orders in the same sync.
 

@@ -45,6 +45,12 @@ type WpLayout = {
 type Executor = Awaited<ReturnType<typeof createRemoteExecutor>>;
 
 const TABLE_NAME_REGEX = /^[A-Za-z0-9_$]+$/;
+const POST_TYPE_REGEX = /^[A-Za-z0-9_-]+$/;
+
+type ProtectedPostTypeBackup = {
+	prefix: string;
+	uploadPaths: string[];
+};
 
 // concurrency=1: sync jobs do SSH+mysqldump+rsync — serialised to avoid
 // saturating CPU/network on concurrent large file transfers.
@@ -430,9 +436,9 @@ export class SyncProcessor extends WorkerHost {
 			),
 		});
 		await targetExecutor.execute(`chmod 600 ${tgtMycnf}`);
-		let protectedPostTypesPrefix: string | null = null;
+		let protectedPostTypesBackup: ProtectedPostTypeBackup | null = null;
 		if (targetEnv.protected_post_types && targetEnv.protected_post_types.length > 0) {
-			protectedPostTypesPrefix = await this.backupProtectedPostTypes(
+			protectedPostTypesBackup = await this.backupProtectedPostTypes(
 				targetExecutor,
 				targetCreds,
 				tgtMycnf,
@@ -441,7 +447,7 @@ export class SyncProcessor extends WorkerHost {
 			);
 		}
 
-		if (cloneSafeProtected.length > 0 || protectedPostTypesPrefix) {
+		if (cloneSafeProtected.length > 0 || protectedPostTypesBackup) {
 			// Protected tables configured — check if the target DB already exists.
 			// If it does: skip DROP/CREATE; the protected tables survive and mysqldump's
 			// per-table DROP TABLE IF EXISTS handles the unprotected ones automatically.
@@ -531,13 +537,13 @@ export class SyncProcessor extends WorkerHost {
 			{ timeout: 10 * 60_000 },
 		);
 
-		if (importResult.code === 0 && protectedPostTypesPrefix) {
+		if (importResult.code === 0 && protectedPostTypesBackup) {
 			await this.restoreProtectedPostTypes(
 				targetExecutor,
 				targetCreds,
 				tgtMycnf,
 				targetEnv.protected_post_types ?? [],
-				protectedPostTypesPrefix,
+				protectedPostTypesBackup.prefix,
 				tracker,
 			);
 		}
@@ -620,6 +626,11 @@ export class SyncProcessor extends WorkerHost {
 			sourceExecutor,
 			targetExecutor,
 			tracker,
+			this.buildProtectedUploadFileExcludes(
+				targetEnv.root_path,
+				targetLayout,
+				protectedPostTypesBackup?.uploadPaths ?? [],
+			),
 		);
 		await job.updateProgress({ value: 85, step: 'Files synced' });
 
@@ -770,9 +781,10 @@ export class SyncProcessor extends WorkerHost {
 
 		if (await this.isCancelled(job.id)) throw new Error('Cancelled by user');
 		let filesUrlsChanged: boolean | null = null;
+		let protectedUploadFileExcludes: string[] = [];
 
 		if (scope === 'database' || scope === 'both') {
-			await this.pushDatabase(
+			protectedUploadFileExcludes = await this.pushDatabase(
 				job,
 				sourceEnv,
 				targetEnv,
@@ -781,6 +793,48 @@ export class SyncProcessor extends WorkerHost {
 				targetExecutor,
 				tracker,
 			);
+		} else if (
+			scope === 'files' &&
+			targetEnv.protected_post_types &&
+			targetEnv.protected_post_types.length > 0
+		) {
+			try {
+				const targetCreds = await this.resolveCredentials(
+					targetExecutor,
+					targetEnv.root_path,
+					tracker,
+					'target (protected file excludes)',
+					targetEnv.id,
+				);
+				const tgtMycnf = `/tmp/forge_files_protected_${job.id}.cnf`;
+				await targetExecutor.pushFile({
+					remotePath: tgtMycnf,
+					content: Buffer.from(
+						`[client]\nuser=${targetCreds.dbUser}\npassword=${targetCreds.dbPassword}\nhost=${targetCreds.dbHost}\n`,
+					),
+				});
+				await targetExecutor.execute(`chmod 600 ${tgtMycnf}`);
+				const protectedUploadPaths =
+					await this.collectProtectedPostTypeUploadPaths(
+						targetExecutor,
+						targetCreds,
+						tgtMycnf,
+						targetEnv.protected_post_types,
+						tracker,
+					);
+				await targetExecutor.execute(`rm -f ${tgtMycnf}`).catch(() => {});
+				protectedUploadFileExcludes = this.buildProtectedUploadFileExcludes(
+					targetEnv.root_path,
+					targetPushLayout,
+					protectedUploadPaths,
+				);
+			} catch (e) {
+				await tracker.track({
+					step: 'Protected Post Types — upload file protection skipped',
+					level: 'warn',
+					detail: e instanceof Error ? e.message : String(e),
+				});
+			}
 		}
 
 		await job.updateProgress({
@@ -796,6 +850,7 @@ export class SyncProcessor extends WorkerHost {
 				sourceExecutor,
 				targetExecutor,
 				tracker,
+				protectedUploadFileExcludes,
 			);
 
 			// Replace hardcoded URLs inside content files (CSS, JS, etc.)
@@ -910,7 +965,7 @@ export class SyncProcessor extends WorkerHost {
 		sourceExecutor: Executor,
 		targetExecutor: Executor,
 		tracker: StepTracker,
-	) {
+	): Promise<string[]> {
 		await tracker.track({
 			step: 'Resolving source database credentials',
 			level: 'info',
@@ -1031,9 +1086,9 @@ export class SyncProcessor extends WorkerHost {
 			),
 		});
 		await targetExecutor.execute(`chmod 600 ${tgtMycnf}`);
-		let protectedPostTypesPrefix: string | null = null;
+		let protectedPostTypesBackup: ProtectedPostTypeBackup | null = null;
 		if (targetEnv.protected_post_types && targetEnv.protected_post_types.length > 0) {
-			protectedPostTypesPrefix = await this.backupProtectedPostTypes(
+			protectedPostTypesBackup = await this.backupProtectedPostTypes(
 				targetExecutor,
 				targetCreds,
 				tgtMycnf,
@@ -1042,7 +1097,7 @@ export class SyncProcessor extends WorkerHost {
 			);
 		}
 
-		if (pushSafeProtected.length > 0 || protectedPostTypesPrefix) {
+		if (pushSafeProtected.length > 0 || protectedPostTypesBackup) {
 			// Protected tables configured — check if the target DB already exists.
 			// If it does: skip DROP/CREATE; the protected tables survive and mysqldump's
 			// per-table DROP TABLE IF EXISTS handles the unprotected ones automatically.
@@ -1131,13 +1186,13 @@ export class SyncProcessor extends WorkerHost {
 			{ timeout: 10 * 60_000 },
 		);
 
-		if (importResult.code === 0 && protectedPostTypesPrefix) {
+		if (importResult.code === 0 && protectedPostTypesBackup) {
 			await this.restoreProtectedPostTypes(
 				targetExecutor,
 				targetCreds,
 				tgtMycnf,
 				targetEnv.protected_post_types ?? [],
-				protectedPostTypesPrefix,
+				protectedPostTypesBackup.prefix,
 				tracker,
 			);
 		}
@@ -1191,6 +1246,12 @@ export class SyncProcessor extends WorkerHost {
 				pushSafeProtected,
 			);
 		}
+
+		return this.buildProtectedUploadFileExcludes(
+			targetEnv.root_path,
+			targetLayout,
+			protectedPostTypesBackup?.uploadPaths ?? [],
+		);
 	}
 
 	/**
@@ -1220,6 +1281,7 @@ export class SyncProcessor extends WorkerHost {
 		sourceExecutor: Executor,
 		targetExecutor: Executor,
 		tracker: StepTracker,
+		protectedFileExcludes: string[] = [],
 	) {
 		const sourceSite = sourceEnv.root_path;
 		const targetSite = targetEnv.root_path;
@@ -1264,6 +1326,7 @@ export class SyncProcessor extends WorkerHost {
 				targetEnv,
 				sourceExecutor,
 				tracker,
+				protectedFileExcludes,
 			);
 		} else {
 			await tracker.track({
@@ -1278,6 +1341,7 @@ export class SyncProcessor extends WorkerHost {
 				sourceExecutor,
 				targetExecutor,
 				tracker,
+				protectedFileExcludes,
 			);
 		}
 
@@ -1300,6 +1364,7 @@ export class SyncProcessor extends WorkerHost {
 		},
 		sourceExecutor: Executor,
 		tracker: StepTracker,
+		protectedFileExcludes: string[] = [],
 	) {
 		// Upload worker's private key to source as a temp file
 		const keyPath = `/tmp/forge_push_key_${job.id}`;
@@ -1312,7 +1377,8 @@ export class SyncProcessor extends WorkerHost {
 
 		// Prepend '/' to anchor each pattern to the transfer root, so rsync won't
 		// strip nested directories with the same name inside plugins or themes.
-		const excludeFlags = this.RSYNC_EXCLUDES.map(
+		const allExcludes = this.buildFileSyncExcludes(protectedFileExcludes);
+		const excludeFlags = allExcludes.map(
 			e => `--exclude=${shellQuote('/' + e)}`,
 		).join(' ');
 
@@ -1331,7 +1397,7 @@ export class SyncProcessor extends WorkerHost {
 			`${shellQuote(targetEnv.server.ssh_user)}@${targetEnv.server.ip_address}:${shellQuote(targetRoot)}/`,
 		].join(' ');
 
-		const loggedExcludes = this.RSYNC_EXCLUDES.join(', ');
+		const loggedExcludes = allExcludes.join(', ');
 		await tracker.track({
 			step: 'Syncing site files via rsync',
 			level: 'info',
@@ -1413,6 +1479,14 @@ export class SyncProcessor extends WorkerHost {
 		);
 	}
 
+	private buildFileSyncExcludes(protectedFileExcludes: string[] = []): string[] {
+		const cleanProtected = protectedFileExcludes
+			.map(p => p.replace(/^\/+/, '').replace(/\/+/g, '/').trim())
+			.filter(p => p.length > 0 && !p.includes('..'));
+
+		return Array.from(new Set([...this.RSYNC_EXCLUDES, ...cleanProtected]));
+	}
+
 	/**
 	 * Fallback file sync: tar on source → pull through worker → untar on target.
 	 * Memory-bounded via streaming: large sites may require significant RAM.
@@ -1424,13 +1498,15 @@ export class SyncProcessor extends WorkerHost {
 		sourceExecutor: Executor,
 		targetExecutor: Executor,
 		tracker: StepTracker,
+		protectedFileExcludes: string[] = [],
 	) {
 		const remoteTar = `/tmp/forge_push_content_${job.id}.tar.gz`;
 
 		// Build tar exclude flags. Prepend './' to anchor patterns to the transfer
 		// root (tar paths start with './' when using '-C dir .'), preventing
 		// accidental exclusion of same-named subdirectories inside plugins/themes.
-		const tarExcludes = this.RSYNC_EXCLUDES.map(
+		const allExcludes = this.buildFileSyncExcludes(protectedFileExcludes);
+		const tarExcludes = allExcludes.map(
 			e => `--exclude=${shellQuote('./' + e)}`,
 		).join(' ');
 
@@ -3006,14 +3082,174 @@ export class SyncProcessor extends WorkerHost {
 		});
 	}
 
+	private normalizeProtectedPostTypes(postTypes: string[] = []): string[] {
+		return Array.from(
+			new Set(
+				postTypes
+					.map(t => t.trim())
+					.filter(t => POST_TYPE_REGEX.test(t)),
+			),
+		);
+	}
+
+	private async collectProtectedPostTypeUploadPaths(
+		executor: Executor,
+		creds: Creds,
+		tgtMycnf: string,
+		postTypes: string[],
+		tracker: StepTracker,
+		knownPrefix?: string,
+		useBackupTables = false,
+	): Promise<string[]> {
+		const safePostTypes = this.normalizeProtectedPostTypes(postTypes);
+		if (safePostTypes.length === 0) return [];
+
+		const prefix =
+			knownPrefix ??
+			(await this.detectTargetTablePrefix(executor, creds, tgtMycnf));
+		const postTypesList = safePostTypes
+			.map(t => `'${escapeMysql(t)}'`)
+			.join(',');
+		const postsTable = useBackupTables
+			? `${prefix}forge_backup_posts`
+			: `${prefix}posts`;
+		const postmetaTable = useBackupTables
+			? `${prefix}forge_backup_postmeta`
+			: `${prefix}postmeta`;
+		const query = `
+			SELECT pm.post_id, pm.meta_key, pm.meta_value
+			FROM \`${postmetaTable}\` pm
+			INNER JOIN \`${postsTable}\` a ON pm.post_id = a.ID
+			INNER JOIN \`${postsTable}\` p ON a.post_parent = p.ID
+			WHERE a.post_type = 'attachment'
+			  AND p.post_type IN (${postTypesList})
+			  AND pm.meta_key IN ('_wp_attached_file', '_wp_attachment_metadata')
+			ORDER BY pm.post_id, pm.meta_key
+		`;
+		const result = await executor.execute(
+			`mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} -B -N -e ${shellQuote(query)}`,
+		);
+		if (result.code !== 0) {
+			await tracker.track({
+				step: 'Protected Post Types — could not collect upload paths',
+				level: 'warn',
+				detail: result.stderr,
+			});
+			return [];
+		}
+
+		const paths = this.extractProtectedUploadPaths(result.stdout);
+		if (paths.length > 0) {
+			await tracker.track({
+				step: 'Protected Post Types — protected upload files detected',
+				level: 'info',
+				detail: `${paths.length} upload path(s) will be excluded from file sync deletion/overwrite`,
+			});
+		}
+		return paths;
+	}
+
+	private async detectTargetTablePrefix(
+		executor: Executor,
+		creds: Creds,
+		tgtMycnf: string,
+	): Promise<string> {
+		const prefixQuery = `SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${escapeMysql(creds.dbName)}' AND table_name LIKE '%options' LIMIT 1`;
+		const prefixResult = await executor.execute(
+			`mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} -sN -e ${shellQuote(prefixQuery)}`,
+		);
+		return prefixResult.code === 0 && prefixResult.stdout.trim()
+			? prefixResult.stdout.trim()
+			: 'wp_';
+	}
+
+	private extractProtectedUploadPaths(mysqlOutput: string): string[] {
+		type AttachmentMeta = {
+			attachedFile?: string;
+			metadata?: string;
+		};
+		const byPost = new Map<string, AttachmentMeta>();
+
+		for (const line of mysqlOutput.split('\n')) {
+			if (!line.trim()) continue;
+			const [postId, metaKey, ...valueParts] = line.split('\t');
+			const metaValue = valueParts.join('\t').trim();
+			const current = byPost.get(postId) ?? {};
+			if (metaKey === '_wp_attached_file') current.attachedFile = metaValue;
+			if (metaKey === '_wp_attachment_metadata') current.metadata = metaValue;
+			byPost.set(postId, current);
+		}
+
+		const paths = new Set<string>();
+		for (const meta of byPost.values()) {
+			if (!meta.attachedFile) continue;
+			const attached = this.normalizeUploadPath(meta.attachedFile);
+			if (!attached) continue;
+			paths.add(attached);
+
+			const dir = attached.includes('/')
+				? attached.slice(0, attached.lastIndexOf('/'))
+				: '';
+			const metadata = meta.metadata ?? '';
+			const fileMatches = metadata.matchAll(
+				/s:\d+:"([^"]+\.[A-Za-z0-9]{2,8})"/g,
+			);
+			for (const match of fileMatches) {
+				const raw = match[1];
+				const candidate = raw.includes('/') || !dir ? raw : `${dir}/${raw}`;
+				const normalized = this.normalizeUploadPath(candidate);
+				if (normalized) paths.add(normalized);
+			}
+		}
+
+		return Array.from(paths);
+	}
+
+	private normalizeUploadPath(path: string): string | null {
+		const clean = path
+			.replace(/\\/g, '/')
+			.replace(/^\/+/, '')
+			.replace(/^wp-content\/uploads\//, '')
+			.replace(/^app\/uploads\//, '')
+			.trim();
+
+		if (!clean || clean.includes('..') || clean.endsWith('/')) return null;
+		return clean;
+	}
+
+	private buildProtectedUploadFileExcludes(
+		targetRoot: string,
+		targetLayout: WpLayout,
+		uploadPaths: string[],
+	): string[] {
+		if (uploadPaths.length === 0) return [];
+		const normalizedRoot = targetRoot.replace(/\/+$/, '');
+		const normalizedContent = targetLayout.contentPath.replace(/\/+$/, '');
+		const contentRelative = normalizedContent.startsWith(`${normalizedRoot}/`)
+			? normalizedContent.slice(normalizedRoot.length + 1)
+			: targetLayout.isBedrock
+				? 'web/app'
+				: 'wp-content';
+
+		return Array.from(
+			new Set(
+				uploadPaths
+					.map(p => this.normalizeUploadPath(p))
+					.filter((p): p is string => Boolean(p))
+					.map(p => `${contentRelative}/uploads/${p}`.replace(/\/+/g, '/')),
+			),
+		);
+	}
+
 	private async backupProtectedPostTypes(
 		executor: Executor,
 		creds: Creds,
 		tgtMycnf: string,
 		postTypes: string[],
 		tracker: StepTracker,
-	): Promise<string | null> {
-		if (!postTypes || postTypes.length === 0) return null;
+	): Promise<ProtectedPostTypeBackup | null> {
+		const safePostTypes = this.normalizeProtectedPostTypes(postTypes);
+		if (safePostTypes.length === 0) return null;
 
 		let prefix = 'wp_';
 		try {
@@ -3049,32 +3285,55 @@ export class SyncProcessor extends WorkerHost {
 				step: 'Protected Post Types — existing backup tables detected from a previous failed run, retaining them',
 				level: 'info',
 			});
-			return prefix;
+			return {
+				prefix,
+				uploadPaths: await this.collectProtectedPostTypeUploadPaths(
+					executor,
+					creds,
+					tgtMycnf,
+					safePostTypes,
+					tracker,
+					prefix,
+					true,
+				),
+			};
 		}
 
 		await tracker.track({
 			step: 'Protected Post Types — backing up target post types',
 			level: 'info',
-			detail: `Post types: ${postTypes.join(', ')}`,
+			detail: `Post types: ${safePostTypes.join(', ')}`,
 		});
 
-		const postTypesList = postTypes.map(t => `'${escapeMysql(t)}'`).join(',');
+		const postTypesList = safePostTypes.map(t => `'${escapeMysql(t)}'`).join(',');
 
 		const queries = [
-			// Back up main posts (protected types + their revisions)
+			// Back up protected posts, their revisions, and directly attached media.
 			`DROP TABLE IF EXISTS \`${prefix}forge_backup_posts\`;`,
 			`CREATE TABLE \`${prefix}forge_backup_posts\` AS
 			  SELECT * FROM \`${prefix}posts\` WHERE post_type IN (${postTypesList})
 			  UNION ALL
 			  SELECT r.* FROM \`${prefix}posts\` r
 			    INNER JOIN \`${prefix}posts\` p ON r.post_parent = p.ID
-			    WHERE r.post_type = 'revision' AND p.post_type IN (${postTypesList});`,
+			    WHERE r.post_type = 'revision' AND p.post_type IN (${postTypesList})
+			  UNION ALL
+			  SELECT a.* FROM \`${prefix}posts\` a
+			    INNER JOIN \`${prefix}posts\` p ON a.post_parent = p.ID
+			    WHERE a.post_type = 'attachment' AND p.post_type IN (${postTypesList});`,
 			// Back up related postmeta
 			`DROP TABLE IF EXISTS \`${prefix}forge_backup_postmeta\`;`,
 			`CREATE TABLE \`${prefix}forge_backup_postmeta\` AS SELECT * FROM \`${prefix}postmeta\` WHERE post_id IN (SELECT ID FROM \`${prefix}forge_backup_posts\`);`,
-			// Back up term relationships
+			// Back up taxonomy graph used by protected posts/media.
 			`DROP TABLE IF EXISTS \`${prefix}forge_backup_term_relationships\`;`,
 			`CREATE TABLE \`${prefix}forge_backup_term_relationships\` AS SELECT * FROM \`${prefix}term_relationships\` WHERE object_id IN (SELECT ID FROM \`${prefix}forge_backup_posts\`);`,
+			`DROP TABLE IF EXISTS \`${prefix}forge_backup_term_taxonomy\`;`,
+			`CREATE TABLE \`${prefix}forge_backup_term_taxonomy\` AS
+			  SELECT DISTINCT tt.* FROM \`${prefix}term_taxonomy\` tt
+			    INNER JOIN \`${prefix}forge_backup_term_relationships\` tr ON tr.term_taxonomy_id = tt.term_taxonomy_id;`,
+			`DROP TABLE IF EXISTS \`${prefix}forge_backup_terms\`;`,
+			`CREATE TABLE \`${prefix}forge_backup_terms\` AS
+			  SELECT DISTINCT t.* FROM \`${prefix}terms\` t
+			    INNER JOIN \`${prefix}forge_backup_term_taxonomy\` tt ON tt.term_id = t.term_id;`,
 			// Back up comments and their meta
 			`DROP TABLE IF EXISTS \`${prefix}forge_backup_comments\`;`,
 			`CREATE TABLE \`${prefix}forge_backup_comments\` AS SELECT * FROM \`${prefix}comments\` WHERE comment_post_ID IN (SELECT ID FROM \`${prefix}forge_backup_posts\`);`,
@@ -3100,7 +3359,18 @@ export class SyncProcessor extends WorkerHost {
 			return null;
 		}
 
-		return prefix;
+		return {
+			prefix,
+			uploadPaths: await this.collectProtectedPostTypeUploadPaths(
+				executor,
+				creds,
+				tgtMycnf,
+				safePostTypes,
+				tracker,
+				prefix,
+				true,
+			),
+		};
 	}
 
 	private async restoreProtectedPostTypes(
@@ -3111,7 +3381,8 @@ export class SyncProcessor extends WorkerHost {
 		prefix: string,
 		tracker: StepTracker,
 	): Promise<void> {
-		if (!postTypes || postTypes.length === 0) return;
+		const safePostTypes = this.normalizeProtectedPostTypes(postTypes);
+		if (safePostTypes.length === 0) return;
 
 		const tableCheck = await executor.execute(
 			`mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} -sN -e ${shellQuote(`SHOW TABLES LIKE '${prefix}forge_backup_posts'`)}`
@@ -3123,25 +3394,32 @@ export class SyncProcessor extends WorkerHost {
 		await tracker.track({
 			step: 'Protected Post Types — restoring target post types',
 			level: 'info',
-			detail: `Post types: ${postTypes.join(', ')}`,
+			detail: `Post types: ${safePostTypes.join(', ')}`,
 		});
 
-		const postTypesList = postTypes.map(t => `'${escapeMysql(t)}'`).join(',');
+		const postTypesList = safePostTypes.map(t => `'${escapeMysql(t)}'`).join(',');
+		const protectedImportedPostsPredicate =
+			`p.post_type IN (${postTypesList}) OR ` +
+			`(p.post_type = 'attachment' AND parent.post_type IN (${postTypesList}))`;
 
 		const queries = [
-			// Step 1: Delete commentmeta for any comments on the protected post types
-			// (these came in from the source dump — we must purge them before deleting comments)
+			// Step 1: Delete comments/meta for source-imported protected posts and attached media.
 			`DELETE cm FROM \`${prefix}commentmeta\` cm
 			  INNER JOIN \`${prefix}comments\` c ON cm.comment_id = c.comment_ID
 			  INNER JOIN \`${prefix}posts\` p ON c.comment_post_ID = p.ID
-			  WHERE p.post_type IN (${postTypesList});`,
+			  LEFT JOIN \`${prefix}posts\` parent ON p.post_parent = parent.ID
+			  WHERE c.comment_post_ID IN (SELECT ID FROM \`${prefix}forge_backup_posts\`)
+			    OR ${protectedImportedPostsPredicate};`,
 
-			// Step 2: Delete comments on the protected post types (from source dump)
 			`DELETE c FROM \`${prefix}comments\` c
 			  INNER JOIN \`${prefix}posts\` p ON c.comment_post_ID = p.ID
-			  WHERE p.post_type IN (${postTypesList});`,
+			  LEFT JOIN \`${prefix}posts\` parent ON p.post_parent = parent.ID
+			  WHERE c.comment_post_ID IN (SELECT ID FROM \`${prefix}forge_backup_posts\`)
+			    OR ${protectedImportedPostsPredicate};`,
 
-			// Step 3: Delete postmeta for protected post types and their revisions (from source dump)
+			// Step 2: Delete postmeta for source-imported protected posts, revisions, and attached media.
+			`DELETE FROM \`${prefix}postmeta\`
+			  WHERE post_id IN (SELECT ID FROM \`${prefix}forge_backup_posts\`);`,
 			`DELETE pm FROM \`${prefix}postmeta\` pm
 			  INNER JOIN \`${prefix}posts\` p ON pm.post_id = p.ID
 			  WHERE p.post_type IN (${postTypesList});`,
@@ -3149,30 +3427,48 @@ export class SyncProcessor extends WorkerHost {
 			  INNER JOIN \`${prefix}posts\` r ON pm.post_id = r.ID
 			  INNER JOIN \`${prefix}posts\` p ON r.post_parent = p.ID
 			  WHERE r.post_type = 'revision' AND p.post_type IN (${postTypesList});`,
+			`DELETE pm FROM \`${prefix}postmeta\` pm
+			  INNER JOIN \`${prefix}posts\` a ON pm.post_id = a.ID
+			  INNER JOIN \`${prefix}posts\` p ON a.post_parent = p.ID
+			  WHERE a.post_type = 'attachment' AND p.post_type IN (${postTypesList});`,
 
-			// Step 4: Delete term relationships for protected post types (from source dump)
+			// Step 3: Delete term relationships for source-imported protected posts and attached media.
+			`DELETE FROM \`${prefix}term_relationships\`
+			  WHERE object_id IN (SELECT ID FROM \`${prefix}forge_backup_posts\`);`,
 			`DELETE tr FROM \`${prefix}term_relationships\` tr
 			  INNER JOIN \`${prefix}posts\` p ON tr.object_id = p.ID
 			  WHERE p.post_type IN (${postTypesList});`,
+			`DELETE tr FROM \`${prefix}term_relationships\` tr
+			  INNER JOIN \`${prefix}posts\` a ON tr.object_id = a.ID
+			  INNER JOIN \`${prefix}posts\` p ON a.post_parent = p.ID
+			  WHERE a.post_type = 'attachment' AND p.post_type IN (${postTypesList});`,
 
-			// Step 5: Delete revisions of protected post types (from source dump)
+			// Step 4: Delete dependent source-imported rows.
 			`DELETE r FROM \`${prefix}posts\` r
 			  INNER JOIN \`${prefix}posts\` p ON r.post_parent = p.ID
 			  WHERE r.post_type = 'revision' AND p.post_type IN (${postTypesList});`,
+			`DELETE a FROM \`${prefix}posts\` a
+			  INNER JOIN \`${prefix}posts\` p ON a.post_parent = p.ID
+			  WHERE a.post_type = 'attachment' AND p.post_type IN (${postTypesList});`,
 
-			// Step 6: Delete the protected post type rows themselves (from source dump)
 			`DELETE FROM \`${prefix}posts\` WHERE post_type IN (${postTypesList});`,
+			`DELETE FROM \`${prefix}posts\`
+			  WHERE ID IN (SELECT ID FROM \`${prefix}forge_backup_posts\`);`,
 
-			// Step 7: Restore original target rows from backup tables
+			// Step 5: Restore original target rows from backup tables.
+			`REPLACE INTO \`${prefix}terms\` SELECT * FROM \`${prefix}forge_backup_terms\`;`,
+			`REPLACE INTO \`${prefix}term_taxonomy\` SELECT * FROM \`${prefix}forge_backup_term_taxonomy\`;`,
 			`INSERT IGNORE INTO \`${prefix}posts\` SELECT * FROM \`${prefix}forge_backup_posts\`;`,
 			`INSERT IGNORE INTO \`${prefix}postmeta\` SELECT * FROM \`${prefix}forge_backup_postmeta\`;`,
 			`INSERT IGNORE INTO \`${prefix}term_relationships\` SELECT * FROM \`${prefix}forge_backup_term_relationships\`;`,
 			`INSERT IGNORE INTO \`${prefix}comments\` SELECT * FROM \`${prefix}forge_backup_comments\`;`,
 			`INSERT IGNORE INTO \`${prefix}commentmeta\` SELECT * FROM \`${prefix}forge_backup_commentmeta\`;`,
 
-			// Step 8: Drop temporary backup tables
+			// Step 6: Drop temporary backup tables.
 			`DROP TABLE IF EXISTS \`${prefix}forge_backup_commentmeta\`;`,
 			`DROP TABLE IF EXISTS \`${prefix}forge_backup_comments\`;`,
+			`DROP TABLE IF EXISTS \`${prefix}forge_backup_terms\`;`,
+			`DROP TABLE IF EXISTS \`${prefix}forge_backup_term_taxonomy\`;`,
 			`DROP TABLE IF EXISTS \`${prefix}forge_backup_term_relationships\`;`,
 			`DROP TABLE IF EXISTS \`${prefix}forge_backup_postmeta\`;`,
 			`DROP TABLE IF EXISTS \`${prefix}forge_backup_posts\`;`

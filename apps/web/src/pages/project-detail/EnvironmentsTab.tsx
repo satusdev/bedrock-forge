@@ -131,6 +131,7 @@ const ENV_TYPES = [
 ] as const;
 
 const TABLE_NAME_REGEX = /^[A-Za-z0-9_$]+$/;
+const POST_TYPE_REGEX = /^[A-Za-z0-9_-]+$/;
 type EnvTypeValue = (typeof ENV_TYPES)[number]['value'];
 
 const SERVER_STATUS_VARIANT: Record<
@@ -141,6 +142,17 @@ const SERVER_STATUS_VARIANT: Record<
 	offline: 'destructive',
 	unknown: 'secondary',
 };
+
+function parseProtectedPostTypes(input: string): string[] {
+	return Array.from(
+		new Set(
+			input
+				.split(',')
+				.map(t => t.trim())
+				.filter(t => t.length > 0 && POST_TYPE_REGEX.test(t)),
+		),
+	);
+}
 
 function ProtectedTablesPicker({
 	projectId,
@@ -421,10 +433,7 @@ function EnvironmentFormDialog({
 					.split('\n')
 					.map(q => q.trim())
 					.filter(Boolean),
-				protected_post_types: protectedPostTypesText
-					.split(',')
-					.map(t => t.trim())
-					.filter(Boolean),
+				protected_post_types: parseProtectedPostTypes(protectedPostTypesText),
 			};
 			if (initial) {
 				await api.put(
@@ -610,7 +619,7 @@ function EnvironmentFormDialog({
 							className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50'
 						/>
 						<p className='text-xs text-muted-foreground'>
-							WordPress custom post type identifiers (comma-separated, e.g. `project, course`) to preserve on the target database during database sync. Target data for these post types will not be overwritten.
+							WordPress custom post type identifiers (comma-separated, e.g. `project, course`) to preserve on the target during sync. Target posts, metadata, taxonomy links, comments, and directly attached media for these post types will not be overwritten.
 						</p>
 					</div>
 
