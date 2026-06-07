@@ -1,19 +1,19 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { randomUUID } from 'crypto';
 import { ThemeScansRepository } from './theme-scans.repository';
 import {
 	QUEUES,
 	JOB_TYPES,
-	DEFAULT_JOB_OPTIONS,
 	PaginationQuery,
 } from '@bedrock-forge/shared';
+import { JobOrchestratorService } from '../job-executions/job-orchestrator.service';
 
 @Injectable()
 export class ThemeScansService {
 	constructor(
 		private readonly repo: ThemeScansRepository,
+		private readonly jobOrchestrator: JobOrchestratorService,
 		@InjectQueue(QUEUES.THEME_SCANS) private readonly queue: Queue,
 	) {}
 
@@ -22,20 +22,15 @@ export class ThemeScansService {
 	}
 
 	async enqueueScan(environmentId: number) {
-		await this.requireEnv(environmentId);
-		const bullJobId = randomUUID();
-		const exec = await this.repo.createJobExecution({
-			environment_id: BigInt(environmentId),
-			queue_name: QUEUES.THEME_SCANS,
-			job_type: JOB_TYPES.THEME_SCAN_RUN,
-			bull_job_id: bullJobId,
+		const env = await this.requireEnv(environmentId);
+		const result = await this.jobOrchestrator.enqueue({
+			queue: this.queue,
+			queueName: QUEUES.THEME_SCANS,
+			jobType: JOB_TYPES.THEME_SCAN_RUN,
+			payload: { environmentId },
+			environmentId: env.id,
 		});
-		const job = await this.queue.add(
-			JOB_TYPES.THEME_SCAN_RUN,
-			{ environmentId, jobExecutionId: Number(exec.id) },
-			{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
-		);
-		return { jobExecutionId: Number(exec.id), bullJobId: job.id };
+		return { jobExecutionId: result.jobExecutionId, bullJobId: result.bullJobId };
 	}
 
 	async enqueueThemeManage(
@@ -43,20 +38,15 @@ export class ThemeScansService {
 		action: 'activate' | 'install' | 'delete' | 'update' | 'update-all',
 		slug?: string,
 	) {
-		await this.requireEnv(environmentId);
-		const bullJobId = randomUUID();
-		const exec = await this.repo.createJobExecution({
-			environment_id: BigInt(environmentId),
-			queue_name: QUEUES.THEME_SCANS,
-			job_type: JOB_TYPES.THEME_MANAGE,
-			bull_job_id: bullJobId,
+		const env = await this.requireEnv(environmentId);
+		const result = await this.jobOrchestrator.enqueue({
+			queue: this.queue,
+			queueName: QUEUES.THEME_SCANS,
+			jobType: JOB_TYPES.THEME_MANAGE,
+			payload: { environmentId, action, slug },
+			environmentId: env.id,
 		});
-		const job = await this.queue.add(
-			JOB_TYPES.THEME_MANAGE,
-			{ environmentId, jobExecutionId: Number(exec.id), action, slug },
-			{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
-		);
-		return { jobExecutionId: Number(exec.id), bullJobId: job.id };
+		return { jobExecutionId: result.jobExecutionId, bullJobId: result.bullJobId };
 	}
 
 	findJobExecution(execId: number) {

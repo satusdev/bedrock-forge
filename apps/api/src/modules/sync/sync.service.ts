@@ -5,20 +5,20 @@ import {
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { randomUUID } from 'crypto';
 import {
 	QUEUES,
 	JOB_TYPES,
-	DEFAULT_JOB_OPTIONS,
 	SYNC_JOB_OPTIONS,
 } from '@bedrock-forge/shared';
 import { SyncCloneDto, SyncPushDto } from './dto/sync.dto';
 import { SyncRepository } from './sync.repository';
+import { JobOrchestratorService } from '../job-executions/job-orchestrator.service';
 
 @Injectable()
 export class SyncService {
 	constructor(
 		private readonly repo: SyncRepository,
+		private readonly jobOrchestrator: JobOrchestratorService,
 		@InjectQueue(QUEUES.SYNC) private readonly queue: Queue,
 	) {}
 
@@ -39,55 +39,25 @@ export class SyncService {
 			}
 		}
 
-		const bullJobId = randomUUID();
-		const exec = await this.repo.createJobExecution({
-			queue_name: QUEUES.SYNC,
-			job_type: JOB_TYPES.SYNC_CLONE,
-			bull_job_id: bullJobId,
-			environment_id: BigInt(dto.targetEnvironmentId),
+		return this.jobOrchestrator.enqueue({
+			queue: this.queue,
+			queueName: QUEUES.SYNC,
+			jobType: JOB_TYPES.SYNC_CLONE,
+			payload: dto,
+			environmentId: dto.targetEnvironmentId,
+			jobOptions: SYNC_JOB_OPTIONS,
 		});
-		let job;
-		try {
-			job = await this.queue.add(
-				JOB_TYPES.SYNC_CLONE,
-				{ ...dto, jobExecutionId: Number(exec.id) },
-				{ ...SYNC_JOB_OPTIONS, jobId: bullJobId },
-			);
-		} catch (err) {
-			const errMsg = err instanceof Error ? err.message : String(err);
-			await this.repo.updateJobExecution(exec.id, {
-				status: 'failed',
-				last_error: errMsg,
-			});
-			throw err;
-		}
-		return { jobExecutionId: Number(exec.id), jobId: job.id };
 	}
 
 	async enqueuePush(dto: SyncPushDto) {
-		const bullJobId = randomUUID();
-		const exec = await this.repo.createJobExecution({
-			queue_name: QUEUES.SYNC,
-			job_type: JOB_TYPES.SYNC_PUSH,
-			bull_job_id: bullJobId,
-			environment_id: BigInt(dto.targetEnvironmentId),
+		return this.jobOrchestrator.enqueue({
+			queue: this.queue,
+			queueName: QUEUES.SYNC,
+			jobType: JOB_TYPES.SYNC_PUSH,
+			payload: dto,
+			environmentId: dto.targetEnvironmentId,
+			jobOptions: SYNC_JOB_OPTIONS,
 		});
-		let job;
-		try {
-			job = await this.queue.add(
-				JOB_TYPES.SYNC_PUSH,
-				{ ...dto, jobExecutionId: Number(exec.id) },
-				{ ...SYNC_JOB_OPTIONS, jobId: bullJobId },
-			);
-		} catch (err) {
-			const errMsg = err instanceof Error ? err.message : String(err);
-			await this.repo.updateJobExecution(exec.id, {
-				status: 'failed',
-				last_error: errMsg,
-			});
-			throw err;
-		}
-		return { jobExecutionId: Number(exec.id), jobId: job.id };
 	}
 
 	async cancelJobExecution(id: number) {

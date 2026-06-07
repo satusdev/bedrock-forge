@@ -5,6 +5,7 @@ import { PluginScansController } from './plugin-scans.controller';
 import { PluginScansService } from './plugin-scans.service';
 import { PluginScansRepository } from './plugin-scans.repository';
 import { CustomPluginsModule } from '../custom-plugins/custom-plugins.module';
+import { JobExecutionsModule } from '../job-executions/job-executions.module';
 
 @Module({
 	imports: [
@@ -13,6 +14,7 @@ import { CustomPluginsModule } from '../custom-plugins/custom-plugins.module';
 			{ name: QUEUES.CUSTOM_PLUGINS },
 		),
 		CustomPluginsModule,
+		JobExecutionsModule,
 	],
 	controllers: [PluginScansController],
 	providers: [PluginScansService, PluginScansRepository],

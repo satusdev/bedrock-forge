@@ -5,7 +5,6 @@ import { PluginScansService } from './plugin-scans.service';
 function makeRepo() {
 	return {
 		findAllEnvironmentIds: jest.fn(),
-		createJobExecution: jest.fn(),
 	};
 }
 
@@ -17,8 +16,21 @@ describe('PluginScansService', () => {
 	it('queues a scan for every environment during bulk scan', async () => {
 		const repo = makeRepo();
 		const queue = makeQueue();
+
+		const jobOrchestrator = {
+			enqueue: jest.fn().mockImplementation(async ({ queue: q, jobType, payload, beforeQueueAdd }) => {
+				const jobExecutionId = payload.environmentId === 1 ? 11 : 12;
+				const jobData = beforeQueueAdd
+					? await beforeQueueAdd(jobExecutionId)
+					: { ...payload, jobExecutionId };
+				const job = await q.add(jobType, jobData, { jobId: 'scan-' + payload.environmentId });
+				return { jobExecutionId, bullJobId: job.id };
+			}),
+		};
+
 		const svc = new PluginScansService(
 			repo as any,
+			jobOrchestrator as any,
 			queue as any,
 			makeQueue() as any,
 			{} as any,
@@ -28,9 +40,7 @@ describe('PluginScansService', () => {
 			{ id: BigInt(1) },
 			{ id: BigInt(2) },
 		]);
-		repo.createJobExecution
-			.mockResolvedValueOnce({ id: BigInt(11) })
-			.mockResolvedValueOnce({ id: BigInt(12) });
+
 		queue.add.mockResolvedValueOnce({ id: 'scan-1' }).mockResolvedValueOnce({
 			id: 'scan-2',
 		});
@@ -52,14 +62,26 @@ describe('PluginScansService', () => {
 	it('defaults plugin management jobs to skip safety backup', async () => {
 		const repo = makeRepo();
 		const queue = makeQueue();
+
+		const jobOrchestrator = {
+			enqueue: jest.fn().mockImplementation(async ({ queue: q, jobType, payload, beforeQueueAdd }) => {
+				const jobExecutionId = 21;
+				const jobData = beforeQueueAdd
+					? await beforeQueueAdd(jobExecutionId)
+					: { ...payload, jobExecutionId };
+				const job = await q.add(jobType, jobData, { jobId: 'manage-1' });
+				return { jobExecutionId, bullJobId: job.id };
+			}),
+		};
+
 		const svc = new PluginScansService(
 			repo as any,
+			jobOrchestrator as any,
 			queue as any,
 			makeQueue() as any,
 			{} as any,
 		);
 
-		repo.createJobExecution.mockResolvedValue({ id: BigInt(21) });
 		queue.add.mockResolvedValue({ id: 'manage-1' });
 
 		await svc.enqueuePluginManage(3, 'delete', 'elementor');

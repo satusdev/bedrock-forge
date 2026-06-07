@@ -1,20 +1,20 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { randomUUID } from 'crypto';
 import { PluginScansRepository } from './plugin-scans.repository';
 import {
 	QUEUES,
 	JOB_TYPES,
-	DEFAULT_JOB_OPTIONS,
 	PaginationQuery,
 } from '@bedrock-forge/shared';
 import { GithubService } from '../custom-plugins/github.service';
+import { JobOrchestratorService } from '../job-executions/job-orchestrator.service';
 
 @Injectable()
 export class PluginScansService {
 	constructor(
 		private readonly repo: PluginScansRepository,
+		private readonly jobOrchestrator: JobOrchestratorService,
 		@InjectQueue(QUEUES.PLUGIN_SCANS) private readonly queue: Queue,
 		@InjectQueue(QUEUES.CUSTOM_PLUGINS)
 		private readonly customQueue: Queue,
@@ -30,19 +30,14 @@ export class PluginScansService {
 	}
 
 	async enqueueScan(environmentId: number) {
-		const bullJobId = randomUUID();
-		const exec = await this.repo.createJobExecution({
-			environment_id: BigInt(environmentId),
-			queue_name: QUEUES.PLUGIN_SCANS,
-			job_type: JOB_TYPES.PLUGIN_SCAN_RUN,
-			bull_job_id: bullJobId,
+		const result = await this.jobOrchestrator.enqueue({
+			queue: this.queue,
+			queueName: QUEUES.PLUGIN_SCANS,
+			jobType: JOB_TYPES.PLUGIN_SCAN_RUN,
+			payload: { environmentId },
+			environmentId,
 		});
-		const job = await this.queue.add(
-			JOB_TYPES.PLUGIN_SCAN_RUN,
-			{ environmentId, jobExecutionId: Number(exec.id) },
-			{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
-		);
-		return { jobExecutionId: Number(exec.id), bullJobId: job.id };
+		return { jobExecutionId: result.jobExecutionId, bullJobId: result.bullJobId };
 	}
 
 	async enqueueBulkScan() {
@@ -73,27 +68,21 @@ export class PluginScansService {
 		skipSafetyBackup?: boolean,
 		workflow?: 'composer' | 'manual',
 	) {
-		const bullJobId = randomUUID();
-		const exec = await this.repo.createJobExecution({
-			environment_id: BigInt(environmentId),
-			queue_name: QUEUES.PLUGIN_SCANS,
-			job_type: JOB_TYPES.PLUGIN_MANAGE,
-			bull_job_id: bullJobId,
-		});
-		const job = await this.queue.add(
-			JOB_TYPES.PLUGIN_MANAGE,
-			{
+		const result = await this.jobOrchestrator.enqueue({
+			queue: this.queue,
+			queueName: QUEUES.PLUGIN_SCANS,
+			jobType: JOB_TYPES.PLUGIN_MANAGE,
+			payload: {
 				environmentId,
-				jobExecutionId: Number(exec.id),
 				action,
 				slug,
 				version,
 				workflow,
 				skipSafetyBackup: skipSafetyBackup ?? true,
 			},
-			{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
-		);
-		return { jobExecutionId: Number(exec.id), bullJobId: job.id };
+			environmentId,
+		});
+		return { jobExecutionId: result.jobExecutionId, bullJobId: result.bullJobId };
 	}
 
 	async searchWpOrg(query: string) {
@@ -129,41 +118,30 @@ export class PluginScansService {
 		slug: string,
 		constraint: string,
 	) {
-		const bullJobId = randomUUID();
-		const exec = await this.repo.createJobExecution({
-			environment_id: BigInt(environmentId),
-			queue_name: QUEUES.PLUGIN_SCANS,
-			job_type: JOB_TYPES.PLUGIN_MANAGE,
-			bull_job_id: bullJobId,
-		});
-		const job = await this.queue.add(
-			JOB_TYPES.PLUGIN_MANAGE,
-			{
+		const result = await this.jobOrchestrator.enqueue({
+			queue: this.queue,
+			queueName: QUEUES.PLUGIN_SCANS,
+			jobType: JOB_TYPES.PLUGIN_MANAGE,
+			payload: {
 				environmentId,
-				jobExecutionId: Number(exec.id),
 				action: 'change-constraint',
 				slug,
 				constraint,
 			},
-			{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
-		);
-		return { jobExecutionId: Number(exec.id), bullJobId: job.id };
+			environmentId,
+		});
+		return { jobExecutionId: result.jobExecutionId, bullJobId: result.bullJobId };
 	}
 
 	async enqueueComposerRead(environmentId: number) {
-		const bullJobId = randomUUID();
-		const exec = await this.repo.createJobExecution({
-			environment_id: BigInt(environmentId),
-			queue_name: QUEUES.PLUGIN_SCANS,
-			job_type: JOB_TYPES.PLUGIN_MANAGE,
-			bull_job_id: bullJobId,
+		const result = await this.jobOrchestrator.enqueue({
+			queue: this.queue,
+			queueName: QUEUES.PLUGIN_SCANS,
+			jobType: JOB_TYPES.PLUGIN_MANAGE,
+			payload: { environmentId, action: 'read' },
+			environmentId,
 		});
-		const job = await this.queue.add(
-			JOB_TYPES.PLUGIN_MANAGE,
-			{ environmentId, jobExecutionId: Number(exec.id), action: 'read' },
-			{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
-		);
-		return { jobExecutionId: Number(exec.id), bullJobId: job.id };
+		return { jobExecutionId: result.jobExecutionId, bullJobId: result.bullJobId };
 	}
 
 	async findExecution(execId: number) {
@@ -186,19 +164,12 @@ export class PluginScansService {
 			throw new NotFoundException(`Custom plugin ${customPluginId} not found`);
 		}
 
-		const bullJobId = randomUUID();
-		const exec = await this.repo.createJobExecution({
-			environment_id: BigInt(environmentId),
-			queue_name: QUEUES.CUSTOM_PLUGINS,
-			job_type: JOB_TYPES.CUSTOM_PLUGIN_MANAGE,
-			bull_job_id: bullJobId,
-		});
-
-		const job = await this.customQueue.add(
-			JOB_TYPES.CUSTOM_PLUGIN_MANAGE,
-			{
+		const result = await this.jobOrchestrator.enqueue({
+			queue: this.customQueue,
+			queueName: QUEUES.CUSTOM_PLUGINS,
+			jobType: JOB_TYPES.CUSTOM_PLUGIN_MANAGE,
+			payload: {
 				environmentId,
-				jobExecutionId: Number(exec.id),
 				action,
 				customPluginId,
 				slug: plugin.slug,
@@ -206,10 +177,10 @@ export class PluginScansService {
 				repoPath: plugin.repo_path,
 				type: plugin.type,
 			},
-			{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
-		);
+			environmentId,
+		});
 
-		return { jobExecutionId: Number(exec.id), bullJobId: job.id };
+		return { jobExecutionId: result.jobExecutionId, bullJobId: result.bullJobId };
 	}
 
 	async checkCustomPluginVersions(envId: number) {

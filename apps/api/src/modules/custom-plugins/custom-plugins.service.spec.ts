@@ -32,7 +32,24 @@ describe('CustomPluginsService', () => {
 		repo = makeRepo();
 		github = makeGithub();
 		queue = makeQueue();
-		svc = new CustomPluginsService(repo as any, github as any, queue as any);
+		const jobOrchestrator = {
+			enqueue: jest
+				.fn()
+				.mockImplementation(async ({ queue: q, payload, beforeQueueAdd }) => {
+					const jobExecutionId = payload.environmentId === 1 ? 101 : 102;
+					const jobData = beforeQueueAdd
+						? await beforeQueueAdd(jobExecutionId)
+						: { ...payload, jobExecutionId };
+					const job = await q.add('CUSTOM_PLUGIN_MANAGE', jobData);
+					return { jobExecutionId, bullJobId: job.id };
+				}),
+		};
+		svc = new CustomPluginsService(
+			repo as any,
+			github as any,
+			jobOrchestrator as any,
+			queue as any,
+		);
 	});
 
 	it('builds inventory from installed rows and latest scan detections', async () => {
@@ -132,9 +149,6 @@ describe('CustomPluginsService', () => {
 			{ environment_id: BigInt(1) },
 			{ environment_id: BigInt(2) },
 		]);
-		repo.createJobExecution
-			.mockResolvedValueOnce({ id: BigInt(101) })
-			.mockResolvedValueOnce({ id: BigInt(102) });
 		queue.add.mockResolvedValueOnce({ id: 'job-1' }).mockResolvedValueOnce({
 			id: 'job-2',
 		});

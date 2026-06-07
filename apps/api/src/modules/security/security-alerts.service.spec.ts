@@ -16,7 +16,7 @@ describe('SecurityService server alert settings', () => {
 		const securityQueue = { add: jest.fn() };
 		const reportsQueue = {};
 		
-		const scanSvc = new SecurityScanService(repo as any, securityQueue as any);
+		const scanSvc = new SecurityScanService(repo as any, {} as any, securityQueue as any);
 		const findingsSvc = new SecurityFindingsService(repo as any, reportsQueue as any);
 		const schedulesSvc = new SecuritySchedulesService(repo as any);
 		const alertsSvc = new SecurityAlertsService(repo as any, securityQueue as any);

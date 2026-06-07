@@ -5,18 +5,19 @@ import {
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { randomUUID } from 'crypto';
-import { DEFAULT_JOB_OPTIONS, JOB_TYPES, QUEUES } from '@bedrock-forge/shared';
+import { JOB_TYPES, QUEUES } from '@bedrock-forge/shared';
 import { CustomPluginsRepository } from './custom-plugins.repository';
 import { GithubService } from './github.service';
 import { CreateCustomPluginDto } from './dto/create-custom-plugin.dto';
 import { UpdateCustomPluginDto } from './dto/update-custom-plugin.dto';
+import { JobOrchestratorService } from '../job-executions/job-orchestrator.service';
 
 @Injectable()
 export class CustomPluginsService {
 	constructor(
 		private readonly repo: CustomPluginsRepository,
 		private readonly github: GithubService,
+		private readonly jobOrchestrator: JobOrchestratorService,
 		@InjectQueue(QUEUES.CUSTOM_PLUGINS)
 		private readonly customQueue: Queue,
 	) {}
@@ -154,36 +155,35 @@ export class CustomPluginsService {
 		const jobs = [];
 
 		for (const install of installations) {
-			const bullJobId = randomUUID();
-			const exec = await this.repo.createJobExecution({
-				environment_id: install.environment_id,
-				queue_name: QUEUES.CUSTOM_PLUGINS,
-				job_type: JOB_TYPES.CUSTOM_PLUGIN_MANAGE,
-				bull_job_id: bullJobId,
+			const envId = Number(install.environment_id);
+			const result = await this.jobOrchestrator.enqueue({
+				queue: this.customQueue,
+				queueName: QUEUES.CUSTOM_PLUGINS,
+				jobType: JOB_TYPES.CUSTOM_PLUGIN_MANAGE,
 				payload: {
-					environmentId: Number(install.environment_id),
+					environmentId: envId,
 					customPluginId: id,
 					action: 'update',
-				} as Record<string, string | number>,
-			});
-			const job = await this.customQueue.add(
-				JOB_TYPES.CUSTOM_PLUGIN_MANAGE,
-				{
-					environmentId: Number(install.environment_id),
-					jobExecutionId: Number(exec.id),
-					action: 'update',
-					customPluginId: id,
-					slug: plugin.slug,
-					repoUrl: plugin.repo_url,
-					repoPath: plugin.repo_path,
-					type: plugin.type,
 				},
-				{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
-			);
+				environmentId: envId,
+				beforeQueueAdd: async (jobExecutionId) => {
+					return {
+						environmentId: envId,
+						jobExecutionId,
+						action: 'update',
+						customPluginId: id,
+						slug: plugin.slug,
+						repoUrl: plugin.repo_url,
+						repoPath: plugin.repo_path,
+						type: plugin.type,
+					};
+				},
+			});
+
 			jobs.push({
-				environmentId: Number(install.environment_id),
-				jobExecutionId: Number(exec.id),
-				bullJobId: job.id,
+				environmentId: envId,
+				jobExecutionId: result.jobExecutionId,
+				bullJobId: result.bullJobId,
 			});
 		}
 

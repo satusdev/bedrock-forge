@@ -5,11 +5,11 @@ import {
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { randomUUID } from 'crypto';
 import { createRemoteExecutor } from '@bedrock-forge/remote-executor';
-import { QUEUES, JOB_TYPES, DEFAULT_JOB_OPTIONS } from '@bedrock-forge/shared';
+import { QUEUES, JOB_TYPES } from '@bedrock-forge/shared';
 import { WpActionsRepository } from './wp-actions.repository';
 import { ServersService } from '../servers/servers.service';
+import { JobOrchestratorService } from '../job-executions/job-orchestrator.service';
 import {
 	WpFixActionDto,
 	WpDebugModeDto,
@@ -24,6 +24,7 @@ export class WpActionsService {
 	constructor(
 		private readonly repo: WpActionsRepository,
 		private readonly serversService: ServersService,
+		private readonly jobOrchestrator: JobOrchestratorService,
 		@InjectQueue(QUEUES.WP_ACTIONS) private readonly wpActionsQueue: Queue,
 	) {}
 
@@ -31,193 +32,83 @@ export class WpActionsService {
 
 	async enqueueFix(envId: number, dto: WpFixActionDto) {
 		const env = await this.requireEnv(envId);
-		const bullJobId = randomUUID();
-		const exec = await this.repo.createJobExecution({
-			queue_name: QUEUES.WP_ACTIONS,
-			job_type: JOB_TYPES.WP_FIX_ACTION,
-			bull_job_id: bullJobId,
-			environment_id: env.id,
+		const result = await this.jobOrchestrator.enqueue({
+			queue: this.wpActionsQueue,
+			queueName: QUEUES.WP_ACTIONS,
+			jobType: JOB_TYPES.WP_FIX_ACTION,
 			payload: { environmentId: envId, action: dto.action },
+			environmentId: env.id,
 		});
-		try {
-			await this.wpActionsQueue.add(
-				JOB_TYPES.WP_FIX_ACTION,
-				{
-					environmentId: envId,
-					action: dto.action,
-					jobExecutionId: Number(exec.id),
-				},
-				{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
-			);
-		} catch (err) {
-			const errMsg = err instanceof Error ? err.message : String(err);
-			await this.repo.updateJobExecution(exec.id, {
-				status: 'failed',
-				last_error: errMsg,
-			});
-			throw err;
-		}
-		return { jobExecutionId: Number(exec.id), bullJobId };
+		return { jobExecutionId: result.jobExecutionId, bullJobId: result.bullJobId };
 	}
 
 	async enqueueDebugMode(envId: number, dto: WpDebugModeDto) {
 		const env = await this.requireEnv(envId);
-		const bullJobId = randomUUID();
-		const exec = await this.repo.createJobExecution({
-			queue_name: QUEUES.WP_ACTIONS,
-			job_type: JOB_TYPES.WP_DEBUG_TOGGLE,
-			bull_job_id: bullJobId,
-			environment_id: env.id,
+		const result = await this.jobOrchestrator.enqueue({
+			queue: this.wpActionsQueue,
+			queueName: QUEUES.WP_ACTIONS,
+			jobType: JOB_TYPES.WP_DEBUG_TOGGLE,
 			payload: {
 				environmentId: envId,
 				enabled: dto.enabled,
 				revertAfterMinutes: dto.revert_after_minutes,
 			},
+			environmentId: env.id,
 		});
-		try {
-			await this.wpActionsQueue.add(
-				JOB_TYPES.WP_DEBUG_TOGGLE,
-				{
-					environmentId: envId,
-					enabled: dto.enabled,
-					revertAfterMinutes: dto.revert_after_minutes,
-					jobExecutionId: Number(exec.id),
-				},
-				{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
-			);
-		} catch (err) {
-			const errMsg = err instanceof Error ? err.message : String(err);
-			await this.repo.updateJobExecution(exec.id, {
-				status: 'failed',
-				last_error: errMsg,
-			});
-			throw err;
-		}
-		return { jobExecutionId: Number(exec.id), bullJobId };
+		return { jobExecutionId: result.jobExecutionId, bullJobId: result.bullJobId };
 	}
 
 	async enqueueCleanup(envId: number, dryRun: boolean, keepRevisions?: number) {
 		const env = await this.requireEnv(envId);
-		const bullJobId = randomUUID();
-		const exec = await this.repo.createJobExecution({
-			queue_name: QUEUES.WP_ACTIONS,
-			job_type: JOB_TYPES.WP_CLEANUP,
-			bull_job_id: bullJobId,
-			environment_id: env.id,
+		const result = await this.jobOrchestrator.enqueue({
+			queue: this.wpActionsQueue,
+			queueName: QUEUES.WP_ACTIONS,
+			jobType: JOB_TYPES.WP_CLEANUP,
 			payload: { environmentId: envId, dryRun, keepRevisions },
+			environmentId: env.id,
 		});
-		try {
-			await this.wpActionsQueue.add(
-				JOB_TYPES.WP_CLEANUP,
-				{
-					environmentId: envId,
-					dryRun,
-					keepRevisions,
-					jobExecutionId: Number(exec.id),
-				},
-				{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
-			);
-		} catch (err) {
-			const errMsg = err instanceof Error ? err.message : String(err);
-			await this.repo.updateJobExecution(exec.id, {
-				status: 'failed',
-				last_error: errMsg,
-			});
-			throw err;
-		}
-		return { jobExecutionId: Number(exec.id), bullJobId };
+		return { jobExecutionId: result.jobExecutionId, bullJobId: result.bullJobId };
 	}
 
 	async enqueueCoreCheck(envId: number) {
 		const env = await this.requireEnv(envId);
-		const bullJobId = randomUUID();
-		const exec = await this.repo.createJobExecution({
-			queue_name: QUEUES.WP_ACTIONS,
-			job_type: JOB_TYPES.WP_CORE_CHECK,
-			bull_job_id: bullJobId,
-			environment_id: env.id,
+		const result = await this.jobOrchestrator.enqueue({
+			queue: this.wpActionsQueue,
+			queueName: QUEUES.WP_ACTIONS,
+			jobType: JOB_TYPES.WP_CORE_CHECK,
 			payload: { environmentId: envId },
+			environmentId: env.id,
 		});
-		try {
-			await this.wpActionsQueue.add(
-				JOB_TYPES.WP_CORE_CHECK,
-				{ environmentId: envId, jobExecutionId: Number(exec.id) },
-				{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
-			);
-		} catch (err) {
-			const errMsg = err instanceof Error ? err.message : String(err);
-			await this.repo.updateJobExecution(exec.id, {
-				status: 'failed',
-				last_error: errMsg,
-			});
-			throw err;
-		}
-		return { jobExecutionId: Number(exec.id), bullJobId };
+		return { jobExecutionId: result.jobExecutionId, bullJobId: result.bullJobId };
 	}
 
 	async enqueueCoreUpdate(envId: number) {
 		const env = await this.requireEnv(envId);
-		const bullJobId = randomUUID();
-		const exec = await this.repo.createJobExecution({
-			queue_name: QUEUES.WP_ACTIONS,
-			job_type: JOB_TYPES.WP_CORE_UPDATE,
-			bull_job_id: bullJobId,
-			environment_id: env.id,
+		const result = await this.jobOrchestrator.enqueue({
+			queue: this.wpActionsQueue,
+			queueName: QUEUES.WP_ACTIONS,
+			jobType: JOB_TYPES.WP_CORE_UPDATE,
 			payload: { environmentId: envId },
+			environmentId: env.id,
 		});
-		try {
-			await this.wpActionsQueue.add(
-				JOB_TYPES.WP_CORE_UPDATE,
-				{ environmentId: envId, jobExecutionId: Number(exec.id) },
-				{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
-			);
-		} catch (err) {
-			const errMsg = err instanceof Error ? err.message : String(err);
-			await this.repo.updateJobExecution(exec.id, {
-				status: 'failed',
-				last_error: errMsg,
-			});
-			throw err;
-		}
-		return { jobExecutionId: Number(exec.id), bullJobId };
+		return { jobExecutionId: result.jobExecutionId, bullJobId: result.bullJobId };
 	}
 
 	async enqueueMaintenanceMode(envId: number, dto: WpMaintenanceModeDto) {
 		const env = await this.requireEnv(envId);
-		const bullJobId = randomUUID();
-		const exec = await this.repo.createJobExecution({
-			queue_name: QUEUES.WP_ACTIONS,
-			job_type: JOB_TYPES.WP_MAINTENANCE_MODE,
-			bull_job_id: bullJobId,
-			environment_id: env.id,
+		const result = await this.jobOrchestrator.enqueue({
+			queue: this.wpActionsQueue,
+			queueName: QUEUES.WP_ACTIONS,
+			jobType: JOB_TYPES.WP_MAINTENANCE_MODE,
 			payload: {
 				environmentId: envId,
 				enabled: dto.enabled,
 				revertAfterMinutes: dto.revert_after_minutes,
 				message: dto.message,
 			},
+			environmentId: env.id,
 		});
-		try {
-			await this.wpActionsQueue.add(
-				JOB_TYPES.WP_MAINTENANCE_MODE,
-				{
-					environmentId: envId,
-					enabled: dto.enabled,
-					revertAfterMinutes: dto.revert_after_minutes,
-					message: dto.message,
-					jobExecutionId: Number(exec.id),
-				},
-				{ ...DEFAULT_JOB_OPTIONS, jobId: bullJobId },
-			);
-		} catch (err) {
-			const errMsg = err instanceof Error ? err.message : String(err);
-			await this.repo.updateJobExecution(exec.id, {
-				status: 'failed',
-				last_error: errMsg,
-			});
-			throw err;
-		}
-		return { jobExecutionId: Number(exec.id), bullJobId };
+		return { jobExecutionId: result.jobExecutionId, bullJobId: result.bullJobId };
 	}
 
 	// ─── Synchronous SSH calls ────────────────────────────────────────────────

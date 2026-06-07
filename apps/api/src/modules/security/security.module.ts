@@ -10,6 +10,7 @@ import { SecurityAlertsService } from './security-alerts.service';
 import { SecurityRepository } from './security.repository';
 import { SettingsModule } from '../settings/settings.module';
 import { VulnerabilityDbService } from './vulnerability-db.service';
+import { JobExecutionsModule } from '../job-executions/job-executions.module';
 
 @Module({
 	imports: [
@@ -17,6 +18,7 @@ import { VulnerabilityDbService } from './vulnerability-db.service';
 		BullModule.registerQueue({ name: QUEUES.REPORTS }),
 		BullModule.registerQueue({ name: QUEUES.NOTIFICATIONS }),
 		SettingsModule,
+		JobExecutionsModule,
 	],
 	controllers: [SecurityController],
 	providers: [

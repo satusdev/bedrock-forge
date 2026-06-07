@@ -25,29 +25,29 @@ Largest targets found during inspection:
 - `apps/api/src/modules/settings/settings.controller.ts`
 - `apps/api/src/gateways/jobs.gateway.ts`
 
-## Phase 1: API Queue Orchestration
+## Phase 1: API Queue Orchestration [COMPLETED]
 
 Create a small API-side helper for queue-backed operations:
 
-- create `JobExecution`.
-- enqueue BullMQ job.
-- mark execution failed if enqueue fails.
-- return `{ jobExecutionId, jobId }` consistently.
+- [x] create `JobExecution`.
+- [x] enqueue BullMQ job.
+- [x] mark execution failed if enqueue fails.
+- [x] return `{ jobExecutionId, jobId }` consistently.
 
 Initial services to migrate:
 
-- sync
-- plugin scans
-- theme scans
-- security
-- wp actions
-- custom plugins
+- [x] sync
+- [x] plugin scans
+- [x] theme scans
+- [x] security
+- [x] wp actions
+- [x] custom plugins
 
 Acceptance:
 
-- Repeated try/catch queue-add blocks are reduced.
-- Existing response shapes remain compatible.
-- Service tests cover enqueue failure behavior.
+- [x] Repeated try/catch queue-add blocks are reduced.
+- [x] Existing response shapes remain compatible.
+- [x] Service tests cover enqueue failure behavior.
 
 ## Phase 2: Worker Job Lifecycle
 
