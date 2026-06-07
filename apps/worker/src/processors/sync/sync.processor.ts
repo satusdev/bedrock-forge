@@ -1,84 +1,36 @@
 import { Processor, WorkerHost, InjectQueue } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job, Queue } from 'bullmq';
-import { mkdir, rm, mkdtemp, stat, readFile } from 'fs/promises';
+import { mkdir, rm, mkdtemp } from 'fs/promises';
 import { createReadStream } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SshKeyService } from '../../services/ssh-key.service';
-import { RcloneService } from '../../services/rclone.service';
-import { EncryptionService } from '../../encryption/encryption.service';
 import { StepTracker } from '../../services/step-tracker';
-import {
-	createRemoteExecutor,
-	CredentialParserService,
-} from '@bedrock-forge/remote-executor';
+import { createRemoteExecutor } from '@bedrock-forge/remote-executor';
 import { QUEUES, JOB_TYPES } from '@bedrock-forge/shared';
-import { escapeMysql } from '../../utils/cyberpanel-http';
-import {
-	shellQuote,
-	flipProtocol,
-	fixCyberPanelOwnership,
-	buildWpCliPrefix,
-} from '../../utils/processor-utils';
-
-const STAGING_DIR = '/tmp/forge-sync';
-
-type Creds = {
-	dbHost: string;
-	dbUser: string;
-	dbPassword: string;
-	dbName: string;
-};
-
-/** WordPress installation layout — probed at runtime to support standard WP and Bedrock. */
-type WpLayout = {
-	/** Absolute path to the directory containing wp-includes/ (= wp core). Used for --path with WP-CLI. */
-	corePath: string;
-	/** Absolute path to the wp-content (or web/app) directory. Used for file sync / URL replace. */
-	contentPath: string;
-	/** True when a Bedrock-style layout was detected (web/wp + web/app). */
-	isBedrock: boolean;
-};
+import { shellQuote } from '../../utils/processor-utils';
+import { LayoutDetectorService, WpLayout } from './services/layout-detector.service';
+import { ProtectedCptService, ProtectedPostTypeBackup } from './services/protected-cpt.service';
+import { SyncDbService } from './services/sync-db.service';
+import { SyncFilesService } from './services/sync-files.service';
 
 type Executor = Awaited<ReturnType<typeof createRemoteExecutor>>;
-
-const TABLE_NAME_REGEX = /^[A-Za-z0-9_$]+$/;
-const POST_TYPE_REGEX = /^[A-Za-z0-9_-]+$/;
-
-type ProtectedPostTypeBackup = {
-	prefix: string;
-	uploadPaths: string[];
-};
 
 // concurrency=1: sync jobs do SSH+mysqldump+rsync — serialised to avoid
 // saturating CPU/network on concurrent large file transfers.
 @Processor(QUEUES.SYNC, { concurrency: 1, lockDuration: 90 * 60 * 1_000 })
 export class SyncProcessor extends WorkerHost {
 	private readonly logger = new Logger(SyncProcessor.name);
-	private readonly credParser = new CredentialParserService();
-
-	/**
-	 * Rsync excludes — environment-specific files that must not be overwritten on
-	 * the target. Listed WITHOUT a leading slash; the slash is prepended at call
-	 * sites so that rsync (/prefix) and tar (./prefix) both anchor the pattern to
-	 * the transfer root, preventing accidental exclusion of same-named directories
-	 * deep inside plugins (e.g. elementor/vendor/, woocommerce/node_modules/).
-	 */
-	private readonly RSYNC_EXCLUDES = [
-		'.env',
-		'wp-config.php',
-		'.htaccess',
-		'storage/',
-		'node_modules/',
-	];
 
 	constructor(
 		private readonly prisma: PrismaService,
 		private readonly sshKey: SshKeyService,
-		private readonly rclone: RcloneService,
-		private readonly encryption: EncryptionService,
+		private readonly layoutDetector: LayoutDetectorService,
+		private readonly protectedCpt: ProtectedCptService,
+		private readonly syncDb: SyncDbService,
+		private readonly syncFiles: SyncFilesService,
 		@InjectQueue(QUEUES.SYNC) private readonly syncQueue: Queue,
 	) {
 		super();
@@ -120,79 +72,6 @@ export class SyncProcessor extends WorkerHost {
 			});
 			throw err;
 		}
-	}
-
-	// ── Layout detection ────────────────────────────────────────────────────────
-
-	/**
-	 * Detect the WordPress installation layout on a remote server.
-	 *
-	 * Probes for wp-includes/version.php at common locations:
-	 *   - {rootPath}/wp-includes/version.php          → standard WP
-	 *   - {rootPath}/web/wp/wp-includes/version.php   → Bedrock (web/wp + web/app)
-	 *   - {rootPath}/wp/wp-includes/version.php       → Bedrock variant (wp + app)
-	 *
-	 * Falls back to standard layout when none of the above are found.
-	 */
-	private async detectWpLayout(
-		executor: Executor,
-		rootPath: string,
-		tracker: StepTracker,
-		label: string,
-	): Promise<WpLayout> {
-		const candidates: Array<{ core: string; content: string; label: string }> =
-			[
-				{
-					core: rootPath,
-					content: `${rootPath}/wp-content`,
-					label: 'standard',
-				},
-				{
-					core: `${rootPath}/web/wp`,
-					content: `${rootPath}/web/app`,
-					label: 'bedrock (web/wp)',
-				},
-				{
-					core: `${rootPath}/wp`,
-					content: `${rootPath}/app`,
-					label: 'bedrock (wp)',
-				},
-			];
-
-		for (const candidate of candidates) {
-			try {
-				const check = await executor.execute(
-					`test -f ${shellQuote(`${candidate.core}/wp-includes/version.php`)} && echo ok || echo missing`,
-				);
-				if (check.stdout.trim() === 'ok') {
-					const isBedrock = candidate.label.startsWith('bedrock');
-					await tracker.track({
-						step: `${label} WordPress layout detected`,
-						level: 'info',
-						detail: `${candidate.label} — core=${candidate.core}, content=${candidate.content}`,
-					});
-					return {
-						corePath: candidate.core,
-						contentPath: candidate.content,
-						isBedrock,
-					};
-				}
-			} catch {
-				// probe failed — try next candidate
-			}
-		}
-
-		// Fallback — assume standard layout and continue
-		await tracker.track({
-			step: `${label} WordPress layout: falling back to standard`,
-			level: 'warn',
-			detail: `wp-includes/version.php not found under any known path — assuming ${rootPath}/wp-content`,
-		});
-		return {
-			corePath: rootPath,
-			contentPath: `${rootPath}/wp-content`,
-			isBedrock: false,
-		};
 	}
 
 	// ── Clone ──────────────────────────────────────────────────────────────────
@@ -255,13 +134,13 @@ export class SyncProcessor extends WorkerHost {
 
 		// Detect WordPress layout on both servers (standard vs Bedrock)
 		const [sourceLayout, targetLayout] = await Promise.all([
-			this.detectWpLayout(
+			this.layoutDetector.detectWpLayout(
 				sourceExecutor,
 				sourceEnv.root_path,
 				tracker,
 				'source',
 			),
-			this.detectWpLayout(
+			this.layoutDetector.detectWpLayout(
 				targetExecutor,
 				targetEnv.root_path,
 				tracker,
@@ -275,7 +154,7 @@ export class SyncProcessor extends WorkerHost {
 			level: 'info',
 			detail: sourceEnv.root_path,
 		});
-		const sourceCreds = await this.resolveCredentials(
+		const sourceCreds = await this.syncDb.resolveCredentials(
 			sourceExecutor,
 			sourceEnv.root_path,
 			tracker,
@@ -288,7 +167,7 @@ export class SyncProcessor extends WorkerHost {
 			level: 'info',
 			detail: targetEnv.root_path,
 		});
-		const targetCreds = await this.resolveCredentials(
+		const targetCreds = await this.syncDb.resolveCredentials(
 			targetExecutor,
 			targetEnv.root_path,
 			tracker,
@@ -299,14 +178,14 @@ export class SyncProcessor extends WorkerHost {
 		await job.updateProgress({ value: 15, step: 'Credentials resolved' });
 
 		// Auto-detect URLs for search-replace — no manual input required
-		const sourceUrl = await this.resolveWpUrl(
+		const sourceUrl = await this.syncDb.resolveWpUrl(
 			sourceExecutor,
 			sourceCreds,
 			tracker,
 			'source',
 			sourceEnv.url,
 		);
-		const targetUrl = await this.resolveWpUrl(
+		const targetUrl = await this.syncDb.resolveWpUrl(
 			targetExecutor,
 			targetCreds,
 			tracker,
@@ -325,7 +204,7 @@ export class SyncProcessor extends WorkerHost {
 					'skipSafetyBackup=true was passed. The target database will be overwritten without a prior backup.',
 			});
 		} else {
-			await this.createSafetyBackup(
+			await this.syncDb.createSafetyBackup(
 				job,
 				targetEnv,
 				targetExecutor,
@@ -338,9 +217,6 @@ export class SyncProcessor extends WorkerHost {
 		if (await this.isCancelled(job.id)) throw new Error('Cancelled by user');
 
 		// Dump source DB
-		// Use --defaults-extra-file (temp .my.cnf) instead of MYSQL_PWD.
-		// MariaDB 10.6+ (CyberPanel) silently ignores MYSQL_PWD; this approach
-		// mirrors backup.php and works on all MySQL/MariaDB versions.
 		const dumpRemote = `/tmp/sync_${job.id}.sql`;
 		const srcMycnf = `/tmp/forge_sync_src_${job.id}.cnf`;
 		await sourceExecutor.pushFile({
@@ -351,10 +227,7 @@ export class SyncProcessor extends WorkerHost {
 		});
 		await sourceExecutor.execute(`chmod 600 ${srcMycnf}`);
 
-		// Protected tables: sanitize names (only valid MySQL identifier chars) and build
-		// --ignore-table flags so these tables are excluded from the source dump entirely.
-		// Their existing data on the target survives the import untouched.
-		const cloneSafeProtected = this.normalizeProtectedTables(
+		const cloneSafeProtected = this.syncDb.normalizeProtectedTables(
 			targetEnv.protected_tables ?? [],
 		);
 		const cloneIgnoreFlags =
@@ -401,7 +274,7 @@ export class SyncProcessor extends WorkerHost {
 
 		if (await this.isCancelled(job.id)) throw new Error('Cancelled by user');
 
-		// Transfer dump to target via worker disk relay (avoids buffering in process memory)
+		// Transfer dump to target via worker disk relay
 		await tracker.track({
 			step: 'Transferring database dump to target',
 			level: 'info',
@@ -427,7 +300,7 @@ export class SyncProcessor extends WorkerHost {
 		}
 		await job.updateProgress({ value: 65, step: 'Dump transferred to target' });
 
-		// Import on target: conditionally DROP+CREATE or preserve protected tables
+		// Import on target
 		const tgtMycnf = `/tmp/forge_sync_imp_${job.id}.cnf`;
 		await targetExecutor.pushFile({
 			remotePath: tgtMycnf,
@@ -438,7 +311,7 @@ export class SyncProcessor extends WorkerHost {
 		await targetExecutor.execute(`chmod 600 ${tgtMycnf}`);
 		let protectedPostTypesBackup: ProtectedPostTypeBackup | null = null;
 		if (targetEnv.protected_post_types && targetEnv.protected_post_types.length > 0) {
-			protectedPostTypesBackup = await this.backupProtectedPostTypes(
+			protectedPostTypesBackup = await this.protectedCpt.backupProtectedPostTypes(
 				targetExecutor,
 				targetCreds,
 				tgtMycnf,
@@ -448,10 +321,6 @@ export class SyncProcessor extends WorkerHost {
 		}
 
 		if (cloneSafeProtected.length > 0 || protectedPostTypesBackup) {
-			// Protected tables configured — check if the target DB already exists.
-			// If it does: skip DROP/CREATE; the protected tables survive and mysqldump's
-			// per-table DROP TABLE IF EXISTS handles the unprotected ones automatically.
-			// If it doesn't: just CREATE (nothing to protect yet in an empty/new DB).
 			await tracker.track({
 				step: 'Protected tables — checking target database existence',
 				level: 'info',
@@ -465,7 +334,7 @@ export class SyncProcessor extends WorkerHost {
 				dbExistsRes.code === 0 && dbExistsRes.stdout.trim().length > 0;
 
 			if (dbExists) {
-				await this.trackProtectedTablePresence(
+				await this.syncDb.trackProtectedTablePresence(
 					targetExecutor,
 					tgtMycnf,
 					targetCreds.dbName,
@@ -500,7 +369,6 @@ export class SyncProcessor extends WorkerHost {
 				}
 			}
 		} else {
-			// No protected tables — clean slate: DROP + CREATE removes all orphan tables.
 			await tracker.track({
 				step: 'Dropping and recreating target database (clean slate)',
 				level: 'info',
@@ -511,7 +379,6 @@ export class SyncProcessor extends WorkerHost {
 				{ timeout: 2 * 60_000 },
 			);
 			if (dropCreateResult.code !== 0) {
-				// Clean up temp files before failing so the target server is not littered.
 				await targetExecutor
 					.execute(`rm -f ${tgtMycnf} ${dumpRemote}`)
 					.catch(() => {});
@@ -538,7 +405,7 @@ export class SyncProcessor extends WorkerHost {
 		);
 
 		if (importResult.code === 0 && protectedPostTypesBackup) {
-			await this.restoreProtectedPostTypes(
+			await this.protectedCpt.restoreProtectedPostTypes(
 				targetExecutor,
 				targetCreds,
 				tgtMycnf,
@@ -571,7 +438,7 @@ export class SyncProcessor extends WorkerHost {
 		}
 
 		if (targetEnv.sql_protection_queries && targetEnv.sql_protection_queries.length > 0) {
-			await this.executeSqlProtectionQueries(
+			await this.syncDb.executeSqlProtectionQueries(
 				targetExecutor,
 				targetCreds,
 				targetEnv.sql_protection_queries,
@@ -585,8 +452,8 @@ export class SyncProcessor extends WorkerHost {
 			step: 'Database imported on target',
 		});
 
-		// URL search-replace (auto-detected — no user input)
-		await this.runUrlSearchReplace(
+		// URL search-replace
+		await this.syncDb.runUrlSearchReplace(
 			sourceUrl,
 			targetUrl,
 			targetExecutor,
@@ -598,11 +465,8 @@ export class SyncProcessor extends WorkerHost {
 			cloneSafeProtected,
 		);
 
-		// Verify the source URL is no longer present in siteurl/home after replacement.
-		// Throws hard if the DB still carries the source domain — prevents a sync that
-		// "completes" but leaves all content rendering with the wrong domain.
 		if (sourceUrl && targetUrl && sourceUrl !== targetUrl) {
-			await this.validateUrlReplacement(
+			await this.syncDb.validateUrlReplacement(
 				targetExecutor,
 				targetCreds,
 				sourceUrl,
@@ -618,15 +482,15 @@ export class SyncProcessor extends WorkerHost {
 		});
 		if (await this.isCancelled(job.id)) throw new Error('Cancelled by user');
 
-		// Sync site files source → target (full root_path, protected files excluded)
-		await this.pushFiles(
+		// Sync site files source → target
+		await this.syncFiles.pushFiles(
 			job,
 			sourceEnv,
 			targetEnv,
 			sourceExecutor,
 			targetExecutor,
 			tracker,
-			this.buildProtectedUploadFileExcludes(
+			this.protectedCpt.buildProtectedUploadFileExcludes(
 				targetEnv.root_path,
 				targetLayout,
 				protectedPostTypesBackup?.uploadPaths ?? [],
@@ -634,9 +498,9 @@ export class SyncProcessor extends WorkerHost {
 		);
 		await job.updateProgress({ value: 85, step: 'Files synced' });
 
-		// Replace hardcoded URLs inside content files (CSS, JS, PHP, etc.)
+		// Replace hardcoded URLs inside content files
 		if (sourceUrl && targetUrl && sourceUrl !== targetUrl) {
-			await this.replaceUrlsInFiles(
+			await this.syncFiles.replaceUrlsInFiles(
 				sourceUrl,
 				targetUrl,
 				targetLayout.contentPath,
@@ -647,19 +511,14 @@ export class SyncProcessor extends WorkerHost {
 		}
 		await job.updateProgress({ value: 93, step: 'File URLs replaced' });
 
-		// When URLs differ, delete Elementor's generated CSS so it rebuilds from the
-		// freshly URL-replaced database. The rsync'd CSS files were sed-replaced via
-		// replaceUrlsInFiles, but Elementor may also generate CSS from database-stored
-		// widget data; a stale generated CSS file would serve source-domain URLs.
-		// When URLs are identical the copied files are already correct — preserve them.
 		const urlsIdentical = !sourceUrl || !targetUrl || sourceUrl === targetUrl;
-		await this.flushWordPressCaches(
+		await this.syncDb.flushWordPressCaches(
 			targetExecutor,
 			targetCreds,
 			targetLayout,
 			tracker,
 			'Clone',
-			urlsIdentical, // skipElementorCssFlush — skip only when URLs are identical
+			urlsIdentical,
 			targetUrl,
 		);
 
@@ -736,15 +595,15 @@ export class SyncProcessor extends WorkerHost {
 
 		await job.updateProgress({ value: 5, step: 'Connected to servers' });
 
-		// Detect WordPress layout on both servers (standard vs Bedrock)
+		// Detect WordPress layout on both servers
 		const [sourcePushLayout, targetPushLayout] = await Promise.all([
-			this.detectWpLayout(
+			this.layoutDetector.detectWpLayout(
 				sourceExecutor,
 				sourceEnv.root_path,
 				tracker,
 				'source',
 			),
-			this.detectWpLayout(
+			this.layoutDetector.detectWpLayout(
 				targetExecutor,
 				targetEnv.root_path,
 				tracker,
@@ -752,7 +611,7 @@ export class SyncProcessor extends WorkerHost {
 			),
 		]);
 
-		// Safety backup of target before overwrite (database scopes only)
+		// Safety backup of target before overwrite
 		if (scope !== 'files') {
 			if (skipSafetyBackup) {
 				await tracker.track({
@@ -761,11 +620,11 @@ export class SyncProcessor extends WorkerHost {
 					detail: 'skipSafetyBackup=true was passed.',
 				});
 			} else {
-				await this.createSafetyBackup(
+				await this.syncDb.createSafetyBackup(
 					job,
 					targetEnv,
 					targetExecutor,
-					await this.resolveCredentials(
+					await this.syncDb.resolveCredentials(
 						targetExecutor,
 						targetEnv.root_path,
 						tracker,
@@ -799,7 +658,7 @@ export class SyncProcessor extends WorkerHost {
 			targetEnv.protected_post_types.length > 0
 		) {
 			try {
-				const targetCreds = await this.resolveCredentials(
+				const targetCreds = await this.syncDb.resolveCredentials(
 					targetExecutor,
 					targetEnv.root_path,
 					tracker,
@@ -815,7 +674,7 @@ export class SyncProcessor extends WorkerHost {
 				});
 				await targetExecutor.execute(`chmod 600 ${tgtMycnf}`);
 				const protectedUploadPaths =
-					await this.collectProtectedPostTypeUploadPaths(
+					await this.protectedCpt.collectProtectedPostTypeUploadPaths(
 						targetExecutor,
 						targetCreds,
 						tgtMycnf,
@@ -823,7 +682,7 @@ export class SyncProcessor extends WorkerHost {
 						tracker,
 					);
 				await targetExecutor.execute(`rm -f ${tgtMycnf}`).catch(() => {});
-				protectedUploadFileExcludes = this.buildProtectedUploadFileExcludes(
+				protectedUploadFileExcludes = this.protectedCpt.buildProtectedUploadFileExcludes(
 					targetEnv.root_path,
 					targetPushLayout,
 					protectedUploadPaths,
@@ -843,7 +702,7 @@ export class SyncProcessor extends WorkerHost {
 		});
 
 		if (scope === 'files' || scope === 'both') {
-			await this.pushFiles(
+			await this.syncFiles.pushFiles(
 				job,
 				sourceEnv,
 				targetEnv,
@@ -853,35 +712,31 @@ export class SyncProcessor extends WorkerHost {
 				protectedUploadFileExcludes,
 			);
 
-			// Replace hardcoded URLs inside content files (CSS, JS, etc.)
-			// Resolve URLs here if we haven't already (files-only scope skips pushDatabase).
 			let filesSrcUrl: string | null = null;
 			let filesTgtUrl: string | null = null;
 			try {
-				// For files-only we must resolve credentials just to query siteurl.
-				// For 'both', pushDatabase already ran; re-resolving is cheap (cached in wpDbCredentials).
-				const srcCreds = await this.resolveCredentials(
+				const srcCreds = await this.syncDb.resolveCredentials(
 					sourceExecutor,
 					sourceEnv.root_path,
 					tracker,
 					'source (file-replace)',
 					sourceEnv.id,
 				);
-				const tgtCreds = await this.resolveCredentials(
+				const tgtCreds = await this.syncDb.resolveCredentials(
 					targetExecutor,
 					targetEnv.root_path,
 					tracker,
 					'target (file-replace)',
 					targetEnv.id,
 				);
-				filesSrcUrl = await this.resolveWpUrl(
+				filesSrcUrl = await this.syncDb.resolveWpUrl(
 					sourceExecutor,
 					srcCreds,
 					tracker,
 					'source (file-replace)',
 					sourceEnv.url,
 				);
-				filesTgtUrl = await this.resolveWpUrl(
+				filesTgtUrl = await this.syncDb.resolveWpUrl(
 					targetExecutor,
 					tgtCreds,
 					tracker,
@@ -900,7 +755,7 @@ export class SyncProcessor extends WorkerHost {
 			}
 
 			if (filesSrcUrl && filesTgtUrl && filesSrcUrl !== filesTgtUrl) {
-				await this.replaceUrlsInFiles(
+				await this.syncFiles.replaceUrlsInFiles(
 					filesSrcUrl,
 					filesTgtUrl,
 					targetPushLayout.contentPath,
@@ -913,22 +768,19 @@ export class SyncProcessor extends WorkerHost {
 
 		// Flush all WordPress caches on target after any push operation
 		try {
-			const pushFlushCreds = await this.resolveCredentials(
+			const pushFlushCreds = await this.syncDb.resolveCredentials(
 				targetExecutor,
 				targetEnv.root_path,
 				tracker,
 				'target (cache-flush)',
 				targetEnv.id,
 			);
-			await this.flushWordPressCaches(
+			await this.syncDb.flushWordPressCaches(
 				targetExecutor,
 				pushFlushCreds,
 				targetPushLayout,
 				tracker,
 				'Push',
-				// Files-only pushes keep the target DB, so preserving generated CSS is
-				// safe. For scope=both, skip only when we positively know URLs did not
-				// change; otherwise delete/regenerate Elementor CSS from the new DB.
 				scope === 'files' || (scope === 'both' && filesUrlsChanged === false),
 				targetEnv.url,
 			);
@@ -970,7 +822,7 @@ export class SyncProcessor extends WorkerHost {
 			step: 'Resolving source database credentials',
 			level: 'info',
 		});
-		const sourceCreds = await this.resolveCredentials(
+		const sourceCreds = await this.syncDb.resolveCredentials(
 			sourceExecutor,
 			sourceEnv.root_path,
 			tracker,
@@ -982,7 +834,7 @@ export class SyncProcessor extends WorkerHost {
 			step: 'Resolving target database credentials',
 			level: 'info',
 		});
-		const targetCreds = await this.resolveCredentials(
+		const targetCreds = await this.syncDb.resolveCredentials(
 			targetExecutor,
 			targetEnv.root_path,
 			tracker,
@@ -990,14 +842,14 @@ export class SyncProcessor extends WorkerHost {
 			targetEnv.id,
 		);
 
-		const sourceUrl = await this.resolveWpUrl(
+		const sourceUrl = await this.syncDb.resolveWpUrl(
 			sourceExecutor,
 			sourceCreds,
 			tracker,
 			'source',
 			sourceEnv.url,
 		);
-		const targetUrl = await this.resolveWpUrl(
+		const targetUrl = await this.syncDb.resolveWpUrl(
 			targetExecutor,
 			targetCreds,
 			tracker,
@@ -1016,9 +868,7 @@ export class SyncProcessor extends WorkerHost {
 		});
 		await sourceExecutor.execute(`chmod 600 ${srcMycnf}`);
 
-		// Protected tables: sanitize names and build --ignore-table flags so these
-		// tables are excluded from the source dump — their data survives on target.
-		const pushSafeProtected = this.normalizeProtectedTables(
+		const pushSafeProtected = this.syncDb.normalizeProtectedTables(
 			targetEnv.protected_tables ?? [],
 		);
 		const pushIgnoreFlags =
@@ -1060,7 +910,7 @@ export class SyncProcessor extends WorkerHost {
 			);
 		}
 
-		// Transfer via worker disk relay (avoids buffering entire dump in process memory)
+		// Transfer via worker disk relay
 		await tracker.track({
 			step: 'Transferring database dump to target',
 			level: 'info',
@@ -1077,7 +927,7 @@ export class SyncProcessor extends WorkerHost {
 			await rm(localPushDir, { recursive: true, force: true });
 		}
 
-		// Import on target: conditionally DROP+CREATE or preserve protected tables
+		// Import on target
 		const tgtMycnf = `/tmp/forge_push_imp_${job.id}.cnf`;
 		await targetExecutor.pushFile({
 			remotePath: tgtMycnf,
@@ -1088,7 +938,7 @@ export class SyncProcessor extends WorkerHost {
 		await targetExecutor.execute(`chmod 600 ${tgtMycnf}`);
 		let protectedPostTypesBackup: ProtectedPostTypeBackup | null = null;
 		if (targetEnv.protected_post_types && targetEnv.protected_post_types.length > 0) {
-			protectedPostTypesBackup = await this.backupProtectedPostTypes(
+			protectedPostTypesBackup = await this.protectedCpt.backupProtectedPostTypes(
 				targetExecutor,
 				targetCreds,
 				tgtMycnf,
@@ -1098,10 +948,6 @@ export class SyncProcessor extends WorkerHost {
 		}
 
 		if (pushSafeProtected.length > 0 || protectedPostTypesBackup) {
-			// Protected tables configured — check if the target DB already exists.
-			// If it does: skip DROP/CREATE; the protected tables survive and mysqldump's
-			// per-table DROP TABLE IF EXISTS handles the unprotected ones automatically.
-			// If it doesn't: just CREATE (nothing to protect yet in an empty/new DB).
 			await tracker.track({
 				step: 'Protected tables — checking target database existence',
 				level: 'info',
@@ -1115,7 +961,7 @@ export class SyncProcessor extends WorkerHost {
 				dbExistsRes.code === 0 && dbExistsRes.stdout.trim().length > 0;
 
 			if (dbExists) {
-				await this.trackProtectedTablePresence(
+				await this.syncDb.trackProtectedTablePresence(
 					targetExecutor,
 					tgtMycnf,
 					targetCreds.dbName,
@@ -1150,7 +996,6 @@ export class SyncProcessor extends WorkerHost {
 				}
 			}
 		} else {
-			// No protected tables — clean slate: DROP + CREATE removes all orphan tables.
 			await tracker.track({
 				step: 'Dropping and recreating target database (clean slate)',
 				level: 'info',
@@ -1187,7 +1032,7 @@ export class SyncProcessor extends WorkerHost {
 		);
 
 		if (importResult.code === 0 && protectedPostTypesBackup) {
-			await this.restoreProtectedPostTypes(
+			await this.protectedCpt.restoreProtectedPostTypes(
 				targetExecutor,
 				targetCreds,
 				tgtMycnf,
@@ -1213,7 +1058,7 @@ export class SyncProcessor extends WorkerHost {
 		}
 
 		if (targetEnv.sql_protection_queries && targetEnv.sql_protection_queries.length > 0) {
-			await this.executeSqlProtectionQueries(
+			await this.syncDb.executeSqlProtectionQueries(
 				targetExecutor,
 				targetCreds,
 				targetEnv.sql_protection_queries,
@@ -1222,8 +1067,8 @@ export class SyncProcessor extends WorkerHost {
 			);
 		}
 
-		// URL search-replace using the detected WP core path so WP-CLI finds WP
-		await this.runUrlSearchReplace(
+		// URL search-replace
+		await this.syncDb.runUrlSearchReplace(
 			sourceUrl,
 			targetUrl,
 			targetExecutor,
@@ -1235,9 +1080,8 @@ export class SyncProcessor extends WorkerHost {
 			pushSafeProtected,
 		);
 
-		// Verify the source URL is no longer present in siteurl/home after replacement.
 		if (sourceUrl && targetUrl && sourceUrl !== targetUrl) {
-			await this.validateUrlReplacement(
+			await this.syncDb.validateUrlReplacement(
 				targetExecutor,
 				targetCreds,
 				sourceUrl,
@@ -1247,2254 +1091,10 @@ export class SyncProcessor extends WorkerHost {
 			);
 		}
 
-		return this.buildProtectedUploadFileExcludes(
+		return this.protectedCpt.buildProtectedUploadFileExcludes(
 			targetEnv.root_path,
 			targetLayout,
 			protectedPostTypesBackup?.uploadPaths ?? [],
 		);
-	}
-
-	/**
-	 * Sync site files from source → target via rsync over SSH.
-	 *
-	 * Syncs the full root_path directory with protected-file excludes:
-	 * .env, wp-config.php, .htaccess, storage/, node_modules/, vendor/
-	 *
-	 * Strategy: rsync is called on the source server with SSH tunnel to the
-	 * target. The worker uploads its private key to source temporarily, then
-	 * invokes rsync with the remote target. Falls back to a tar pipe relay
-	 * through the worker if rsync is unavailable.
-	 */
-	private async pushFiles(
-		job: Job,
-		sourceEnv: { root_path: string },
-		targetEnv: {
-			root_path: string;
-			server: {
-				ip_address: string;
-				ssh_port: number;
-				ssh_user: string;
-				name: string;
-				ssh_private_key_encrypted: string | null;
-			};
-		},
-		sourceExecutor: Executor,
-		targetExecutor: Executor,
-		tracker: StepTracker,
-		protectedFileExcludes: string[] = [],
-	) {
-		const sourceSite = sourceEnv.root_path;
-		const targetSite = targetEnv.root_path;
-
-		await tracker.track({
-			step: 'Checking source site directory',
-			level: 'info',
-			detail: sourceSite,
-		});
-
-		// Verify root_path exists on source
-		const checkResult = await sourceExecutor.execute(
-			`test -d ${shellQuote(sourceSite)} && echo ok || echo missing`,
-		);
-		if (checkResult.code !== 0 || checkResult.stdout.trim() === 'missing') {
-			await tracker.track({
-				step: 'Source site directory not found — skipping file sync',
-				level: 'warn',
-				detail: `${sourceSite} does not exist`,
-			});
-			return;
-		}
-
-		// Check if rsync is available on both source and target
-		const [rsyncSrcCheck, rsyncTgtCheck] = await Promise.all([
-			sourceExecutor.execute(
-				'command -v rsync > /dev/null 2>&1 && echo ok || echo missing',
-			),
-			targetExecutor.execute(
-				'command -v rsync > /dev/null 2>&1 && echo ok || echo missing',
-			),
-		]);
-		const hasRsync =
-			rsyncSrcCheck.stdout.trim() === 'ok' &&
-			rsyncTgtCheck.stdout.trim() === 'ok';
-
-		if (hasRsync) {
-			await this.pushFilesViaRsync(
-				job,
-				sourceSite,
-				targetSite,
-				targetEnv,
-				sourceExecutor,
-				tracker,
-				protectedFileExcludes,
-			);
-		} else {
-			await tracker.track({
-				step: 'rsync not available on source — using tar pipe relay',
-				level: 'warn',
-				detail: 'Falling back to tar + pull + push through worker',
-			});
-			await this.pushFilesViaTarRelay(
-				job,
-				sourceSite,
-				targetSite,
-				sourceExecutor,
-				targetExecutor,
-				tracker,
-				protectedFileExcludes,
-			);
-		}
-
-		await fixCyberPanelOwnership(targetExecutor, targetSite, tracker);
-	}
-
-	/** rsync source → target using SSH, executed on the source server. */
-	private async pushFilesViaRsync(
-		job: Job,
-		sourceRoot: string,
-		targetRoot: string,
-		targetEnv: {
-			server: {
-				ip_address: string;
-				ssh_port: number;
-				ssh_user: string;
-				name: string;
-				ssh_private_key_encrypted: string | null;
-			};
-		},
-		sourceExecutor: Executor,
-		tracker: StepTracker,
-		protectedFileExcludes: string[] = [],
-	) {
-		// Upload worker's private key to source as a temp file
-		const keyPath = `/tmp/forge_push_key_${job.id}`;
-		const rawKey = await this.sshKey.resolvePrivateKey(targetEnv.server);
-		await sourceExecutor.pushFile({
-			remotePath: keyPath,
-			content: Buffer.from(rawKey),
-		});
-		await sourceExecutor.execute(`chmod 600 ${keyPath}`);
-
-		// Prepend '/' to anchor each pattern to the transfer root, so rsync won't
-		// strip nested directories with the same name inside plugins or themes.
-		const allExcludes = this.buildFileSyncExcludes(protectedFileExcludes);
-		const excludeFlags = allExcludes.map(
-			e => `--exclude=${shellQuote('/' + e)}`,
-		).join(' ');
-
-		const rsyncCmd = [
-			'rsync',
-			'-az',
-			'--delete',
-			'--no-owner',
-			'--no-group',
-			'--no-perms',
-			'--ignore-errors', // don't abort if a root-owned file can't have attrs set
-			'--timeout=300',
-			excludeFlags,
-			`-e "ssh -i ${keyPath} -p ${targetEnv.server.ssh_port} -o StrictHostKeyChecking=no -o ConnectTimeout=30"`,
-			`${shellQuote(sourceRoot)}/`,
-			`${shellQuote(targetEnv.server.ssh_user)}@${targetEnv.server.ip_address}:${shellQuote(targetRoot)}/`,
-		].join(' ');
-
-		const loggedExcludes = allExcludes.join(', ');
-		await tracker.track({
-			step: 'Syncing site files via rsync',
-			level: 'info',
-			detail: `${sourceRoot} → ${targetEnv.server.ip_address}:${targetRoot} (excluding: ${loggedExcludes})`,
-			command: 'rsync -az --delete --no-perms [excludes] (key redacted)',
-		});
-
-		const rsyncStart = Date.now();
-		const rsyncResult = await sourceExecutor.execute(rsyncCmd);
-
-		// Cleanup key regardless of outcome
-		await sourceExecutor.execute(`rm -f ${keyPath}`).catch(() => {});
-
-		await tracker.trackCommand(
-			'rsync site files',
-			'rsync -az --delete --no-perms [excludes] (key redacted)',
-			rsyncResult,
-			Date.now() - rsyncStart,
-		);
-
-		// rsync exit 23 = "some files/attrs were not transferred" — this is expected
-		// when security-hardened files (e.g. wp-config.php owned by root) exist on
-		// the target and rsync can't set their permissions. Those files are already
-		// excluded from the transfer itself; rsync is only failing to reconcile
-		// metadata on the destination copy. Treat as a non-fatal warning.
-		const RSYNC_PARTIAL = 23; // partial transfer / some attrs not set
-		const rsyncOutput = rsyncResult.stderr || rsyncResult.stdout || '';
-		const isPermissionOnlyPartial =
-			rsyncResult.code === RSYNC_PARTIAL &&
-			this.isRsyncPermissionOnlyPartial(rsyncOutput);
-
-		if (
-			rsyncResult.code !== 0 &&
-			(rsyncResult.code !== RSYNC_PARTIAL || !isPermissionOnlyPartial)
-		) {
-			throw new Error(
-				`rsync failed (exit ${rsyncResult.code}): ${rsyncResult.stderr || rsyncResult.stdout}`,
-			);
-		}
-
-		if (isPermissionOnlyPartial) {
-			// Extract the permission-error lines for the warning detail so the user
-			// knows exactly which root-owned files were skipped.
-			const permLines = rsyncOutput
-				.split('\n')
-				.filter(l => l.includes('Operation not permitted') || l.includes('failed to set permissions'))
-				.join(' | ')
-				.slice(0, 400);
-			await tracker.track({
-				step: 'File sync complete (rsync) — some attrs skipped (root-owned files)',
-				level: 'warn',
-				detail:
-					(permLines || rsyncResult.stderr || 'Some file attributes could not be set') +
-					' — this is expected for intentionally root-owned files (e.g. wp-config.php) and does NOT affect the sync.',
-			});
-		} else {
-			await tracker.track({
-				step: 'File sync complete (rsync)',
-				level: 'info',
-				detail: rsyncResult.stdout.trim() || 'Done',
-			});
-		}
-	}
-
-	private isRsyncPermissionOnlyPartial(output: string): boolean {
-		const meaningfulLines = output
-			.split('\n')
-			.map(line => line.trim())
-			.filter(line => line.length > 0)
-			.filter(line => !/^rsync error: .*code 23\b/.test(line));
-
-		return (
-			meaningfulLines.length > 0 &&
-			meaningfulLines.every(
-				line =>
-					line.includes('Operation not permitted') ||
-					line.includes('failed to set permissions'),
-			)
-		);
-	}
-
-	private buildFileSyncExcludes(protectedFileExcludes: string[] = []): string[] {
-		const cleanProtected = protectedFileExcludes
-			.map(p => p.replace(/^\/+/, '').replace(/\/+/g, '/').trim())
-			.filter(p => p.length > 0 && !p.includes('..'));
-
-		return Array.from(new Set([...this.RSYNC_EXCLUDES, ...cleanProtected]));
-	}
-
-	/**
-	 * Fallback file sync: tar on source → pull through worker → untar on target.
-	 * Memory-bounded via streaming: large sites may require significant RAM.
-	 */
-	private async pushFilesViaTarRelay(
-		job: Job,
-		sourceContent: string,
-		targetContent: string,
-		sourceExecutor: Executor,
-		targetExecutor: Executor,
-		tracker: StepTracker,
-		protectedFileExcludes: string[] = [],
-	) {
-		const remoteTar = `/tmp/forge_push_content_${job.id}.tar.gz`;
-
-		// Build tar exclude flags. Prepend './' to anchor patterns to the transfer
-		// root (tar paths start with './' when using '-C dir .'), preventing
-		// accidental exclusion of same-named subdirectories inside plugins/themes.
-		const allExcludes = this.buildFileSyncExcludes(protectedFileExcludes);
-		const tarExcludes = allExcludes.map(
-			e => `--exclude=${shellQuote('./' + e)}`,
-		).join(' ');
-
-		// Archive on source (full site directory, exclusions applied)
-		const tarCmd = `tar -czf ${remoteTar} ${tarExcludes} -C ${shellQuote(sourceContent)} .`;
-		await tracker.track({
-			step: 'Archiving site files on source',
-			level: 'info',
-			command: tarCmd,
-		});
-		const tarStart = Date.now();
-		const tarResult = await sourceExecutor.execute(tarCmd);
-		await tracker.trackCommand(
-			'tar site files',
-			tarCmd,
-			tarResult,
-			Date.now() - tarStart,
-		);
-
-		if (tarResult.code !== 0) {
-			throw new Error(
-				`tar failed (exit ${tarResult.code}): ${tarResult.stderr}`,
-			);
-		}
-
-		// Relay archive through worker disk (streaming — avoids OOM on large sites)
-		await tracker.track({
-			step: 'Relaying site archive through worker (streaming)',
-			level: 'info',
-		});
-		const localTarDir = await mkdtemp(join(tmpdir(), 'forge-tar-'));
-		const localTarPath = join(localTarDir, `content_${job.id}.tar.gz`);
-		try {
-			await sourceExecutor.pullFileToPath(remoteTar, localTarPath);
-			await sourceExecutor.execute(`rm -f ${remoteTar}`).catch(() => {});
-			const tarStat = await stat(localTarPath);
-			await tracker.track({
-				step: `Archive pulled (${(tarStat.size / 1024 / 1024).toFixed(1)} MB) — pushing to target`,
-				level: 'info',
-			});
-			const tarStream = createReadStream(localTarPath);
-			await targetExecutor.pushFileFromStream(remoteTar, tarStream);
-		} finally {
-			await rm(localTarDir, { recursive: true, force: true });
-		}
-
-		// Ensure target site directory exists, then extract (tar does not --delete)
-		await targetExecutor.execute(`mkdir -p ${shellQuote(targetContent)}`);
-		const extractCmd = `tar -xzf ${remoteTar} -C ${shellQuote(targetContent)}`;
-		await tracker.track({
-			step: 'Extracting site files on target',
-			level: 'info',
-			command: extractCmd,
-		});
-		const extractStart = Date.now();
-		const extractResult = await targetExecutor.execute(extractCmd);
-		await targetExecutor.execute(`rm -f ${remoteTar}`).catch(() => {});
-		await tracker.trackCommand(
-			'tar extract on target',
-			extractCmd,
-			extractResult,
-			Date.now() - extractStart,
-		);
-
-		if (extractResult.code !== 0) {
-			throw new Error(
-				`tar extract failed (exit ${extractResult.code}): ${extractResult.stderr}`,
-			);
-		}
-
-		await tracker.track({
-			step: 'File sync complete (tar relay)',
-			level: 'info',
-		});
-	}
-
-	// ── Helpers ─────────────────────────────────────────────────────────────────
-
-	/**
-	 * Run URL search-replace on the target database.
-	 *
-	 * Covers both the primary URL and the opposite-protocol variant (http↔https)
-	 * so domain moves that introduced protocol changes are fully handled.
-	 *
-	 * Strategy 1 (preferred): WP-CLI — handles PHP serialized data correctly.
-	 * Strategy 2 (fallback): Raw SQL UPDATE covering all standard WP tables.
-	 *
-	 * @param suffix  Short label used for temp file names ('sync' | 'push')
-	 */
-
-	private async runUrlSearchReplace(
-		sourceUrl: string | null,
-		targetUrl: string | null,
-		executor: Executor,
-		creds: Creds,
-		rootPath: string,
-		tracker: StepTracker,
-		job: Job,
-		suffix: string,
-		protectedTables: string[] = [],
-	): Promise<void> {
-		if (!sourceUrl || !targetUrl || sourceUrl === targetUrl) {
-			await tracker.track({
-				step: 'URL search-replace skipped',
-				level: 'info',
-				detail:
-					!sourceUrl || !targetUrl
-						? 'Could not detect one or both URLs'
-						: `Source and target URLs are identical (${sourceUrl})`,
-			});
-			return;
-		}
-
-		// Build replacement pairs: primary + protocol-variant (http↔https)
-		const pairs: Array<[string, string]> = [[sourceUrl, targetUrl]];
-		const srcAlt = flipProtocol(sourceUrl);
-		const tgtAlt = flipProtocol(targetUrl);
-		if (srcAlt && tgtAlt && srcAlt !== targetUrl) {
-			pairs.push([srcAlt, tgtAlt]);
-		}
-
-		// JSON-escaped variants: Elementor, CartFlows, and other page-builder plugins
-		// store layout data as JSON where '/' is escaped to '\/'. WP-CLI's substring
-		// match for 'https://example.com' won't find 'https:\/\/example.com' in the DB,
-		// so we add explicit escaped pairs to cover button links, image URLs, etc.
-		const jsonPairs: Array<[string, string]> = [];
-		for (const [old, nw] of pairs) {
-			const oj = old.replace(/\//g, '\\/');
-			const nj = nw.replace(/\//g, '\\/');
-			if (oj !== old) jsonPairs.push([oj, nj]);
-		}
-
-		// URL-encoded variants (redirect params, WooCommerce callbacks, plugin options)
-		const urlEncodedPairs: Array<[string, string]> = [];
-		for (const [old, nw] of pairs) {
-			const oe = old.replace('://', '%3A%2F%2F');
-			const ne = nw.replace('://', '%3A%2F%2F');
-			if (oe !== old) urlEncodedPairs.push([oe, ne]);
-		}
-
-		const allDisplayPairs = [...pairs, ...jsonPairs, ...urlEncodedPairs];
-		const safeProtectedTables = this.normalizeProtectedTables(protectedTables);
-		const protectedSet = new Set(safeProtectedTables);
-		const skipTablesArg =
-			safeProtectedTables.length > 0
-				? ` --skip-tables=${shellQuote(safeProtectedTables.join(','))}`
-				: '';
-
-		await tracker.track({
-			step: 'Running URL search-replace on target',
-			level: 'info',
-			detail:
-				allDisplayPairs.map(([o, n]) => `${o} → ${n}`).join(', ') +
-				(safeProtectedTables.length
-					? ` (skipping protected tables: ${safeProtectedTables.join(', ')})`
-					: ''),
-		});
-
-		const srStart = Date.now();
-
-		// Strategy 1: WP-CLI — handles serialized PHP data and all tables.
-		// Pass --all-tables to cover custom plugin tables (Elementor, WooCommerce, ACF, etc.)
-		// Pass --precise for PHP-serialization-aware matching (no corrupt lengths).
-		// Try WITHOUT --skip-plugins first so Elementor classes are loaded and no rows
-		// are skipped with "Skipping an uninitialized class" warnings. If WP-CLI crashes
-		// (Elementor PHP fatal), auto-retry with --skip-plugins.
-		const allWpCliPairs = [...pairs, ...jsonPairs, ...urlEncodedPairs];
-
-		// Run WP-CLI as the WP directory owner so the correct PHP environment is used.
-		// On CyberPanel each site user has their own PHP-FPM pool with mysqli; root's
-		// system CLI PHP commonly lacks it, causing the "missing MySQL extension" error.
-		const {
-			prefix: wpPrefix,
-			allowRootFlag,
-			lsphpBin,
-			wpBin,
-		} = await buildWpCliPrefix(executor, rootPath);
-		const wp = (args: string): string => {
-			let phpAndWp: string;
-			if (lsphpBin && wpBin) {
-				// Direct phar call — bypasses hardcoded #!/usr/bin/env php shebang
-				phpAndWp = `${shellQuote(lsphpBin)} ${shellQuote(wpBin)}`;
-			} else if (lsphpBin) {
-				// Shell-wrapper wp install: WP_CLI_PHP is honoured
-				phpAndWp = `env WP_CLI_PHP=${shellQuote(lsphpBin)} wp`;
-			} else {
-				phpAndWp = 'wp';
-			}
-			const parts = [wpPrefix, phpAndWp, args.trim(), allowRootFlag].filter(
-				Boolean,
-			);
-			return parts.join(' ') + ' 2>&1';
-		};
-
-		let wpCliSuccess = false;
-		for (const skipPlugins of [false, true]) {
-			const skiparg = skipPlugins ? ' --skip-themes --skip-plugins' : '';
-			let passOk = true;
-			for (const [oldUrl, newUrl] of allWpCliPairs) {
-				const srArgs = `search-replace ${shellQuote(oldUrl)} ${shellQuote(newUrl)} --path=${shellQuote(rootPath)} --all-tables --precise --skip-columns=guid${skipTablesArg}${skiparg}`;
-				const wpCliResult = await executor.execute(wp(srArgs));
-				if (wpCliResult.code === 0) {
-					await tracker.track({
-						step: `URL search-replace complete (WP-CLI${skipPlugins ? ', skip-plugins' : ''}): ${oldUrl} → ${newUrl}`,
-						level: 'info',
-						detail: wpCliResult.stdout.trim() || 'Done',
-					});
-				} else {
-					// cd-based fallback: only attempted without a sudo prefix —
-					// with sudo the system PATH already includes /usr/local/bin/wp.
-					let cdOk = false;
-					if (!wpPrefix) {
-						const cdArgs = `search-replace ${shellQuote(oldUrl)} ${shellQuote(newUrl)} --all-tables --precise --skip-columns=guid${skipTablesArg}${skiparg}${allowRootFlag ? ' ' + allowRootFlag : ''}`;
-						const cdResult = await executor.execute(
-							`cd ${shellQuote(rootPath)} && wp ${cdArgs} 2>&1`,
-						);
-						if (cdResult.code === 0) {
-							await tracker.track({
-								step: `URL search-replace complete (WP-CLI via cd${skipPlugins ? ', skip-plugins' : ''}): ${oldUrl} → ${newUrl}`,
-								level: 'info',
-								detail: cdResult.stdout.trim() || 'Done',
-							});
-							cdOk = true;
-						}
-					}
-					if (!cdOk) {
-						passOk = false;
-						if (!skipPlugins) {
-							await tracker.track({
-								step: 'WP-CLI failed without --skip-plugins — retrying with --skip-plugins',
-								level: 'warn',
-								detail: `exit ${wpCliResult.code}: ${(wpCliResult.stderr || wpCliResult.stdout || '').slice(0, 200)}`,
-							});
-						} else {
-							await tracker.track({
-								step: 'WP-CLI unavailable — falling back to SQL',
-								level: 'warn',
-								detail: `exit ${wpCliResult.code}: ${(wpCliResult.stderr || wpCliResult.stdout || 'command not found').slice(0, 200)}`,
-							});
-						}
-						break;
-					}
-				}
-			}
-			if (passOk) {
-				wpCliSuccess = true; // every pair in this mode succeeded
-				break;
-			}
-			if (skipPlugins) break; // already tried both modes, give up on WP-CLI
-			// else: retry the full set of pairs with --skip-plugins
-		}
-
-		if (wpCliSuccess) return;
-
-		// Strategy 2: PHP script — serialization-aware, handles Elementor/page-builder data.
-		// Falls back to raw SQL REPLACE (Strategy 3) if PHP CLI is unavailable on the server.
-		const scriptsPath = join(__dirname, '..', '..', '..', 'scripts');
-		const srScript = `/tmp/forge_sr_${suffix}_${job.id}.php`;
-		const scriptContent = await readFile(
-			join(scriptsPath, 'search-replace.php'),
-		);
-		await executor.pushFile({
-			remotePath: srScript,
-			content: scriptContent,
-		});
-
-		// Auto-detect table prefix (needed for both PHP and SQL fallback paths)
-		const srMycnf = `/tmp/forge_sr_${suffix}_${job.id}.cnf`;
-		await executor.pushFile({
-			remotePath: srMycnf,
-			content: Buffer.from(
-				`[client]\nuser=${creds.dbUser}\npassword=${creds.dbPassword}\nhost=${creds.dbHost}\n`,
-			),
-		});
-		await executor.execute(`chmod 600 ${srMycnf}`);
-
-		const prefixResult = await executor.execute(
-			`mysql --defaults-extra-file=${srMycnf} ${creds.dbName} -sN -e ${shellQuote(
-				`SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${escapeMysql(creds.dbName)}' AND table_name LIKE '%options' LIMIT 1`,
-			)}`,
-		);
-		const p =
-			prefixResult.code === 0 && prefixResult.stdout.trim()
-				? prefixResult.stdout.trim()
-				: 'wp_';
-
-		await tracker.track({
-			step: 'Table prefix detected',
-			level: 'info',
-			detail: `prefix=${p}`,
-		});
-
-		// Try PHP serialization-aware search-replace first
-		let phpSuccess = true;
-		const allPairs = [...pairs, ...jsonPairs, ...urlEncodedPairs];
-		for (const [oldUrl, newUrl] of allPairs) {
-			const phpResult = await executor.execute(
-				`php ${srScript}` +
-					` --mycnf=${srMycnf}` +
-					` --db-name=${shellQuote(creds.dbName)}` +
-					` --prefix=${shellQuote(p)}` +
-					` --search=${shellQuote(oldUrl)}` +
-					` --replace=${shellQuote(newUrl)}` +
-					(safeProtectedTables.length
-						? ` --skip-tables=${shellQuote(safeProtectedTables.join(','))}`
-						: ''),
-				{ timeout: 5 * 60_000 },
-			);
-			if (phpResult.code !== 0) {
-				await tracker.track({
-					step: 'PHP search-replace failed — falling back to SQL',
-					level: 'warn',
-					detail: (phpResult.stderr || phpResult.stdout || '').slice(0, 300),
-				});
-				phpSuccess = false;
-				break;
-			}
-			try {
-				const parsed = JSON.parse(phpResult.stdout) as {
-					tables_scanned: number;
-					rows_affected: number;
-					errors: string[];
-				};
-				await tracker.track({
-					step: `PHP search-replace: ${oldUrl} → ${newUrl}`,
-					level: 'info',
-					detail: `${parsed.tables_scanned} tables scanned, ${parsed.rows_affected} rows updated${
-						parsed.errors.length ? ` (${parsed.errors.length} errors)` : ''
-					}`,
-				});
-			} catch {
-				await tracker.track({
-					step: `PHP search-replace: ${oldUrl} → ${newUrl}`,
-					level: 'info',
-					detail: phpResult.stdout.slice(0, 200),
-				});
-			}
-		}
-
-		if (phpSuccess) {
-			await executor.execute(`rm -f ${srScript} ${srMycnf}`).catch(() => {});
-			await tracker.track({
-				step: 'URL search-replace complete (PHP, serialization-aware)',
-				level: 'info',
-				detail: `prefix=${p}, ${allPairs.length} pair(s) — serialized data handled correctly`,
-				durationMs: Date.now() - srStart,
-			});
-			return;
-		}
-
-		// Strategy 3: Raw SQL REPLACE fallback (no serialization fix)
-		await executor.execute(`rm -f ${srScript}`).catch(() => {});
-		const statements: string[] = [];
-		const addProtectedAwareStatement = (table: string, sql: string) => {
-			if (!protectedSet.has(table)) {
-				statements.push(sql);
-			}
-		};
-		for (const [oldRaw, newRaw] of allPairs) {
-			const o = escapeMysql(oldRaw);
-			const n = escapeMysql(newRaw);
-			addProtectedAwareStatement(
-				`${p}options`,
-				`UPDATE \`${p}options\` SET option_value = REPLACE(option_value, '${o}', '${n}')`,
-			);
-			addProtectedAwareStatement(
-				`${p}posts`,
-				`UPDATE \`${p}posts\` SET post_content = REPLACE(post_content, '${o}', '${n}')`,
-			);
-			addProtectedAwareStatement(
-				`${p}posts`,
-				`UPDATE \`${p}posts\` SET post_excerpt = REPLACE(post_excerpt, '${o}', '${n}')`,
-			);
-			addProtectedAwareStatement(
-				`${p}postmeta`,
-				`UPDATE \`${p}postmeta\` SET meta_value = REPLACE(CAST(meta_value AS CHAR), '${o}', '${n}')`,
-			);
-			addProtectedAwareStatement(
-				`${p}usermeta`,
-				`UPDATE \`${p}usermeta\` SET meta_value = REPLACE(meta_value, '${o}', '${n}')`,
-			);
-			addProtectedAwareStatement(
-				`${p}comments`,
-				`UPDATE \`${p}comments\` SET comment_content = REPLACE(comment_content, '${o}', '${n}')`,
-			);
-			addProtectedAwareStatement(
-				`${p}comments`,
-				`UPDATE \`${p}comments\` SET comment_author_url = REPLACE(comment_author_url, '${o}', '${n}')`,
-			);
-			addProtectedAwareStatement(
-				`${p}commentmeta`,
-				`UPDATE \`${p}commentmeta\` SET meta_value = REPLACE(meta_value, '${o}', '${n}')`,
-			);
-			addProtectedAwareStatement(
-				`${p}termmeta`,
-				`UPDATE \`${p}termmeta\` SET meta_value = REPLACE(meta_value, '${o}', '${n}')`,
-			);
-			addProtectedAwareStatement(
-				`${p}links`,
-				`UPDATE \`${p}links\` SET link_url = REPLACE(link_url, '${o}', '${n}')`,
-			);
-			addProtectedAwareStatement(
-				`${p}links`,
-				`UPDATE \`${p}links\` SET link_image = REPLACE(link_image, '${o}', '${n}')`,
-			);
-			addProtectedAwareStatement(
-				`${p}links`,
-				`UPDATE \`${p}links\` SET link_rss = REPLACE(link_rss, '${o}', '${n}')`,
-			);
-		}
-		const srSql = statements.join(';\n') + ';';
-
-		const sqlFile = `/tmp/forge_sr_${suffix}_sql_${job.id}.sql`;
-		await executor.pushFile({
-			remotePath: sqlFile,
-			content: Buffer.from(srSql),
-		});
-
-		const maskedSr = `mysql --defaults-extra-file=*** ${creds.dbName} < ${sqlFile} (prefix=${p}, ${allPairs.length} pair(s))`;
-		const sqlResult = await executor.execute(
-			`mysql --defaults-extra-file=${srMycnf} ${creds.dbName} < ${sqlFile}`,
-			{ timeout: 5 * 60_000 },
-		);
-		await executor.execute(`rm -f ${srMycnf} ${sqlFile}`).catch(() => {});
-
-		await tracker.trackCommand(
-			'SQL URL search-replace',
-			maskedSr,
-			sqlResult,
-			Date.now() - srStart,
-		);
-
-		if (sqlResult.code !== 0) {
-			await tracker.track({
-				step: 'URL search-replace failed — sync still complete',
-				level: 'warn',
-				detail: sqlResult.stderr,
-			});
-		} else {
-			await tracker.track({
-				step: 'URL search-replace complete (SQL)',
-				level: 'info',
-				detail: `prefix=${p}, 12 columns × ${pairs.length} pair(s) — note: serialized PHP data not fixed`,
-			});
-		}
-	}
-
-	/**
-	 * Search-replace hardcoded URLs in wp-content text files (CSS, JS, etc.).
-	 *
-	 * Runs `find … | xargs sed` on the target for each replacement pair.
-	 * Covers both the primary URL and opposite-protocol variant (http↔https).
-	 * Binary files are never touched — only text-based file extensions.
-	 */
-	private async replaceUrlsInFiles(
-		sourceUrl: string,
-		targetUrl: string,
-		wpContentPath: string,
-		executor: Executor,
-		tracker: StepTracker,
-		job: Job,
-	): Promise<void> {
-		// Build pairs: primary + protocol-variant
-		const pairs: Array<[string, string]> = [[sourceUrl, targetUrl]];
-		const srcAlt = flipProtocol(sourceUrl);
-		const tgtAlt = flipProtocol(targetUrl);
-		if (srcAlt && tgtAlt && srcAlt !== targetUrl) {
-			pairs.push([srcAlt, tgtAlt]);
-		}
-
-		// JSON-escaped variants (Elementor/page-builder data in .json files, JS bundles)
-		const jsonPairs: Array<[string, string]> = [];
-		for (const [old, nw] of pairs) {
-			const oj = old.replace(/\//g, '\\/');
-			const nj = nw.replace(/\//g, '\\/');
-			if (oj !== old) jsonPairs.push([oj, nj]);
-		}
-
-		// URL-encoded variants (redirect params, WooCommerce callbacks, plugin options)
-		const urlEncodedPairs: Array<[string, string]> = [];
-		for (const [old, nw] of pairs) {
-			const oe = old.replace('://', '%3A%2F%2F');
-			const ne = nw.replace('://', '%3A%2F%2F');
-			if (oe !== old) urlEncodedPairs.push([oe, ne]);
-		}
-
-		const allFilePairs = [...pairs, ...jsonPairs, ...urlEncodedPairs];
-
-		await tracker.track({
-			step: 'Replacing URLs in wp-content files',
-			level: 'info',
-			detail: `${wpContentPath} — ${allFilePairs.map(([o, n]) => `${o} → ${n}`).join(', ')}`,
-		});
-
-		// Verify the directory exists before attempting find
-		const checkResult = await executor.execute(
-			`test -d ${shellQuote(wpContentPath)} && echo ok || echo missing`,
-		);
-		if (checkResult.stdout.trim() !== 'ok') {
-			await tracker.track({
-				step: 'wp-content not found on target — skipping file URL replace',
-				level: 'warn',
-				detail: wpContentPath,
-			});
-			return;
-		}
-
-		const fileStart = Date.now();
-		let anyError = false;
-
-		for (const [oldUrl, newUrl] of allFilePairs) {
-			// Escape characters that could break sed's s|…|…|g delimiter
-			// We use | as delimiter so forward slashes don't need escaping.
-			// The only chars that need escaping are: | and \
-			const sedEscape = (s: string) =>
-				s.replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
-			const oldSed = sedEscape(oldUrl);
-			const newSed = sedEscape(newUrl);
-
-			// find all text-format files and in-place replace with sed
-			const sedCmd = [
-				`find ${shellQuote(wpContentPath)} -type f`,
-				`\\( -name '*.css' -o -name '*.js' -o -name '*.json' -o -name '*.html'`,
-				`-o -name '*.htm' -o -name '*.svg' -o -name '*.xml' -o -name '*.txt'`,
-				`-o -name '*.php' \\)`,
-				`-exec sed -i 's|${oldSed}|${newSed}|g' {} +`,
-			].join(' ');
-
-			const sedResult = await executor.execute(sedCmd);
-			if (sedResult.code !== 0) {
-				await tracker.track({
-					step: `File URL replace failed for ${oldUrl}`,
-					level: 'warn',
-					detail: sedResult.stderr.trim() || `exit ${sedResult.code}`,
-				});
-				anyError = true;
-			}
-		}
-
-		await tracker.track({
-			step: anyError
-				? 'File URL replace completed with warnings'
-				: 'File URL replace complete',
-			level: anyError ? 'warn' : 'info',
-			detail: `${wpContentPath}, ${allFilePairs.length} pair(s), extensions: css/js/json/html/svg/xml/txt/php`,
-			durationMs: Date.now() - fileStart,
-		});
-
-		if (anyError) {
-			throw new Error(
-				`File URL replacement failed for one or more URL patterns in ${wpContentPath}. ` +
-					`The target may contain stale source-domain URLs in static assets (CSS, JS). ` +
-					`Check the execution log above for per-pattern error details.`,
-			);
-		}
-
-		await this.validateFileUrlReplacement(
-			sourceUrl,
-			targetUrl,
-			wpContentPath,
-			executor,
-			tracker,
-		);
-	}
-
-	/**
-	 * Flush all WordPress caches on a remote environment.
-	 *
-	 * Strategy 1 (preferred): WP-CLI — flushes object cache, rewrites, OPcache.
-	 * Strategy 2 (fallback):  SQL DELETE transients + rm common disk cache dirs.
-	 *
-	 * All operations are non-fatal: cache flush failure never aborts a sync.
-	 */
-	private async flushWordPressCaches(
-		executor: Executor,
-		creds: Creds,
-		layout: WpLayout,
-		tracker: StepTracker,
-		label: string,
-		/** When true, skip deleting uploads/elementor/css — used when files were just
-		 *  synced and URL-replaced, so the CSS files are already correct on disk. */
-		skipElementorCssFlush = false,
-		/** Site URL used to send an HTTP PURGE request, clearing LiteSpeed's
-		 *  in-memory page cache. Pass null/undefined to skip. Non-fatal. */
-		siteUrl: string | null | undefined = undefined,
-	): Promise<void> {
-		const { corePath, contentPath, isBedrock } = layout;
-
-		// Run WP-CLI as the WP directory owner so the correct PHP environment is used.
-		// On CyberPanel each site user has their own PHP-FPM pool with mysqli; root's
-		// system CLI PHP commonly lacks it, causing the "missing MySQL extension" error.
-		const {
-			prefix: wpPrefix,
-			allowRootFlag,
-			lsphpBin,
-			wpBin,
-		} = await buildWpCliPrefix(executor, corePath);
-		const wp = (args: string): string => {
-			let phpAndWp: string;
-			if (lsphpBin && wpBin) {
-				// Direct phar call — bypasses hardcoded #!/usr/bin/env php shebang
-				phpAndWp = `${shellQuote(lsphpBin)} ${shellQuote(wpBin)}`;
-			} else if (lsphpBin) {
-				// Shell-wrapper wp install: WP_CLI_PHP is honoured
-				phpAndWp = `env WP_CLI_PHP=${shellQuote(lsphpBin)} wp`;
-			} else {
-				phpAndWp = 'wp';
-			}
-			const parts = [wpPrefix, phpAndWp, args.trim(), allowRootFlag].filter(
-				Boolean,
-			);
-			return parts.join(' ') + ' 2>&1';
-		};
-
-		// Strategy 1: WP-CLI (use detected WP core path so it's found correctly)
-		const cacheResult = await executor
-			.execute(
-				wp(
-					`cache flush --path=${shellQuote(corePath)} --skip-themes --skip-plugins`,
-				),
-			)
-			.catch(() => ({ code: 1, stdout: '', stderr: 'executor error' }));
-		if (cacheResult.code === 0) {
-			await tracker.track({
-				step: `${label}: object cache flushed (WP-CLI)`,
-				level: 'info',
-			});
-			await executor
-				.execute(
-					wp(
-						`rewrite flush --path=${shellQuote(corePath)} --skip-themes --skip-plugins`,
-					),
-				)
-				.catch(() => {});
-			await executor
-				.execute(
-					wp(
-						`eval 'if(function_exists("opcache_reset")){opcache_reset();}' --path=${shellQuote(corePath)} --skip-themes --skip-plugins`,
-					),
-				)
-				.catch(() => {});
-			// Regenerate Elementor CSS — skip entirely when files were just synced;
-			// those CSS files are already correct on disk after the URL sed-replace.
-			// When files were NOT synced (db-only), regenerate or delete the stale
-			// CSS so Elementor rebuilds it from the freshly-imported database.
-			let cssFlushSummary = 'rewrite rules and OPcache flushed (WP-CLI)';
-			if (!skipElementorCssFlush) {
-				const elementorActive = await executor
-					.execute(
-						wp(
-							`plugin is-active elementor --path=${shellQuote(corePath)} --skip-themes --skip-plugins`,
-						),
-					)
-					.catch(() => ({ code: 1, stdout: '', stderr: '' }));
-
-				if (elementorActive.code !== 0) {
-					await tracker.track({
-						step: `${label}: Elementor CSS flush skipped`,
-						level: 'info',
-						detail: 'Elementor is not active on this environment.',
-					});
-				} else {
-					// Must run WITHOUT --skip-plugins so Elementor is loaded and can write
-					// its generated CSS files. Falls back to deleting the cache dir so
-					// Elementor auto-regenerates on the next page visit.
-					const elFlush = await executor
-						.execute(wp(`elementor flush-css --path=${shellQuote(corePath)}`))
-						.catch(() => ({ code: 1, stdout: '', stderr: '' }));
-					if (elFlush.code === 0) {
-						cssFlushSummary = 'rewrite rules, OPcache, and Elementor CSS flushed (WP-CLI)';
-					} else {
-						// CLI failed (Elementor fatal, not installed, etc.) — nuke the CSS dir
-						// so Elementor rebuilds it fresh on the next front-end request.
-						await executor
-							.execute(
-								`rm -rf ${shellQuote(contentPath)}/uploads/elementor/css 2>/dev/null; true`,
-							)
-							.catch(() => {});
-						cssFlushSummary = 'rewrite rules, OPcache, and Elementor CSS cache reset';
-						await tracker.track({
-							step: `${label}: Elementor CSS cache reset for auto-regeneration`,
-							level: 'warn',
-							detail: (
-								elFlush.stderr ||
-								elFlush.stdout ||
-								'Elementor CLI command failed'
-							).slice(0, 200),
-						});
-					}
-				}
-			}
-			await tracker.track({
-				step: `${label}: ${cssFlushSummary}`,
-				level: 'info',
-			});
-
-			// Always wipe disk caches after a WP-CLI flush. This catches Divi's
-			// et-cache and LiteSpeed's file cache, which WP-CLI does not clear by
-			// itself. Without this, Divi regenerates et-cache from stale
-			// gzip-compressed option blobs that WP-CLI's search-replace could not
-			// reach, re-introducing the old domain in CSS. Similarly, cached pages
-			// served by LiteSpeed would keep referencing the source domain.
-			// `uploads/elementor/css` is intentionally omitted here — it is
-			// handled by the Elementor flush block above.
-			const strategy1CacheDirs = [
-				`${shellQuote(contentPath)}/cache`,
-				`${shellQuote(contentPath)}/et-cache`,
-				`${shellQuote(contentPath)}/litespeed`,
-				...(isBedrock ? [`${shellQuote(contentPath)}/uploads/cache`] : []),
-			];
-			await executor
-				.execute(`rm -rf ${strategy1CacheDirs.join(' ')} 2>/dev/null; true`)
-				.catch(() => {});
-			await tracker.track({
-				step: `${label}: disk caches cleared (et-cache, cache, litespeed)`,
-				level: 'info',
-				detail: strategy1CacheDirs.join(', '),
-			});
-
-			// Clear Divi's compiled CSS DB cache options when URLs changed.
-			// Divi stores its final rendered CSS as gzip-compressed blobs in
-			// et_dynamic_css* options. WP-CLI search-replace --precise cannot
-			// reach inside compressed binary data, so these blobs still carry the
-			// old domain after a URL move. Deleting them forces Divi to rebuild
-			// from its theme/page settings (which WP-CLI already fixed), producing
-			// clean CSS on the next front-end request. When URLs are identical
-			// (skipElementorCssFlush=true) the blobs are untouched and correct.
-			if (!skipElementorCssFlush) {
-				try {
-					const diviMycnf = `/tmp/forge_divi_flush_${Date.now()}.cnf`;
-					await executor.pushFile({
-						remotePath: diviMycnf,
-						content: Buffer.from(
-							`[client]\nuser=${creds.dbUser}\npassword=${creds.dbPassword}\nhost=${creds.dbHost}\n`,
-						),
-					});
-					await executor.execute(`chmod 600 ${diviMycnf}`);
-					const pfxRes = await executor.execute(
-						`mysql --defaults-extra-file=${diviMycnf} ${creds.dbName} -sN -e ${shellQuote(
-							`SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${escapeMysql(creds.dbName)}' AND table_name LIKE '%options' LIMIT 1`,
-						)}`,
-					);
-					const diviPrefix =
-						pfxRes.code === 0 && pfxRes.stdout.trim()
-							? pfxRes.stdout.trim()
-							: 'wp_';
-					const diviDeleteSql =
-						`DELETE FROM \`${diviPrefix}options\` WHERE ` +
-						`option_name LIKE 'et\\_dynamic\\_css%' OR ` +
-						`option_name LIKE 'et\\_pb\\_dynamic\\_css%' OR ` +
-						`option_name LIKE 'et\\_core\\_bb\\_layout\\_css%' OR ` +
-						`option_name LIKE 'et\\_dynamic\\_css\\_cache\\_%'`;
-					const diviResult = await executor.execute(
-						`mysql --defaults-extra-file=${diviMycnf} ${creds.dbName} -e ${shellQuote(diviDeleteSql)}`,
-					);
-					await executor.execute(`rm -f ${diviMycnf}`).catch(() => {});
-					if (diviResult.code === 0) {
-						await tracker.track({
-							step: `${label}: Divi compiled CSS cache cleared (et_dynamic_css)`,
-							level: 'info',
-							detail: `Divi will regenerate CSS from theme settings on next page visit`,
-						});
-					} else {
-						await tracker.track({
-							step: `${label}: Divi CSS cache clear skipped — table not found or no Divi options`,
-							level: 'info',
-						});
-					}
-				} catch (e) {
-					await tracker.track({
-						step: `${label}: Divi CSS cache clear non-fatal error`,
-						level: 'warn',
-						detail: e instanceof Error ? e.message : String(e),
-					});
-				}
-			}
-
-			// Attempt WP-CLI LiteSpeed full-site purge (requires LiteSpeed Cache plugin)
-			await executor
-				.execute(
-					wp(
-						`litespeed-purge all --path=${shellQuote(corePath)} --skip-themes --skip-plugins`,
-					),
-				)
-				.catch(() => {});
-
-			if (siteUrl) {
-				// Standard LiteSpeed PURGE to root
-				await executor
-					.execute(
-						`curl -s -o /dev/null --max-time 5 -X PURGE ${shellQuote(siteUrl)}/ 2>/dev/null; true`,
-					)
-					.catch(() => {});
-				// Wildcard purge — clears all cached pages, not just the homepage
-				await executor
-					.execute(
-						`curl -s -o /dev/null --max-time 5 -H ${shellQuote('X-LiteSpeed-Purge: *')} ${shellQuote(siteUrl)}/ 2>/dev/null; true`,
-					)
-					.catch(() => {});
-				await tracker.track({
-					step: `${label}: LiteSpeed HTTP PURGE sent`,
-					level: 'info',
-				});
-			}
-			return;
-		}
-
-		// Strategy 2: SQL transient delete + disk cache removal
-		await tracker.track({
-			step: `${label}: WP-CLI unavailable — flushing via SQL + disk`,
-			level: 'warn',
-		});
-		try {
-			const flushMycnf = `/tmp/forge_flush_${Date.now()}.cnf`;
-			await executor.pushFile({
-				remotePath: flushMycnf,
-				content: Buffer.from(
-					`[client]\nuser=${creds.dbUser}\npassword=${creds.dbPassword}\nhost=${creds.dbHost}\n`,
-				),
-			});
-			await executor.execute(`chmod 600 ${flushMycnf}`);
-			const pfxRes = await executor.execute(
-				`mysql --defaults-extra-file=${flushMycnf} ${creds.dbName} -sN -e ${shellQuote(
-					`SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${escapeMysql(creds.dbName)}' AND table_name LIKE '%options' LIMIT 1`,
-				)}`,
-			);
-			const p =
-				pfxRes.code === 0 && pfxRes.stdout.trim()
-					? pfxRes.stdout.trim()
-					: 'wp_';
-			await executor
-				.execute(
-					`mysql --defaults-extra-file=${flushMycnf} ${creds.dbName} -e "DELETE FROM \`${p}options\` WHERE option_name LIKE '_transient_%' OR option_name LIKE '_site_transient_%' OR option_name = 'elementor_log';"`,
-				)
-				.catch(() => {});
-			await executor.execute(`rm -f ${flushMycnf}`).catch(() => {});
-			await tracker.track({
-				step: `${label}: transients and stale logs cleared (SQL, prefix=${p})`,
-				level: 'info',
-			});
-		} catch (e) {
-			await tracker.track({
-				step: `${label}: SQL cache flush failed`,
-				level: 'warn',
-				detail: e instanceof Error ? e.message : String(e),
-			});
-		}
-		// Remove WordPress object-cache drop-in so WP re-queries the (now fresh) DB
-		// directly until the caching plugin reinstates it on the next admin request.
-		await executor
-			.execute(
-				`rm -f ${shellQuote(contentPath)}/object-cache.php 2>/dev/null; true`,
-			)
-			.catch(() => {});
-		await tracker.track({
-			step: `${label}: WordPress object cache drop-in removed — WP will re-query from DB until plugin restores it`,
-			level: 'info',
-		});
-		// Remove common disk cache directories (non-fatal)
-		// Covers both standard wp-content/cache and Bedrock web/app/cache paths
-		// uploads/elementor/css is intentionally excluded when files were just
-		// synced: those CSS files are already correct after URL replace.
-		const cacheRmParts = [
-			`${shellQuote(contentPath)}/cache`,
-			`${shellQuote(contentPath)}/et-cache`,
-			`${shellQuote(contentPath)}/litespeed`,
-			...(!skipElementorCssFlush
-				? [`${shellQuote(contentPath)}/uploads/elementor/css`]
-				: []),
-		];
-		if (isBedrock) {
-			// Bedrock may also have a cache dir at web/app/cache or app/cache directly
-			cacheRmParts.push(`${shellQuote(contentPath)}/uploads/cache`);
-		}
-		await executor
-			.execute(`rm -rf ${cacheRmParts.join(' ')} 2>/dev/null; true`)
-			.catch(() => {});
-		await tracker.track({
-			step: `${label}: disk cache directories removed`,
-			level: 'info',
-			detail: cacheRmParts.join(', '),
-		});
-		if (siteUrl) {
-			await executor
-				.execute(
-					`curl -s -o /dev/null --max-time 5 -X PURGE ${shellQuote(siteUrl)}/ 2>/dev/null; true`,
-				)
-				.catch(() => {});
-			await tracker.track({
-				step: `${label}: LiteSpeed HTTP PURGE sent`,
-				level: 'info',
-			});
-		}
-	}
-
-	/**
-	 * Resolve DB credentials from a remote environment.
-	 *
-	 * Attempts in order:
-	 *  1. wp-config.php inside root_path          (standard WP)
-	 *  2. wp-config.php one level above root_path (hardened WP — placed above
-	 *     public_html so it is not web-accessible)
-	 *  3. .env one level above root_path          (Bedrock layout)
-	 */
-	private async resolveCredentials(
-		executor: Executor,
-		rootPath: string,
-		tracker: StepTracker,
-		label: string,
-		environmentId: bigint,
-	): Promise<Creds> {
-		// Attempt 0: stored credentials in Bedrock Forge DB (manually configured, highest priority)
-		try {
-			const stored = await this.prisma.wpDbCredentials.findUnique({
-				where: { environment_id: environmentId },
-			});
-			if (stored) {
-				const creds: Creds = {
-					dbHost: this.encryption.decrypt(stored.db_host_encrypted),
-					dbUser: this.encryption.decrypt(stored.db_user_encrypted),
-					dbPassword: this.encryption.decrypt(stored.db_password_encrypted),
-					dbName: this.encryption.decrypt(stored.db_name_encrypted),
-				};
-				await tracker.track({
-					step: `${label} credentials from Bedrock Forge (stored)`,
-					level: 'info',
-					detail: `host=${creds.dbHost} user=${creds.dbUser} db=${creds.dbName}`,
-				});
-				return creds;
-			}
-		} catch (e) {
-			await tracker.track({
-				step: `${label} stored credentials could not be loaded — falling back to file`,
-				level: 'warn',
-				detail: e instanceof Error ? e.message : String(e),
-			});
-		}
-
-		const parentDir = rootPath.replace(/\/[^/]+\/?$/, '');
-
-		// Attempt 1: wp-config.php inside root_path (standard WordPress)
-		const wpConfigInRoot = `${rootPath}/wp-config.php`;
-		try {
-			const buf = await executor.pullFile(wpConfigInRoot);
-			const creds = this.credParser.parse(buf.toString('utf8'));
-			if (creds) {
-				await tracker.track({
-					step: `${label} credentials from wp-config.php`,
-					level: 'info',
-					detail: wpConfigInRoot,
-				});
-				return creds as Creds;
-			}
-			await tracker.track({
-				step: `${label} wp-config.php found but credentials could not be parsed`,
-				level: 'warn',
-				detail: wpConfigInRoot,
-			});
-		} catch (e) {
-			await tracker.track({
-				step: `${label} wp-config.php not readable at root path`,
-				level: 'warn',
-				detail: `${wpConfigInRoot}: ${e instanceof Error ? e.message : String(e)}`,
-			});
-		}
-
-		// Attempt 2: wp-config.php one level above root_path
-		// Many hardened WordPress installs move wp-config.php above public_html
-		const wpConfigAbove = `${parentDir}/wp-config.php`;
-		try {
-			const buf = await executor.pullFile(wpConfigAbove);
-			const creds = this.credParser.parse(buf.toString('utf8'));
-			if (creds) {
-				await tracker.track({
-					step: `${label} credentials from wp-config.php (above root)`,
-					level: 'info',
-					detail: wpConfigAbove,
-				});
-				return creds as Creds;
-			}
-			await tracker.track({
-				step: `${label} wp-config.php above root found but credentials could not be parsed`,
-				level: 'warn',
-				detail: wpConfigAbove,
-			});
-		} catch (e) {
-			await tracker.track({
-				step: `${label} wp-config.php not readable above root path`,
-				level: 'warn',
-				detail: `${wpConfigAbove}: ${e instanceof Error ? e.message : String(e)}`,
-			});
-		}
-
-		// Attempt 3: .env inside root_path (some setups place it inside public_html)
-		const envInRoot = `${rootPath}/.env`;
-		try {
-			const buf = await executor.pullFile(envInRoot);
-			const creds = this.credParser.parse(buf.toString('utf8'));
-			if (creds) {
-				await tracker.track({
-					step: `${label} credentials from .env (inside root)`,
-					level: 'info',
-					detail: envInRoot,
-				});
-				return creds as Creds;
-			}
-			await tracker.track({
-				step: `${label} .env inside root found but credentials could not be parsed`,
-				level: 'warn',
-				detail: envInRoot,
-			});
-		} catch (e) {
-			await tracker.track({
-				step: `${label} .env not readable inside root path`,
-				level: 'warn',
-				detail: `${envInRoot}: ${e instanceof Error ? e.message : String(e)}`,
-			});
-		}
-
-		// Attempt 4: .env one directory above root_path (Bedrock layout)
-		const parentEnv = `${parentDir}/.env`;
-		try {
-			const buf = await executor.pullFile(parentEnv);
-			const creds = this.credParser.parse(buf.toString('utf8'));
-			if (creds) {
-				await tracker.track({
-					step: `${label} credentials from .env (Bedrock — above root)`,
-					level: 'info',
-					detail: parentEnv,
-				});
-				return creds as Creds;
-			}
-			await tracker.track({
-				step: `${label} .env above root found but credentials could not be parsed`,
-				level: 'warn',
-				detail: parentEnv,
-			});
-		} catch (e) {
-			await tracker.track({
-				step: `${label} .env not readable above root path`,
-				level: 'warn',
-				detail: `${parentEnv}: ${e instanceof Error ? e.message : String(e)}`,
-			});
-		}
-
-		throw new Error(
-			`Could not resolve database credentials for ${label} environment at ${rootPath}. ` +
-				`Tried: ${wpConfigInRoot}, ${wpConfigAbove}, ${envInRoot}, ${parentEnv}. ` +
-				`Check the execution log above for per-file error details.`,
-		);
-	}
-
-	/**
-	 * Detect the WordPress siteurl.
-	 * Priority: env.url field stored in DB > wp_options query.
-	 */
-	private async resolveWpUrl(
-		executor: Executor,
-		creds: Creds,
-		tracker: StepTracker,
-		label: string,
-		envUrl?: string | null,
-	): Promise<string | null> {
-		if (envUrl && envUrl.trim()) {
-			const url = envUrl.trim().replace(/\/$/, '');
-			await tracker.track({
-				step: `${label} URL from environment record`,
-				level: 'info',
-				detail: url,
-			});
-			return url;
-		}
-
-		try {
-			const urlMycnf = `/tmp/forge_url_${Date.now()}.cnf`;
-			await executor.pushFile({
-				remotePath: urlMycnf,
-				content: Buffer.from(
-					`[client]\nuser=${creds.dbUser}\npassword=${creds.dbPassword}\nhost=${creds.dbHost}\n`,
-				),
-			});
-			await executor.execute(`chmod 600 ${urlMycnf}`);
-			// Detect actual table prefix to support custom prefixes (not just 'wp_')
-			const pfxRes = await executor.execute(
-				`mysql --defaults-extra-file=${urlMycnf} ${creds.dbName} -sN -e ${shellQuote(
-					`SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${escapeMysql(creds.dbName)}' AND table_name LIKE '%options' LIMIT 1`,
-				)}`,
-			);
-			const tblPrefix =
-				pfxRes.code === 0 && pfxRes.stdout.trim()
-					? pfxRes.stdout.trim()
-					: 'wp_';
-			const query = `SELECT option_value FROM \`${tblPrefix}options\` WHERE option_name = 'siteurl' LIMIT 1`;
-			const result = await executor.execute(
-				`mysql --defaults-extra-file=${urlMycnf} ${creds.dbName} -sN -e ${shellQuote(query)}`,
-			);
-			await executor.execute(`rm -f ${urlMycnf}`).catch(() => {});
-			if (result.code === 0 && result.stdout.trim()) {
-				const url = result.stdout.trim().replace(/\/$/, '');
-				await tracker.track({
-					step: `${label} URL from wp_options (prefix: ${tblPrefix})`,
-					level: 'info',
-					detail: url,
-				});
-				return url;
-			}
-		} catch {
-			// non-fatal
-		}
-
-		await tracker.track({
-			step: `Could not detect ${label} URL`,
-			level: 'warn',
-			detail: 'Search-replace skipped for this side',
-		});
-		return null;
-	}
-
-	/**
-	 * Verify that the source URL is no longer present in the target database's
-	 * core content locations after a URL search-replace operation.
-	 *
-	 * Throws if common content stores still contain the source URL — this
-	 * indicates that the search-replace strategy (WP-CLI, PHP, or SQL) silently
-	 * failed without updating the database, which would leave content rendering
-	 * with the wrong domain.
-	 *
-	 * Non-fatal when the database cannot be queried (connectivity issues) — logged
-	 * as a warning so the job does not fail due to a transient probe error.
-	 */
-	private async validateUrlReplacement(
-		executor: Executor,
-		creds: Creds,
-		sourceUrl: string,
-		targetUrl: string,
-		tracker: StepTracker,
-		protectedTables: string[] = [],
-	): Promise<void> {
-		const protectedSet = new Set(this.normalizeProtectedTables(protectedTables));
-		const valMycnf = `/tmp/forge_val_${Date.now()}.cnf`;
-		try {
-			await executor.pushFile({
-				remotePath: valMycnf,
-				content: Buffer.from(
-					`[client]\nuser=${creds.dbUser}\npassword=${creds.dbPassword}\nhost=${creds.dbHost}\n`,
-				),
-			});
-			await executor.execute(`chmod 600 ${valMycnf}`);
-
-			// Detect table prefix
-			const pfxRes = await executor.execute(
-				`mysql --defaults-extra-file=${valMycnf} ${creds.dbName} -sN -e ${shellQuote(
-					`SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${escapeMysql(creds.dbName)}' AND table_name LIKE '%options' LIMIT 1`,
-				)}`,
-			);
-			const tblPrefix =
-				pfxRes.code === 0 && pfxRes.stdout.trim()
-					? pfxRes.stdout.trim()
-					: 'wp_';
-
-			const likeSource = escapeMysql(sourceUrl);
-			// Log/diagnostic option names that may contain historical source-domain
-			// URLs inside PHP-serialized objects with null bytes (private property
-			// markers). WP-CLI cannot replace inside those byte sequences, but the
-			// values are non-functional debug data that do not affect page rendering.
-			const NON_FUNCTIONAL_OPTIONS = ['elementor_log', '_elementor_log'];
-			const excludeOptionNames = NON_FUNCTIONAL_OPTIONS.map(
-				n => `'${escapeMysql(n)}'`,
-			).join(',');
-			const allProbes = [
-				{
-					label: `${tblPrefix}options`,
-					sql:
-						`SELECT 'options', option_name, LEFT(REPLACE(REPLACE(option_value, CHAR(10), ' '), CHAR(13), ' '), 180) ` +
-						`FROM \`${tblPrefix}options\` WHERE option_value LIKE '%${likeSource}%' ` +
-						`AND option_name NOT IN (${excludeOptionNames}) ` +
-						`AND option_name NOT LIKE '\_transient\_%' ` +
-						`AND option_name NOT LIKE '\_site\_transient\_%' LIMIT 5`,
-				},
-				{
-					label: `${tblPrefix}posts`,
-					sql:
-						`SELECT 'posts', CONCAT(ID, ':', post_type), LEFT(REPLACE(REPLACE(post_content, CHAR(10), ' '), CHAR(13), ' '), 180) ` +
-						`FROM \`${tblPrefix}posts\` WHERE post_content LIKE '%${likeSource}%' LIMIT 5`,
-				},
-				{
-					label: `${tblPrefix}postmeta`,
-					sql:
-						`SELECT 'postmeta', CONCAT(post_id, ':', meta_key), LEFT(REPLACE(REPLACE(CAST(meta_value AS CHAR), CHAR(10), ' '), CHAR(13), ' '), 180) ` +
-						`FROM \`${tblPrefix}postmeta\` WHERE CAST(meta_value AS CHAR) LIKE '%${likeSource}%' LIMIT 5`,
-				},
-			] as const;
-			const probes = allProbes.filter(probe => !protectedSet.has(probe.label));
-
-			if (probes.length === 0) {
-				await tracker.track({
-					step: 'URL replacement validation skipped for protected core tables',
-					level: 'info',
-					detail: Array.from(protectedSet).join(', '),
-				});
-				return;
-			}
-
-			const staleMatches: string[] = [];
-			for (const probe of probes) {
-				const result = await executor.execute(
-					`mysql --defaults-extra-file=${valMycnf} ${creds.dbName} -sN -e ${shellQuote(probe.sql)}`,
-				);
-				if (result.code !== 0) {
-					throw new Error(
-						`Validation probe failed for ${probe.label}: ${(result.stderr || result.stdout || `exit ${result.code}`).trim()}`,
-					);
-				}
-				if (!result.stdout.trim()) continue;
-				for (const line of result.stdout.trim().split('\n')) {
-					const [bucket = probe.label, key = '(unknown)', ...excerptParts] =
-						line.split('\t');
-					const excerpt = excerptParts.join('\t').trim();
-					staleMatches.push(
-						`${bucket.trim()} ${key.trim()} = ${excerpt || '(empty)'}`,
-					);
-				}
-			}
-
-			if (staleMatches.length > 0) {
-				throw new Error(
-					`URL replacement did not complete: source URL (${sourceUrl}) is still present ` +
-						`in target content after search-replace.\n` +
-						`Sample stale rows: ${staleMatches.join('; ')}.\n` +
-						`This would cause content to render with the wrong domain on the target site.`,
-				);
-			}
-
-			await tracker.track({
-				step: 'URL replacement verified — no stale source URLs remain in core WP content',
-				level: 'info',
-				detail:
-					`${tblPrefix}options, ${tblPrefix}posts, and ${tblPrefix}postmeta no longer contain ${sourceUrl} ` +
-					`(expected target: ${targetUrl})`,
-			});
-		} catch (e) {
-			// Re-throw validation failures — these are intentional hard stops.
-			if (
-				e instanceof Error &&
-				e.message.includes('URL replacement did not complete')
-			) {
-				throw e;
-			}
-			// Any other error (DB probe failure, SSH timeout) is a warning — the job
-			// should not fail because the validation probe itself had a connectivity issue.
-			await tracker.track({
-				step: 'URL replacement validation probe failed — could not verify target content',
-				level: 'warn',
-				detail: e instanceof Error ? e.message : String(e),
-			});
-		} finally {
-			await executor.execute(`rm -f ${valMycnf}`).catch(() => {});
-		}
-	}
-
-	private normalizeProtectedTables(tables: string[]): string[] {
-		const seen = new Set<string>();
-		const safe: string[] = [];
-		for (const raw of tables) {
-			const table = raw.trim();
-			if (!TABLE_NAME_REGEX.test(table) || seen.has(table)) continue;
-			seen.add(table);
-			safe.push(table);
-		}
-		return safe;
-	}
-
-	private async trackProtectedTablePresence(
-		executor: Executor,
-		mycnf: string,
-		dbName: string,
-		protectedTables: string[],
-		tracker: StepTracker,
-	): Promise<void> {
-		if (protectedTables.length === 0) return;
-		const quotedTables = protectedTables
-			.map(t => `'${escapeMysql(t)}'`)
-			.join(',');
-		const result = await executor.execute(
-			`mysql --defaults-extra-file=${mycnf} ${dbName} -sN -e ${shellQuote(
-				`SELECT TABLE_NAME FROM information_schema.tables WHERE table_schema='${escapeMysql(dbName)}' AND TABLE_NAME IN (${quotedTables})`,
-			)}`,
-			{ timeout: 30_000 },
-		);
-		if (result.code !== 0) {
-			await tracker.track({
-				step: 'Protected table presence check failed',
-				level: 'warn',
-				detail: (result.stderr || result.stdout || '').slice(0, 300),
-			});
-			return;
-		}
-		const existing = new Set(
-			result.stdout
-				.split('\n')
-				.map(t => t.trim())
-				.filter(Boolean),
-		);
-		const missing = protectedTables.filter(t => !existing.has(t));
-		if (missing.length > 0) {
-			await tracker.track({
-				step: 'Some protected tables do not exist on target',
-				level: 'warn',
-				detail: missing.join(', '),
-			});
-		}
-	}
-
-	/**
-	 * Verify that text assets under wp-content no longer contain the source URL
-	 * after the file sed replacement pass.
-	 */
-	private async validateFileUrlReplacement(
-		sourceUrl: string,
-		targetUrl: string,
-		wpContentPath: string,
-		executor: Executor,
-		tracker: StepTracker,
-	): Promise<void> {
-		try {
-			const grepCmd = [
-				`find ${shellQuote(wpContentPath)} -type f`,
-				`\\( -name '*.css' -o -name '*.js' -o -name '*.json' -o -name '*.html'`,
-				`-o -name '*.htm' -o -name '*.svg' -o -name '*.xml' -o -name '*.txt'`,
-				`-o -name '*.php' \\)`,
-				`-exec grep -nHF -m 1 -- ${shellQuote(sourceUrl)} {} + 2>/dev/null`,
-			].join(' ');
-			const grepResult = await executor.execute(grepCmd);
-
-			if (grepResult.code === 0 && grepResult.stdout.trim()) {
-				const samples = grepResult.stdout
-					.trim()
-					.split('\n')
-					.slice(0, 10)
-					.join('; ');
-				throw new Error(
-					`File URL replacement did not complete: source URL (${sourceUrl}) is still present ` +
-						`in text assets under ${wpContentPath} after search-replace.\n` +
-						`Sample files: ${samples}.\n` +
-						`This would cause stale links or assets to render from the wrong domain.`,
-				);
-			}
-			if (grepResult.code > 1) {
-				throw new Error(
-					`File validation probe failed: ${(grepResult.stderr || grepResult.stdout || `exit ${grepResult.code}`).trim()}`,
-				);
-			}
-
-			await tracker.track({
-				step: 'File URL replacement verified — no stale source URLs remain in text assets',
-				level: 'info',
-				detail: `${wpContentPath} no longer contains ${sourceUrl} (expected target: ${targetUrl})`,
-			});
-		} catch (e) {
-			if (
-				e instanceof Error &&
-				e.message.includes('File URL replacement did not complete')
-			) {
-				throw e;
-			}
-			await tracker.track({
-				step: 'File URL replacement validation probe failed — could not verify text assets',
-				level: 'warn',
-				detail: e instanceof Error ? e.message : String(e),
-			});
-		}
-	}
-
-	/**
-	 * Create a DB-only safety backup of the target and upload to GDrive.
-	 * Blocks sync if GDrive upload fails — data safety is mandatory.
-	 */
-	private async createSafetyBackup(
-		job: Job,
-		targetEnv: {
-			id: bigint;
-			google_drive_folder_id: string | null;
-			root_path: string;
-			server: { ip_address: string };
-		},
-		targetExecutor: Executor,
-		targetCreds: Creds,
-		tracker: StepTracker,
-	): Promise<void> {
-		const gdriveFolder = targetEnv.google_drive_folder_id;
-		if (!gdriveFolder) {
-			throw new Error(
-				'Target environment has no Google Drive folder configured. Cannot create safety backup before sync.',
-			);
-		}
-
-		await tracker.track({
-			step: 'Creating safety backup of target before overwrite',
-			level: 'info',
-			detail: `GDrive folder: ${gdriveFolder}`,
-		});
-
-		const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-		const filename = `sync-safety-${ts}.sql`;
-		const remoteTemp = `/tmp/sync_safety_${job.id}.sql`;
-		const localDir = join(STAGING_DIR, String(job.id));
-		const localFile = join(localDir, filename);
-
-		// Dump target DB to temp file on target server
-		// Use --defaults-extra-file — MariaDB 10.6+ ignores MYSQL_PWD env var.
-		const sbMycnf = `/tmp/forge_sync_sb_${job.id}.cnf`;
-		await targetExecutor.pushFile({
-			remotePath: sbMycnf,
-			content: Buffer.from(
-				`[client]\nuser=${targetCreds.dbUser}\npassword=${targetCreds.dbPassword}\nhost=${targetCreds.dbHost}\n`,
-			),
-		});
-		await targetExecutor.execute(`chmod 600 ${sbMycnf}`);
-		const maskedDump = `mysqldump --defaults-extra-file=*** --single-transaction --quick ${targetCreds.dbName}`;
-
-		const dumpStart = Date.now();
-		const dumpResult = await targetExecutor.execute(
-			`mysqldump --defaults-extra-file=${sbMycnf} --single-transaction --quick ${targetCreds.dbName} > ${remoteTemp}`,
-		);
-		await targetExecutor.execute(`rm -f ${sbMycnf}`);
-		await tracker.trackCommand(
-			'Safety backup: mysqldump target',
-			maskedDump,
-			dumpResult,
-			Date.now() - dumpStart,
-		);
-
-		if (dumpResult.code !== 0) {
-			throw new Error(
-				`Safety backup mysqldump failed (exit ${dumpResult.code}): ${dumpResult.stderr}`,
-			);
-		}
-
-		// Pull dump and upload to GDrive
-		await mkdir(localDir, { recursive: true });
-		const dumpBuffer = await targetExecutor.pullFile(remoteTemp);
-		await targetExecutor.execute(`rm -f ${remoteTemp}`);
-
-		const { writeFile } = await import('fs/promises');
-		await writeFile(localFile, dumpBuffer);
-
-		await tracker.track({
-			step: 'Safety backup pulled — uploading to Google Drive',
-			level: 'info',
-			detail: `${filename} (${dumpBuffer.length} bytes)`,
-		});
-
-		try {
-			const configOk = await this.rclone.writeConfig();
-			if (!configOk) {
-				throw new Error(
-					'Google Drive rclone not configured. Configure rclone in Settings first.',
-				);
-			}
-
-			const uploadStart = Date.now();
-			const filePath = await this.rclone.upload(
-				localFile,
-				gdriveFolder,
-				filename,
-			);
-			await tracker.track({
-				step: 'Safety backup uploaded to Google Drive',
-				level: 'info',
-				detail: filePath,
-				durationMs: Date.now() - uploadStart,
-			});
-
-			// Record in the database so it appears in the Backups tab
-			await this.prisma.backup.create({
-				data: {
-					environment_id: targetEnv.id,
-					type: 'db_only',
-					status: 'completed',
-					file_path: filePath,
-					size_bytes: BigInt(dumpBuffer.length),
-					completed_at: new Date(),
-					started_at: new Date(),
-				},
-			});
-
-			await tracker.track({ step: 'Safety backup recorded', level: 'info' });
-		} finally {
-			await rm(localDir, { recursive: true, force: true });
-		}
-	}
-
-	private async executeSqlProtectionQueries(
-		executor: Executor,
-		creds: Creds,
-		sqlQueries: string[],
-		tracker: StepTracker,
-		jobId: string,
-	): Promise<void> {
-		if (!sqlQueries || sqlQueries.length === 0) {
-			return;
-		}
-
-		await tracker.track({
-			step: 'Executing SQL protection queries',
-			level: 'info',
-			detail: `Executing ${sqlQueries.length} query/queries on target`,
-		});
-
-		const tgtMycnf = `/tmp/forge_sync_prot_queries_${jobId}.cnf`;
-		await executor.pushFile({
-			remotePath: tgtMycnf,
-			content: Buffer.from(
-				`[client]\nuser=${creds.dbUser}\npassword=${creds.dbPassword}\nhost=${creds.dbHost}\n`,
-			),
-		});
-		await executor.execute(`chmod 600 ${tgtMycnf}`);
-
-		let prefix = 'wp_';
-		try {
-			const prefixQuery = `SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${escapeMysql(creds.dbName)}' AND table_name LIKE '%options' LIMIT 1`;
-			const prefixResult = await executor.execute(
-				`mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} -sN -e ${shellQuote(prefixQuery)}`,
-			);
-			if (prefixResult.code === 0 && prefixResult.stdout.trim()) {
-				prefix = prefixResult.stdout.trim();
-			}
-		} catch (err) {
-			this.logger.warn(`Failed to auto-detect target table prefix, defaulting to wp_: ${err}`);
-		}
-
-		const processedQueries = sqlQueries.map(q => {
-			let processed = q.replace(/\{prefix\}/gi, prefix).replace(/%prefix%/gi, prefix).trim();
-			if (processed && !processed.endsWith(';')) {
-				processed += ';';
-			}
-			return processed;
-		});
-
-		const queriesSqlFile = `/tmp/forge_sql_prot_exec_${jobId}.sql`;
-		const sqlContent = processedQueries.join('\n') + '\n';
-
-		await executor.pushFile({
-			remotePath: queriesSqlFile,
-			content: Buffer.from(sqlContent),
-		});
-
-		const start = Date.now();
-		const result = await executor.execute(
-			`mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} < ${queriesSqlFile}`,
-			{ timeout: 5 * 60_000 },
-		);
-
-		await executor.execute(`rm -f ${tgtMycnf} ${queriesSqlFile}`).catch(() => {});
-
-		await tracker.trackCommand(
-			'SQL protection queries execution',
-			`mysql --defaults-extra-file=*** ${creds.dbName} < ${queriesSqlFile}`,
-			result,
-			Date.now() - start,
-		);
-
-		if (result.code !== 0) {
-			throw new Error(
-				`Failed to execute SQL protection queries on target: ${result.stderr.trim()}`,
-			);
-		}
-
-		await tracker.track({
-			step: 'SQL protection queries executed successfully',
-			level: 'info',
-			detail: `Processed queries: ${processedQueries.join(' ')}`,
-		});
-	}
-
-	private normalizeProtectedPostTypes(postTypes: string[] = []): string[] {
-		return Array.from(
-			new Set(
-				postTypes
-					.map(t => t.trim())
-					.filter(t => POST_TYPE_REGEX.test(t)),
-			),
-		);
-	}
-
-	private async collectProtectedPostTypeUploadPaths(
-		executor: Executor,
-		creds: Creds,
-		tgtMycnf: string,
-		postTypes: string[],
-		tracker: StepTracker,
-		knownPrefix?: string,
-		useBackupTables = false,
-	): Promise<string[]> {
-		const safePostTypes = this.normalizeProtectedPostTypes(postTypes);
-		if (safePostTypes.length === 0) return [];
-
-		const prefix =
-			knownPrefix ??
-			(await this.detectTargetTablePrefix(executor, creds, tgtMycnf));
-		const postTypesList = safePostTypes
-			.map(t => `'${escapeMysql(t)}'`)
-			.join(',');
-		const postsTable = useBackupTables
-			? `${prefix}forge_backup_posts`
-			: `${prefix}posts`;
-		const postmetaTable = useBackupTables
-			? `${prefix}forge_backup_postmeta`
-			: `${prefix}postmeta`;
-		const query = `
-			SELECT pm.post_id, pm.meta_key, pm.meta_value
-			FROM \`${postmetaTable}\` pm
-			INNER JOIN \`${postsTable}\` a ON pm.post_id = a.ID
-			INNER JOIN \`${postsTable}\` p ON a.post_parent = p.ID
-			WHERE a.post_type = 'attachment'
-			  AND p.post_type IN (${postTypesList})
-			  AND pm.meta_key IN ('_wp_attached_file', '_wp_attachment_metadata')
-			ORDER BY pm.post_id, pm.meta_key
-		`;
-		const result = await executor.execute(
-			`mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} -B -N -e ${shellQuote(query)}`,
-		);
-		if (result.code !== 0) {
-			await tracker.track({
-				step: 'Protected Post Types — could not collect upload paths',
-				level: 'warn',
-				detail: result.stderr,
-			});
-			return [];
-		}
-
-		const paths = this.extractProtectedUploadPaths(result.stdout);
-		if (paths.length > 0) {
-			await tracker.track({
-				step: 'Protected Post Types — protected upload files detected',
-				level: 'info',
-				detail: `${paths.length} upload path(s) will be excluded from file sync deletion/overwrite`,
-			});
-		}
-		return paths;
-	}
-
-	private async detectTargetTablePrefix(
-		executor: Executor,
-		creds: Creds,
-		tgtMycnf: string,
-	): Promise<string> {
-		const prefixQuery = `SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${escapeMysql(creds.dbName)}' AND table_name LIKE '%options' LIMIT 1`;
-		const prefixResult = await executor.execute(
-			`mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} -sN -e ${shellQuote(prefixQuery)}`,
-		);
-		return prefixResult.code === 0 && prefixResult.stdout.trim()
-			? prefixResult.stdout.trim()
-			: 'wp_';
-	}
-
-	private extractProtectedUploadPaths(mysqlOutput: string): string[] {
-		type AttachmentMeta = {
-			attachedFile?: string;
-			metadata?: string;
-		};
-		const byPost = new Map<string, AttachmentMeta>();
-
-		for (const line of mysqlOutput.split('\n')) {
-			if (!line.trim()) continue;
-			const [postId, metaKey, ...valueParts] = line.split('\t');
-			const metaValue = valueParts.join('\t').trim();
-			const current = byPost.get(postId) ?? {};
-			if (metaKey === '_wp_attached_file') current.attachedFile = metaValue;
-			if (metaKey === '_wp_attachment_metadata') current.metadata = metaValue;
-			byPost.set(postId, current);
-		}
-
-		const paths = new Set<string>();
-		for (const meta of byPost.values()) {
-			if (!meta.attachedFile) continue;
-			const attached = this.normalizeUploadPath(meta.attachedFile);
-			if (!attached) continue;
-			paths.add(attached);
-
-			const dir = attached.includes('/')
-				? attached.slice(0, attached.lastIndexOf('/'))
-				: '';
-			const metadata = meta.metadata ?? '';
-			const fileMatches = metadata.matchAll(
-				/s:\d+:"([^"]+\.[A-Za-z0-9]{2,8})"/g,
-			);
-			for (const match of fileMatches) {
-				const raw = match[1];
-				const candidate = raw.includes('/') || !dir ? raw : `${dir}/${raw}`;
-				const normalized = this.normalizeUploadPath(candidate);
-				if (normalized) paths.add(normalized);
-			}
-		}
-
-		return Array.from(paths);
-	}
-
-	private normalizeUploadPath(path: string): string | null {
-		const clean = path
-			.replace(/\\/g, '/')
-			.replace(/^\/+/, '')
-			.replace(/^wp-content\/uploads\//, '')
-			.replace(/^app\/uploads\//, '')
-			.trim();
-
-		if (!clean || clean.includes('..') || clean.endsWith('/')) return null;
-		return clean;
-	}
-
-	private buildProtectedUploadFileExcludes(
-		targetRoot: string,
-		targetLayout: WpLayout,
-		uploadPaths: string[],
-	): string[] {
-		if (uploadPaths.length === 0) return [];
-		const normalizedRoot = targetRoot.replace(/\/+$/, '');
-		const normalizedContent = targetLayout.contentPath.replace(/\/+$/, '');
-		const contentRelative = normalizedContent.startsWith(`${normalizedRoot}/`)
-			? normalizedContent.slice(normalizedRoot.length + 1)
-			: targetLayout.isBedrock
-				? 'web/app'
-				: 'wp-content';
-
-		return Array.from(
-			new Set(
-				uploadPaths
-					.map(p => this.normalizeUploadPath(p))
-					.filter((p): p is string => Boolean(p))
-					.map(p => `${contentRelative}/uploads/${p}`.replace(/\/+/g, '/')),
-			),
-		);
-	}
-
-	private async backupProtectedPostTypes(
-		executor: Executor,
-		creds: Creds,
-		tgtMycnf: string,
-		postTypes: string[],
-		tracker: StepTracker,
-	): Promise<ProtectedPostTypeBackup | null> {
-		const safePostTypes = this.normalizeProtectedPostTypes(postTypes);
-		if (safePostTypes.length === 0) return null;
-
-		let prefix = 'wp_';
-		try {
-			const prefixQuery = `SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${escapeMysql(creds.dbName)}' AND table_name LIKE '%options' LIMIT 1`;
-			const prefixResult = await executor.execute(
-				`mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} -sN -e ${shellQuote(prefixQuery)}`,
-			);
-			if (prefixResult.code === 0 && prefixResult.stdout.trim()) {
-				prefix = prefixResult.stdout.trim();
-			}
-		} catch (err) {
-			this.logger.warn(`Failed to auto-detect target table prefix for post type backup, defaulting to wp_: ${err}`);
-		}
-
-		const tableCheck = await executor.execute(
-			`mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} -sN -e ${shellQuote(`SHOW TABLES LIKE '${prefix}posts'`)}`
-		);
-		if (tableCheck.code !== 0 || tableCheck.stdout.trim() === '') {
-			await tracker.track({
-				step: 'Protected Post Types — posts table does not exist, skipping backup',
-				level: 'info',
-			});
-			return null;
-		}
-
-		// Check if backup tables already exist. If they do, DO NOT overwrite them because
-		// they contain the original target data from a previous failed sync attempt.
-		const backupTableCheck = await executor.execute(
-			`mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} -sN -e ${shellQuote(`SHOW TABLES LIKE '${prefix}forge_backup_posts'`)}`
-		);
-		if (backupTableCheck.code === 0 && backupTableCheck.stdout.trim() !== '') {
-			await tracker.track({
-				step: 'Protected Post Types — existing backup tables detected from a previous failed run, retaining them',
-				level: 'info',
-			});
-			return {
-				prefix,
-				uploadPaths: await this.collectProtectedPostTypeUploadPaths(
-					executor,
-					creds,
-					tgtMycnf,
-					safePostTypes,
-					tracker,
-					prefix,
-					true,
-				),
-			};
-		}
-
-		await tracker.track({
-			step: 'Protected Post Types — backing up target post types',
-			level: 'info',
-			detail: `Post types: ${safePostTypes.join(', ')}`,
-		});
-
-		const postTypesList = safePostTypes.map(t => `'${escapeMysql(t)}'`).join(',');
-
-		const queries = [
-			// Back up protected posts, their revisions, and directly attached media.
-			`DROP TABLE IF EXISTS \`${prefix}forge_backup_posts\`;`,
-			`CREATE TABLE \`${prefix}forge_backup_posts\` AS
-			  SELECT * FROM \`${prefix}posts\` WHERE post_type IN (${postTypesList})
-			  UNION ALL
-			  SELECT r.* FROM \`${prefix}posts\` r
-			    INNER JOIN \`${prefix}posts\` p ON r.post_parent = p.ID
-			    WHERE r.post_type = 'revision' AND p.post_type IN (${postTypesList})
-			  UNION ALL
-			  SELECT a.* FROM \`${prefix}posts\` a
-			    INNER JOIN \`${prefix}posts\` p ON a.post_parent = p.ID
-			    WHERE a.post_type = 'attachment' AND p.post_type IN (${postTypesList});`,
-			// Back up related postmeta
-			`DROP TABLE IF EXISTS \`${prefix}forge_backup_postmeta\`;`,
-			`CREATE TABLE \`${prefix}forge_backup_postmeta\` AS SELECT * FROM \`${prefix}postmeta\` WHERE post_id IN (SELECT ID FROM \`${prefix}forge_backup_posts\`);`,
-			// Back up taxonomy graph used by protected posts/media.
-			`DROP TABLE IF EXISTS \`${prefix}forge_backup_term_relationships\`;`,
-			`CREATE TABLE \`${prefix}forge_backup_term_relationships\` AS SELECT * FROM \`${prefix}term_relationships\` WHERE object_id IN (SELECT ID FROM \`${prefix}forge_backup_posts\`);`,
-			`DROP TABLE IF EXISTS \`${prefix}forge_backup_term_taxonomy\`;`,
-			`CREATE TABLE \`${prefix}forge_backup_term_taxonomy\` AS
-			  SELECT DISTINCT tt.* FROM \`${prefix}term_taxonomy\` tt
-			    INNER JOIN \`${prefix}forge_backup_term_relationships\` tr ON tr.term_taxonomy_id = tt.term_taxonomy_id;`,
-			`DROP TABLE IF EXISTS \`${prefix}forge_backup_terms\`;`,
-			`CREATE TABLE \`${prefix}forge_backup_terms\` AS
-			  SELECT DISTINCT t.* FROM \`${prefix}terms\` t
-			    INNER JOIN \`${prefix}forge_backup_term_taxonomy\` tt ON tt.term_id = t.term_id;`,
-			// Back up comments and their meta
-			`DROP TABLE IF EXISTS \`${prefix}forge_backup_comments\`;`,
-			`CREATE TABLE \`${prefix}forge_backup_comments\` AS SELECT * FROM \`${prefix}comments\` WHERE comment_post_ID IN (SELECT ID FROM \`${prefix}forge_backup_posts\`);`,
-			`DROP TABLE IF EXISTS \`${prefix}forge_backup_commentmeta\`;`,
-			`CREATE TABLE \`${prefix}forge_backup_commentmeta\` AS SELECT * FROM \`${prefix}commentmeta\` WHERE comment_id IN (SELECT comment_ID FROM \`${prefix}forge_backup_comments\`);`
-		];
-
-		const sqlFile = `/tmp/forge_post_type_backup_${Date.now()}.sql`;
-		await executor.pushFile({
-			remotePath: sqlFile,
-			content: Buffer.from(queries.join('\n')),
-		});
-
-		const res = await executor.execute(`mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} < ${sqlFile}`);
-		await executor.execute(`rm -f ${sqlFile}`);
-
-		if (res.code !== 0) {
-			await tracker.track({
-				step: 'Protected Post Types — backup failed',
-				level: 'warn',
-				detail: res.stderr,
-			});
-			return null;
-		}
-
-		return {
-			prefix,
-			uploadPaths: await this.collectProtectedPostTypeUploadPaths(
-				executor,
-				creds,
-				tgtMycnf,
-				safePostTypes,
-				tracker,
-				prefix,
-				true,
-			),
-		};
-	}
-
-	private async restoreProtectedPostTypes(
-		executor: Executor,
-		creds: Creds,
-		tgtMycnf: string,
-		postTypes: string[],
-		prefix: string,
-		tracker: StepTracker,
-	): Promise<void> {
-		const safePostTypes = this.normalizeProtectedPostTypes(postTypes);
-		if (safePostTypes.length === 0) return;
-
-		const tableCheck = await executor.execute(
-			`mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} -sN -e ${shellQuote(`SHOW TABLES LIKE '${prefix}forge_backup_posts'`)}`
-		);
-		if (tableCheck.code !== 0 || tableCheck.stdout.trim() === '') {
-			return;
-		}
-
-		await tracker.track({
-			step: 'Protected Post Types — restoring target post types',
-			level: 'info',
-			detail: `Post types: ${safePostTypes.join(', ')}`,
-		});
-
-		const postTypesList = safePostTypes.map(t => `'${escapeMysql(t)}'`).join(',');
-		const protectedImportedPostsPredicate =
-			`p.post_type IN (${postTypesList}) OR ` +
-			`(p.post_type = 'attachment' AND parent.post_type IN (${postTypesList}))`;
-
-		const queries = [
-			// Step 1: Delete comments/meta for source-imported protected posts and attached media.
-			`DELETE cm FROM \`${prefix}commentmeta\` cm
-			  INNER JOIN \`${prefix}comments\` c ON cm.comment_id = c.comment_ID
-			  INNER JOIN \`${prefix}posts\` p ON c.comment_post_ID = p.ID
-			  LEFT JOIN \`${prefix}posts\` parent ON p.post_parent = parent.ID
-			  WHERE c.comment_post_ID IN (SELECT ID FROM \`${prefix}forge_backup_posts\`)
-			    OR ${protectedImportedPostsPredicate};`,
-
-			`DELETE c FROM \`${prefix}comments\` c
-			  INNER JOIN \`${prefix}posts\` p ON c.comment_post_ID = p.ID
-			  LEFT JOIN \`${prefix}posts\` parent ON p.post_parent = parent.ID
-			  WHERE c.comment_post_ID IN (SELECT ID FROM \`${prefix}forge_backup_posts\`)
-			    OR ${protectedImportedPostsPredicate};`,
-
-			// Step 2: Delete postmeta for source-imported protected posts, revisions, and attached media.
-			`DELETE FROM \`${prefix}postmeta\`
-			  WHERE post_id IN (SELECT ID FROM \`${prefix}forge_backup_posts\`);`,
-			`DELETE pm FROM \`${prefix}postmeta\` pm
-			  INNER JOIN \`${prefix}posts\` p ON pm.post_id = p.ID
-			  WHERE p.post_type IN (${postTypesList});`,
-			`DELETE pm FROM \`${prefix}postmeta\` pm
-			  INNER JOIN \`${prefix}posts\` r ON pm.post_id = r.ID
-			  INNER JOIN \`${prefix}posts\` p ON r.post_parent = p.ID
-			  WHERE r.post_type = 'revision' AND p.post_type IN (${postTypesList});`,
-			`DELETE pm FROM \`${prefix}postmeta\` pm
-			  INNER JOIN \`${prefix}posts\` a ON pm.post_id = a.ID
-			  INNER JOIN \`${prefix}posts\` p ON a.post_parent = p.ID
-			  WHERE a.post_type = 'attachment' AND p.post_type IN (${postTypesList});`,
-
-			// Step 3: Delete term relationships for source-imported protected posts and attached media.
-			`DELETE FROM \`${prefix}term_relationships\`
-			  WHERE object_id IN (SELECT ID FROM \`${prefix}forge_backup_posts\`);`,
-			`DELETE tr FROM \`${prefix}term_relationships\` tr
-			  INNER JOIN \`${prefix}posts\` p ON tr.object_id = p.ID
-			  WHERE p.post_type IN (${postTypesList});`,
-			`DELETE tr FROM \`${prefix}term_relationships\` tr
-			  INNER JOIN \`${prefix}posts\` a ON tr.object_id = a.ID
-			  INNER JOIN \`${prefix}posts\` p ON a.post_parent = p.ID
-			  WHERE a.post_type = 'attachment' AND p.post_type IN (${postTypesList});`,
-
-			// Step 4: Delete dependent source-imported rows.
-			`DELETE r FROM \`${prefix}posts\` r
-			  INNER JOIN \`${prefix}posts\` p ON r.post_parent = p.ID
-			  WHERE r.post_type = 'revision' AND p.post_type IN (${postTypesList});`,
-			`DELETE a FROM \`${prefix}posts\` a
-			  INNER JOIN \`${prefix}posts\` p ON a.post_parent = p.ID
-			  WHERE a.post_type = 'attachment' AND p.post_type IN (${postTypesList});`,
-
-			`DELETE FROM \`${prefix}posts\` WHERE post_type IN (${postTypesList});`,
-			`DELETE FROM \`${prefix}posts\`
-			  WHERE ID IN (SELECT ID FROM \`${prefix}forge_backup_posts\`);`,
-
-			// Step 5: Restore original target rows from backup tables.
-			`REPLACE INTO \`${prefix}terms\` SELECT * FROM \`${prefix}forge_backup_terms\`;`,
-			`REPLACE INTO \`${prefix}term_taxonomy\` SELECT * FROM \`${prefix}forge_backup_term_taxonomy\`;`,
-			`INSERT IGNORE INTO \`${prefix}posts\` SELECT * FROM \`${prefix}forge_backup_posts\`;`,
-			`INSERT IGNORE INTO \`${prefix}postmeta\` SELECT * FROM \`${prefix}forge_backup_postmeta\`;`,
-			`INSERT IGNORE INTO \`${prefix}term_relationships\` SELECT * FROM \`${prefix}forge_backup_term_relationships\`;`,
-			`INSERT IGNORE INTO \`${prefix}comments\` SELECT * FROM \`${prefix}forge_backup_comments\`;`,
-			`INSERT IGNORE INTO \`${prefix}commentmeta\` SELECT * FROM \`${prefix}forge_backup_commentmeta\`;`,
-
-			// Step 6: Drop temporary backup tables.
-			`DROP TABLE IF EXISTS \`${prefix}forge_backup_commentmeta\`;`,
-			`DROP TABLE IF EXISTS \`${prefix}forge_backup_comments\`;`,
-			`DROP TABLE IF EXISTS \`${prefix}forge_backup_terms\`;`,
-			`DROP TABLE IF EXISTS \`${prefix}forge_backup_term_taxonomy\`;`,
-			`DROP TABLE IF EXISTS \`${prefix}forge_backup_term_relationships\`;`,
-			`DROP TABLE IF EXISTS \`${prefix}forge_backup_postmeta\`;`,
-			`DROP TABLE IF EXISTS \`${prefix}forge_backup_posts\`;`
-		];
-
-		const sqlFile = `/tmp/forge_post_type_restore_${Date.now()}.sql`;
-		await executor.pushFile({
-			remotePath: sqlFile,
-			content: Buffer.from(queries.join('\n')),
-		});
-
-		const res = await executor.execute(`mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} < ${sqlFile}`);
-		await executor.execute(`rm -f ${sqlFile}`);
-
-		if (res.code !== 0) {
-			await tracker.track({
-				step: 'Protected Post Types — restore failed',
-				level: 'error',
-				detail: res.stderr,
-			});
-			throw new Error(`Protected Post Types — restore failed: ${res.stderr}`);
-		} else {
-			await tracker.track({
-				step: 'Protected Post Types — restored successfully',
-				level: 'info',
-			});
-		}
 	}
 }

@@ -110,7 +110,7 @@ Acceptance:
 
 - [x] At least one representative frontend feature uses feature-local `api.ts`,
   `hooks.ts`, `types.ts`, and typed components.
-- [ ] At least one worker processor uses a small extracted helper or service with
+- [x] At least one worker processor uses a small extracted helper or service with
   focused tests.
 - [ ] New conventions are documented in the matching roadmap or development guide.
 
@@ -126,7 +126,7 @@ Recommended order:
 - [x] `apps/web/src/pages/project-detail/SyncTab.tsx`
 - [x] `apps/web/src/pages/project-detail/BackupsTab.tsx`
 - [x] `apps/web/src/pages/project-detail/ToolsTab.tsx`
-- [ ] `apps/worker/src/processors/sync/sync.processor.ts`
+- [x] `apps/worker/src/processors/sync/sync.processor.ts` [COMPLETED]
 - [ ] `apps/worker/src/processors/security/security-server-scan.processor.ts`
 - [x] `apps/api/src/modules/settings/settings.controller.ts`
 - [ ] `apps/api/src/modules/security/security.service.ts`
