@@ -58,24 +58,24 @@ behavior and tests are stable.
 - Do not change public API behavior unless a phase explicitly calls it out and
   tests cover it.
 
-## Phase 0: Stabilize Current Work
+## Phase 0: Stabilize Current Work [COMPLETED]
 
 Before starting refactors, make the working state explicit:
 
-- Commit or group the current dirty worktree.
-- Run targeted checks for recently touched areas.
-- Record any known failing tests or unstable features.
-- Avoid formatting the whole repo until the refactor branch is clean.
+- [x] Commit or group the current dirty worktree.
+- [x] Run targeted checks for recently touched areas.
+- [x] Record any known failing tests or unstable features.
+- [x] Avoid formatting the whole repo until the refactor branch is clean.
 
 Acceptance:
 
-- `git status` is understood and no unrelated user changes are mixed into a
+- [x] `git status` is understood and no unrelated user changes are mixed into a
   cleanup commit.
-- `pnpm --filter @bedrock-forge/web type-check`
-- `pnpm --filter @bedrock-forge/api build`
-- `pnpm --filter @bedrock-forge/worker build`
+- [x] `pnpm --filter @bedrock-forge/web type-check`
+- [x] `pnpm --filter @bedrock-forge/api build`
+- [x] `pnpm --filter @bedrock-forge/worker build`
 
-## Phase 1: Documentation And Boundaries
+## Phase 1: Documentation And Boundaries [COMPLETED]
 
 This phase is mostly complete: the overall, frontend, and backend/worker
 roadmaps exist under `docs/roadmaps/`, and `docs/guides/DEVELOPMENT.md` links
@@ -83,53 +83,53 @@ to them. Keep this phase current as new cleanup work lands.
 
 Maintain these review thresholds:
 
-- Pages/tabs above 700 lines should be split.
-- Worker processors above 900 lines should be split by workflow.
-- Controllers with inline DTOs should move DTOs into `dto/`.
+- [x] Pages/tabs above 700 lines should be split.
+- [x] Worker processors above 900 lines should be split by workflow.
+- [x] Controllers with inline DTOs should move DTOs into `dto/`.
 
 Acceptance:
 
-- Roadmaps exist under `docs/roadmaps/`.
-- Development guide links them.
-- Each later refactor phase has a clear acceptance gate.
-- No runtime code changes are required for documentation-only updates.
+- [x] Roadmaps exist under `docs/roadmaps/`.
+- [x] Development guide links them.
+- [x] Each later refactor phase has a clear acceptance gate.
+- [x] No runtime code changes are required for documentation-only updates.
 
-## Phase 2: Shared Standards
+## Phase 2: Shared Standards [PARTIALLY COMPLETED]
 
 Establish conventions by extracting one representative feature at a time.
 Prefer small helpers with focused tests over broad abstractions.
 
 Initial standards to create through code:
 
-- Frontend feature API modules, query keys, hooks, and mutation toast patterns.
-- Job execution UI wrappers around `ExecutionLogPanel`.
-- Worker job lifecycle helpers for active/completed/failed execution status.
-- Remote command builders for MySQL, WP-CLI, rsync, tar, and script execution.
+- [x] Frontend feature API modules, query keys, hooks, and mutation toast patterns.
+- [x] Job execution UI wrappers around `ExecutionLogPanel`.
+- [ ] Worker job lifecycle helpers for active/completed/failed execution status.
+- [ ] Remote command builders for MySQL, WP-CLI, rsync, tar, and script execution.
 
 Acceptance:
 
-- At least one representative frontend feature uses feature-local `api.ts`,
+- [x] At least one representative frontend feature uses feature-local `api.ts`,
   `hooks.ts`, `types.ts`, and typed components.
-- At least one worker processor uses a small extracted helper or service with
+- [ ] At least one worker processor uses a small extracted helper or service with
   focused tests.
-- New conventions are documented in the matching roadmap or development guide.
+- [ ] New conventions are documented in the matching roadmap or development guide.
 
-## Phase 3: High-Impact Refactors
+## Phase 3: High-Impact Refactors [IN PROGRESS]
 
 Prioritize high-churn and high-risk files, but do not start with the riskiest
 worker extraction while sync behavior is still settling.
 
 Recommended order:
 
-- `apps/web/src/pages/project-detail/PluginsTab.tsx`
-- `apps/web/src/pages/project-detail/EnvironmentsTab.tsx`
-- `apps/web/src/pages/project-detail/SyncTab.tsx`
-- `apps/web/src/pages/project-detail/BackupsTab.tsx`
-- `apps/web/src/pages/project-detail/ToolsTab.tsx`
-- `apps/worker/src/processors/sync/sync.processor.ts`
-- `apps/worker/src/processors/security/security-server-scan.processor.ts`
-- `apps/api/src/modules/settings/settings.controller.ts`
-- `apps/api/src/modules/security/security.service.ts`
+- [x] `apps/web/src/pages/project-detail/PluginsTab.tsx` [COMPLETED]
+- [ ] `apps/web/src/pages/project-detail/EnvironmentsTab.tsx`
+- [ ] `apps/web/src/pages/project-detail/SyncTab.tsx`
+- [ ] `apps/web/src/pages/project-detail/BackupsTab.tsx`
+- [ ] `apps/web/src/pages/project-detail/ToolsTab.tsx`
+- [ ] `apps/worker/src/processors/sync/sync.processor.ts`
+- [ ] `apps/worker/src/processors/security/security-server-scan.processor.ts`
+- [ ] `apps/api/src/modules/settings/settings.controller.ts`
+- [ ] `apps/api/src/modules/security/security.service.ts`
 
 Use the detailed frontend/backend plans for exact extraction shapes:
 
