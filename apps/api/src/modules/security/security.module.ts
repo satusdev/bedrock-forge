@@ -3,6 +3,10 @@ import { BullModule } from '@nestjs/bullmq';
 import { QUEUES } from '@bedrock-forge/shared';
 import { SecurityController } from './security.controller';
 import { SecurityService } from './security.service';
+import { SecurityScanService } from './security-scan.service';
+import { SecurityFindingsService } from './security-findings.service';
+import { SecuritySchedulesService } from './security-schedules.service';
+import { SecurityAlertsService } from './security-alerts.service';
 import { SecurityRepository } from './security.repository';
 import { SettingsModule } from '../settings/settings.module';
 import { VulnerabilityDbService } from './vulnerability-db.service';
@@ -15,7 +19,22 @@ import { VulnerabilityDbService } from './vulnerability-db.service';
 		SettingsModule,
 	],
 	controllers: [SecurityController],
-	providers: [SecurityService, SecurityRepository, VulnerabilityDbService],
-	exports: [SecurityService, VulnerabilityDbService],
+	providers: [
+		SecurityService,
+		SecurityScanService,
+		SecurityFindingsService,
+		SecuritySchedulesService,
+		SecurityAlertsService,
+		SecurityRepository,
+		VulnerabilityDbService,
+	],
+	exports: [
+		SecurityService,
+		SecurityScanService,
+		SecurityFindingsService,
+		SecuritySchedulesService,
+		SecurityAlertsService,
+		VulnerabilityDbService,
+	],
 })
 export class SecurityModule {}

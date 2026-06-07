@@ -128,7 +128,7 @@ Recommended order:
 - [x] `apps/web/src/pages/project-detail/ToolsTab.tsx`
 - [ ] `apps/worker/src/processors/sync/sync.processor.ts`
 - [ ] `apps/worker/src/processors/security/security-server-scan.processor.ts`
-- [ ] `apps/api/src/modules/settings/settings.controller.ts`
+- [x] `apps/api/src/modules/settings/settings.controller.ts`
 - [ ] `apps/api/src/modules/security/security.service.ts`
 
 Use the detailed frontend/backend plans for exact extraction shapes:

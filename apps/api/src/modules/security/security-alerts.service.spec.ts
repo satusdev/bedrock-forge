@@ -1,6 +1,10 @@
 import { NotFoundException } from '@nestjs/common';
 import { JOB_TYPES } from '@bedrock-forge/shared';
 import { SecurityService } from './security.service';
+import { SecurityScanService } from './security-scan.service';
+import { SecurityFindingsService } from './security-findings.service';
+import { SecuritySchedulesService } from './security-schedules.service';
+import { SecurityAlertsService } from './security-alerts.service';
 
 describe('SecurityService server alert settings', () => {
 	function makeSubject() {
@@ -11,10 +15,17 @@ describe('SecurityService server alert settings', () => {
 		};
 		const securityQueue = { add: jest.fn() };
 		const reportsQueue = {};
+		
+		const scanSvc = new SecurityScanService(repo as any, securityQueue as any);
+		const findingsSvc = new SecurityFindingsService(repo as any, reportsQueue as any);
+		const schedulesSvc = new SecuritySchedulesService(repo as any);
+		const alertsSvc = new SecurityAlertsService(repo as any, securityQueue as any);
+		
 		const service = new SecurityService(
-			repo as any,
-			securityQueue as any,
-			reportsQueue as any,
+			scanSvc,
+			findingsSvc,
+			schedulesSvc,
+			alertsSvc,
 		);
 		return { service, repo, securityQueue };
 	}
