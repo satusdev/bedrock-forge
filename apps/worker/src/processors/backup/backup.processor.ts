@@ -96,11 +96,6 @@ export class BackupProcessor extends WorkerHost {
 		const isRestore = job.name === JOB_TYPES.BACKUP_RESTORE;
 
 		try {
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId!) },
-				data: { status: 'active', started_at: new Date() },
-			});
-
 			if (isRestore) {
 				await this.handleRestore(
 					job,
@@ -133,20 +128,6 @@ export class BackupProcessor extends WorkerHost {
 					})
 					.catch(() => undefined); // non-fatal if row already gone
 			}
-			await this.prisma.jobExecution
-				.update({
-					where: { id: BigInt(jobExecutionId!) },
-					data: {
-						status: 'failed',
-						last_error: msg,
-						completed_at: new Date(),
-					},
-				})
-				.catch(e =>
-					this.logger.error(
-						`Failed to mark JobExecution ${jobExecutionId} as failed: ${e}`,
-					),
-				);
 			throw err;
 		}
 	}
@@ -162,12 +143,7 @@ export class BackupProcessor extends WorkerHost {
 		jobExecutionId: number,
 		backupId: number,
 	) {
-		const tracker = new StepTracker(
-			this.prisma,
-			BigInt(jobExecutionId),
-			this.logger,
-			job.id ?? '',
-		);
+		const tracker = await StepTracker.start(this.prisma, jobExecutionId, this.logger, job);
 
 		const env = await this.prisma.environment.findUniqueOrThrow({
 			where: { id: BigInt(environmentId) },
@@ -430,10 +406,7 @@ export class BackupProcessor extends WorkerHost {
 				},
 			});
 
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: { status: 'completed', completed_at: new Date(), progress: 100 },
-			});
+			await tracker.complete();
 
 			await job.updateProgress({ value: 100, step: 'Backup complete' });
 		} catch (err) {
@@ -460,13 +433,7 @@ export class BackupProcessor extends WorkerHost {
 			await rm(localStagingDir, { recursive: true, force: true }).catch(
 				() => undefined,
 			);
-			await tracker
-				.track({
-					step: 'Backup failed',
-					level: 'error',
-					detail: err instanceof Error ? err.message : String(err),
-				})
-				.catch(() => undefined);
+			await tracker.fail(err, 'Backup create');
 			throw err;
 		}
 	}
@@ -479,12 +446,7 @@ export class BackupProcessor extends WorkerHost {
 		environmentId: number,
 		jobExecutionId: number,
 	) {
-		const tracker = new StepTracker(
-			this.prisma,
-			BigInt(jobExecutionId),
-			this.logger,
-			job.id ?? '',
-		);
+		const tracker = await StepTracker.start(this.prisma, jobExecutionId, this.logger, job);
 
 		const backup = await this.prisma.backup.findUniqueOrThrow({
 			where: { id: BigInt(backupId) },
@@ -602,8 +564,7 @@ export class BackupProcessor extends WorkerHost {
 					// avoids a Redis round-trip on every SFTP chunk event.
 					if (mb >= lastCancelCheckMb + 10) {
 						lastCancelCheckMb = mb;
-						const redis = await this.backupsQueue.client;
-						if (await redis.get(`forge:cancel:${job.id}`)) {
+						if (await tracker.isCancelled(this.backupsQueue)) {
 							rcloneChild.kill('SIGTERM');
 							throw new Error('Cancelled by user');
 						}
@@ -676,12 +637,8 @@ export class BackupProcessor extends WorkerHost {
 			});
 
 			// ── Step D: Execute restore script ──────────────────────────────────
-			// Final cancellation gate before the irreversible restore script runs.
-			{
-				const redis = await this.backupsQueue.client;
-				if (await redis.get(`forge:cancel:${job.id}`)) {
-					throw new Error('Cancelled by user');
-				}
+			if (await tracker.isCancelled(this.backupsQueue)) {
+				throw new Error('Cancelled by user');
 			}
 
 			const restoreCmd = `${storedCredsEnv}php ${remoteScript} --restore --file=${remoteBackupPath} --docroot=${env.root_path}${storedCredsArgs ? ' ' + storedCredsArgs : ''}`;
@@ -749,12 +706,9 @@ export class BackupProcessor extends WorkerHost {
 				0,
 			);
 
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: { status: 'completed', completed_at: new Date(), progress: 100 },
-			});
-			await job.updateProgress({ value: 100, step: 'Restore complete' });
 			await tracker.track({ step: 'Restore complete', level: 'info' });
+			await tracker.complete();
+			await job.updateProgress({ value: 100, step: 'Restore complete' });
 		} catch (err) {
 			// Best-effort remote cleanup — do not suppress original error
 			await executor
@@ -764,13 +718,7 @@ export class BackupProcessor extends WorkerHost {
 						`[${job.id}] Remote cleanup on failure failed: ${e}`,
 					),
 				);
-			await tracker
-				.track({
-					step: 'Restore failed',
-					level: 'error',
-					detail: err instanceof Error ? err.message : String(err),
-				})
-				.catch(() => undefined);
+			await tracker.fail(err, 'Backup restore');
 			throw err;
 		}
 	}
@@ -833,14 +781,11 @@ export class BackupProcessor extends WorkerHost {
 		});
 
 		if (!env.google_drive_folder_id) {
-			await this.prisma.jobExecution.update({
-				where: { id: exec.id },
-				data: {
-					status: 'failed',
-					last_error: `Environment ${environmentId} has no google_drive_folder_id`,
-					completed_at: new Date(),
-				},
-			});
+			const tracker = new StepTracker(this.prisma, exec.id, this.logger, job.id ?? '');
+			await tracker.fail(
+				new Error(`Environment ${environmentId} has no google_drive_folder_id`),
+				'Scheduled backup pre-flight'
+			);
 			this.logger.error(
 				`[${job.id}] Scheduled backup aborted: no google_drive_folder_id on env ${environmentId}`,
 			);

@@ -36,56 +36,29 @@ export class SyncProcessor extends WorkerHost {
 		super();
 	}
 
-	private async isCancelled(jobId: string | undefined): Promise<boolean> {
-		if (!jobId) return false;
-		const redis = await this.syncQueue.client;
-		return (await redis.get(`forge:cancel:${jobId}`)) === '1';
-	}
-
 	async process(job: Job) {
 		const { jobExecutionId } = job.data;
-		await this.prisma.jobExecution.update({
-			where: { id: BigInt(jobExecutionId) },
-			data: { status: 'active', started_at: new Date() },
-		});
+		const tracker = await StepTracker.start(this.prisma, jobExecutionId, this.logger, job);
 
 		try {
 			if (job.name === JOB_TYPES.SYNC_CLONE) {
-				await this.processClone(job);
+				await this.processClone(job, tracker);
 			} else {
-				await this.processPush(job);
+				await this.processPush(job, tracker);
 			}
 
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: { status: 'completed', completed_at: new Date() },
-			});
+			await tracker.complete();
 		} catch (err: unknown) {
-			const msg = err instanceof Error ? err.message : String(err);
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: {
-					status: 'failed',
-					last_error: msg,
-					completed_at: new Date(),
-				},
-			});
+			await tracker.fail(err, 'Sync process');
 			throw err;
 		}
 	}
 
 	// ── Clone ──────────────────────────────────────────────────────────────────
 
-	private async processClone(job: Job) {
+	private async processClone(job: Job, tracker: StepTracker) {
 		const { sourceEnvironmentId, targetEnvironmentId, jobExecutionId } =
 			job.data;
-
-		const tracker = new StepTracker(
-			this.prisma,
-			BigInt(jobExecutionId),
-			this.logger,
-			job.id ?? '',
-		);
 
 		await tracker.track({
 			step: 'Database sync started',
@@ -214,7 +187,7 @@ export class SyncProcessor extends WorkerHost {
 		}
 		await job.updateProgress({ value: 40, step: 'Safety backup complete' });
 
-		if (await this.isCancelled(job.id)) throw new Error('Cancelled by user');
+		if (await tracker.isCancelled(this.syncQueue)) throw new Error('Cancelled by user');
 
 		// Dump source DB
 		const dumpRemote = `/tmp/sync_${job.id}.sql`;
@@ -272,7 +245,7 @@ export class SyncProcessor extends WorkerHost {
 
 		await job.updateProgress({ value: 55, step: 'Source database dumped' });
 
-		if (await this.isCancelled(job.id)) throw new Error('Cancelled by user');
+		if (await tracker.isCancelled(this.syncQueue)) throw new Error('Cancelled by user');
 
 		// Transfer dump to target via worker disk relay
 		await tracker.track({
@@ -480,7 +453,7 @@ export class SyncProcessor extends WorkerHost {
 			value: 83,
 			step: 'Database cloned, syncing files',
 		});
-		if (await this.isCancelled(job.id)) throw new Error('Cancelled by user');
+		if (await tracker.isCancelled(this.syncQueue)) throw new Error('Cancelled by user');
 
 		// Sync site files source → target
 		await this.syncFiles.pushFiles(
@@ -535,7 +508,7 @@ export class SyncProcessor extends WorkerHost {
 
 	// ── Push ────────────────────────────────────────────────────────────────────
 
-	private async processPush(job: Job) {
+	private async processPush(job: Job, tracker: StepTracker) {
 		const {
 			sourceEnvironmentId,
 			targetEnvironmentId,
@@ -543,13 +516,6 @@ export class SyncProcessor extends WorkerHost {
 			jobExecutionId,
 			skipSafetyBackup,
 		} = job.data;
-
-		const tracker = new StepTracker(
-			this.prisma,
-			BigInt(jobExecutionId),
-			this.logger,
-			job.id ?? '',
-		);
 
 		await tracker.track({
 			step: 'Sync push started',
@@ -638,7 +604,7 @@ export class SyncProcessor extends WorkerHost {
 
 		await job.updateProgress({ value: 20, step: 'Safety backup complete' });
 
-		if (await this.isCancelled(job.id)) throw new Error('Cancelled by user');
+		if (await tracker.isCancelled(this.syncQueue)) throw new Error('Cancelled by user');
 		let filesUrlsChanged: boolean | null = null;
 		let protectedUploadFileExcludes: string[] = [];
 

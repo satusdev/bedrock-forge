@@ -49,13 +49,40 @@ function truncate(s: string): string {
  */
 export class StepTracker {
 	private entries: ExecutionLogEntry[] = [];
+	private readonly jobId: string | number;
+	private readonly job: { id?: string | number; updateProgress?: (val: number | any) => Promise<any> } | null;
 
 	constructor(
 		private readonly prisma: PrismaService,
 		private readonly jobExecutionId: bigint,
 		private readonly logger: Logger,
-		private readonly jobId: string | number,
-	) {}
+		jobOrId: string | number | { id?: string | number; updateProgress?: (val: number | any) => Promise<any> },
+	) {
+		if (jobOrId && typeof jobOrId === 'object') {
+			this.job = jobOrId;
+			this.jobId = jobOrId.id ?? '';
+		} else {
+			this.job = null;
+			this.jobId = jobOrId ?? '';
+		}
+	}
+
+	/**
+	 * Static start helper: instantiates StepTracker and updates JobExecution status to active
+	 */
+	static async start(
+		prisma: PrismaService,
+		jobExecutionId: bigint | number,
+		logger: Logger,
+		jobOrId: string | number | { id?: string | number; updateProgress?: (val: number | any) => Promise<any> },
+	): Promise<StepTracker> {
+		const tracker = new StepTracker(prisma, BigInt(jobExecutionId), logger, jobOrId);
+		await prisma.jobExecution.update({
+			where: { id: BigInt(jobExecutionId) },
+			data: { status: 'active', started_at: new Date() },
+		});
+		return tracker;
+	}
 
 	/** Log a generic step (info, warn, or error). */
 	async track(entry: Omit<ExecutionLogEntry, 'ts'>): Promise<void> {
@@ -111,6 +138,47 @@ export class StepTracker {
 					`[${this.jobId}] StepTracker flush failed: ${err instanceof Error ? err.message : String(err)}`,
 				),
 			);
+	}
+
+	/**
+	 * Complete helper: marks the JobExecution status as completed, sets completed_at, updates progress, and writes execution log.
+	 */
+	async complete(data?: { progress?: number; executionLog?: any }): Promise<void> {
+		await this.prisma.jobExecution.update({
+			where: { id: this.jobExecutionId },
+			data: {
+				status: 'completed',
+				completed_at: new Date(),
+				progress: data?.progress ?? 100,
+				execution_log: data?.executionLog !== undefined ? data.executionLog : (this.entries as object[]),
+			},
+		});
+	}
+
+	/**
+	 * Fail helper: marks the JobExecution status as failed, updates last_error and completed_at, and logs the error.
+	 */
+	async fail(err: unknown, stepLabel?: string): Promise<void> {
+		const msg = err instanceof Error ? err.message : String(err);
+		this.logger.error(`[${this.jobId}] Job failed${stepLabel ? ` (${stepLabel})` : ''}: ${msg}`);
+		await this.track({
+			step: `${stepLabel || 'Job'} failed`,
+			level: 'error',
+			detail: msg,
+		}).catch(() => {});
+		await this.prisma.jobExecution.update({
+			where: { id: this.jobExecutionId },
+			data: { status: 'failed', last_error: msg, completed_at: new Date() },
+		}).catch(() => {});
+	}
+
+	/**
+	 * Checks the queue's Redis client for the cancellation key (forge:cancel:${jobId})
+	 */
+	async isCancelled(queue: { client: Promise<any> }): Promise<boolean> {
+		if (!this.jobId) return false;
+		const redis = await queue.client;
+		return (await redis.get(`forge:cancel:${this.jobId}`)) === '1';
 	}
 
 	/** Return a snapshot of all entries (for inspection / test assertions). */

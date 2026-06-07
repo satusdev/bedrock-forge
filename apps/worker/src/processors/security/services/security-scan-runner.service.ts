@@ -18,6 +18,7 @@ import {
 	runMalwareScan,
 } from '../server-checks';
 import { runWpAudit, runProjectMalware } from '../environment-checks';
+import { StepTracker } from '../../../services/step-tracker';
 
 @Injectable()
 export class SecurityScanRunnerService {
@@ -34,93 +35,87 @@ export class SecurityScanRunnerService {
 		const { serverId, scanTypes, jobExecutionId, scanIds } =
 			job.data as SecurityServerScanPayload & { scheduleId?: number };
 
-		await this.prisma.jobExecution.update({
-			where: { id: BigInt(jobExecutionId) },
-			data: { status: 'active', started_at: new Date() },
-		});
+		const tracker = await StepTracker.start(this.prisma, jobExecutionId, this.logger, job);
 
-		const server = await this.prisma.server.findUnique({
-			where: { id: BigInt(serverId) },
-		});
-		if (!server) {
-			await this.failExecution(jobExecutionId, `Server ${serverId} not found`);
-			return;
-		}
-
-		let privateKey: string;
 		try {
-			privateKey = await this.sshKey.resolvePrivateKey(server);
-		} catch (err) {
-			await this.failExecution(
-				jobExecutionId,
-				`SSH key resolution failed: ${err instanceof Error ? err.message : String(err)}`,
-			);
-			for (const scanId of scanIds) {
-				await this.prisma.securityScan.update({
-					where: { id: BigInt(scanId) },
-					data: { status: 'failed', error: 'SSH key unavailable' },
-				});
+			const server = await this.prisma.server.findUnique({
+				where: { id: BigInt(serverId) },
+			});
+			if (!server) {
+				throw new Error(`Server ${serverId} not found`);
 			}
-			return;
-		}
 
-		const remoteExecutor = createRemoteExecutor({
-			host: server.ip_address,
-			port: server.ssh_port,
-			username: server.ssh_user,
-			privateKey,
-		});
+			let privateKey: string;
+			try {
+				privateKey = await this.sshKey.resolvePrivateKey(server);
+			} catch (err) {
+				for (const scanId of scanIds) {
+					await this.prisma.securityScan.update({
+						where: { id: BigInt(scanId) },
+						data: { status: 'failed', error: 'SSH key unavailable' },
+					});
+				}
+				throw new Error(`SSH key resolution failed: ${err instanceof Error ? err.message : String(err)}`);
+			}
 
-		for (let i = 0; i < scanTypes.length; i++) {
-			const scanType = scanTypes[i] as SecurityScanType;
-			const scanId = scanIds[i];
-
-			await this.prisma.securityScan.update({
-				where: { id: BigInt(scanId) },
-				data: { status: 'running', started_at: new Date() },
+			const remoteExecutor = createRemoteExecutor({
+				host: server.ip_address,
+				port: server.ssh_port,
+				username: server.ssh_user,
+				privateKey,
 			});
 
-			try {
-				const findings = await this.runServerCheck(scanType, remoteExecutor);
-				const score = calculateScore(findings);
-				const summary = buildSummary(findings);
+			for (let i = 0; i < scanTypes.length; i++) {
+				const scanType = scanTypes[i] as SecurityScanType;
+				const scanId = scanIds[i];
 
 				await this.prisma.securityScan.update({
 					where: { id: BigInt(scanId) },
-					data: {
-						status: 'completed',
-						score,
-						summary: summary as any,
-						findings: findings as unknown as Parameters<
-							typeof this.prisma.securityScan.update
-						>[0]['data']['findings'],
-						completed_at: new Date(),
-					},
+					data: { status: 'running', started_at: new Date() },
 				});
 
-				this.logger.log(
-					`[Server ${serverId}] ${scanType} completed — score: ${score}, findings: ${findings.length}`,
-				);
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				this.logger.error(`[Server ${serverId}] ${scanType} failed: ${msg}`);
-				await this.prisma.securityScan.update({
-					where: { id: BigInt(scanId) },
-					data: { status: 'failed', error: msg, completed_at: new Date() },
-				});
+				try {
+					const findings = await this.runServerCheck(scanType, remoteExecutor);
+					const score = calculateScore(findings);
+					const summary = buildSummary(findings);
+
+					await this.prisma.securityScan.update({
+						where: { id: BigInt(scanId) },
+						data: {
+							status: 'completed',
+							score,
+							summary: summary as any,
+							findings: findings as unknown as Parameters<
+								typeof this.prisma.securityScan.update
+							>[0]['data']['findings'],
+							completed_at: new Date(),
+						},
+					});
+
+					this.logger.log(
+						`[Server ${serverId}] ${scanType} completed — score: ${score}, findings: ${findings.length}`,
+					);
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					this.logger.error(`[Server ${serverId}] ${scanType} failed: ${msg}`);
+					await this.prisma.securityScan.update({
+						where: { id: BigInt(scanId) },
+						data: { status: 'failed', error: msg, completed_at: new Date() },
+					});
+				}
+
+				await job.updateProgress(Math.round(((i + 1) / scanTypes.length) * 100));
 			}
 
-			await job.updateProgress(Math.round(((i + 1) / scanTypes.length) * 100));
-		}
+			await tracker.complete();
 
-		await this.prisma.jobExecution.update({
-			where: { id: BigInt(jobExecutionId) },
-			data: { status: 'completed', completed_at: new Date(), progress: 100 },
-		});
-
-		const scheduleId = (job.data as { scheduleId?: number }).scheduleId;
-		if (scheduleId) {
-			await this.maybeNotify('server', serverId, scanIds);
+			const scheduleId = (job.data as { scheduleId?: number }).scheduleId;
+			if (scheduleId) {
+				await this.maybeNotify('server', serverId, scanIds);
+			}
+		} catch (err: unknown) {
+			await tracker.fail(err, 'Server scan');
+			throw err;
 		}
 	}
 
@@ -128,101 +123,92 @@ export class SecurityScanRunnerService {
 		const { environmentId, scanTypes, jobExecutionId, scanIds } =
 			job.data as SecurityEnvironmentScanPayload & { scheduleId?: number };
 
-		await this.prisma.jobExecution.update({
-			where: { id: BigInt(jobExecutionId) },
-			data: { status: 'active', started_at: new Date() },
-		});
+		const tracker = await StepTracker.start(this.prisma, jobExecutionId, this.logger, job);
 
-		const environment = await this.prisma.environment.findUnique({
-			where: { id: BigInt(environmentId) },
-			include: { server: true },
-		});
-		if (!environment) {
-			await this.failExecution(
-				jobExecutionId,
-				`Environment ${environmentId} not found`,
-			);
-			return;
-		}
-
-		let privateKey: string;
 		try {
-			privateKey = await this.sshKey.resolvePrivateKey(environment.server);
-		} catch (err) {
-			await this.failExecution(
-				jobExecutionId,
-				`SSH key resolution failed: ${err instanceof Error ? err.message : String(err)}`,
-			);
-			for (const scanId of scanIds) {
-				await this.prisma.securityScan.update({
-					where: { id: BigInt(scanId) },
-					data: { status: 'failed', error: 'SSH key unavailable' },
-				});
+			const environment = await this.prisma.environment.findUnique({
+				where: { id: BigInt(environmentId) },
+				include: { server: true },
+			});
+			if (!environment) {
+				throw new Error(`Environment ${environmentId} not found`);
 			}
-			return;
-		}
 
-		const remoteExecutor = createRemoteExecutor({
-			host: environment.server.ip_address,
-			port: environment.server.ssh_port,
-			username: environment.server.ssh_user,
-			privateKey,
-		});
+			let privateKey: string;
+			try {
+				privateKey = await this.sshKey.resolvePrivateKey(environment.server);
+			} catch (err) {
+				for (const scanId of scanIds) {
+					await this.prisma.securityScan.update({
+						where: { id: BigInt(scanId) },
+						data: { status: 'failed', error: 'SSH key unavailable' },
+					});
+				}
+				throw new Error(`SSH key resolution failed: ${err instanceof Error ? err.message : String(err)}`);
+			}
 
-		for (let i = 0; i < scanTypes.length; i++) {
-			const scanType = scanTypes[i] as SecurityScanType;
-			const scanId = scanIds[i];
-
-			await this.prisma.securityScan.update({
-				where: { id: BigInt(scanId) },
-				data: { status: 'running', started_at: new Date() },
+			const remoteExecutor = createRemoteExecutor({
+				host: environment.server.ip_address,
+				port: environment.server.ssh_port,
+				username: environment.server.ssh_user,
+				privateKey,
 			});
 
-			try {
-				const findings = await this.runEnvironmentCheck(
-					scanType,
-					remoteExecutor,
-					environment.root_path,
-				);
-				const score = calculateScore(findings);
-				const summary = buildSummary(findings);
+			for (let i = 0; i < scanTypes.length; i++) {
+				const scanType = scanTypes[i] as SecurityScanType;
+				const scanId = scanIds[i];
 
 				await this.prisma.securityScan.update({
 					where: { id: BigInt(scanId) },
-					data: {
-						status: 'completed',
-						score,
-						summary: summary as any,
-						findings: findings as unknown as Parameters<
-							typeof this.prisma.securityScan.update
-						>[0]['data']['findings'],
-						completed_at: new Date(),
-					},
+					data: { status: 'running', started_at: new Date() },
 				});
 
-				this.logger.log(
-					`[Env ${environmentId}] ${scanType} completed — score: ${score}, findings: ${findings.length}`,
-				);
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				this.logger.error(`[Env ${environmentId}] ${scanType} failed: ${msg}`);
-				await this.prisma.securityScan.update({
-					where: { id: BigInt(scanId) },
-					data: { status: 'failed', error: msg, completed_at: new Date() },
-				});
+				try {
+					const findings = await this.runEnvironmentCheck(
+						scanType,
+						remoteExecutor,
+						environment.root_path,
+					);
+					const score = calculateScore(findings);
+					const summary = buildSummary(findings);
+
+					await this.prisma.securityScan.update({
+						where: { id: BigInt(scanId) },
+						data: {
+							status: 'completed',
+							score,
+							summary: summary as any,
+							findings: findings as unknown as Parameters<
+								typeof this.prisma.securityScan.update
+							>[0]['data']['findings'],
+							completed_at: new Date(),
+						},
+					});
+
+					this.logger.log(
+						`[Env ${environmentId}] ${scanType} completed — score: ${score}, findings: ${findings.length}`,
+					);
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					this.logger.error(`[Env ${environmentId}] ${scanType} failed: ${msg}`);
+					await this.prisma.securityScan.update({
+						where: { id: BigInt(scanId) },
+						data: { status: 'failed', error: msg, completed_at: new Date() },
+					});
+				}
+
+				await job.updateProgress(Math.round(((i + 1) / scanTypes.length) * 100));
 			}
 
-			await job.updateProgress(Math.round(((i + 1) / scanTypes.length) * 100));
-		}
+			await tracker.complete();
 
-		await this.prisma.jobExecution.update({
-			where: { id: BigInt(jobExecutionId) },
-			data: { status: 'completed', completed_at: new Date(), progress: 100 },
-		});
-
-		const scheduleId = (job.data as { scheduleId?: number }).scheduleId;
-		if (scheduleId) {
-			await this.maybeNotify('environment', environmentId, scanIds);
+			const scheduleId = (job.data as { scheduleId?: number }).scheduleId;
+			if (scheduleId) {
+				await this.maybeNotify('environment', environmentId, scanIds);
+			}
+		} catch (err: unknown) {
+			await tracker.fail(err, 'Environment scan');
+			throw err;
 		}
 	}
 
@@ -255,13 +241,6 @@ export class SecurityScanRunnerService {
 			default:
 				return [];
 		}
-	}
-
-	async failExecution(jobExecutionId: number, error: string) {
-		await this.prisma.jobExecution.update({
-			where: { id: BigInt(jobExecutionId) },
-			data: { status: 'failed', last_error: error, completed_at: new Date() },
-		});
 	}
 
 	private async maybeNotify(

@@ -20,7 +20,7 @@ describe('SecurityHardeningService', () => {
 				findUnique: jest.fn(),
 			},
 			jobExecution: {
-				update: jest.fn(),
+				update: jest.fn().mockResolvedValue({}),
 			},
 		};
 		sshKeyMock = {
@@ -61,22 +61,24 @@ describe('SecurityHardeningService', () => {
 				data: { status: 'active', started_at: expect.any(Date) },
 			});
 			expect(hardeningActions.applyServerHardeningActions).toHaveBeenCalled();
-			expect(prismaMock.jobExecution.update).toHaveBeenLastCalledWith({
-				where: { id: BigInt(100) },
-				data: {
-					status: 'completed',
-					completed_at: expect.any(Date),
-					execution_log: [
-						{
-							ts: expect.any(String),
-							step: 'SSH_PORT_CHANGE',
-							level: 'info',
-							detail: 'Port changed to 2222',
-							hardenStatus: 'success',
-						},
-					],
-				},
-			});
+			expect(prismaMock.jobExecution.update).toHaveBeenLastCalledWith(
+				expect.objectContaining({
+					where: { id: BigInt(100) },
+					data: expect.objectContaining({
+						status: 'completed',
+						completed_at: expect.any(Date),
+						execution_log: [
+							expect.objectContaining({
+								ts: expect.any(String),
+								step: 'SSH_PORT_CHANGE',
+								level: 'info',
+								detail: 'Port changed to 2222',
+								hardenStatus: 'success',
+							}),
+						],
+					}),
+				}),
+			);
 		});
 
 		it('marks job execution failed if server is not found', async () => {
@@ -92,14 +94,16 @@ describe('SecurityHardeningService', () => {
 
 			await expect(service.processServerHardening(job)).rejects.toThrow('Server 1 not found');
 
-			expect(prismaMock.jobExecution.update).toHaveBeenCalledWith({
-				where: { id: BigInt(100) },
-				data: {
-					status: 'failed',
-					last_error: 'Server 1 not found',
-					completed_at: expect.any(Date),
-				},
-			});
+			expect(prismaMock.jobExecution.update).toHaveBeenCalledWith(
+				expect.objectContaining({
+					where: { id: BigInt(100) },
+					data: expect.objectContaining({
+						status: 'failed',
+						last_error: 'Server 1 not found',
+						completed_at: expect.any(Date),
+					}),
+				}),
+			);
 		});
 	});
 
@@ -138,22 +142,24 @@ describe('SecurityHardeningService', () => {
 				data: { status: 'active', started_at: expect.any(Date) },
 			});
 			expect(hardeningActions.applyEnvironmentHardeningActions).toHaveBeenCalled();
-			expect(prismaMock.jobExecution.update).toHaveBeenLastCalledWith({
-				where: { id: BigInt(101) },
-				data: {
-					status: 'completed',
-					completed_at: expect.any(Date),
-					execution_log: [
-						{
-							ts: expect.any(String),
-							step: 'DISABLE_FILE_EDIT',
-							level: 'warn',
-							detail: 'Already disabled',
-							hardenStatus: 'skipped',
-						},
-					],
-				},
-			});
+			expect(prismaMock.jobExecution.update).toHaveBeenLastCalledWith(
+				expect.objectContaining({
+					where: { id: BigInt(101) },
+					data: expect.objectContaining({
+						status: 'completed',
+						completed_at: expect.any(Date),
+						execution_log: [
+							expect.objectContaining({
+								ts: expect.any(String),
+								step: 'DISABLE_FILE_EDIT',
+								level: 'warn',
+								detail: 'Already disabled',
+								hardenStatus: 'skipped',
+							}),
+						],
+					}),
+				}),
+			);
 		});
 	});
 });

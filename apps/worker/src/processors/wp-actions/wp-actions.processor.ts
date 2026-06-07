@@ -107,17 +107,8 @@ export class WpActionsProcessor extends WorkerHost {
 	private async processFixAction(job: Job): Promise<unknown> {
 		const { environmentId, jobExecutionId, action } =
 			job.data as WpFixActionPayload;
-		const tracker = new StepTracker(
-			this.prisma,
-			BigInt(jobExecutionId),
-			this.logger,
-			job.id ?? '',
-		);
+		const tracker = await StepTracker.start(this.prisma, jobExecutionId, this.logger, job);
 		try {
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: { status: 'active', started_at: new Date() },
-			});
 			await tracker.track({
 				step: `WP action: ${action}`,
 				level: 'info',
@@ -160,24 +151,10 @@ export class WpActionsProcessor extends WorkerHost {
 				);
 			}
 			await job.updateProgress(100);
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: {
-					status: 'completed',
-					completed_at: new Date(),
-					progress: 100,
-					execution_log: parsed ?? {},
-				},
-			});
+			await tracker.complete({ executionLog: parsed ?? {} });
 			return parsed;
 		} catch (err: unknown) {
-			await this.failJob(
-				jobExecutionId,
-				job.id ?? '',
-				tracker,
-				`wp:fix-action(${action})`,
-				err,
-			);
+			await tracker.fail(err, `wp:fix-action(${action})`);
 			throw err;
 		}
 	}
@@ -185,17 +162,8 @@ export class WpActionsProcessor extends WorkerHost {
 	private async processDebugToggle(job: Job): Promise<unknown> {
 		const { environmentId, jobExecutionId, enabled, revertAfterMinutes } =
 			job.data as WpDebugTogglePayload;
-		const tracker = new StepTracker(
-			this.prisma,
-			BigInt(jobExecutionId),
-			this.logger,
-			job.id ?? '',
-		);
+		const tracker = await StepTracker.start(this.prisma, jobExecutionId, this.logger, job);
 		try {
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: { status: 'active', started_at: new Date() },
-			});
 			await tracker.track({
 				step: `WP Debug: ${enabled ? 'enable' : 'disable'}`,
 				level: 'info',
@@ -251,24 +219,10 @@ export class WpActionsProcessor extends WorkerHost {
 				});
 			}
 			await job.updateProgress(100);
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: {
-					status: 'completed',
-					completed_at: new Date(),
-					progress: 100,
-					execution_log: parsed ?? {},
-				},
-			});
+			await tracker.complete({ executionLog: parsed ?? {} });
 			return parsed;
 		} catch (err: unknown) {
-			await this.failJob(
-				jobExecutionId,
-				job.id ?? '',
-				tracker,
-				'wp:debug-toggle',
-				err,
-			);
+			await tracker.fail(err, 'wp:debug-toggle');
 			throw err;
 		}
 	}
@@ -280,17 +234,8 @@ export class WpActionsProcessor extends WorkerHost {
 	private async processLogsFetch(job: Job): Promise<unknown> {
 		const { environmentId, jobExecutionId, type, lines } =
 			job.data as WpLogsPayload;
-		const tracker = new StepTracker(
-			this.prisma,
-			BigInt(jobExecutionId),
-			this.logger,
-			job.id ?? '',
-		);
+		const tracker = await StepTracker.start(this.prisma, jobExecutionId, this.logger, job);
 		try {
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: { status: 'active', started_at: new Date() },
-			});
 			await tracker.track({ step: `WP Logs: ${type}`, level: 'info' });
 			const { executor, env } = await this.connectToEnv(environmentId, tracker);
 			await job.updateProgress(20);
@@ -308,41 +253,18 @@ export class WpActionsProcessor extends WorkerHost {
 				.catch(() => {});
 			const parsed = safeJsonParse(result.stdout);
 			await job.updateProgress(100);
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: {
-					status: 'completed',
-					completed_at: new Date(),
-					progress: 100,
-					execution_log: parsed ?? {},
-				},
-			});
+			await tracker.complete({ executionLog: parsed ?? {} });
 			return parsed;
 		} catch (err: unknown) {
-			await this.failJob(
-				jobExecutionId,
-				job.id ?? '',
-				tracker,
-				'wp:logs-fetch',
-				err,
-			);
+			await tracker.fail(err, 'wp:logs-fetch');
 			throw err;
 		}
 	}
 
 	private async processCronList(job: Job): Promise<unknown> {
 		const { environmentId, jobExecutionId } = job.data as WpCronPayload;
-		const tracker = new StepTracker(
-			this.prisma,
-			BigInt(jobExecutionId),
-			this.logger,
-			job.id ?? '',
-		);
+		const tracker = await StepTracker.start(this.prisma, jobExecutionId, this.logger, job);
 		try {
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: { status: 'active', started_at: new Date() },
-			});
 			await tracker.track({ step: 'WP Cron: list', level: 'info' });
 			const { executor, env } = await this.connectToEnv(environmentId, tracker);
 			await job.updateProgress(20);
@@ -359,24 +281,10 @@ export class WpActionsProcessor extends WorkerHost {
 				.catch(() => {});
 			const parsed = safeJsonParse(result.stdout);
 			await job.updateProgress(100);
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: {
-					status: 'completed',
-					completed_at: new Date(),
-					progress: 100,
-					execution_log: parsed ?? {},
-				},
-			});
+			await tracker.complete({ executionLog: parsed ?? {} });
 			return parsed;
 		} catch (err: unknown) {
-			await this.failJob(
-				jobExecutionId,
-				job.id ?? '',
-				tracker,
-				'wp:cron-list',
-				err,
-			);
+			await tracker.fail(err, 'wp:cron-list');
 			throw err;
 		}
 	}
@@ -384,17 +292,8 @@ export class WpActionsProcessor extends WorkerHost {
 	private async processCleanup(job: Job): Promise<unknown> {
 		const { environmentId, jobExecutionId, dryRun, keepRevisions } =
 			job.data as WpCleanupPayload;
-		const tracker = new StepTracker(
-			this.prisma,
-			BigInt(jobExecutionId),
-			this.logger,
-			job.id ?? '',
-		);
+		const tracker = await StepTracker.start(this.prisma, jobExecutionId, this.logger, job);
 		try {
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: { status: 'active', started_at: new Date() },
-			});
 			await tracker.track({
 				step: `WP Cleanup (dry=${dryRun ?? false})`,
 				level: 'info',
@@ -424,41 +323,18 @@ export class WpActionsProcessor extends WorkerHost {
 				Date.now() - t0,
 			);
 			await job.updateProgress(100);
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: {
-					status: 'completed',
-					completed_at: new Date(),
-					progress: 100,
-					execution_log: parsed ?? {},
-				},
-			});
+			await tracker.complete({ executionLog: parsed ?? {} });
 			return parsed;
 		} catch (err: unknown) {
-			await this.failJob(
-				jobExecutionId,
-				job.id ?? '',
-				tracker,
-				'wp:cleanup',
-				err,
-			);
+			await tracker.fail(err, 'wp:cleanup');
 			throw err;
 		}
 	}
 
 	private async processCoreCheck(job: Job): Promise<unknown> {
 		const { environmentId, jobExecutionId } = job.data as WpCoreCheckPayload;
-		const tracker = new StepTracker(
-			this.prisma,
-			BigInt(jobExecutionId),
-			this.logger,
-			job.id ?? '',
-		);
+		const tracker = await StepTracker.start(this.prisma, jobExecutionId, this.logger, job);
 		try {
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: { status: 'active', started_at: new Date() },
-			});
 			await tracker.track({
 				step: 'WP Core: check version',
 				level: 'info',
@@ -498,15 +374,7 @@ export class WpActionsProcessor extends WorkerHost {
 			}
 			const result = { current_version: currentVersion, updates };
 			await job.updateProgress(100);
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: {
-					status: 'completed',
-					completed_at: new Date(),
-					progress: 100,
-					execution_log: result as object,
-				},
-			});
+			await tracker.complete({ executionLog: result as object });
 			await tracker.track({
 				step: 'WP Core check complete',
 				level: 'info',
@@ -514,30 +382,15 @@ export class WpActionsProcessor extends WorkerHost {
 			});
 			return result;
 		} catch (err: unknown) {
-			await this.failJob(
-				jobExecutionId,
-				job.id ?? '',
-				tracker,
-				'wp:core-check',
-				err,
-			);
+			await tracker.fail(err, 'wp:core-check');
 			throw err;
 		}
 	}
 
 	private async processCoreUpdate(job: Job): Promise<unknown> {
 		const { environmentId, jobExecutionId } = job.data as WpCoreUpdatePayload;
-		const tracker = new StepTracker(
-			this.prisma,
-			BigInt(jobExecutionId),
-			this.logger,
-			job.id ?? '',
-		);
+		const tracker = await StepTracker.start(this.prisma, jobExecutionId, this.logger, job);
 		try {
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: { status: 'active', started_at: new Date() },
-			});
 			await tracker.track({
 				step: 'WP Core: update',
 				level: 'info',
@@ -605,15 +458,7 @@ export class WpActionsProcessor extends WorkerHost {
 				db_update_output: dbUpdateResult.stdout,
 			};
 			await job.updateProgress(100);
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: {
-					status: 'completed',
-					completed_at: new Date(),
-					progress: 100,
-					execution_log: result as object,
-				},
-			});
+			await tracker.complete({ executionLog: result as object });
 			await tracker.track({
 				step: 'WP Core update complete',
 				level: 'info',
@@ -621,13 +466,7 @@ export class WpActionsProcessor extends WorkerHost {
 			});
 			return result;
 		} catch (err: unknown) {
-			await this.failJob(
-				jobExecutionId,
-				job.id ?? '',
-				tracker,
-				'wp:core-update',
-				err,
-			);
+			await tracker.fail(err, 'wp:core-update');
 			throw err;
 		}
 	}
@@ -635,17 +474,8 @@ export class WpActionsProcessor extends WorkerHost {
 	private async processMaintenanceMode(job: Job): Promise<unknown> {
 		const { environmentId, jobExecutionId, enabled, revertAfterMinutes, message } =
 			job.data as WpMaintenanceModePayload;
-		const tracker = new StepTracker(
-			this.prisma,
-			BigInt(jobExecutionId),
-			this.logger,
-			job.id ?? '',
-		);
+		const tracker = await StepTracker.start(this.prisma, jobExecutionId, this.logger, job);
 		try {
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: { status: 'active', started_at: new Date() },
-			});
 			await tracker.track({
 				step: `WP Maintenance: ${enabled ? 'enable' : 'disable'}`,
 				level: 'info',
@@ -732,24 +562,10 @@ export class WpActionsProcessor extends WorkerHost {
 
 			const result = { success: true, enabled, source };
 			await job.updateProgress(100);
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: {
-					status: 'completed',
-					completed_at: new Date(),
-					progress: 100,
-					execution_log: result,
-				},
-			});
+			await tracker.complete({ executionLog: result });
 			return result;
 		} catch (err: unknown) {
-			await this.failJob(
-				jobExecutionId,
-				job.id ?? '',
-				tracker,
-				'wp:maintenance-mode',
-				err,
-			);
+			await tracker.fail(err, 'wp:maintenance-mode');
 			throw err;
 		}
 	}
@@ -818,26 +634,6 @@ export class WpActionsProcessor extends WorkerHost {
 			privateKey,
 		});
 		return { executor, env };
-	}
-
-	private async failJob(
-		jobExecutionId: number,
-		jobId: string,
-		tracker: StepTracker,
-		step: string,
-		err: unknown,
-	): Promise<void> {
-		const msg = err instanceof Error ? err.message : String(err);
-		this.logger.error(`WP actions job ${jobId} failed (${step}): ${msg}`);
-		await tracker
-			.track({ step: `${step} failed`, level: 'error', detail: msg })
-			.catch(() => {});
-		await this.prisma.jobExecution
-			.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: { status: 'failed', last_error: msg, completed_at: new Date() },
-			})
-			.catch(() => {});
 	}
 }
 

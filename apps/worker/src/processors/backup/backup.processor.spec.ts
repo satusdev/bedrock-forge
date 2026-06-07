@@ -118,7 +118,7 @@ describe('BackupProcessor', () => {
 			expect(handleScheduled).toHaveBeenCalledWith(job, 5, 1, 'full');
 		});
 
-		it('routes backup:create to handleCreate and marks execution active', async () => {
+		it('routes backup:create to handleCreate', async () => {
 			const handleCreate = jest
 				.spyOn(processor as any, 'handleCreate')
 				.mockResolvedValue(undefined);
@@ -131,16 +131,10 @@ describe('BackupProcessor', () => {
 			});
 			await processor.process(job);
 
-			expect(prisma.jobExecution.update).toHaveBeenCalledWith(
-				expect.objectContaining({
-					where: { id: BigInt(10) },
-					data: expect.objectContaining({ status: 'active' }),
-				}),
-			);
 			expect(handleCreate).toHaveBeenCalledWith(job, 2, 'db_only', 10, 20);
 		});
 
-		it('routes backup:restore to handleRestore and marks execution active', async () => {
+		it('routes backup:restore to handleRestore', async () => {
 			const handleRestore = jest
 				.spyOn(processor as any, 'handleRestore')
 				.mockResolvedValue(undefined);
@@ -152,12 +146,6 @@ describe('BackupProcessor', () => {
 			});
 			await processor.process(job);
 
-			expect(prisma.jobExecution.update).toHaveBeenCalledWith(
-				expect.objectContaining({
-					where: { id: BigInt(15) },
-					data: expect.objectContaining({ status: 'active' }),
-				}),
-			);
 			expect(handleRestore).toHaveBeenCalledWith(job, 7, 3, 15);
 		});
 	});
@@ -191,32 +179,6 @@ describe('BackupProcessor', () => {
 					}),
 				}),
 			);
-			// JobExecution must be marked failed
-			const execUpdateCallsWithFailed = (
-				prisma.jobExecution.update as jest.Mock
-			).mock.calls.filter((call: [any]) => call[0]?.data?.status === 'failed');
-			expect(execUpdateCallsWithFailed.length).toBeGreaterThan(0);
-		});
-
-		it('marks job execution as failed when handleRestore throws', async () => {
-			jest
-				.spyOn(processor as any, 'handleRestore')
-				.mockRejectedValue(new Error('Backup file not found on GDrive'));
-
-			const job = makeJob(JOB_TYPES.BACKUP_RESTORE, {
-				backupId: 7,
-				environmentId: 3,
-				jobExecutionId: 15,
-			});
-
-			await expect(processor.process(job)).rejects.toThrow(
-				'Backup file not found on GDrive',
-			);
-
-			const execUpdateCallsWithFailed = (
-				prisma.jobExecution.update as jest.Mock
-			).mock.calls.filter((call: [any]) => call[0]?.data?.status === 'failed');
-			expect(execUpdateCallsWithFailed.length).toBeGreaterThan(0);
 		});
 
 		it('does NOT update backup row on restore failures (no backupId write on restore path)', async () => {

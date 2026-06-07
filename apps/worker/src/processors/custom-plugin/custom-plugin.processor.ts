@@ -51,19 +51,9 @@ export class CustomPluginProcessor extends WorkerHost {
 		} = payload;
 		const action = payload.action as 'add' | 'remove' | 'update';
 
-		const tracker = new StepTracker(
-			this.prisma,
-			BigInt(jobExecutionId),
-			this.logger,
-			job.id ?? '',
-		);
+		const tracker = await StepTracker.start(this.prisma, jobExecutionId, this.logger, job);
 
 		try {
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: { status: 'active', started_at: new Date() },
-			});
-
 			await tracker.track({
 				step: `Custom plugin ${action} started`,
 				level: 'info',
@@ -277,36 +267,18 @@ export class CustomPluginProcessor extends WorkerHost {
 			await scanQueue.close();
 
 			await job.updateProgress(100);
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: { status: 'completed', completed_at: new Date(), progress: 100 },
-			});
 
 			await tracker.track({
 				step: `Custom plugin ${action} complete`,
 				level: 'info',
 			});
+
+			await tracker.complete();
+
 			this.logger.log(`[${job.id}] Custom plugin ${action} complete: ${slug}`);
 		} catch (err: unknown) {
-			const msg = err instanceof Error ? err.message : String(err);
-			this.logger.error(`Custom plugin ${action} job ${job.id} failed: ${msg}`);
-			await tracker
-				.track({
-					step: `Custom plugin ${action} failed`,
-					level: 'error',
-					detail: msg,
-				})
-				.catch(() => {});
-			await this.prisma.jobExecution
-				.update({
-					where: { id: BigInt(jobExecutionId) },
-					data: { status: 'failed', last_error: msg, completed_at: new Date() },
-				})
-				.catch((e) =>
-					this.logger.error(
-						`Failed to mark JobExecution ${jobExecutionId} as failed: ${e}`,
-					),
-				);
+			this.logger.error(`Custom plugin ${action} job ${job.id} failed: ${err instanceof Error ? err.message : String(err)}`);
+			await tracker.fail(err, `custom plugin ${action}`);
 			throw err;
 		}
 	}

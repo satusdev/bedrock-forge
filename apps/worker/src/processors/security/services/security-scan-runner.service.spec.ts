@@ -25,7 +25,7 @@ describe('SecurityScanRunnerService', () => {
 				findUnique: jest.fn(),
 			},
 			jobExecution: {
-				update: jest.fn(),
+				update: jest.fn().mockResolvedValue({}),
 			},
 			securityScan: {
 				update: jest.fn(),
@@ -103,10 +103,16 @@ describe('SecurityScanRunnerService', () => {
 			});
 
 			expect(job.updateProgress).toHaveBeenCalledWith(100);
-			expect(prismaMock.jobExecution.update).toHaveBeenLastCalledWith({
-				where: { id: BigInt(100) },
-				data: { status: 'completed', completed_at: expect.any(Date), progress: 100 },
-			});
+			expect(prismaMock.jobExecution.update).toHaveBeenLastCalledWith(
+				expect.objectContaining({
+					where: { id: BigInt(100) },
+					data: expect.objectContaining({
+						status: 'completed',
+						completed_at: expect.any(Date),
+						progress: 100,
+					}),
+				}),
+			);
 		});
 
 		it('marks job execution failed if server is not found', async () => {
@@ -121,16 +127,18 @@ describe('SecurityScanRunnerService', () => {
 
 			prismaMock.server.findUnique.mockResolvedValue(null);
 
-			await service.processServerScan(job);
+			await expect(service.processServerScan(job)).rejects.toThrow('Server 1 not found');
 
-			expect(prismaMock.jobExecution.update).toHaveBeenLastCalledWith({
-				where: { id: BigInt(100) },
-				data: {
-					status: 'failed',
-					last_error: 'Server 1 not found',
-					completed_at: expect.any(Date),
-				},
-			});
+			expect(prismaMock.jobExecution.update).toHaveBeenLastCalledWith(
+				expect.objectContaining({
+					where: { id: BigInt(100) },
+					data: expect.objectContaining({
+						status: 'failed',
+						last_error: 'Server 1 not found',
+						completed_at: expect.any(Date),
+					}),
+				}),
+			);
 		});
 	});
 

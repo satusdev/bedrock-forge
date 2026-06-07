@@ -110,19 +110,9 @@ export class ThemeScanProcessor extends WorkerHost {
 	private async processScan(job: Job) {
 		const { environmentId, jobExecutionId } = job.data as ThemeScanRunPayload;
 
-		const tracker = new StepTracker(
-			this.prisma,
-			BigInt(jobExecutionId),
-			this.logger,
-			job.id ?? '',
-		);
+		const tracker = await StepTracker.start(this.prisma, jobExecutionId, this.logger, job);
 
 		try {
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: { status: 'active', started_at: new Date() },
-			});
-
 			await tracker.track({
 				step: 'Theme scan started',
 				level: 'info',
@@ -275,11 +265,6 @@ export class ThemeScanProcessor extends WorkerHost {
 
 			await job.updateProgress(100);
 
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: { status: 'completed', completed_at: new Date(), progress: 100 },
-			});
-
 			await tracker.track({
 				step: 'Theme scan complete',
 				level: 'info',
@@ -288,25 +273,14 @@ export class ThemeScanProcessor extends WorkerHost {
 					: `${themes.length} themes`,
 			});
 
+			await tracker.complete();
+
 			this.logger.log(
 				`[${job.id}] Theme scan complete. ${themes.length} themes found.`,
 			);
 		} catch (err: unknown) {
-			const msg = err instanceof Error ? err.message : String(err);
-			this.logger.error(`Theme scan job ${job.id} failed: ${msg}`);
-			await tracker
-				.track({ step: 'Theme scan failed', level: 'error', detail: msg })
-				.catch(() => {});
-			await this.prisma.jobExecution
-				.update({
-					where: { id: BigInt(jobExecutionId) },
-					data: { status: 'failed', last_error: msg, completed_at: new Date() },
-				})
-				.catch(e =>
-					this.logger.error(
-						`Failed to mark JobExecution ${jobExecutionId} as failed: ${e}`,
-					),
-				);
+			this.logger.error(`Theme scan job ${job.id} failed: ${err instanceof Error ? err.message : String(err)}`);
+			await tracker.fail(err, 'Theme scan');
 			throw err;
 		}
 	}
@@ -319,19 +293,9 @@ export class ThemeScanProcessor extends WorkerHost {
 		const payload = job.data as ThemeManagePayload;
 		const { environmentId, jobExecutionId, action, slug } = payload;
 
-		const tracker = new StepTracker(
-			this.prisma,
-			BigInt(jobExecutionId),
-			this.logger,
-			job.id ?? '',
-		);
+		const tracker = await StepTracker.start(this.prisma, jobExecutionId, this.logger, job);
 
 		try {
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: { status: 'active', started_at: new Date() },
-			});
-
 			const env = await this.prisma.environment.findUniqueOrThrow({
 				where: { id: BigInt(environmentId) },
 				include: { server: true },
@@ -475,31 +439,16 @@ export class ThemeScanProcessor extends WorkerHost {
 			await scanQueue.close();
 
 			await job.updateProgress(100);
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: { status: 'completed', completed_at: new Date(), progress: 100 },
-			});
 
 			await tracker.track({
 				step: `wp theme ${action} complete`,
 				level: 'info',
 			});
+
+			await tracker.complete();
 		} catch (err: unknown) {
-			const msg = err instanceof Error ? err.message : String(err);
-			this.logger.error(`Theme manage job ${job.id} failed: ${msg}`);
-			await tracker
-				.track({
-					step: `theme ${action} failed`,
-					level: 'error',
-					detail: msg,
-				})
-				.catch(() => {});
-			await this.prisma.jobExecution
-				.update({
-					where: { id: BigInt(jobExecutionId) },
-					data: { status: 'failed', last_error: msg, completed_at: new Date() },
-				})
-				.catch(() => {});
+			this.logger.error(`Theme manage job ${job.id} failed: ${err instanceof Error ? err.message : String(err)}`);
+			await tracker.fail(err, `theme ${action}`);
 			throw err;
 		}
 	}

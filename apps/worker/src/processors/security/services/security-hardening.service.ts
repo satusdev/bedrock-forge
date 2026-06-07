@@ -11,6 +11,7 @@ import {
 	applyServerHardeningActions,
 	applyEnvironmentHardeningActions,
 } from '../hardening-actions';
+import { StepTracker } from '../../../services/step-tracker';
 
 @Injectable()
 export class SecurityHardeningService {
@@ -25,10 +26,7 @@ export class SecurityHardeningService {
 		const payload = job.data as SecurityServerHardeningPayload;
 		const { serverId, jobExecutionId, actions } = payload;
 
-		await this.prisma.jobExecution.update({
-			where: { id: BigInt(jobExecutionId) },
-			data: { status: 'active', started_at: new Date() },
-		});
+		const tracker = await StepTracker.start(this.prisma, jobExecutionId, this.logger, job);
 
 		try {
 			const server = await this.prisma.server.findUnique({
@@ -59,25 +57,17 @@ export class SecurityHardeningService {
 				hardenStatus: r.status,
 			}));
 
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: {
-					status: 'completed',
-					completed_at: new Date(),
-					execution_log: logEntries as object[],
-				},
-			});
+			await tracker.complete({ executionLog: logEntries });
 
 			this.logger.log(
 				`Server hardening ${jobExecutionId} completed — ${results.length} action(s)`,
 			);
 			return results;
 		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
 			this.logger.error(
-				`Server hardening ${jobExecutionId} failed: ${message}`,
+				`Server hardening ${jobExecutionId} failed: ${err instanceof Error ? err.message : String(err)}`,
 			);
-			await this.failExecution(jobExecutionId, message);
+			await tracker.fail(err, 'Server hardening');
 			throw err;
 		}
 	}
@@ -86,10 +76,7 @@ export class SecurityHardeningService {
 		const payload = job.data as SecurityEnvironmentHardeningPayload;
 		const { environmentId, jobExecutionId, actions } = payload;
 
-		await this.prisma.jobExecution.update({
-			where: { id: BigInt(jobExecutionId) },
-			data: { status: 'active', started_at: new Date() },
-		});
+		const tracker = await StepTracker.start(this.prisma, jobExecutionId, this.logger, job);
 
 		try {
 			const env = await this.prisma.environment.findUnique({
@@ -126,33 +113,18 @@ export class SecurityHardeningService {
 				hardenStatus: r.status,
 			}));
 
-			await this.prisma.jobExecution.update({
-				where: { id: BigInt(jobExecutionId) },
-				data: {
-					status: 'completed',
-					completed_at: new Date(),
-					execution_log: logEntries as object[],
-				},
-			});
+			await tracker.complete({ executionLog: logEntries });
 
 			this.logger.log(
 				`Environment hardening ${jobExecutionId} completed — ${results.length} action(s)`,
 			);
 			return results;
 		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
 			this.logger.error(
-				`Environment hardening ${jobExecutionId} failed: ${message}`,
+				`Environment hardening ${jobExecutionId} failed: ${err instanceof Error ? err.message : String(err)}`,
 			);
-			await this.failExecution(jobExecutionId, message);
+			await tracker.fail(err, 'Environment hardening');
 			throw err;
 		}
-	}
-
-	private async failExecution(jobExecutionId: number, error: string) {
-		await this.prisma.jobExecution.update({
-			where: { id: BigInt(jobExecutionId) },
-			data: { status: 'failed', last_error: error, completed_at: new Date() },
-		});
 	}
 }

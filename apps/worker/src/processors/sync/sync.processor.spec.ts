@@ -144,7 +144,7 @@ describe('SyncProcessor', () => {
 					data: expect.objectContaining({ status: 'active' }),
 				}),
 			);
-			expect(processClone).toHaveBeenCalledWith(job);
+			expect(processClone).toHaveBeenCalledWith(job, expect.any(Object));
 		});
 
 		it('routes sync:clone to processClone', async () => {
