@@ -123,9 +123,9 @@ Recommended order:
 
 - [x] `apps/web/src/pages/project-detail/PluginsTab.tsx` [COMPLETED]
 - [x] `apps/web/src/pages/project-detail/EnvironmentsTab.tsx` [COMPLETED]
-- [ ] `apps/web/src/pages/project-detail/SyncTab.tsx`
-- [ ] `apps/web/src/pages/project-detail/BackupsTab.tsx`
-- [ ] `apps/web/src/pages/project-detail/ToolsTab.tsx`
+- [x] `apps/web/src/pages/project-detail/SyncTab.tsx`
+- [x] `apps/web/src/pages/project-detail/BackupsTab.tsx`
+- [x] `apps/web/src/pages/project-detail/ToolsTab.tsx`
 - [ ] `apps/worker/src/processors/sync/sync.processor.ts`
 - [ ] `apps/worker/src/processors/security/security-server-scan.processor.ts`
 - [ ] `apps/api/src/modules/settings/settings.controller.ts`
