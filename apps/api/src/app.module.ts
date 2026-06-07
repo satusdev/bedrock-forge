@@ -41,6 +41,7 @@ import { SystemBackupsModule } from './modules/system-backups/system-backups.mod
 import { ThemeScansModule } from './modules/theme-scans/theme-scans.module';
 import { SecurityModule } from './modules/security/security.module';
 import { LighthouseModule } from './modules/lighthouse/lighthouse.module';
+import { RemoteOpsModule } from './modules/remote-ops/remote-ops.module';
 import { IpAllowlistMiddleware } from './common/middleware/ip-allowlist.middleware';
 import { SettingsRepository } from './modules/settings/settings.repository';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
@@ -143,6 +144,7 @@ import appConfig from './config/app.config';
 		ThemeScansModule,
 		SecurityModule,
 		LighthouseModule,
+		RemoteOpsModule,
 	],
 	providers: [
 		// Global rate limiting — 100 req/min per IP (ThrottlerModule configured above)

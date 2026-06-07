@@ -17,6 +17,7 @@ import {
 	GitCompare,
 	Palette,
 	Cpu,
+	FileCog,
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
@@ -32,6 +33,7 @@ import { ToolsTab } from './project-detail/ToolsTab';
 import { DriftTab } from './project-detail/DriftTab';
 import { ThemesTab } from './project-detail/ThemesTab';
 import { WpCoreTab } from './project-detail/WpCoreTab';
+import { RemoteOpsTab } from './project-detail/RemoteOpsTab';
 import { ProjectFormDialog } from './ProjectsPage';
 
 interface Server {
@@ -292,7 +294,7 @@ export function ProjectDetailPage() {
 				}}
 			>
 				<TabsList className='flex-wrap h-auto gap-1 bg-muted/60 p-1 border border-border/40 rounded-xl shadow-sm backdrop-blur-sm'>
-					<TabsTrigger 
+					<TabsTrigger
 						value='environments'
 						className='gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm'
 					>
@@ -304,56 +306,63 @@ export function ProjectDetailPage() {
 							</span>
 						)}
 					</TabsTrigger>
-					<TabsTrigger 
+					<TabsTrigger
 						value='backups'
 						className='gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm'
 					>
 						<History className='h-3.5 w-3.5 opacity-70' />
 						Backups
 					</TabsTrigger>
-					<TabsTrigger 
+					<TabsTrigger
 						value='plugins'
 						className='gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm'
 					>
 						<Puzzle className='h-3.5 w-3.5 opacity-70' />
 						Plugins
 					</TabsTrigger>
-					<TabsTrigger 
+					<TabsTrigger
 						value='sync'
 						className='gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm'
 					>
 						<RefreshCw className='h-3.5 w-3.5 opacity-70' />
 						Sync
 					</TabsTrigger>
-					<TabsTrigger 
+					<TabsTrigger
 						value='restore'
 						className='gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm'
 					>
 						<Undo2 className='h-3.5 w-3.5 opacity-70' />
 						Restore
 					</TabsTrigger>
-					<TabsTrigger 
+					<TabsTrigger
 						value='tools'
 						className='gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm'
 					>
 						<Wrench className='h-3.5 w-3.5 opacity-70' />
 						Tools
 					</TabsTrigger>
-					<TabsTrigger 
+					<TabsTrigger
 						value='drift'
 						className='gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm'
 					>
 						<GitCompare className='h-3.5 w-3.5 opacity-70' />
 						Drift
 					</TabsTrigger>
-					<TabsTrigger 
+					<TabsTrigger
 						value='themes'
 						className='gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm'
 					>
 						<Palette className='h-3.5 w-3.5 opacity-70' />
 						Themes
 					</TabsTrigger>
-					<TabsTrigger 
+					<TabsTrigger
+						value='files-config'
+						className='gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm'
+					>
+						<FileCog className='h-3.5 w-3.5 opacity-70' />
+						Files & Config
+					</TabsTrigger>
+					<TabsTrigger
 						value='wp-core'
 						className='gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm'
 					>
@@ -413,6 +422,16 @@ export function ProjectDetailPage() {
 				<TabsContent value='wp-core'>
 					{activatedTabs.has('wp-core') && (
 						<WpCoreTab environments={environments} />
+					)}
+				</TabsContent>
+
+				<TabsContent value='files-config'>
+					{activatedTabs.has('files-config') && (
+						<RemoteOpsTab
+							projectId={projectId}
+							projectName={project.name}
+							environments={environments}
+						/>
 					)}
 				</TabsContent>
 			</Tabs>
