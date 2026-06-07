@@ -2,7 +2,6 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Job, Queue } from 'bullmq';
-import { readFileSync } from 'fs';
 import { join } from 'path';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SshKeyService } from '../../services/ssh-key.service';
@@ -14,11 +13,7 @@ import {
 	PluginScheduledUpdatePayload,
 } from '@bedrock-forge/shared';
 import { ConfigService } from '@nestjs/config';
-
-/** Wrap a string in single quotes for safe shell embedding on the remote host. */
-function shellQuote(value: string): string {
-	return "'" + value.replace(/'/g, "'\\''") + "'";
-}
+import { shellQuote, pushRemoteScript } from '../../utils/processor-utils';
 
 @Processor(QUEUES.PLUGIN_UPDATES, { concurrency: 1 })
 export class PluginUpdateProcessor extends WorkerHost {
@@ -206,13 +201,7 @@ export class PluginUpdateProcessor extends WorkerHost {
 				detail: `${join(scriptsPath, 'composer-manager.php')} → ${remoteScript}`,
 			});
 
-			const scriptContent = readFileSync(
-				join(scriptsPath, 'composer-manager.php'),
-			);
-			await executor.pushFile({
-				remotePath: remoteScript,
-				content: scriptContent,
-			});
+			await pushRemoteScript(executor, join(scriptsPath, 'composer-manager.php'), remoteScript);
 
 			await job.updateProgress(20);
 

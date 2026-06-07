@@ -14,6 +14,7 @@ import { ConfigService } from '@nestjs/config';
 import {
 	fixCyberPanelOwnership,
 	shellQuote,
+	pushRemoteScript,
 } from '../../utils/processor-utils';
 
 const STAGING_DIR = '/tmp/forge-backups';
@@ -186,17 +187,8 @@ export class BackupProcessor extends WorkerHost {
 
 		try {
 			// ── Step A: Push backup.php to remote server ────────────────────────
-			const scriptContent = await readFile(join(scriptsPath, 'backup.php'));
-			await tracker.track({
-				step: 'Pushing backup script via SFTP',
-				level: 'info',
-				detail: `${remoteScript} (${scriptContent.length} bytes)`,
-			});
 			const pushStart = Date.now();
-			await executor.pushFile({
-				remotePath: remoteScript,
-				content: scriptContent,
-			});
+			await pushRemoteScript(executor, join(scriptsPath, 'backup.php'), remoteScript);
 			await tracker.track({
 				step: 'Backup script uploaded',
 				level: 'info',
@@ -518,17 +510,13 @@ export class BackupProcessor extends WorkerHost {
 			}
 
 			// ── Step B: Push restore script via SFTP ────────────────────────────
-			const scriptContent = await readFile(join(scriptsPath, 'backup.php'));
+			const pushStart = Date.now();
+			await pushRemoteScript(executor, join(scriptsPath, 'backup.php'), remoteScript);
 			await tracker.track({
-				step: 'Pushing restore script via SFTP',
+				step: 'Restore script uploaded',
 				level: 'info',
-				detail: `${remoteScript} (${scriptContent.length} bytes)`,
+				durationMs: Date.now() - pushStart,
 			});
-			await executor.pushFile({
-				remotePath: remoteScript,
-				content: scriptContent,
-			});
-			await tracker.track({ step: 'Restore script uploaded', level: 'info' });
 
 			// ── Step C: Stream archive directly from Google Drive → server ──────
 			// Zero local temp files — rclone stdout is piped directly into SFTP.

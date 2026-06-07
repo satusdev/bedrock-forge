@@ -14,7 +14,11 @@ import { escapeMysql } from '../../../utils/cyberpanel-http';
 import {
 	shellQuote,
 	flipProtocol,
-	buildWpCliPrefix,
+	createRemoteMyCnf,
+	cleanupRemoteMyCnf,
+	pushRemoteScript,
+	WpCliBuilder,
+	sanitizeTableList,
 } from '../../../utils/processor-utils';
 import { WpLayout } from './layout-detector.service';
 import { Creds } from './protected-cpt.service';
@@ -22,7 +26,6 @@ import { Creds } from './protected-cpt.service';
 type Executor = Awaited<ReturnType<typeof createRemoteExecutor>>;
 
 const STAGING_DIR = '/tmp/forge-sync';
-const TABLE_NAME_REGEX = /^[A-Za-z0-9_$]+$/;
 
 @Injectable()
 export class SyncDbService {
@@ -205,15 +208,9 @@ export class SyncDbService {
 			return url;
 		}
 
+		let urlMycnf: string | null = null;
 		try {
-			const urlMycnf = `/tmp/forge_url_${Date.now()}.cnf`;
-			await executor.pushFile({
-				remotePath: urlMycnf,
-				content: Buffer.from(
-					`[client]\nuser=${creds.dbUser}\npassword=${creds.dbPassword}\nhost=${creds.dbHost}\n`,
-				),
-			});
-			await executor.execute(`chmod 600 ${urlMycnf}`);
+			urlMycnf = await createRemoteMyCnf(executor, creds, `url_${Date.now()}`);
 			const pfxRes = await executor.execute(
 				`mysql --defaults-extra-file=${urlMycnf} ${creds.dbName} -sN -e ${shellQuote(
 					`SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${escapeMysql(creds.dbName)}' AND table_name LIKE '%options' LIMIT 1`,
@@ -227,7 +224,6 @@ export class SyncDbService {
 			const result = await executor.execute(
 				`mysql --defaults-extra-file=${urlMycnf} ${creds.dbName} -sN -e ${shellQuote(query)}`,
 			);
-			await executor.execute(`rm -f ${urlMycnf}`).catch(() => {});
 			if (result.code === 0 && result.stdout.trim()) {
 				const url = result.stdout.trim().replace(/\/$/, '');
 				await tracker.track({
@@ -239,6 +235,10 @@ export class SyncDbService {
 			}
 		} catch {
 			// non-fatal
+		} finally {
+			if (urlMycnf) {
+				await cleanupRemoteMyCnf(executor, urlMycnf);
+			}
 		}
 
 		await tracker.track({
@@ -250,15 +250,7 @@ export class SyncDbService {
 	}
 
 	normalizeProtectedTables(tables: string[]): string[] {
-		const seen = new Set<string>();
-		const safe: string[] = [];
-		for (const raw of tables) {
-			const table = raw.trim();
-			if (!TABLE_NAME_REGEX.test(table) || seen.has(table)) continue;
-			seen.add(table);
-			safe.push(table);
-		}
-		return safe;
+		return sanitizeTableList(tables);
 	}
 
 	async trackProtectedTablePresence(
@@ -319,14 +311,8 @@ export class SyncDbService {
 			detail: `Executing ${sqlQueries.length} query/queries on target`,
 		});
 
-		const tgtMycnf = `/tmp/forge_sync_prot_queries_${jobId}.cnf`;
-		await executor.pushFile({
-			remotePath: tgtMycnf,
-			content: Buffer.from(
-				`[client]\nuser=${creds.dbUser}\npassword=${creds.dbPassword}\nhost=${creds.dbHost}\n`,
-			),
-		});
-		await executor.execute(`chmod 600 ${tgtMycnf}`);
+		const tgtMycnf = await createRemoteMyCnf(executor, creds, jobId, 'forge_sync_prot_queries');
+		const queriesSqlFile = `/tmp/forge_sql_prot_exec_${jobId}.sql`;
 
 		let prefix = 'wp_';
 		try {
@@ -349,7 +335,6 @@ export class SyncDbService {
 			return processed;
 		});
 
-		const queriesSqlFile = `/tmp/forge_sql_prot_exec_${jobId}.sql`;
 		const sqlContent = processedQueries.join('\n') + '\n';
 
 		await executor.pushFile({
@@ -358,12 +343,16 @@ export class SyncDbService {
 		});
 
 		const start = Date.now();
-		const result = await executor.execute(
-			`mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} < ${queriesSqlFile}`,
-			{ timeout: 5 * 60_000 },
-		);
-
-		await executor.execute(`rm -f ${tgtMycnf} ${queriesSqlFile}`).catch(() => {});
+		let result;
+		try {
+			result = await executor.execute(
+				`mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} < ${queriesSqlFile}`,
+				{ timeout: 5 * 60_000 },
+			);
+		} finally {
+			await cleanupRemoteMyCnf(executor, tgtMycnf);
+			await executor.execute(`rm -f ${queriesSqlFile}`).catch(() => {});
+		}
 
 		await tracker.trackCommand(
 			'SQL protection queries execution',
@@ -416,21 +405,18 @@ export class SyncDbService {
 		const localDir = join(STAGING_DIR, String(job.id));
 		const localFile = join(localDir, filename);
 
-		const sbMycnf = `/tmp/forge_sync_sb_${job.id}.cnf`;
-		await targetExecutor.pushFile({
-			remotePath: sbMycnf,
-			content: Buffer.from(
-				`[client]\nuser=${targetCreds.dbUser}\npassword=${targetCreds.dbPassword}\nhost=${targetCreds.dbHost}\n`,
-			),
-		});
-		await targetExecutor.execute(`chmod 600 ${sbMycnf}`);
+		const sbMycnf = await createRemoteMyCnf(targetExecutor, targetCreds, job.id!, 'forge_sync_sb');
 		const maskedDump = `mysqldump --defaults-extra-file=*** --single-transaction --quick ${targetCreds.dbName}`;
 
 		const dumpStart = Date.now();
-		const dumpResult = await targetExecutor.execute(
-			`mysqldump --defaults-extra-file=${sbMycnf} --single-transaction --quick ${targetCreds.dbName} > ${remoteTemp}`,
-		);
-		await targetExecutor.execute(`rm -f ${sbMycnf}`);
+		let dumpResult;
+		try {
+			dumpResult = await targetExecutor.execute(
+				`mysqldump --defaults-extra-file=${sbMycnf} --single-transaction --quick ${targetCreds.dbName} > ${remoteTemp}`,
+			);
+		} finally {
+			await cleanupRemoteMyCnf(targetExecutor, sbMycnf);
+		}
 		await tracker.trackCommand(
 			'Safety backup: mysqldump target',
 			maskedDump,
@@ -560,26 +546,7 @@ export class SyncDbService {
 		const srStart = Date.now();
 		const allWpCliPairs = [...pairs, ...jsonPairs, ...urlEncodedPairs];
 
-		const {
-			prefix: wpPrefix,
-			allowRootFlag,
-			lsphpBin,
-			wpBin,
-		} = await buildWpCliPrefix(executor, rootPath);
-		const wp = (args: string): string => {
-			let phpAndWp: string;
-			if (lsphpBin && wpBin) {
-				phpAndWp = `${shellQuote(lsphpBin)} ${shellQuote(wpBin)}`;
-			} else if (lsphpBin) {
-				phpAndWp = `env WP_CLI_PHP=${shellQuote(lsphpBin)} wp`;
-			} else {
-				phpAndWp = 'wp';
-			}
-			const parts = [wpPrefix, phpAndWp, args.trim(), allowRootFlag].filter(
-				Boolean,
-			);
-			return parts.join(' ') + ' 2>&1';
-		};
+		const wpCli = await WpCliBuilder.create(executor, rootPath);
 
 		let wpCliSuccess = false;
 		for (const skipPlugins of [false, true]) {
@@ -587,7 +554,7 @@ export class SyncDbService {
 			let passOk = true;
 			for (const [oldUrl, newUrl] of allWpCliPairs) {
 				const srArgs = `search-replace ${shellQuote(oldUrl)} ${shellQuote(newUrl)} --path=${shellQuote(rootPath)} --all-tables --precise --skip-columns=guid${skipTablesArg}${skiparg}`;
-				const wpCliResult = await executor.execute(wp(srArgs));
+				const wpCliResult = await executor.execute(wpCli.buildCommand(srArgs));
 				if (wpCliResult.code === 0) {
 					await tracker.track({
 						step: `URL search-replace complete (WP-CLI${skipPlugins ? ', skip-plugins' : ''}): ${oldUrl} → ${newUrl}`,
@@ -596,11 +563,9 @@ export class SyncDbService {
 					});
 				} else {
 					let cdOk = false;
-					if (!wpPrefix) {
-						const cdArgs = `search-replace ${shellQuote(oldUrl)} ${shellQuote(newUrl)} --all-tables --precise --skip-columns=guid${skipTablesArg}${skiparg}${allowRootFlag ? ' ' + allowRootFlag : ''}`;
-						const cdResult = await executor.execute(
-							`cd ${shellQuote(rootPath)} && wp ${cdArgs} 2>&1`,
-						);
+					if (!wpCli.prefix) {
+						const cdArgs = `search-replace ${shellQuote(oldUrl)} ${shellQuote(newUrl)} --all-tables --precise --skip-columns=guid${skipTablesArg}${skiparg}`;
+						const cdResult = await executor.execute(wpCli.buildCdCommand(cdArgs));
 						if (cdResult.code === 0) {
 							await tracker.track({
 								step: `URL search-replace complete (WP-CLI via cd${skipPlugins ? ', skip-plugins' : ''}): ${oldUrl} → ${newUrl}`,
@@ -640,32 +605,23 @@ export class SyncDbService {
 
 		const scriptsPath = join(__dirname, '..', '..', '..', '..', 'scripts');
 		const srScript = `/tmp/forge_sr_${suffix}_${job.id}.php`;
-		const scriptContent = await import('fs/promises').then(fs =>
-			fs.readFile(join(scriptsPath, 'search-replace.php')),
-		);
-		await executor.pushFile({
-			remotePath: srScript,
-			content: scriptContent,
-		});
+		await pushRemoteScript(executor, join(scriptsPath, 'search-replace.php'), srScript);
 
-		const srMycnf = `/tmp/forge_sr_${suffix}_${job.id}.cnf`;
-		await executor.pushFile({
-			remotePath: srMycnf,
-			content: Buffer.from(
-				`[client]\nuser=${creds.dbUser}\npassword=${creds.dbPassword}\nhost=${creds.dbHost}\n`,
-			),
-		});
-		await executor.execute(`chmod 600 ${srMycnf}`);
+		const srMycnf = await createRemoteMyCnf(executor, creds, job.id!, `forge_sr_${suffix}`);
 
-		const prefixResult = await executor.execute(
-			`mysql --defaults-extra-file=${srMycnf} ${creds.dbName} -sN -e ${shellQuote(
-				`SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${escapeMysql(creds.dbName)}' AND table_name LIKE '%options' LIMIT 1`,
-			)}`,
-		);
-		const p =
-			prefixResult.code === 0 && prefixResult.stdout.trim()
-				? prefixResult.stdout.trim()
-				: 'wp_';
+		let p = 'wp_';
+		try {
+			const prefixResult = await executor.execute(
+				`mysql --defaults-extra-file=${srMycnf} ${creds.dbName} -sN -e ${shellQuote(
+					`SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${escapeMysql(creds.dbName)}' AND table_name LIKE '%options' LIMIT 1`,
+				)}`,
+			);
+			if (prefixResult.code === 0 && prefixResult.stdout.trim()) {
+				p = prefixResult.stdout.trim();
+			}
+		} catch {
+			// fallback to wp_
+		}
 
 		await tracker.track({
 			step: 'Table prefix detected',
@@ -675,52 +631,56 @@ export class SyncDbService {
 
 		let phpSuccess = true;
 		const allPairs = [...pairs, ...jsonPairs, ...urlEncodedPairs];
-		for (const [oldUrl, newUrl] of allPairs) {
-			const phpResult = await executor.execute(
-				`php ${srScript}` +
-					` --mycnf=${srMycnf}` +
-					` --db-name=${shellQuote(creds.dbName)}` +
-					` --prefix=${shellQuote(p)}` +
-					` --search=${shellQuote(oldUrl)}` +
-					` --replace=${shellQuote(newUrl)}` +
-					(safeProtectedTables.length
-						? ` --skip-tables=${shellQuote(safeProtectedTables.join(','))}`
-						: ''),
-				{ timeout: 5 * 60_000 },
-			);
-			if (phpResult.code !== 0) {
-				await tracker.track({
-					step: 'PHP search-replace failed — falling back to SQL',
-					level: 'warn',
-					detail: (phpResult.stderr || phpResult.stdout || '').slice(0, 300),
+		try {
+			for (const [oldUrl, newUrl] of allPairs) {
+				const phpResult = await executor.execute(
+					`php ${srScript}` +
+						` --mycnf=${srMycnf}` +
+						` --db-name=${shellQuote(creds.dbName)}` +
+						` --prefix=${shellQuote(p)}` +
+						` --search=${shellQuote(oldUrl)}` +
+						` --replace=${shellQuote(newUrl)}` +
+						(safeProtectedTables.length
+							? ` --skip-tables=${shellQuote(safeProtectedTables.join(','))}`
+							: ''),
+					{ timeout: 5 * 60_000 },
+				);
+				if (phpResult.code !== 0) {
+					await tracker.track({
+						step: 'PHP search-replace failed — falling back to SQL',
+						level: 'warn',
+						detail: (phpResult.stderr || phpResult.stdout || '').slice(0, 300),
+					});
+					phpSuccess = false;
+					break;
+				}
+				try {
+					const parsed = JSON.parse(phpResult.stdout) as {
+						tables_scanned: number;
+						rows_affected: number;
+						errors: string[];
+					};
+					await tracker.track({
+						step: `PHP search-replace: ${oldUrl} → ${newUrl}`,
+						level: 'info',
+						detail: `${parsed.tables_scanned} tables scanned, ${parsed.rows_affected} rows updated${
+							parsed.errors.length ? ` (${parsed.errors.length} errors)` : ''
+						}`,
+					});
+				} catch {
+					await tracker.track({
+						step: `PHP search-replace: ${oldUrl} → ${newUrl}`,
+						level: 'info',
+						detail: phpResult.stdout.slice(0, 200),
 				});
-				phpSuccess = false;
-				break;
+				}
 			}
-			try {
-				const parsed = JSON.parse(phpResult.stdout) as {
-					tables_scanned: number;
-					rows_affected: number;
-					errors: string[];
-				};
-				await tracker.track({
-					step: `PHP search-replace: ${oldUrl} → ${newUrl}`,
-					level: 'info',
-					detail: `${parsed.tables_scanned} tables scanned, ${parsed.rows_affected} rows updated${
-						parsed.errors.length ? ` (${parsed.errors.length} errors)` : ''
-					}`,
-				});
-			} catch {
-				await tracker.track({
-					step: `PHP search-replace: ${oldUrl} → ${newUrl}`,
-					level: 'info',
-					detail: phpResult.stdout.slice(0, 200),
-				});
-			}
+		} finally {
+			await cleanupRemoteMyCnf(executor, srMycnf);
+			await executor.execute(`rm -f ${srScript}`).catch(() => {});
 		}
 
 		if (phpSuccess) {
-			await executor.execute(`rm -f ${srScript} ${srMycnf}`).catch(() => {});
 			await tracker.track({
 				step: 'URL search-replace complete (PHP, serialization-aware)',
 				level: 'info',
@@ -729,8 +689,6 @@ export class SyncDbService {
 			});
 			return;
 		}
-
-		await executor.execute(`rm -f ${srScript}`).catch(() => {});
 		const statements: string[] = [];
 		const addProtectedAwareStatement = (table: string, sql: string) => {
 			if (!protectedSet.has(table)) {
@@ -813,15 +771,8 @@ export class SyncDbService {
 		protectedTables: string[] = [],
 	): Promise<void> {
 		const protectedSet = new Set(this.normalizeProtectedTables(protectedTables));
-		const valMycnf = `/tmp/forge_val_${Date.now()}.cnf`;
+		const valMycnf = await createRemoteMyCnf(executor, creds, `val_${Date.now()}`);
 		try {
-			await executor.pushFile({
-				remotePath: valMycnf,
-				content: Buffer.from(
-					`[client]\nuser=${creds.dbUser}\npassword=${creds.dbPassword}\nhost=${creds.dbHost}\n`,
-				),
-			});
-			await executor.execute(`chmod 600 ${valMycnf}`);
 
 			const pfxRes = await executor.execute(
 				`mysql --defaults-extra-file=${valMycnf} ${creds.dbName} -sN -e ${shellQuote(
@@ -922,7 +873,7 @@ export class SyncDbService {
 				detail: e instanceof Error ? e.message : String(e),
 			});
 		} finally {
-			await executor.execute(`rm -f ${valMycnf}`).catch(() => {});
+			await cleanupRemoteMyCnf(executor, valMycnf);
 		}
 	}
 
@@ -937,30 +888,11 @@ export class SyncDbService {
 	): Promise<void> {
 		const { corePath, contentPath, isBedrock } = layout;
 
-		const {
-			prefix: wpPrefix,
-			allowRootFlag,
-			lsphpBin,
-			wpBin,
-		} = await buildWpCliPrefix(executor, corePath);
-		const wp = (args: string): string => {
-			let phpAndWp: string;
-			if (lsphpBin && wpBin) {
-				phpAndWp = `${shellQuote(lsphpBin)} ${shellQuote(wpBin)}`;
-			} else if (lsphpBin) {
-				phpAndWp = `env WP_CLI_PHP=${shellQuote(lsphpBin)} wp`;
-			} else {
-				phpAndWp = 'wp';
-			}
-			const parts = [wpPrefix, phpAndWp, args.trim(), allowRootFlag].filter(
-				Boolean,
-			);
-			return parts.join(' ') + ' 2>&1';
-		};
+		const wpCli = await WpCliBuilder.create(executor, corePath);
 
 		const cacheResult = await executor
 			.execute(
-				wp(
+				wpCli.buildCommand(
 					`cache flush --path=${shellQuote(corePath)} --skip-themes --skip-plugins`,
 				),
 			)
@@ -972,14 +904,14 @@ export class SyncDbService {
 			});
 			await executor
 				.execute(
-					wp(
+					wpCli.buildCommand(
 						`rewrite flush --path=${shellQuote(corePath)} --skip-themes --skip-plugins`,
 					),
 				)
 				.catch(() => {});
 			await executor
 				.execute(
-					wp(
+					wpCli.buildCommand(
 						`eval 'if(function_exists("opcache_reset")){opcache_reset();}' --path=${shellQuote(corePath)} --skip-themes --skip-plugins`,
 					),
 				)
@@ -989,7 +921,7 @@ export class SyncDbService {
 			if (!skipElementorCssFlush) {
 				const elementorActive = await executor
 					.execute(
-						wp(
+						wpCli.buildCommand(
 							`plugin is-active elementor --path=${shellQuote(corePath)} --skip-themes --skip-plugins`,
 						),
 					)
@@ -1003,7 +935,7 @@ export class SyncDbService {
 					});
 				} else {
 					const elFlush = await executor
-						.execute(wp(`elementor flush-css --path=${shellQuote(corePath)}`))
+						.execute(wpCli.buildCommand(`elementor flush-css --path=${shellQuote(corePath)}`))
 						.catch(() => ({ code: 1, stdout: '', stderr: '' }));
 					if (elFlush.code === 0) {
 						cssFlushSummary = 'rewrite rules, OPcache, and Elementor CSS flushed (WP-CLI)';
@@ -1047,15 +979,9 @@ export class SyncDbService {
 			});
 
 			if (!skipElementorCssFlush) {
+				let diviMycnf: string | null = null;
 				try {
-					const diviMycnf = `/tmp/forge_divi_flush_${Date.now()}.cnf`;
-					await executor.pushFile({
-						remotePath: diviMycnf,
-						content: Buffer.from(
-							`[client]\nuser=${creds.dbUser}\npassword=${creds.dbPassword}\nhost=${creds.dbHost}\n`,
-						),
-					});
-					await executor.execute(`chmod 600 ${diviMycnf}`);
+					diviMycnf = await createRemoteMyCnf(executor, creds, `divi_flush_${Date.now()}`);
 					const pfxRes = await executor.execute(
 						`mysql --defaults-extra-file=${diviMycnf} ${creds.dbName} -sN -e ${shellQuote(
 							`SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${escapeMysql(creds.dbName)}' AND table_name LIKE '%options' LIMIT 1`,
@@ -1074,7 +1000,6 @@ export class SyncDbService {
 					const diviResult = await executor.execute(
 						`mysql --defaults-extra-file=${diviMycnf} ${creds.dbName} -e ${shellQuote(diviDeleteSql)}`,
 					);
-					await executor.execute(`rm -f ${diviMycnf}`).catch(() => {});
 					if (diviResult.code === 0) {
 						await tracker.track({
 							step: `${label}: Divi compiled CSS cache cleared (et_dynamic_css)`,
@@ -1093,12 +1018,16 @@ export class SyncDbService {
 						level: 'warn',
 						detail: e instanceof Error ? e.message : String(e),
 					});
+				} finally {
+					if (diviMycnf) {
+						await cleanupRemoteMyCnf(executor, diviMycnf);
+					}
 				}
 			}
 
 			await executor
 				.execute(
-					wp(
+					wpCli.buildCommand(
 						`litespeed-purge all --path=${shellQuote(corePath)} --skip-themes --skip-plugins`,
 					),
 				)
@@ -1127,15 +1056,9 @@ export class SyncDbService {
 			step: `${label}: WP-CLI unavailable — flushing via SQL + disk`,
 			level: 'warn',
 		});
+		let flushMycnf: string | null = null;
 		try {
-			const flushMycnf = `/tmp/forge_flush_${Date.now()}.cnf`;
-			await executor.pushFile({
-				remotePath: flushMycnf,
-				content: Buffer.from(
-					`[client]\nuser=${creds.dbUser}\npassword=${creds.dbPassword}\nhost=${creds.dbHost}\n`,
-				),
-			});
-			await executor.execute(`chmod 600 ${flushMycnf}`);
+			flushMycnf = await createRemoteMyCnf(executor, creds, `flush_${Date.now()}`);
 			const pfxRes = await executor.execute(
 				`mysql --defaults-extra-file=${flushMycnf} ${creds.dbName} -sN -e ${shellQuote(
 					`SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${escapeMysql(creds.dbName)}' AND table_name LIKE '%options' LIMIT 1`,
@@ -1150,7 +1073,6 @@ export class SyncDbService {
 					`mysql --defaults-extra-file=${flushMycnf} ${creds.dbName} -e "DELETE FROM \`${p}options\` WHERE option_name LIKE '_transient_%' OR option_name LIKE '_site_transient_%' OR option_name = 'elementor_log';"`,
 				)
 				.catch(() => {});
-			await executor.execute(`rm -f ${flushMycnf}`).catch(() => {});
 			await tracker.track({
 				step: `${label}: transients and stale logs cleared (SQL, prefix=${p})`,
 				level: 'info',
@@ -1161,6 +1083,10 @@ export class SyncDbService {
 				level: 'warn',
 				detail: e instanceof Error ? e.message : String(e),
 			});
+		} finally {
+			if (flushMycnf) {
+				await cleanupRemoteMyCnf(executor, flushMycnf);
+			}
 		}
 		await executor
 			.execute(

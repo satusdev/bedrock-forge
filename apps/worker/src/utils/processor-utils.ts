@@ -1,5 +1,6 @@
 import { RemoteExecutorService } from '@bedrock-forge/remote-executor';
 import { StepTracker } from '../services/step-tracker';
+import { readFile } from 'fs/promises';
 
 /**
  * Wrap a string in single quotes for safe shell embedding.
@@ -247,4 +248,162 @@ export async function buildWpCliPrefix(
 		}
 	}
 	return { prefix, allowRootFlag, lsphpBin, wpBin };
+}
+
+/**
+ * Create a temporary MySQL client config file on the remote host for secure password handling.
+ * Returns the remote path to the created file.
+ */
+export async function createRemoteMyCnf(
+	executor: RemoteExecutorService,
+	creds: { dbUser: string; dbPassword?: string; dbHost: string },
+	jobId: string | number,
+	prefix = 'forge',
+): Promise<string> {
+	const remotePath = `/tmp/${prefix}_mycnf_${jobId}_${Date.now()}.cnf`;
+	const content = `[client]\nuser=${creds.dbUser}\npassword=${creds.dbPassword ?? ''}\nhost=${creds.dbHost}\n`;
+	await executor.pushFile({
+		remotePath,
+		content: Buffer.from(content),
+	});
+	await executor.execute(`chmod 600 ${shellQuote(remotePath)}`);
+	return remotePath;
+}
+
+/**
+ * Delete a temporary MySQL config file on the remote host.
+ */
+export async function cleanupRemoteMyCnf(
+	executor: RemoteExecutorService,
+	remotePath: string,
+): Promise<void> {
+	await executor.execute(`rm -f ${shellQuote(remotePath)}`).catch(() => {});
+}
+
+/**
+ * Validate that a table name contains only safe characters to prevent shell/SQL injection.
+ */
+export function isValidTableName(tableName: string): boolean {
+	return /^[A-Za-z0-9_$]+$/.test(tableName);
+}
+
+/**
+ * Filter and normalize a list of table names to ensure they are safe for SQL and shell commands.
+ */
+export function sanitizeTableList(tables: string[]): string[] {
+	const seen = new Set<string>();
+	const safe: string[] = [];
+	for (const raw of tables) {
+		const table = raw.trim();
+		if (isValidTableName(table) && !seen.has(table)) {
+			seen.add(table);
+			safe.push(table);
+		}
+	}
+	return safe;
+}
+
+/**
+ * Push a local helper script from the scripts directory to the remote server.
+ */
+export async function pushRemoteScript(
+	executor: RemoteExecutorService,
+	localScriptPath: string,
+	remoteScriptPath: string,
+): Promise<void> {
+	const content = await readFile(localScriptPath);
+	await executor.pushFile({
+		remotePath: remoteScriptPath,
+		content,
+	});
+}
+
+/**
+ * Builder for constructing WP-CLI commands safely with paths, permissions, and panel-specific PHP overrides.
+ */
+export class WpCliBuilder {
+	constructor(
+		public readonly prefix: string,
+		public readonly allowRootFlag: string,
+		public readonly lsphpBin: string | null,
+		public readonly wpBin: string | null,
+		private readonly rootPath: string,
+	) {}
+
+	static async create(
+		executor: RemoteExecutorService,
+		rootPath: string,
+	): Promise<WpCliBuilder> {
+		const info = await buildWpCliPrefix(executor, rootPath);
+		return new WpCliBuilder(
+			info.prefix,
+			info.allowRootFlag,
+			info.lsphpBin,
+			info.wpBin,
+			rootPath,
+		);
+	}
+
+	buildCommand(args: string): string {
+		let phpAndWp: string;
+		if (this.lsphpBin && this.wpBin) {
+			phpAndWp = `${shellQuote(this.lsphpBin)} ${shellQuote(this.wpBin)}`;
+		} else if (this.lsphpBin) {
+			phpAndWp = `env WP_CLI_PHP=${shellQuote(this.lsphpBin)} wp`;
+		} else {
+			phpAndWp = 'wp';
+		}
+
+		let finalArgs = args.trim();
+		if (!finalArgs.includes('--path=')) {
+			finalArgs += ` --path=${shellQuote(this.rootPath)}`;
+		}
+
+		const parts = [
+			this.prefix,
+			phpAndWp,
+			finalArgs,
+			this.allowRootFlag,
+		].filter(Boolean);
+
+		return parts.join(' ') + ' 2>&1';
+	}
+
+	buildCdCommand(args: string): string {
+		const parts = [
+			'wp',
+			args.trim(),
+			this.allowRootFlag,
+		].filter(Boolean);
+		return `cd ${shellQuote(this.rootPath)} && ${parts.join(' ')} 2>&1`;
+	}
+}
+
+/**
+ * Builder for constructing composer-manager commands with docroot and action parameters.
+ */
+export class ComposerCommandBuilder {
+	private readonly phpCmd: string;
+
+	constructor(
+		private readonly scriptPath: string,
+		private readonly docroot: string,
+		lsphpBin: string | null = null,
+	) {
+		this.phpCmd = lsphpBin ? shellQuote(lsphpBin) : 'php';
+	}
+
+	build(action: string, options: { package?: string; version?: string; constraint?: string } = {}): string {
+		let cmd = `${this.phpCmd} ${shellQuote(this.scriptPath)} --docroot=${shellQuote(this.docroot)} --action=${shellQuote(action)}`;
+		if (options.package) {
+			cmd += ` --package=${shellQuote(options.package)}`;
+		}
+		if (options.version) {
+			cmd += ` --version=${shellQuote(options.version)}`;
+		}
+		if (options.constraint) {
+			cmd += ` --constraint=${shellQuote(options.constraint)}`;
+		}
+		return cmd;
+	}
 }

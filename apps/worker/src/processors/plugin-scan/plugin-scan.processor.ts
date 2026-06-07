@@ -1,7 +1,7 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job, Queue } from 'bullmq';
-import { readFileSync } from 'fs';
+import { join } from 'path';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SshKeyService } from '../../services/ssh-key.service';
 import { StepTracker } from '../../services/step-tracker';
@@ -14,13 +14,7 @@ import {
 	PluginManagePayload,
 } from '@bedrock-forge/shared';
 import { ConfigService } from '@nestjs/config';
-import { join } from 'path';
-import { buildWpCliPrefix } from '../../utils/processor-utils';
-
-/** Wrap a string in single quotes for safe shell embedding on the remote host. */
-function shellQuote(value: string): string {
-	return "'" + value.replace(/'/g, "'\\''") + "'";
-}
+import { buildWpCliPrefix, shellQuote, pushRemoteScript } from '../../utils/processor-utils';
 
 function normalizeGithubRepoUrl(
 	value: string | null | undefined,
@@ -162,11 +156,7 @@ export class PluginScanProcessor extends WorkerHost {
 				level: 'info',
 				detail: `${join(scriptsPath, 'plugin-scan.php')} → ${remoteScript}`,
 			});
-			const scriptContent = readFileSync(join(scriptsPath, 'plugin-scan.php'));
-			await executor.pushFile({
-				remotePath: remoteScript,
-				content: scriptContent,
-			});
+			await pushRemoteScript(executor, join(scriptsPath, 'plugin-scan.php'), remoteScript);
 
 			await job.updateProgress(30);
 
@@ -520,13 +510,7 @@ export class PluginScanProcessor extends WorkerHost {
 					step: 'Uploading composer-manager script',
 					level: 'info',
 				});
-				const scriptContent = readFileSync(
-					join(scriptsPath, 'composer-manager.php'),
-				);
-				await executor.pushFile({
-					remotePath: remoteScript,
-					content: scriptContent,
-				});
+				await pushRemoteScript(executor, join(scriptsPath, 'composer-manager.php'), remoteScript);
 
 				await job.updateProgress(20);
 
