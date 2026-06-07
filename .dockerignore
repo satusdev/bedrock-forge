@@ -1,35 +1,53 @@
-# Turbo cache - must be excluded so Docker builds compile from scratch
+# ── Build caches ─────────────────────────────────────────────────────────────
 .turbo/
-
-# TypeScript incremental build state - excluded to force a clean tsc build
-# inside Docker (paths inside .tsbuildinfo point to the host machine, not /app)
 **/*.tsbuildinfo
 
-# App compiled outputs (builder stage recompiles these)
-# packages/*/dist/ is intentionally NOT excluded; packages like @bedrock-forge/shared
-# must have their pre-built .d.ts files available for downstream compilation
+# ── Compiled outputs (builder stage recompiles these) ────────────────────────
+# NOTE: packages/*/dist/ is intentionally NOT excluded; packages like
+# @bedrock-forge/shared must have their pre-built .d.ts available for
+# downstream compilation if using a local cache. Builder stage rebuilds anyway.
 apps/*/dist/
 
-# Dev dependencies and local state
+# ── Node modules (installed fresh inside Docker) ─────────────────────────────
 node_modules/
 apps/*/node_modules/
 packages/*/node_modules/
 
-# Tests and docs
+# ── Tests, coverage, docs ────────────────────────────────────────────────────
 **/__tests__/
 **/*.test.ts
 **/*.spec.ts
 **/coverage/
+docs/
+tasks/
 
-# Editor / OS files
+# ── Development & tooling ────────────────────────────────────────────────────
+.agents/
+.github/
 .vscode/
 .idea/
-*.DS_Store
 
-# Git
+# ── Shell scripts (not needed inside image) ───────────────────────────────────
+deploy.sh
+dev.sh
+install.sh
+reset.sh
+update.sh
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+
+# ── OS / editor artefacts ─────────────────────────────────────────────────────
+*.DS_Store
+*.swp
+*.swo
+
+# ── Git ───────────────────────────────────────────────────────────────────────
 .git/
 .gitignore
 
-# Local env overrides (the .env file is passed at runtime, not baked into image)
-# Note: .env is intentionally NOT excluded - build needs it for prisma generate
-# .env
+# ── Local env overrides ───────────────────────────────────────────────────────
+# .env is passed at runtime via docker compose env_file, not baked into image.
+.env
+.env.*
+!.env.example

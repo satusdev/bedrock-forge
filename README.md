@@ -43,13 +43,15 @@ supports standard WordPress layouts for many operations.
 | Plugins              | Scan installed plugins, view Composer/manual/GitHub source, activate/deactivate, install, update, remove, change Composer constraints, schedule Composer updates, and manage a custom GitHub plugin catalog. |
 | Themes               | Scan, install, update, activate, and delete themes through WP-CLI worker jobs.                                                                                                                               |
 | WordPress core       | Check current core version and run core updates through WP-CLI worker jobs.                                                                                                                                  |
-| Tools                | Run cleanup, debug toggles, WP cron inspection, log fetches, and other environment operations.                                                                                                               |
+| Tools                | Run cleanup, maintenance mode, debug toggles, WP cron inspection, log fetches, cache fixes, and other environment operations.                                                                                |
+| Files & Config       | Edit remote `.env` safely, compare environment variables, browse safe remote roots, quick-edit text files, tail logs, download small files, archive uploads, and keep project notes.                         |
 | Security             | Run server and WordPress environment scans, schedule scans, review findings, acknowledge findings, apply hardening actions, and configure SSH/file-change alerts.                                            |
 | Monitoring           | HTTP uptime checks, SSL expiry checks, DNS checks, keyword/content checks, response history, incident logs, and notifications.                                                                               |
-| Lighthouse           | Queue and review Lighthouse performance audits for environments, including mobile/desktop strategy history.                                                                                                  |
+| Lighthouse           | Queue and review local Lighthouse or PageSpeed performance audits, including mobile/desktop history and trend charts.                                                                                        |
 | Domains              | Track domain WHOIS expiry and SSL expiry.                                                                                                                                                                    |
 | Billing              | Define hosting/support packages, generate invoices, track invoice status, and configure display currency/locale.                                                                                             |
 | Notifications        | Slack delivery, in-app notification records, notification logs, and weekly reports.                                                                                                                          |
+| Integrations         | Google Drive backup storage, Cloudflare DNS/cache controls, and encrypted integration credentials.                                                                                                           |
 | Platform ops         | Audit logs, job execution logs, system backups, command palette, dark mode, RBAC, and a cross-project problems feed.                                                                                         |
 
 ## What It Does Not Do Yet
@@ -65,15 +67,19 @@ These are current boundaries, not bugs:
 - No incremental backups. Backups are full snapshots by selected scope.
 - No cross-server restore from an existing backup record. Restores target the
   originating environment.
-- Google Drive is the only remote backup target wired into the UI.
+- Google Drive is the only remote backup target wired into the backup UI.
+- The remote file browser is intentionally limited to safe roots such as site
+  root, uploads, logs, downloads, and backup paths.
+- Direct file download is intended for small files; large uploads are packaged
+  into a remote Downloads archive.
 - CyberPanel automation is CyberPanel-specific. cPanel, Plesk, DirectAdmin,
   CloudPanel, and RunCloud are not integrated.
 - WordPress Multisite is not documented or tested.
 - SSH host key trust/known-host verification is not implemented yet.
 - External vulnerability-feed sync such as WPScan/CVE ingestion is not wired
   as a production feed.
-- Lighthouse audits require the worker host to have the needed browser/audit
-  runtime available in the deployed image.
+- Lighthouse runs locally with Chromium in the Docker image by default.
+  Google PageSpeed API fallback is optional and quota-bound.
 
 ## How It Works
 
@@ -138,9 +144,10 @@ Change the admin password immediately after first login.
    path, and server.
 4. Run a backup from **Project -> Backups**.
 5. Run a plugin scan from **Project -> Plugins**.
-6. Configure monitoring from **Monitors** and security schedules from
+6. Use **Project -> Files & Config** for `.env`, downloads, logs, and notes.
+7. Configure monitoring from **Monitors** and security schedules from
    **Security**.
-7. Use **Activity** or the project execution log panel when a queued job needs
+8. Use **Activity** or the project execution log panel when a queued job needs
    inspection.
 
 See [docs/guides/USAGE.md](docs/guides/USAGE.md) for a fuller operator guide.
@@ -193,10 +200,15 @@ pnpm --filter @bedrock-forge/worker test
 
 ```bash
 ./update.sh          # rebuild/restart Forge and apply migrations
+./deploy.sh --cleanup-only # safe Docker image/build-cache cleanup on remote
 ./reset.sh           # destructive reset: wipes volumes and regenerates secrets
 docker compose ps
 docker compose logs -f forge
 ```
+
+Deploy/update cleanup prunes unused images and old Docker builder cache after a
+healthy deploy. It does not prune volumes. Set `DEPLOY_SKIP_DOCKER_CLEANUP=true`
+to skip cleanup, or `DEPLOY_DOCKER_BUILDER_PRUNE_UNTIL=168h` to tune cache age.
 
 Back up both:
 

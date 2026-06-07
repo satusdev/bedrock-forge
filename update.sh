@@ -5,6 +5,26 @@ echo "╔═══════════════════════�
 echo "║      Bedrock Forge — Update            ║"
 echo "╚════════════════════════════════════════╝"
 
+cleanup_docker_disk() {
+  if [[ "${DEPLOY_SKIP_DOCKER_CLEANUP:-false}" == "true" ]]; then
+    echo "Docker cleanup skipped (DEPLOY_SKIP_DOCKER_CLEANUP=true)."
+    return
+  fi
+
+  local builder_until="${DEPLOY_DOCKER_BUILDER_PRUNE_UNTIL:-168h}"
+  echo "Docker disk usage before cleanup:"
+  docker system df || true
+  echo ""
+  echo "Removing unused images..."
+  docker image prune -f || true
+  echo ""
+  echo "Removing builder cache older than ${builder_until}..."
+  docker builder prune -f --filter "until=${builder_until}" || true
+  echo ""
+  echo "Docker disk usage after cleanup:"
+  docker system df || true
+}
+
 # ── Prerequisites ────────────────────────────────────────────────────────────
 command -v docker >/dev/null 2>&1 || { echo "ERROR: Docker is not installed."; exit 1; }
 
@@ -41,3 +61,6 @@ echo "   API  → http://localhost:3001"
 echo "   Web  → http://localhost:3002"
 echo ""
 echo "   Logs: docker compose logs -f forge"
+
+echo ""
+cleanup_docker_disk

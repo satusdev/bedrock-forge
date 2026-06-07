@@ -1,5 +1,8 @@
 # Resource budget — 2 vCPU / 4 GB RAM / 40 GB SSD.
 # Total reserved: ~2.8 GB RAM / ~2.2 CPU. Leaves ~1.2 GB for OS + Docker daemon.
+#
+# Images are built LOCALLY and loaded via SSH — the server never needs to run
+# `docker build`. Update IMAGE_TAG in .env to pin a specific deployment.
 
 services:
   postgres:
@@ -76,10 +79,9 @@ services:
         max-file: '3'
 
   forge:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: runtime
+    # Image is built locally and loaded to the server — no build on server.
+    # The IMAGE_TAG env var is set by deploy.sh (default: latest).
+    image: bedrock-forge/forge:${IMAGE_TAG:-latest}
     restart: unless-stopped
     stop_grace_period: 30s
     env_file: .env
@@ -132,10 +134,8 @@ services:
         max-file: '3'
 
   web:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: web
+    # Image is built locally and loaded to the server — no build on server.
+    image: bedrock-forge/web:${IMAGE_TAG:-latest}
     restart: unless-stopped
     deploy:
       resources:

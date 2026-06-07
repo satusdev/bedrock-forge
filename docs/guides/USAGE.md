@@ -57,6 +57,7 @@ Project tabs:
 | Sync         | Clone or push files/database between environments.                                    |
 | Restore      | Restore backups to the originating environment.                                       |
 | Tools        | Cleanup, WP logs, debug mode, cron listing, cache and operational tools.              |
+| Files & Config | Remote `.env`, safe file browser, downloads, uploads archive, log tail, notes.     |
 | Drift        | Compare environment config against stored baseline/committed config.                  |
 | Themes       | Scan, install, update, activate, and delete themes.                                   |
 | WP Core      | Check WordPress core version and run core updates.                                    |
@@ -106,18 +107,120 @@ Sync is for moving data between project environments.
 
 Supported scopes:
 
-- **Database only**
-- **Files only**
-- **Database + files**
+- **Database only**: Generates a database dump on the source server, transfers it to the target, imports it, runs protection steps, and performs URL replacement.
+- **Files only**: Syncs site files (excluding configurations like `.env`, `wp-config.php`, `.htaccess`) using `rsync` (or a tar-relay fallback).
+- **Database + files**: Performs the database sync first, followed by the file sync.
 
-Forge can replace source URLs with target URLs in database and text assets,
-clear common cache locations, handle Bedrock paths, and preserve configured
-protected tables during database sync.
+### Data Protection & Sanitization
 
-Files sync uses rsync when available and falls back to a tar relay if rsync is
-missing. Protected/root-owned files such as `wp-config.php` are expected to
-remain protected; Forge avoids treating permission reconciliation noise as a
-failed sync.
+When syncing databases between environments (such as cloning from `production` to `staging` or pushing from `staging` to `production`), it is critical to prevent overwriting environment-specific data or leaking sensitive user information. Forge provides three levels of database protection, all configured per target environment.
+
+> **Which should I use?**
+> | Goal | Use |
+> |---|---|
+> | Keep an entire plugin's table intact on target | **Protected Tables** |
+> | Delete/sanitize data after import (e.g. wipe orders on staging) | **SQL Protection Queries** |
+> | Keep target post type content untouched during sync | **Protected Custom Post Types** |
+
+#### 1. Protected Tables
+Protected tables are specific database tables on the target environment that are **completely skipped** during the database import.
+* **How it works**: The source `mysqldump` is generated without those tables. The target's existing table data is never touched or overwritten. They are also excluded from URL search-replace.
+* **When to use**: Plugin-owned tables that are environment-specific and should never be overwritten — e.g. local SMTP settings, Wordfence scan logs, or WP Super Cache config.
+* **Configuration**: Enter the exact table names (e.g. `wp_smtp_settings, wp_wflogs`) in the **Protected Tables** field of the Environment settings modal.
+
+#### 2. SQL Protection Queries
+SQL Protection Queries are custom SQL commands executed on the **target** database **immediately after** the dump is imported but **before** URL search-replace runs.
+* **How it works**: Forge pushes the queries to the target server, auto-detects the WordPress table prefix (via `information_schema`), substitutes `{prefix}` / `%prefix%` with the real prefix (e.g. `wp_` or `mysite_`), and runs all queries in sequence.
+* **When to use**: Sanitizing production data when pushing to staging or dev — delete orders, anonymize emails, clear API keys, etc.
+* **Configuration**: Enter one SQL query per line in the **SQL Protection Queries** text area of the Environment settings modal.
+
+##### Use case: Delete a custom post type on import (e.g. wipe 'project' from staging)
+Use this when you do **not** want a post type to exist on the target after sync. The queries must be entered in dependency order (children before parents):
+
+```sql
+-- 1. Delete comment metadata for project post comments
+DELETE cm FROM {prefix}commentmeta cm
+  INNER JOIN {prefix}comments c ON cm.comment_id = c.comment_ID
+  INNER JOIN {prefix}posts p ON c.comment_post_ID = p.ID
+  WHERE p.post_type = 'project';
+
+-- 2. Delete comments on project posts
+DELETE c FROM {prefix}comments c
+  INNER JOIN {prefix}posts p ON c.comment_post_ID = p.ID
+  WHERE p.post_type = 'project';
+
+-- 3. Delete postmeta for project revisions
+DELETE pm FROM {prefix}postmeta pm
+  INNER JOIN {prefix}posts r ON pm.post_id = r.ID
+  INNER JOIN {prefix}posts p ON r.post_parent = p.ID
+  WHERE r.post_type = 'revision' AND p.post_type = 'project';
+
+-- 4. Delete project revisions
+DELETE r FROM {prefix}posts r
+  INNER JOIN {prefix}posts p ON r.post_parent = p.ID
+  WHERE r.post_type = 'revision' AND p.post_type = 'project';
+
+-- 5. Delete term relationships (category/tag links) for projects
+DELETE tr FROM {prefix}term_relationships tr
+  INNER JOIN {prefix}posts p ON tr.object_id = p.ID
+  WHERE p.post_type = 'project';
+
+-- 6. Delete custom fields / ACF metadata for projects
+DELETE pm FROM {prefix}postmeta pm
+  INNER JOIN {prefix}posts p ON pm.post_id = p.ID
+  WHERE p.post_type = 'project';
+
+-- 7. Finally delete the project posts themselves
+DELETE FROM {prefix}posts WHERE post_type = 'project';
+```
+
+##### Use case: Sanitize WooCommerce orders & customer data on staging
+```sql
+-- Remove WooCommerce orders & shop logs
+DELETE FROM {prefix}posts WHERE post_type IN ('shop_order', 'shop_order_refund', 'wc_user_membership', 'wc_membership_plan');
+DELETE pm FROM {prefix}postmeta pm LEFT JOIN {prefix}posts p ON pm.post_id = p.ID WHERE p.ID IS NULL;
+
+-- Anonymize user email addresses and clear session tokens
+UPDATE {prefix}users SET user_email = CONCAT(user_login, '@staging.local'), user_pass = '$P$B7yO3s4Z2iA5hS7gX9wQ1R0tU6vY2o.' WHERE ID > 1;
+DELETE FROM {prefix}usermeta WHERE meta_key = 'session_tokens';
+```
+
+#### 3. Protected Custom Post Types
+Use this when you want to **keep** the target's existing content for a custom post type untouched — so that whatever is in production doesn't overwrite staging/dev data for that post type.
+
+* **When to use**: You have staging-specific projects, courses, lessons, or test content that you never want wiped out by a production sync.
+* **How it works** (full lifecycle):
+  1. **Pre-import backup**: Before the dump is imported, Forge connects to the target DB, auto-detects the table prefix, and copies all rows for the protected post types from `posts`, `postmeta`, `term_relationships`, `comments`, and `commentmeta` — including their revisions — into temporary `_forge_backup_*` tables.
+  2. **Safe import**: Forge skips the `DROP DATABASE` step so the backup tables survive the incoming dump.
+  3. **Post-import restore**: After import, Forge deletes all rows for the protected post types that arrived from the source (posts + revisions + all their related data), then re-inserts the original target rows from the backup tables, and finally drops the backup tables.
+* **Configuration**: Enter a comma-separated list of custom post type slugs in the **Protected Custom Post Types** field of the Environment settings modal.
+
+```
+project, course, lesson
+```
+
+> **Important**: This preserves post type **content** on the target. The post type **registration** (code / plugin) must still exist on both environments — this only controls which database rows survive the sync.
+
+> **Note**: Protected Custom Post Types and SQL Protection Queries are not mutually exclusive. You could protect `course` posts on staging while also running sanitization queries for WooCommerce orders in the same sync.
+
+## Files & Config
+
+
+Use **Project -> Files & Config** to reduce routine SSH usage.
+
+Available workflows:
+
+- Edit remote `.env` with secret masking, checksum conflict checks, required
+  variable validation, and backup-before-write.
+- Compare `.env` variables between staging and production.
+- Browse safe remote roots: site root, uploads, logs, downloads, and backups.
+- Quick-edit small text files and tail selected log files.
+- Download small files directly from safe roots.
+- Create a remote uploads archive under the Downloads folder.
+- Keep persistent project notes.
+
+The file browser is intentionally scoped. It does not expose arbitrary server
+paths such as `/etc`, `/root`, or SSH key directories.
 
 ## Security
 
@@ -154,7 +257,13 @@ Monitoring supports:
 - Incident logs and notifications.
 
 Lighthouse audits are separate from uptime monitors. Use **Lighthouse** to run
-performance audits for environments and review historical mobile/desktop scores.
+performance audits for environments and review historical mobile/desktop scores
+and trends.
+
+Forge runs local Chromium-based Lighthouse by default to avoid Google PageSpeed
+daily query quotas. PageSpeed API is optional fallback/configurable behavior.
+If a PageSpeed quota error appears, set `LIGHTHOUSE_PROVIDER=local` or wait for
+the Google quota reset.
 
 ## Billing and Packages
 
