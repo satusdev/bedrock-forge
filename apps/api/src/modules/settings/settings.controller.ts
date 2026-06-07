@@ -19,7 +19,10 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { ROLES } from '@bedrock-forge/shared';
 import { SettingsService } from './settings.service';
 import { SetGdriveDto } from './dto/gdrive-settings.dto';
-import { IsBoolean, IsOptional, IsString, MinLength, Matches } from 'class-validator';
+import { SetSettingDto } from './dto/setting.dto';
+import { SetSshKeyDto } from './dto/ssh-key.dto';
+import { SetBillingSettingsDto } from './dto/billing-settings.dto';
+import { SetCloudflareSettingsDto, UpdateCloudflareDnsRecordDto } from './dto/cloudflare-settings.dto';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { writeFile, unlink, mkdir } from 'fs/promises';
@@ -29,56 +32,6 @@ import { randomUUID } from 'crypto';
 import { ConfigService } from '@nestjs/config';
 
 const execFileAsync = promisify(execFile);
-
-class SetSettingDto {
-	@IsString() value!: string;
-}
-
-class SetSshKeyDto {
-	@IsString() @MinLength(20) key!: string;
-}
-
-class SetBillingSettingsDto {
-	@IsString()
-	@Matches(/^[A-Za-z]{3}$/)
-	currency_code!: string;
-
-	@IsString()
-	@MinLength(2)
-	currency_locale!: string;
-}
-
-class SetCloudflareSettingsDto {
-	@IsString()
-	@MinLength(20)
-	api_token!: string;
-
-	@IsString()
-	@MinLength(3)
-	zone_id!: string;
-
-	@IsOptional()
-	@IsString()
-	zone_name?: string;
-}
-
-class UpdateCloudflareDnsRecordDto {
-	@IsOptional()
-	@IsString()
-	type?: string;
-
-	@IsOptional()
-	@IsString()
-	name?: string;
-
-	@IsOptional()
-	@IsString()
-	content?: string;
-
-	@IsOptional()
-	@IsBoolean()
-	proxied?: boolean;
-}
 
 interface RcloneOAuthToken {
 	access_token?: string;
