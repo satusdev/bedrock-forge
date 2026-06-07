@@ -7,6 +7,7 @@ const SENSITIVE_KEYS = new Set([
 	'global_ssh_private_key',
 	'rclone_gdrive_config',
 	'GITHUB_API_TOKEN',
+	'cloudflare_api_token',
 ]);
 
 @Injectable()

@@ -19,7 +19,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { ROLES } from '@bedrock-forge/shared';
 import { SettingsService } from './settings.service';
 import { SetGdriveDto } from './dto/gdrive-settings.dto';
-import { IsString, MinLength, Matches } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, MinLength, Matches } from 'class-validator';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { writeFile, unlink, mkdir } from 'fs/promises';
@@ -46,6 +46,38 @@ class SetBillingSettingsDto {
 	@IsString()
 	@MinLength(2)
 	currency_locale!: string;
+}
+
+class SetCloudflareSettingsDto {
+	@IsString()
+	@MinLength(20)
+	api_token!: string;
+
+	@IsString()
+	@MinLength(3)
+	zone_id!: string;
+
+	@IsOptional()
+	@IsString()
+	zone_name?: string;
+}
+
+class UpdateCloudflareDnsRecordDto {
+	@IsOptional()
+	@IsString()
+	type?: string;
+
+	@IsOptional()
+	@IsString()
+	name?: string;
+
+	@IsOptional()
+	@IsString()
+	content?: string;
+
+	@IsOptional()
+	@IsBoolean()
+	proxied?: boolean;
 }
 
 interface RcloneOAuthToken {
@@ -159,6 +191,110 @@ export class SettingsController {
 		await this.svc.delete('rclone_gdrive_config');
 	}
 
+	// ── Cloudflare ──────────────────────────────────────────────────────────
+
+	@Get('cloudflare')
+	async getCloudflare() {
+		const configured = await this.svc.hasEncrypted('cloudflare_api_token');
+		const zone = await this.svc.get('cloudflare_zone_id');
+		const zoneName = await this.svc.get('cloudflare_zone_name');
+		return {
+			configured,
+			zone_id: zone?.value ?? null,
+			zone_name: zoneName?.value ?? null,
+		};
+	}
+
+	@Put('cloudflare') @HttpCode(HttpStatus.NO_CONTENT) async setCloudflare(
+		@Body() dto: SetCloudflareSettingsDto,
+	) {
+		await Promise.all([
+			this.svc.setEncrypted('cloudflare_api_token', dto.api_token.trim()),
+			this.svc.set('cloudflare_zone_id', dto.zone_id.trim()),
+			this.svc.set('cloudflare_zone_name', dto.zone_name?.trim() ?? ''),
+		]);
+	}
+
+	@Delete('cloudflare') @HttpCode(HttpStatus.NO_CONTENT) async deleteCloudflare() {
+		await Promise.all([
+			this.svc.delete('cloudflare_api_token').catch(() => undefined),
+			this.svc.delete('cloudflare_zone_id').catch(() => undefined),
+			this.svc.delete('cloudflare_zone_name').catch(() => undefined),
+		]);
+	}
+
+	@Post('cloudflare/test')
+	async testCloudflare() {
+		const { token, zoneId } = await this.getCloudflareCredentials();
+		const result = await this.cloudflareFetch(token, `/zones/${zoneId}`);
+		return {
+			success: true,
+			message: `Connected to ${result.result?.name ?? zoneId}`,
+			zone: result.result,
+		};
+	}
+
+	@Get('cloudflare/dns-records')
+	async listCloudflareDnsRecords() {
+		const { token, zoneId } = await this.getCloudflareCredentials();
+		const result = await this.cloudflareFetch(
+			token,
+			`/zones/${zoneId}/dns_records?per_page=100`,
+		);
+		return result.result ?? [];
+	}
+
+	@Put('cloudflare/dns-records/:recordId')
+	async updateCloudflareDnsRecord(
+		@Param('recordId') recordId: string,
+		@Body() dto: UpdateCloudflareDnsRecordDto,
+	) {
+		const { token, zoneId } = await this.getCloudflareCredentials();
+		const existing = await this.cloudflareFetch(
+			token,
+			`/zones/${zoneId}/dns_records/${recordId}`,
+		);
+		const current = existing.result;
+		const payload = {
+			type: dto.type ?? current.type,
+			name: dto.name ?? current.name,
+			content: dto.content ?? current.content,
+			ttl: current.ttl ?? 1,
+			proxied: dto.proxied ?? current.proxied ?? false,
+		};
+		const result = await this.cloudflareFetch(
+			token,
+			`/zones/${zoneId}/dns_records/${recordId}`,
+			{ method: 'PUT', body: JSON.stringify(payload) },
+		);
+		return result.result;
+	}
+
+	@Post('cloudflare/cache/purge')
+	async purgeCloudflareCache() {
+		const { token, zoneId } = await this.getCloudflareCredentials();
+		const result = await this.cloudflareFetch(
+			token,
+			`/zones/${zoneId}/purge_cache`,
+			{ method: 'POST', body: JSON.stringify({ purge_everything: true }) },
+		);
+		return { success: !!result.success };
+	}
+
+	@Put('cloudflare/development-mode')
+	async setCloudflareDevelopmentMode(@Body('enabled') enabled: boolean) {
+		const { token, zoneId } = await this.getCloudflareCredentials();
+		const result = await this.cloudflareFetch(
+			token,
+			`/zones/${zoneId}/settings/development_mode`,
+			{
+				method: 'PATCH',
+				body: JSON.stringify({ value: enabled ? 'on' : 'off' }),
+			},
+		);
+		return result.result;
+	}
+
 	/**
 	 * Test the stored Google Drive credentials by writing a temp rclone.conf
 	 * and running `rclone lsd`. Returns { success: boolean, message: string }.
@@ -197,6 +333,37 @@ export class SettingsController {
 		} finally {
 			await unlink(tmpConf).catch(() => undefined);
 		}
+	}
+
+	private async getCloudflareCredentials() {
+		const token = await this.svc.getDecrypted('cloudflare_api_token');
+		const zone = await this.svc.get('cloudflare_zone_id');
+		if (!token || !zone?.value) {
+			throw new BadRequestException('Cloudflare is not configured.');
+		}
+		return { token, zoneId: zone.value };
+	}
+
+	private async cloudflareFetch(
+		token: string,
+		path: string,
+		init: RequestInit = {},
+	): Promise<any> {
+		const res = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
+			...init,
+			headers: {
+				Authorization: `Bearer ${token}`,
+				'Content-Type': 'application/json',
+				...(init.headers ?? {}),
+			},
+		});
+		const payload = await res.json().catch(() => null);
+		if (!res.ok || payload?.success === false) {
+			const message =
+				payload?.errors?.[0]?.message ?? res.statusText ?? 'Cloudflare request failed';
+			throw new BadRequestException(message);
+		}
+		return payload;
 	}
 
 	// ── System Backup Folder ID ─────────────────────────────────────────────
