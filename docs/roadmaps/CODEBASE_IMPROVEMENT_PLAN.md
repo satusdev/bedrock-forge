@@ -122,7 +122,7 @@ worker extraction while sync behavior is still settling.
 Recommended order:
 
 - [x] `apps/web/src/pages/project-detail/PluginsTab.tsx` [COMPLETED]
-- [ ] `apps/web/src/pages/project-detail/EnvironmentsTab.tsx`
+- [x] `apps/web/src/pages/project-detail/EnvironmentsTab.tsx` [COMPLETED]
 - [ ] `apps/web/src/pages/project-detail/SyncTab.tsx`
 - [ ] `apps/web/src/pages/project-detail/BackupsTab.tsx`
 - [ ] `apps/web/src/pages/project-detail/ToolsTab.tsx`
