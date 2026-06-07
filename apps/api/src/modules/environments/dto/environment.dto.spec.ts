@@ -68,4 +68,31 @@ describe('CreateEnvironmentDto', () => {
 			]),
 		);
 	});
+
+	it('accepts valid protected table names used by custom plugins', async () => {
+		const errors = await validateDto({
+			...validEnvironment,
+			protected_tables: [
+				'wp_ct_registrations',
+				'wp_lamah_certificates',
+				'wp_frmt_form_entry_meta',
+				'wp_posts',
+			],
+		});
+
+		expect(errors).toHaveLength(0);
+	});
+
+	it('rejects protected table names with hyphens instead of silently rewriting them', async () => {
+		const errors = await validateDto({
+			...validEnvironment,
+			protected_tables: ['wp-valid-but-hyphenated'],
+		});
+
+		expect(errors).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ property: 'protected_tables' }),
+			]),
+		);
+	});
 });

@@ -80,6 +80,8 @@ export class EnvironmentsRepository {
 				backup_path: dto.backup_path ?? null,
 				google_drive_folder_id: dto.google_drive_folder_id ?? null,
 				protected_tables: dto.protected_tables ?? [],
+				sql_protection_queries: dto.sql_protection_queries ?? [],
+				protected_post_types: dto.protected_post_types ?? [],
 			},
 			include: {
 				server: {
@@ -108,6 +110,12 @@ export class EnvironmentsRepository {
 				}),
 				...(dto.protected_tables !== undefined && {
 					protected_tables: dto.protected_tables,
+				}),
+				...(dto.sql_protection_queries !== undefined && {
+					sql_protection_queries: dto.sql_protection_queries,
+				}),
+				...(dto.protected_post_types !== undefined && {
+					protected_post_types: dto.protected_post_types,
 				}),
 			},
 			include: {

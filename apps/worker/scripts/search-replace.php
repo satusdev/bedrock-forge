@@ -11,7 +11,7 @@
  *   php search-replace.php \
  *     --mycnf=/tmp/forge_sr.cnf --db-name=mydb \
  *     --search='https://old.example.com' --replace='https://new.example.com' \
- *     [--prefix=wp_] [--dry-run]
+ *     [--prefix=wp_] [--skip-tables=wp_posts,wp_ct_registrations] [--dry-run]
  *
  * Usage (backward-compat — script creates a temp .my.cnf internally):
  *   php search-replace.php \
@@ -55,6 +55,15 @@ $search = $opts['search'];
 $replace = $opts['replace'];
 $prefix  = $opts['prefix'] ?? 'wp_';
 $dryRun  = isset($opts['dry-run']);
+$skipTables = [];
+if (isset($opts['skip-tables']) && trim((string) $opts['skip-tables']) !== '') {
+    foreach (explode(',', (string) $opts['skip-tables']) as $table) {
+        $table = trim($table);
+        if ($table !== '' && preg_match('/^[A-Za-z0-9_$]+$/', $table)) {
+            $skipTables[$table] = true;
+        }
+    }
+}
 
 // ── Credentials (.my.cnf) ────────────────────────────────────────────────
 
@@ -148,7 +157,11 @@ $tableColumns = [];
 foreach ($colRows as $line) {
     $parts = explode("\t", $line, 2);
     if (count($parts) === 2) {
-        $tableColumns[trim($parts[0])][] = trim($parts[1]);
+        $table = trim($parts[0]);
+        if (isset($skipTables[$table])) {
+            continue;
+        }
+        $tableColumns[$table][] = trim($parts[1]);
     }
 }
 

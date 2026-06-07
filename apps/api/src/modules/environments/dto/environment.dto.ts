@@ -23,7 +23,7 @@ export type EnvironmentType = (typeof ENVIRONMENT_TYPES)[number];
  */
 const ABSOLUTE_SAFE_PATH_REGEX =
 	/^\/(?!.*(?:^|\/)\.\.(?:\/|$))[a-zA-Z0-9/_\-.]+$/;
-const TABLE_NAME_REGEX = /^[A-Za-z0-9_$-]+$/;
+const TABLE_NAME_REGEX = /^[A-Za-z0-9_$]+$/;
 
 export class UpsertDbCredentialsDto {
 	@IsString() @IsNotEmpty() @MaxLength(100) dbName!: string;
@@ -76,9 +76,25 @@ export class CreateEnvironmentDto {
 	@Matches(TABLE_NAME_REGEX, {
 		each: true,
 		message:
-			'protected_tables entries may only contain letters, numbers, underscores, hyphens, and dollar signs',
+			'protected_tables entries may only contain letters, numbers, underscores, and dollar signs',
 	})
 	protected_tables?: string[];
+
+	/**
+	 * SQL queries run on the TARGET immediately after database import to sanitize/filter/protect data.
+	 */
+	@IsOptional()
+	@IsArray()
+	@IsString({ each: true })
+	sql_protection_queries?: string[];
+
+	/**
+	 * WP custom post types to be preserved on the TARGET during a DB push or clone.
+	 */
+	@IsOptional()
+	@IsArray()
+	@IsString({ each: true })
+	protected_post_types?: string[];
 }
 
 export class UpdateEnvironmentDto extends PartialType(CreateEnvironmentDto) {}

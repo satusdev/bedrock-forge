@@ -87,6 +87,8 @@ interface Environment {
 	backup_path: string | null;
 	google_drive_folder_id: string | null;
 	protected_tables: string[];
+	sql_protection_queries?: string[];
+	protected_post_types?: string[];
 	server: {
 		id: number;
 		name: string;
@@ -127,6 +129,8 @@ const ENV_TYPES = [
 	{ value: 'staging', label: 'Staging' },
 	{ value: 'development', label: 'Development' },
 ] as const;
+
+const TABLE_NAME_REGEX = /^[A-Za-z0-9_$]+$/;
 type EnvTypeValue = (typeof ENV_TYPES)[number]['value'];
 
 const SERVER_STATUS_VARIANT: Record<
@@ -175,8 +179,17 @@ function ProtectedTablesPicker({
 	};
 
 	const addManual = () => {
-		const name = manualInput.trim().replace(/[^a-zA-Z0-9_$]/g, '');
+		const name = manualInput.trim();
 		if (!name) return;
+		if (!TABLE_NAME_REGEX.test(name)) {
+			toast({
+				title: 'Invalid table name',
+				description:
+					'Use the exact MySQL table name with only letters, numbers, underscores, and dollar signs.',
+				variant: 'destructive',
+			});
+			return;
+		}
 		if (!value.includes(name)) onChange([...value, name]);
 		setManualInput('');
 	};
@@ -387,16 +400,31 @@ function EnvironmentFormDialog({
 		initial?.protected_tables ?? [],
 	);
 
+	const [sqlProtectionQueriesText, setSqlProtectionQueriesText] = useState<string>(
+		initial?.sql_protection_queries?.join('\n') ?? '',
+	);
+
+	const [protectedPostTypesText, setProtectedPostTypesText] = useState<string>(
+		initial?.protected_post_types?.join(', ') ?? '',
+	);
+
 	async function onSubmit(data: EnvForm) {
 		try {
 			const payload: Record<string, unknown> = {
 				type: data.type,
 				server_id: data.server_id,
 				url: data.url,
-				root_path: data.root_path,
 				backup_path: data.backup_path || null,
 				google_drive_folder_id: data.google_drive_folder_id || null,
 				protected_tables: protectedTables,
+				sql_protection_queries: sqlProtectionQueriesText
+					.split('\n')
+					.map(q => q.trim())
+					.filter(Boolean),
+				protected_post_types: protectedPostTypesText
+					.split(',')
+					.map(t => t.trim())
+					.filter(Boolean),
 			};
 			if (initial) {
 				await api.put(
@@ -561,8 +589,47 @@ function EnvironmentFormDialog({
 							onChange={setProtectedTables}
 						/>
 						<p className='text-xs text-muted-foreground'>
-							WP table names preserved during DB push/clone. Use for custom
-							plugin tables that hold production-only data.
+							WP table names preserved during DB push/clone and skipped during
+							URL search-replace. Use for custom plugin tables that hold
+							production-only data.
+						</p>
+					</div>
+
+					<div className='space-y-1.5'>
+						<Label htmlFor='env-post-types'>
+							Protected Custom Post Types{' '}
+							<span className='text-muted-foreground font-normal text-xs'>
+								(optional)
+							</span>
+						</Label>
+						<Input
+							id='env-post-types'
+							value={protectedPostTypesText}
+							onChange={e => setProtectedPostTypesText(e.target.value)}
+							placeholder="project, course, lesson"
+							className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50'
+						/>
+						<p className='text-xs text-muted-foreground'>
+							WordPress custom post type identifiers (comma-separated, e.g. `project, course`) to preserve on the target database during database sync. Target data for these post types will not be overwritten.
+						</p>
+					</div>
+
+					<div className='space-y-1.5'>
+						<Label htmlFor='env-sql-queries'>
+							SQL Protection Queries{' '}
+							<span className='text-muted-foreground font-normal text-xs'>
+								(optional)
+							</span>
+						</Label>
+						<textarea
+							id='env-sql-queries'
+							value={sqlProtectionQueriesText}
+							onChange={e => setSqlProtectionQueriesText(e.target.value)}
+							placeholder="DELETE FROM {prefix}posts WHERE post_type = 'shop_order';&#10;DELETE FROM {prefix}options WHERE option_name LIKE 'elementor_%';"
+							className='flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 font-mono'
+						/>
+						<p className='text-xs text-muted-foreground'>
+							SQL queries executed on the target database after DB sync but before URL rewrites. Enter one query per line. `{'{prefix}'}` will resolve to the target database prefix (e.g. `wp_`).
 						</p>
 					</div>
 

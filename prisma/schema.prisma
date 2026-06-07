@@ -25,6 +25,7 @@ model User {
   audit_logs          AuditLog[]
   notifications       UserNotification[]
   finding_acks        SecurityFindingAck[]
+  resource_notes      ResourceNote[]
 
   @@map("users")
 }
@@ -233,6 +234,8 @@ model Environment {
   backup_path       String?  // Persistent remote path for backup storage (e.g. /home/user/backups)
   google_drive_folder_id String? // Optional Google Drive folder ID for backup storage override
   protected_tables  String[] @default([]) // WP table names excluded from DB push/clone (data preserved on target)
+  sql_protection_queries String[] @default([]) // SQL queries run on target after DB push/clone to protect/sanitize/filter data
+  protected_post_types   String[] @default([]) // WP custom post types preserved on target during DB push/clone
   is_baseline       Boolean  @default(false) // marked as the canonical reference env for drift detection
   created_at        DateTime @default(now()) @db.Timestamptz()
   updated_at        DateTime @updatedAt @db.Timestamptz()
@@ -611,6 +614,37 @@ model AppSetting {
   updated_at DateTime @updatedAt @db.Timestamptz()
 
   @@map("app_settings")
+}
+
+model ResourceNote {
+  id              BigInt   @id @default(autoincrement())
+  resource_type   String   // project | environment | server
+  resource_id     BigInt
+  body            String
+  pinned          Boolean  @default(false)
+  created_by_id   BigInt?
+  created_at      DateTime @default(now()) @db.Timestamptz()
+  updated_at      DateTime @updatedAt @db.Timestamptz()
+
+  created_by  User?        @relation(fields: [created_by_id], references: [id], onDelete: SetNull)
+
+  @@index([resource_type, resource_id])
+  @@index([created_by_id])
+  @@map("resource_notes")
+}
+
+model EnvVariableTemplate {
+  id                BigInt   @id @default(autoincrement())
+  name              String
+  environment_type  String?
+  required_keys     String[] @default([])
+  secret_keys       String[] @default([])
+  defaults          Json?
+  created_at        DateTime @default(now()) @db.Timestamptz()
+  updated_at        DateTime @updatedAt @db.Timestamptz()
+
+  @@unique([name, environment_type])
+  @@map("env_variable_templates")
 }
 
 // Forge self-backup: pg_dump of the Forge PostgreSQL DB uploaded to Google Drive

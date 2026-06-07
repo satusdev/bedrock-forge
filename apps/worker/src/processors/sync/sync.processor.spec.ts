@@ -377,6 +377,31 @@ describe('SyncProcessor', () => {
 			expect(sqlCall![0]).toContain('elementor_log');
 			expect(sqlCall![0]).toContain('_transient_');
 		});
+
+		it('skips validation probes for protected core tables', async () => {
+			const executor = makeExecutor({
+				postsOutput:
+					'posts\t42:page\t<a href="https://staging.example.com/foo">Button</a>',
+			});
+			const tracker = makeTracker();
+
+			await expect(
+				(processor as any).validateUrlReplacement(
+					executor,
+					creds,
+					sourceUrl,
+					targetUrl,
+					tracker,
+					['wp_posts'],
+				),
+			).resolves.toBeUndefined();
+
+			expect(
+				(executor.execute as jest.Mock).mock.calls.some(([cmd]: [string]) =>
+					cmd.includes('FROM `wp_posts`'),
+				),
+			).toBe(false);
+		});
 	});
 
 	// ── replaceUrlsInFiles integrity ───────────────────────────────────────────
@@ -933,7 +958,10 @@ describe('SyncProcessor', () => {
 						// buildWpCliPrefix probe — no sudo
 						return Promise.resolve({ code: 1, stdout: '', stderr: '' });
 					}
-					if (cmd.includes('wp search-replace') || cmd.includes('&& wp ')) {
+					if (
+						cmd.includes('search-replace') &&
+						!cmd.includes('forge_sr_')
+					) {
 						wpCliCallCount++;
 						// Succeed for pair 0 (plain URL), fail for pair 1 (escaped URL)
 						const succeeds = wpCliCallCount % 2 === 1;
@@ -996,6 +1024,7 @@ describe('SyncProcessor', () => {
 					tracker,
 					makeJob(JOB_TYPES.SYNC_CLONE, { jobExecutionId: 1 }),
 					'sync',
+					['wp_posts', 'wp_ct_registrations'],
 				);
 			} finally {
 				jest.spyOn(require('fs/promises'), 'readFile').mockRestore();
@@ -1003,6 +1032,342 @@ describe('SyncProcessor', () => {
 
 			// When WP-CLI partially fails, the PHP strategy should have been invoked.
 			expect(phpCalls.length).toBeGreaterThan(0);
+			expect(phpCalls[0]).toContain(
+				"--skip-tables='wp_posts,wp_ct_registrations'",
+			);
+		});
+
+		it('adds protected tables to successful WP-CLI search-replace commands', async () => {
+			const executor = {
+				pushFile: jest.fn().mockResolvedValue(undefined),
+				execute: jest.fn().mockImplementation((cmd: string) => {
+					if (cmd.includes('stat ') || cmd.includes('id ')) {
+						return Promise.resolve({ code: 1, stdout: '', stderr: '' });
+					}
+					if (cmd.includes('search-replace') && !cmd.includes('forge_sr_')) {
+						return Promise.resolve({ code: 0, stdout: 'Done', stderr: '' });
+					}
+					return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+				}),
+			};
+			const tracker = { track: jest.fn().mockResolvedValue(undefined) } as any;
+
+			await (processor as any).runUrlSearchReplace(
+				'https://staging.example.com',
+				'https://example.com',
+				executor,
+				{
+					dbHost: 'localhost',
+					dbUser: 'u',
+					dbPassword: 'p',
+					dbName: 'db',
+				},
+				'/var/www/html',
+				tracker,
+				makeJob(JOB_TYPES.SYNC_CLONE, { jobExecutionId: 1 }),
+				'sync',
+				['wp_posts', 'wp_ct_registrations'],
+			);
+
+			const commands = (executor.execute as jest.Mock).mock.calls
+				.map(([cmd]) => String(cmd))
+				.join('\n');
+			expect(commands).toContain('search-replace');
+			expect(commands).toContain(
+				"--skip-tables='wp_posts,wp_ct_registrations'",
+			);
+		});
+
+		it('does not generate SQL fallback updates for protected core tables', async () => {
+			let pushedSql = '';
+			const executor = {
+				pushFile: jest.fn().mockImplementation(({ remotePath, content }) => {
+					if (remotePath.includes('_sql_')) {
+						pushedSql = Buffer.isBuffer(content)
+							? content.toString('utf8')
+							: String(content);
+					}
+					return Promise.resolve(undefined);
+				}),
+				execute: jest.fn().mockImplementation((cmd: string) => {
+					if (cmd.includes('stat ') || cmd.includes('id ')) {
+						return Promise.resolve({ code: 1, stdout: '', stderr: '' });
+					}
+					if (
+						cmd.includes('search-replace') &&
+						!cmd.includes('forge_sr_')
+					) {
+						return Promise.resolve({ code: 1, stdout: '', stderr: 'wp failed' });
+					}
+					if (cmd.includes('information_schema') || cmd.includes('%options')) {
+						return Promise.resolve({ code: 0, stdout: 'wp_', stderr: '' });
+					}
+					if (cmd.includes('php ') && cmd.includes('forge_sr_')) {
+						return Promise.resolve({ code: 1, stdout: '', stderr: 'php failed' });
+					}
+					return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+				}),
+			};
+			const tracker = { track: jest.fn().mockResolvedValue(undefined), trackCommand: jest.fn().mockResolvedValue(undefined) } as any;
+			const creds = {
+				dbHost: 'localhost',
+				dbUser: 'u',
+				dbPassword: 'p',
+				dbName: 'db',
+			};
+
+			jest
+				.spyOn(require('fs/promises'), 'readFile')
+				.mockResolvedValue(Buffer.from('<?php echo "fail";'));
+
+			try {
+				await (processor as any).runUrlSearchReplace(
+					'https://staging.example.com',
+					'https://example.com',
+					executor,
+					creds,
+					'/var/www/html',
+					tracker,
+					makeJob(JOB_TYPES.SYNC_CLONE, { jobExecutionId: 1 }),
+					'sync',
+					['wp_posts'],
+				);
+			} finally {
+				jest.spyOn(require('fs/promises'), 'readFile').mockRestore();
+			}
+
+			expect(pushedSql).toContain('UPDATE `wp_options`');
+			expect(pushedSql).not.toContain('UPDATE `wp_posts`');
+		});
+	});
+
+	// ── backupProtectedPostTypes & restoreProtectedPostTypes ──────────────────
+
+	describe('backup/restore protected post types', () => {
+		const creds = {
+			dbHost: 'localhost',
+			dbUser: 'u',
+			dbPassword: 'p',
+			dbName: 'db',
+		};
+		const postTypes = ['course', 'lesson'];
+		const tgtMycnf = '/tmp/my.cnf';
+
+		describe('backupProtectedPostTypes', () => {
+			it('returns null if postTypes list is empty', async () => {
+				const executor = { execute: jest.fn() } as any;
+				const tracker = { track: jest.fn() } as any;
+				const res = await (processor as any).backupProtectedPostTypes(
+					executor,
+					creds,
+					tgtMycnf,
+					[],
+					tracker,
+				);
+				expect(res).toBeNull();
+			});
+
+			it('returns null if posts table does not exist', async () => {
+				const executor = {
+					execute: jest.fn().mockResolvedValue({ code: 0, stdout: '', stderr: '' }),
+				} as any;
+				const tracker = { track: jest.fn() } as any;
+				const res = await (processor as any).backupProtectedPostTypes(
+					executor,
+					creds,
+					tgtMycnf,
+					postTypes,
+					tracker,
+				);
+				expect(res).toBeNull();
+				expect(tracker.track).toHaveBeenCalledWith(
+					expect.objectContaining({
+						step: expect.stringContaining('posts table does not exist'),
+					}),
+				);
+			});
+
+			it('returns prefix and skips backup if backup table already exists', async () => {
+				const executor = {
+					pushFile: jest.fn(),
+					execute: jest.fn().mockImplementation((cmd: string) => {
+						if (cmd.includes('SHOW TABLES') && cmd.includes('wp_posts')) {
+							return Promise.resolve({ code: 0, stdout: 'wp_posts', stderr: '' });
+						}
+						if (cmd.includes('SHOW TABLES') && cmd.includes('wp_forge_backup_posts')) {
+							return Promise.resolve({ code: 0, stdout: 'wp_forge_backup_posts', stderr: '' });
+						}
+						return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+					}),
+				} as any;
+				const tracker = { track: jest.fn() } as any;
+				const res = await (processor as any).backupProtectedPostTypes(
+					executor,
+					creds,
+					tgtMycnf,
+					postTypes,
+					tracker,
+				);
+				expect(res).toBe('wp_');
+				expect(executor.pushFile).not.toHaveBeenCalled();
+				expect(tracker.track).toHaveBeenCalledWith(
+					expect.objectContaining({
+						step: expect.stringContaining('existing backup tables detected'),
+					}),
+				);
+			});
+
+			it('creates backup and returns prefix if backup table does not exist', async () => {
+				const executor = {
+					pushFile: jest.fn().mockResolvedValue(undefined),
+					execute: jest.fn().mockImplementation((cmd: string) => {
+						if (cmd.includes('SHOW TABLES') && cmd.includes('wp_posts')) {
+							return Promise.resolve({ code: 0, stdout: 'wp_posts', stderr: '' });
+						}
+						if (cmd.includes('SHOW TABLES') && cmd.includes('wp_forge_backup_posts')) {
+							return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+						}
+						return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+					}),
+				} as any;
+				const tracker = { track: jest.fn() } as any;
+				const res = await (processor as any).backupProtectedPostTypes(
+					executor,
+					creds,
+					tgtMycnf,
+					postTypes,
+					tracker,
+				);
+				expect(res).toBe('wp_');
+				expect(executor.pushFile).toHaveBeenCalled();
+				expect(tracker.track).toHaveBeenCalledWith(
+					expect.objectContaining({
+						step: expect.stringContaining('backing up target post types'),
+					}),
+				);
+			});
+
+			it('returns null if backup command fails', async () => {
+				const executor = {
+					pushFile: jest.fn().mockResolvedValue(undefined),
+					execute: jest.fn().mockImplementation((cmd: string) => {
+						if (cmd.includes('SHOW TABLES') && cmd.includes('wp_posts')) {
+							return Promise.resolve({ code: 0, stdout: 'wp_posts', stderr: '' });
+						}
+						if (cmd.includes('SHOW TABLES') && cmd.includes('wp_forge_backup_posts')) {
+							return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+						}
+						if (cmd.includes('<') && cmd.includes('forge_post_type_backup_')) {
+							return Promise.resolve({ code: 1, stdout: '', stderr: 'Access denied' });
+						}
+						return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+					}),
+				} as any;
+				const tracker = { track: jest.fn() } as any;
+				const res = await (processor as any).backupProtectedPostTypes(
+					executor,
+					creds,
+					tgtMycnf,
+					postTypes,
+					tracker,
+				);
+				expect(res).toBeNull();
+				expect(tracker.track).toHaveBeenCalledWith(
+					expect.objectContaining({
+						step: expect.stringContaining('backup failed'),
+					}),
+				);
+			});
+		});
+
+		describe('restoreProtectedPostTypes', () => {
+			it('skips restore if postTypes is empty', async () => {
+				const executor = { execute: jest.fn() } as any;
+				const tracker = { track: jest.fn() } as any;
+				await (processor as any).restoreProtectedPostTypes(
+					executor,
+					creds,
+					tgtMycnf,
+					[],
+					'wp_',
+					tracker,
+				);
+				expect(executor.execute).not.toHaveBeenCalled();
+			});
+
+			it('skips restore if backup table does not exist', async () => {
+				const executor = {
+					execute: jest.fn().mockResolvedValue({ code: 0, stdout: '', stderr: '' }),
+				} as any;
+				const tracker = { track: jest.fn() } as any;
+				await (processor as any).restoreProtectedPostTypes(
+					executor,
+					creds,
+					tgtMycnf,
+					postTypes,
+					'wp_',
+					tracker,
+				);
+				expect(executor.execute).toHaveBeenCalledTimes(1); // Only for check
+			});
+
+			it('performs restore and tracks success when query succeeds', async () => {
+				const executor = {
+					pushFile: jest.fn().mockResolvedValue(undefined),
+					execute: jest.fn().mockImplementation((cmd: string) => {
+						if (cmd.includes('SHOW TABLES') && cmd.includes('wp_forge_backup_posts')) {
+							return Promise.resolve({ code: 0, stdout: 'wp_forge_backup_posts', stderr: '' });
+						}
+						return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+					}),
+				} as any;
+				const tracker = { track: jest.fn() } as any;
+				await (processor as any).restoreProtectedPostTypes(
+					executor,
+					creds,
+					tgtMycnf,
+					postTypes,
+					'wp_',
+					tracker,
+				);
+				expect(executor.pushFile).toHaveBeenCalled();
+				expect(tracker.track).toHaveBeenCalledWith(
+					expect.objectContaining({
+						step: expect.stringContaining('restored successfully'),
+					}),
+				);
+			});
+
+			it('throws an error when restore query fails', async () => {
+				const executor = {
+					pushFile: jest.fn().mockResolvedValue(undefined),
+					execute: jest.fn().mockImplementation((cmd: string) => {
+						if (cmd.includes('SHOW TABLES') && cmd.includes('wp_forge_backup_posts')) {
+							return Promise.resolve({ code: 0, stdout: 'wp_forge_backup_posts', stderr: '' });
+						}
+						if (cmd.includes('<') && cmd.includes('forge_post_type_restore_')) {
+							return Promise.resolve({ code: 1, stdout: '', stderr: 'Restore error' });
+						}
+						return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+					}),
+				} as any;
+				const tracker = { track: jest.fn() } as any;
+				await expect(
+					(processor as any).restoreProtectedPostTypes(
+						executor,
+						creds,
+						tgtMycnf,
+						postTypes,
+						'wp_',
+						tracker,
+					),
+				).rejects.toThrow('restore failed: Restore error');
+				expect(tracker.track).toHaveBeenCalledWith(
+					expect.objectContaining({
+						step: expect.stringContaining('restore failed'),
+					}),
+				);
+			});
 		});
 	});
 });

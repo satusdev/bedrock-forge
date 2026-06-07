@@ -47,6 +47,7 @@ if ($restore) {
     // Deleting the docroot first guarantees the result is an exact mirror of
     // the backup.  We only delete AFTER confirming the archive file exists
     // (validated above), so a missing/corrupt archive never nukes the live site.
+    $excludeCmdStr = '';
     if (is_dir($docroot)) {
         $rmOut  = [];
         $rmCode = 0;
@@ -54,6 +55,22 @@ if ($restore) {
         if ($rmCode !== 0) {
             fwrite(STDERR, "WARNING: could not clean docroot before restore (exit {$rmCode}): " . implode("\n", $rmOut) . "\n");
             // Non-fatal: proceed with extraction; stale files may remain.
+            // Find all files that couldn't be deleted and exclude them from tar extraction
+            $parentDir = dirname($docroot);
+            $parentLength = strlen($parentDir) + 1;
+            try {
+                $di = new RecursiveDirectoryIterator($docroot, RecursiveDirectoryIterator::SKIP_DOTS);
+                $it = new RecursiveIteratorIterator($di, RecursiveIteratorIterator::CHILD_FIRST);
+                foreach ($it as $fileinfo) {
+                    if ($fileinfo->isFile()) {
+                        $filePath = $fileinfo->getPathname();
+                        $relativePath = substr($filePath, $parentLength);
+                        $excludeCmdStr .= ' --exclude=' . escapeshellarg($relativePath);
+                    }
+                }
+            } catch (Exception $e) {
+                // Ignore iterator failures
+            }
         } else {
             fwrite(STDERR, "Cleaned docroot before restore: {$docroot}\n");
         }
@@ -64,7 +81,7 @@ if ($restore) {
     // so every file inside is stored as  basename/path/to/file.php
     // Extracting to dirname(docroot) restores files to the correct location.
     $extractTo = dirname($docroot);
-    $cmd = "tar -xzf " . escapeshellarg($file) . " -C " . escapeshellarg($extractTo) . " 2>&1";
+    $cmd = "tar -xzf " . escapeshellarg($file) . " -C " . escapeshellarg($extractTo) . $excludeCmdStr . " 2>&1";
     exec($cmd, $out, $code);
     if ($code > 1) {
         fwrite(STDERR, "ERROR: restore (files) failed (exit {$code}): " . implode("\n", $out) . "\n");

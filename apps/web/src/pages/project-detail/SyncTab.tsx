@@ -42,6 +42,8 @@ interface Environment {
 	url?: string;
 	google_drive_folder_id?: string | null;
 	protected_tables?: string[];
+	sql_protection_queries?: string[];
+	protected_post_types?: string[];
 	server: { name: string };
 }
 
@@ -484,8 +486,39 @@ function ClonePanel({
 					<div>
 						<p className='font-medium text-blue-700 dark:text-blue-400'>Protected tables will be preserved</p>
 						<p className='text-xs text-muted-foreground mt-0.5'>
-							{target.protected_tables.join(', ')} — these tables on the target will not be overwritten
+							{target.protected_tables.join(', ')} — these tables on the target will not be overwritten or URL-replaced
 						</p>
+					</div>
+				</div>
+			)}
+
+			{target?.protected_post_types && target.protected_post_types.length > 0 && (
+				<div className='flex items-start gap-2 rounded-lg border border-purple-200 bg-purple-50 p-3 text-sm dark:border-purple-800 dark:bg-purple-950/40'>
+					<Database className='h-4 w-4 mt-0.5 flex-none text-purple-500' />
+					<div>
+						<p className='font-medium text-purple-700 dark:text-purple-400'>Protected custom post types will be preserved</p>
+						<p className='text-xs text-muted-foreground mt-0.5'>
+							{target.protected_post_types.join(', ')} — target data for these post types will be backed up and restored during database sync.
+						</p>
+					</div>
+				</div>
+			)}
+
+			{target?.sql_protection_queries && target.sql_protection_queries.length > 0 && (
+				<div className='flex items-start gap-2 rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm dark:border-indigo-800 dark:bg-indigo-950/40'>
+					<Database className='h-4 w-4 mt-0.5 flex-none text-indigo-500' />
+					<div>
+						<p className='font-medium text-indigo-700 dark:text-indigo-400'>SQL protection queries will run</p>
+						<p className='text-xs text-muted-foreground mt-0.5'>
+							{target.sql_protection_queries.length} query/queries will execute on target database immediately after import:
+						</p>
+						<ul className='list-disc pl-4 mt-1 text-xs text-muted-foreground font-mono space-y-0.5'>
+							{target.sql_protection_queries.map((q, idx) => (
+								<li key={idx} className='truncate max-w-[500px]' title={q}>
+									{q}
+								</li>
+							))}
+						</ul>
 					</div>
 				</div>
 			)}
@@ -806,8 +839,43 @@ function PushPanel({
 						<div>
 							<p className='font-medium text-blue-700 dark:text-blue-400'>Protected tables will be preserved</p>
 							<p className='text-xs text-muted-foreground mt-0.5'>
-								{target.protected_tables.join(', ')} — these tables on the target will not be overwritten
+								{target.protected_tables.join(', ')} — these tables on the target will not be overwritten or URL-replaced
 							</p>
+						</div>
+					</div>
+				)}
+
+			{(scope === 'database' || scope === 'both') &&
+				target?.protected_post_types &&
+				target.protected_post_types.length > 0 && (
+					<div className='flex items-start gap-2 rounded-lg border border-purple-200 bg-purple-50 p-3 text-sm dark:border-purple-800 dark:bg-purple-950/40'>
+						<Database className='h-4 w-4 mt-0.5 flex-none text-purple-500' />
+						<div>
+							<p className='font-medium text-purple-700 dark:text-purple-400'>Protected custom post types will be preserved</p>
+							<p className='text-xs text-muted-foreground mt-0.5'>
+								{target.protected_post_types.join(', ')} — target data for these post types will be backed up and restored during database sync.
+							</p>
+						</div>
+					</div>
+				)}
+
+			{(scope === 'database' || scope === 'both') &&
+				target?.sql_protection_queries &&
+				target.sql_protection_queries.length > 0 && (
+					<div className='flex items-start gap-2 rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm dark:border-indigo-800 dark:bg-indigo-950/40'>
+						<Database className='h-4 w-4 mt-0.5 flex-none text-indigo-500' />
+						<div>
+							<p className='font-medium text-indigo-700 dark:text-indigo-400'>SQL protection queries will run</p>
+							<p className='text-xs text-muted-foreground mt-0.5'>
+								{target.sql_protection_queries.length} query/queries will execute on target database immediately after import:
+							</p>
+							<ul className='list-disc pl-4 mt-1 text-xs text-muted-foreground font-mono space-y-0.5'>
+								{target.sql_protection_queries.map((q, idx) => (
+									<li key={idx} className='truncate max-w-[500px]' title={q}>
+										{q}
+									</li>
+								))}
+							</ul>
 						</div>
 					</div>
 				)}

@@ -44,6 +44,8 @@ type WpLayout = {
 
 type Executor = Awaited<ReturnType<typeof createRemoteExecutor>>;
 
+const TABLE_NAME_REGEX = /^[A-Za-z0-9_$]+$/;
+
 // concurrency=1: sync jobs do SSH+mysqldump+rsync — serialised to avoid
 // saturating CPU/network on concurrent large file transfers.
 @Processor(QUEUES.SYNC, { concurrency: 1, lockDuration: 90 * 60 * 1_000 })
@@ -346,9 +348,9 @@ export class SyncProcessor extends WorkerHost {
 		// Protected tables: sanitize names (only valid MySQL identifier chars) and build
 		// --ignore-table flags so these tables are excluded from the source dump entirely.
 		// Their existing data on the target survives the import untouched.
-		const cloneSafeProtected = (targetEnv.protected_tables ?? [])
-			.map(t => t.replace(/[^a-zA-Z0-9_$]/g, ''))
-			.filter(t => t.length > 0);
+		const cloneSafeProtected = this.normalizeProtectedTables(
+			targetEnv.protected_tables ?? [],
+		);
 		const cloneIgnoreFlags =
 			cloneSafeProtected.length > 0
 				? ' ' +
@@ -428,8 +430,18 @@ export class SyncProcessor extends WorkerHost {
 			),
 		});
 		await targetExecutor.execute(`chmod 600 ${tgtMycnf}`);
+		let protectedPostTypesPrefix: string | null = null;
+		if (targetEnv.protected_post_types && targetEnv.protected_post_types.length > 0) {
+			protectedPostTypesPrefix = await this.backupProtectedPostTypes(
+				targetExecutor,
+				targetCreds,
+				tgtMycnf,
+				targetEnv.protected_post_types,
+				tracker,
+			);
+		}
 
-		if (cloneSafeProtected.length > 0) {
+		if (cloneSafeProtected.length > 0 || protectedPostTypesPrefix) {
 			// Protected tables configured — check if the target DB already exists.
 			// If it does: skip DROP/CREATE; the protected tables survive and mysqldump's
 			// per-table DROP TABLE IF EXISTS handles the unprotected ones automatically.
@@ -447,6 +459,13 @@ export class SyncProcessor extends WorkerHost {
 				dbExistsRes.code === 0 && dbExistsRes.stdout.trim().length > 0;
 
 			if (dbExists) {
+				await this.trackProtectedTablePresence(
+					targetExecutor,
+					tgtMycnf,
+					targetCreds.dbName,
+					cloneSafeProtected,
+					tracker,
+				);
 				await tracker.track({
 					step: 'Target database exists — skipping DROP/CREATE to preserve protected tables',
 					level: 'info',
@@ -511,6 +530,18 @@ export class SyncProcessor extends WorkerHost {
 			`mysql --defaults-extra-file=${tgtMycnf} ${targetCreds.dbName} < ${dumpRemote}`,
 			{ timeout: 10 * 60_000 },
 		);
+
+		if (importResult.code === 0 && protectedPostTypesPrefix) {
+			await this.restoreProtectedPostTypes(
+				targetExecutor,
+				targetCreds,
+				tgtMycnf,
+				targetEnv.protected_post_types ?? [],
+				protectedPostTypesPrefix,
+				tracker,
+			);
+		}
+
 		await targetExecutor.execute(`rm -f ${tgtMycnf}`);
 		await tracker.trackCommand(
 			'mysql import on target',
@@ -533,6 +564,16 @@ export class SyncProcessor extends WorkerHost {
 			);
 		}
 
+		if (targetEnv.sql_protection_queries && targetEnv.sql_protection_queries.length > 0) {
+			await this.executeSqlProtectionQueries(
+				targetExecutor,
+				targetCreds,
+				targetEnv.sql_protection_queries,
+				tracker,
+				job.id?.toString() || 'unknown',
+			);
+		}
+
 		await job.updateProgress({
 			value: 80,
 			step: 'Database imported on target',
@@ -548,6 +589,7 @@ export class SyncProcessor extends WorkerHost {
 			tracker,
 			job,
 			'sync',
+			cloneSafeProtected,
 		);
 
 		// Verify the source URL is no longer present in siteurl/home after replacement.
@@ -560,6 +602,7 @@ export class SyncProcessor extends WorkerHost {
 				sourceUrl,
 				targetUrl,
 				tracker,
+				cloneSafeProtected,
 			);
 		}
 
@@ -859,6 +902,8 @@ export class SyncProcessor extends WorkerHost {
 			root_path: string;
 			url?: string | null;
 			protected_tables?: string[];
+			sql_protection_queries?: string[];
+			protected_post_types?: string[];
 			server: { ip_address: string };
 		},
 		targetLayout: WpLayout,
@@ -918,9 +963,9 @@ export class SyncProcessor extends WorkerHost {
 
 		// Protected tables: sanitize names and build --ignore-table flags so these
 		// tables are excluded from the source dump — their data survives on target.
-		const pushSafeProtected = (targetEnv.protected_tables ?? [])
-			.map(t => t.replace(/[^a-zA-Z0-9_$]/g, ''))
-			.filter(t => t.length > 0);
+		const pushSafeProtected = this.normalizeProtectedTables(
+			targetEnv.protected_tables ?? [],
+		);
 		const pushIgnoreFlags =
 			pushSafeProtected.length > 0
 				? ' ' +
@@ -986,8 +1031,18 @@ export class SyncProcessor extends WorkerHost {
 			),
 		});
 		await targetExecutor.execute(`chmod 600 ${tgtMycnf}`);
+		let protectedPostTypesPrefix: string | null = null;
+		if (targetEnv.protected_post_types && targetEnv.protected_post_types.length > 0) {
+			protectedPostTypesPrefix = await this.backupProtectedPostTypes(
+				targetExecutor,
+				targetCreds,
+				tgtMycnf,
+				targetEnv.protected_post_types,
+				tracker,
+			);
+		}
 
-		if (pushSafeProtected.length > 0) {
+		if (pushSafeProtected.length > 0 || protectedPostTypesPrefix) {
 			// Protected tables configured — check if the target DB already exists.
 			// If it does: skip DROP/CREATE; the protected tables survive and mysqldump's
 			// per-table DROP TABLE IF EXISTS handles the unprotected ones automatically.
@@ -1005,6 +1060,13 @@ export class SyncProcessor extends WorkerHost {
 				dbExistsRes.code === 0 && dbExistsRes.stdout.trim().length > 0;
 
 			if (dbExists) {
+				await this.trackProtectedTablePresence(
+					targetExecutor,
+					tgtMycnf,
+					targetCreds.dbName,
+					pushSafeProtected,
+					tracker,
+				);
 				await tracker.track({
 					step: 'Target database exists — skipping DROP/CREATE to preserve protected tables',
 					level: 'info',
@@ -1068,6 +1130,18 @@ export class SyncProcessor extends WorkerHost {
 			`mysql --defaults-extra-file=${tgtMycnf} ${targetCreds.dbName} < ${dumpRemote}`,
 			{ timeout: 10 * 60_000 },
 		);
+
+		if (importResult.code === 0 && protectedPostTypesPrefix) {
+			await this.restoreProtectedPostTypes(
+				targetExecutor,
+				targetCreds,
+				tgtMycnf,
+				targetEnv.protected_post_types ?? [],
+				protectedPostTypesPrefix,
+				tracker,
+			);
+		}
+
 		await targetExecutor
 			.execute(`rm -f ${tgtMycnf} ${dumpRemote}`)
 			.catch(() => {});
@@ -1083,6 +1157,16 @@ export class SyncProcessor extends WorkerHost {
 			);
 		}
 
+		if (targetEnv.sql_protection_queries && targetEnv.sql_protection_queries.length > 0) {
+			await this.executeSqlProtectionQueries(
+				targetExecutor,
+				targetCreds,
+				targetEnv.sql_protection_queries,
+				tracker,
+				job.id?.toString() || 'unknown',
+			);
+		}
+
 		// URL search-replace using the detected WP core path so WP-CLI finds WP
 		await this.runUrlSearchReplace(
 			sourceUrl,
@@ -1093,6 +1177,7 @@ export class SyncProcessor extends WorkerHost {
 			tracker,
 			job,
 			'push',
+			pushSafeProtected,
 		);
 
 		// Verify the source URL is no longer present in siteurl/home after replacement.
@@ -1103,6 +1188,7 @@ export class SyncProcessor extends WorkerHost {
 				sourceUrl,
 				targetUrl,
 				tracker,
+				pushSafeProtected,
 			);
 		}
 	}
@@ -1444,6 +1530,7 @@ export class SyncProcessor extends WorkerHost {
 		tracker: StepTracker,
 		job: Job,
 		suffix: string,
+		protectedTables: string[] = [],
 	): Promise<void> {
 		if (!sourceUrl || !targetUrl || sourceUrl === targetUrl) {
 			await tracker.track({
@@ -1485,11 +1572,21 @@ export class SyncProcessor extends WorkerHost {
 		}
 
 		const allDisplayPairs = [...pairs, ...jsonPairs, ...urlEncodedPairs];
+		const safeProtectedTables = this.normalizeProtectedTables(protectedTables);
+		const protectedSet = new Set(safeProtectedTables);
+		const skipTablesArg =
+			safeProtectedTables.length > 0
+				? ` --skip-tables=${shellQuote(safeProtectedTables.join(','))}`
+				: '';
 
 		await tracker.track({
 			step: 'Running URL search-replace on target',
 			level: 'info',
-			detail: allDisplayPairs.map(([o, n]) => `${o} → ${n}`).join(', '),
+			detail:
+				allDisplayPairs.map(([o, n]) => `${o} → ${n}`).join(', ') +
+				(safeProtectedTables.length
+					? ` (skipping protected tables: ${safeProtectedTables.join(', ')})`
+					: ''),
 		});
 
 		const srStart = Date.now();
@@ -1533,7 +1630,7 @@ export class SyncProcessor extends WorkerHost {
 			const skiparg = skipPlugins ? ' --skip-themes --skip-plugins' : '';
 			let passOk = true;
 			for (const [oldUrl, newUrl] of allWpCliPairs) {
-				const srArgs = `search-replace ${shellQuote(oldUrl)} ${shellQuote(newUrl)} --path=${shellQuote(rootPath)} --all-tables --precise --skip-columns=guid${skiparg}`;
+				const srArgs = `search-replace ${shellQuote(oldUrl)} ${shellQuote(newUrl)} --path=${shellQuote(rootPath)} --all-tables --precise --skip-columns=guid${skipTablesArg}${skiparg}`;
 				const wpCliResult = await executor.execute(wp(srArgs));
 				if (wpCliResult.code === 0) {
 					await tracker.track({
@@ -1546,7 +1643,7 @@ export class SyncProcessor extends WorkerHost {
 					// with sudo the system PATH already includes /usr/local/bin/wp.
 					let cdOk = false;
 					if (!wpPrefix) {
-						const cdArgs = `search-replace ${shellQuote(oldUrl)} ${shellQuote(newUrl)} --all-tables --precise --skip-columns=guid${skiparg}${allowRootFlag ? ' ' + allowRootFlag : ''}`;
+						const cdArgs = `search-replace ${shellQuote(oldUrl)} ${shellQuote(newUrl)} --all-tables --precise --skip-columns=guid${skipTablesArg}${skiparg}${allowRootFlag ? ' ' + allowRootFlag : ''}`;
 						const cdResult = await executor.execute(
 							`cd ${shellQuote(rootPath)} && wp ${cdArgs} 2>&1`,
 						);
@@ -1636,7 +1733,10 @@ export class SyncProcessor extends WorkerHost {
 					` --db-name=${shellQuote(creds.dbName)}` +
 					` --prefix=${shellQuote(p)}` +
 					` --search=${shellQuote(oldUrl)}` +
-					` --replace=${shellQuote(newUrl)}`,
+					` --replace=${shellQuote(newUrl)}` +
+					(safeProtectedTables.length
+						? ` --skip-tables=${shellQuote(safeProtectedTables.join(','))}`
+						: ''),
 				{ timeout: 5 * 60_000 },
 			);
 			if (phpResult.code !== 0) {
@@ -1684,21 +1784,60 @@ export class SyncProcessor extends WorkerHost {
 		// Strategy 3: Raw SQL REPLACE fallback (no serialization fix)
 		await executor.execute(`rm -f ${srScript}`).catch(() => {});
 		const statements: string[] = [];
+		const addProtectedAwareStatement = (table: string, sql: string) => {
+			if (!protectedSet.has(table)) {
+				statements.push(sql);
+			}
+		};
 		for (const [oldRaw, newRaw] of allPairs) {
 			const o = escapeMysql(oldRaw);
 			const n = escapeMysql(newRaw);
-			statements.push(
+			addProtectedAwareStatement(
+				`${p}options`,
 				`UPDATE \`${p}options\` SET option_value = REPLACE(option_value, '${o}', '${n}')`,
+			);
+			addProtectedAwareStatement(
+				`${p}posts`,
 				`UPDATE \`${p}posts\` SET post_content = REPLACE(post_content, '${o}', '${n}')`,
+			);
+			addProtectedAwareStatement(
+				`${p}posts`,
 				`UPDATE \`${p}posts\` SET post_excerpt = REPLACE(post_excerpt, '${o}', '${n}')`,
+			);
+			addProtectedAwareStatement(
+				`${p}postmeta`,
 				`UPDATE \`${p}postmeta\` SET meta_value = REPLACE(CAST(meta_value AS CHAR), '${o}', '${n}')`,
+			);
+			addProtectedAwareStatement(
+				`${p}usermeta`,
 				`UPDATE \`${p}usermeta\` SET meta_value = REPLACE(meta_value, '${o}', '${n}')`,
+			);
+			addProtectedAwareStatement(
+				`${p}comments`,
 				`UPDATE \`${p}comments\` SET comment_content = REPLACE(comment_content, '${o}', '${n}')`,
+			);
+			addProtectedAwareStatement(
+				`${p}comments`,
 				`UPDATE \`${p}comments\` SET comment_author_url = REPLACE(comment_author_url, '${o}', '${n}')`,
+			);
+			addProtectedAwareStatement(
+				`${p}commentmeta`,
 				`UPDATE \`${p}commentmeta\` SET meta_value = REPLACE(meta_value, '${o}', '${n}')`,
+			);
+			addProtectedAwareStatement(
+				`${p}termmeta`,
 				`UPDATE \`${p}termmeta\` SET meta_value = REPLACE(meta_value, '${o}', '${n}')`,
+			);
+			addProtectedAwareStatement(
+				`${p}links`,
 				`UPDATE \`${p}links\` SET link_url = REPLACE(link_url, '${o}', '${n}')`,
+			);
+			addProtectedAwareStatement(
+				`${p}links`,
 				`UPDATE \`${p}links\` SET link_image = REPLACE(link_image, '${o}', '${n}')`,
+			);
+			addProtectedAwareStatement(
+				`${p}links`,
 				`UPDATE \`${p}links\` SET link_rss = REPLACE(link_rss, '${o}', '${n}')`,
 			);
 		}
@@ -2428,7 +2567,9 @@ export class SyncProcessor extends WorkerHost {
 		sourceUrl: string,
 		targetUrl: string,
 		tracker: StepTracker,
+		protectedTables: string[] = [],
 	): Promise<void> {
+		const protectedSet = new Set(this.normalizeProtectedTables(protectedTables));
 		const valMycnf = `/tmp/forge_val_${Date.now()}.cnf`;
 		try {
 			await executor.pushFile({
@@ -2459,7 +2600,7 @@ export class SyncProcessor extends WorkerHost {
 			const excludeOptionNames = NON_FUNCTIONAL_OPTIONS.map(
 				n => `'${escapeMysql(n)}'`,
 			).join(',');
-			const probes = [
+			const allProbes = [
 				{
 					label: `${tblPrefix}options`,
 					sql:
@@ -2482,6 +2623,16 @@ export class SyncProcessor extends WorkerHost {
 						`FROM \`${tblPrefix}postmeta\` WHERE CAST(meta_value AS CHAR) LIKE '%${likeSource}%' LIMIT 5`,
 				},
 			] as const;
+			const probes = allProbes.filter(probe => !protectedSet.has(probe.label));
+
+			if (probes.length === 0) {
+				await tracker.track({
+					step: 'URL replacement validation skipped for protected core tables',
+					level: 'info',
+					detail: Array.from(protectedSet).join(', '),
+				});
+				return;
+			}
 
 			const staleMatches: string[] = [];
 			for (const probe of probes) {
@@ -2537,6 +2688,59 @@ export class SyncProcessor extends WorkerHost {
 			});
 		} finally {
 			await executor.execute(`rm -f ${valMycnf}`).catch(() => {});
+		}
+	}
+
+	private normalizeProtectedTables(tables: string[]): string[] {
+		const seen = new Set<string>();
+		const safe: string[] = [];
+		for (const raw of tables) {
+			const table = raw.trim();
+			if (!TABLE_NAME_REGEX.test(table) || seen.has(table)) continue;
+			seen.add(table);
+			safe.push(table);
+		}
+		return safe;
+	}
+
+	private async trackProtectedTablePresence(
+		executor: Executor,
+		mycnf: string,
+		dbName: string,
+		protectedTables: string[],
+		tracker: StepTracker,
+	): Promise<void> {
+		if (protectedTables.length === 0) return;
+		const quotedTables = protectedTables
+			.map(t => `'${escapeMysql(t)}'`)
+			.join(',');
+		const result = await executor.execute(
+			`mysql --defaults-extra-file=${mycnf} ${dbName} -sN -e ${shellQuote(
+				`SELECT TABLE_NAME FROM information_schema.tables WHERE table_schema='${escapeMysql(dbName)}' AND TABLE_NAME IN (${quotedTables})`,
+			)}`,
+			{ timeout: 30_000 },
+		);
+		if (result.code !== 0) {
+			await tracker.track({
+				step: 'Protected table presence check failed',
+				level: 'warn',
+				detail: (result.stderr || result.stdout || '').slice(0, 300),
+			});
+			return;
+		}
+		const existing = new Set(
+			result.stdout
+				.split('\n')
+				.map(t => t.trim())
+				.filter(Boolean),
+		);
+		const missing = protectedTables.filter(t => !existing.has(t));
+		if (missing.length > 0) {
+			await tracker.track({
+				step: 'Some protected tables do not exist on target',
+				level: 'warn',
+				detail: missing.join(', '),
+			});
 		}
 	}
 
@@ -2716,6 +2920,285 @@ export class SyncProcessor extends WorkerHost {
 			await tracker.track({ step: 'Safety backup recorded', level: 'info' });
 		} finally {
 			await rm(localDir, { recursive: true, force: true });
+		}
+	}
+
+	private async executeSqlProtectionQueries(
+		executor: Executor,
+		creds: Creds,
+		sqlQueries: string[],
+		tracker: StepTracker,
+		jobId: string,
+	): Promise<void> {
+		if (!sqlQueries || sqlQueries.length === 0) {
+			return;
+		}
+
+		await tracker.track({
+			step: 'Executing SQL protection queries',
+			level: 'info',
+			detail: `Executing ${sqlQueries.length} query/queries on target`,
+		});
+
+		const tgtMycnf = `/tmp/forge_sync_prot_queries_${jobId}.cnf`;
+		await executor.pushFile({
+			remotePath: tgtMycnf,
+			content: Buffer.from(
+				`[client]\nuser=${creds.dbUser}\npassword=${creds.dbPassword}\nhost=${creds.dbHost}\n`,
+			),
+		});
+		await executor.execute(`chmod 600 ${tgtMycnf}`);
+
+		let prefix = 'wp_';
+		try {
+			const prefixQuery = `SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${escapeMysql(creds.dbName)}' AND table_name LIKE '%options' LIMIT 1`;
+			const prefixResult = await executor.execute(
+				`mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} -sN -e ${shellQuote(prefixQuery)}`,
+			);
+			if (prefixResult.code === 0 && prefixResult.stdout.trim()) {
+				prefix = prefixResult.stdout.trim();
+			}
+		} catch (err) {
+			this.logger.warn(`Failed to auto-detect target table prefix, defaulting to wp_: ${err}`);
+		}
+
+		const processedQueries = sqlQueries.map(q => {
+			let processed = q.replace(/\{prefix\}/gi, prefix).replace(/%prefix%/gi, prefix).trim();
+			if (processed && !processed.endsWith(';')) {
+				processed += ';';
+			}
+			return processed;
+		});
+
+		const queriesSqlFile = `/tmp/forge_sql_prot_exec_${jobId}.sql`;
+		const sqlContent = processedQueries.join('\n') + '\n';
+
+		await executor.pushFile({
+			remotePath: queriesSqlFile,
+			content: Buffer.from(sqlContent),
+		});
+
+		const start = Date.now();
+		const result = await executor.execute(
+			`mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} < ${queriesSqlFile}`,
+			{ timeout: 5 * 60_000 },
+		);
+
+		await executor.execute(`rm -f ${tgtMycnf} ${queriesSqlFile}`).catch(() => {});
+
+		await tracker.trackCommand(
+			'SQL protection queries execution',
+			`mysql --defaults-extra-file=*** ${creds.dbName} < ${queriesSqlFile}`,
+			result,
+			Date.now() - start,
+		);
+
+		if (result.code !== 0) {
+			throw new Error(
+				`Failed to execute SQL protection queries on target: ${result.stderr.trim()}`,
+			);
+		}
+
+		await tracker.track({
+			step: 'SQL protection queries executed successfully',
+			level: 'info',
+			detail: `Processed queries: ${processedQueries.join(' ')}`,
+		});
+	}
+
+	private async backupProtectedPostTypes(
+		executor: Executor,
+		creds: Creds,
+		tgtMycnf: string,
+		postTypes: string[],
+		tracker: StepTracker,
+	): Promise<string | null> {
+		if (!postTypes || postTypes.length === 0) return null;
+
+		let prefix = 'wp_';
+		try {
+			const prefixQuery = `SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${escapeMysql(creds.dbName)}' AND table_name LIKE '%options' LIMIT 1`;
+			const prefixResult = await executor.execute(
+				`mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} -sN -e ${shellQuote(prefixQuery)}`,
+			);
+			if (prefixResult.code === 0 && prefixResult.stdout.trim()) {
+				prefix = prefixResult.stdout.trim();
+			}
+		} catch (err) {
+			this.logger.warn(`Failed to auto-detect target table prefix for post type backup, defaulting to wp_: ${err}`);
+		}
+
+		const tableCheck = await executor.execute(
+			`mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} -sN -e ${shellQuote(`SHOW TABLES LIKE '${prefix}posts'`)}`
+		);
+		if (tableCheck.code !== 0 || tableCheck.stdout.trim() === '') {
+			await tracker.track({
+				step: 'Protected Post Types — posts table does not exist, skipping backup',
+				level: 'info',
+			});
+			return null;
+		}
+
+		// Check if backup tables already exist. If they do, DO NOT overwrite them because
+		// they contain the original target data from a previous failed sync attempt.
+		const backupTableCheck = await executor.execute(
+			`mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} -sN -e ${shellQuote(`SHOW TABLES LIKE '${prefix}forge_backup_posts'`)}`
+		);
+		if (backupTableCheck.code === 0 && backupTableCheck.stdout.trim() !== '') {
+			await tracker.track({
+				step: 'Protected Post Types — existing backup tables detected from a previous failed run, retaining them',
+				level: 'info',
+			});
+			return prefix;
+		}
+
+		await tracker.track({
+			step: 'Protected Post Types — backing up target post types',
+			level: 'info',
+			detail: `Post types: ${postTypes.join(', ')}`,
+		});
+
+		const postTypesList = postTypes.map(t => `'${escapeMysql(t)}'`).join(',');
+
+		const queries = [
+			// Back up main posts (protected types + their revisions)
+			`DROP TABLE IF EXISTS \`${prefix}forge_backup_posts\`;`,
+			`CREATE TABLE \`${prefix}forge_backup_posts\` AS
+			  SELECT * FROM \`${prefix}posts\` WHERE post_type IN (${postTypesList})
+			  UNION ALL
+			  SELECT r.* FROM \`${prefix}posts\` r
+			    INNER JOIN \`${prefix}posts\` p ON r.post_parent = p.ID
+			    WHERE r.post_type = 'revision' AND p.post_type IN (${postTypesList});`,
+			// Back up related postmeta
+			`DROP TABLE IF EXISTS \`${prefix}forge_backup_postmeta\`;`,
+			`CREATE TABLE \`${prefix}forge_backup_postmeta\` AS SELECT * FROM \`${prefix}postmeta\` WHERE post_id IN (SELECT ID FROM \`${prefix}forge_backup_posts\`);`,
+			// Back up term relationships
+			`DROP TABLE IF EXISTS \`${prefix}forge_backup_term_relationships\`;`,
+			`CREATE TABLE \`${prefix}forge_backup_term_relationships\` AS SELECT * FROM \`${prefix}term_relationships\` WHERE object_id IN (SELECT ID FROM \`${prefix}forge_backup_posts\`);`,
+			// Back up comments and their meta
+			`DROP TABLE IF EXISTS \`${prefix}forge_backup_comments\`;`,
+			`CREATE TABLE \`${prefix}forge_backup_comments\` AS SELECT * FROM \`${prefix}comments\` WHERE comment_post_ID IN (SELECT ID FROM \`${prefix}forge_backup_posts\`);`,
+			`DROP TABLE IF EXISTS \`${prefix}forge_backup_commentmeta\`;`,
+			`CREATE TABLE \`${prefix}forge_backup_commentmeta\` AS SELECT * FROM \`${prefix}commentmeta\` WHERE comment_id IN (SELECT comment_ID FROM \`${prefix}forge_backup_comments\`);`
+		];
+
+		const sqlFile = `/tmp/forge_post_type_backup_${Date.now()}.sql`;
+		await executor.pushFile({
+			remotePath: sqlFile,
+			content: Buffer.from(queries.join('\n')),
+		});
+
+		const res = await executor.execute(`mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} < ${sqlFile}`);
+		await executor.execute(`rm -f ${sqlFile}`);
+
+		if (res.code !== 0) {
+			await tracker.track({
+				step: 'Protected Post Types — backup failed',
+				level: 'warn',
+				detail: res.stderr,
+			});
+			return null;
+		}
+
+		return prefix;
+	}
+
+	private async restoreProtectedPostTypes(
+		executor: Executor,
+		creds: Creds,
+		tgtMycnf: string,
+		postTypes: string[],
+		prefix: string,
+		tracker: StepTracker,
+	): Promise<void> {
+		if (!postTypes || postTypes.length === 0) return;
+
+		const tableCheck = await executor.execute(
+			`mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} -sN -e ${shellQuote(`SHOW TABLES LIKE '${prefix}forge_backup_posts'`)}`
+		);
+		if (tableCheck.code !== 0 || tableCheck.stdout.trim() === '') {
+			return;
+		}
+
+		await tracker.track({
+			step: 'Protected Post Types — restoring target post types',
+			level: 'info',
+			detail: `Post types: ${postTypes.join(', ')}`,
+		});
+
+		const postTypesList = postTypes.map(t => `'${escapeMysql(t)}'`).join(',');
+
+		const queries = [
+			// Step 1: Delete commentmeta for any comments on the protected post types
+			// (these came in from the source dump — we must purge them before deleting comments)
+			`DELETE cm FROM \`${prefix}commentmeta\` cm
+			  INNER JOIN \`${prefix}comments\` c ON cm.comment_id = c.comment_ID
+			  INNER JOIN \`${prefix}posts\` p ON c.comment_post_ID = p.ID
+			  WHERE p.post_type IN (${postTypesList});`,
+
+			// Step 2: Delete comments on the protected post types (from source dump)
+			`DELETE c FROM \`${prefix}comments\` c
+			  INNER JOIN \`${prefix}posts\` p ON c.comment_post_ID = p.ID
+			  WHERE p.post_type IN (${postTypesList});`,
+
+			// Step 3: Delete postmeta for protected post types and their revisions (from source dump)
+			`DELETE pm FROM \`${prefix}postmeta\` pm
+			  INNER JOIN \`${prefix}posts\` p ON pm.post_id = p.ID
+			  WHERE p.post_type IN (${postTypesList});`,
+			`DELETE pm FROM \`${prefix}postmeta\` pm
+			  INNER JOIN \`${prefix}posts\` r ON pm.post_id = r.ID
+			  INNER JOIN \`${prefix}posts\` p ON r.post_parent = p.ID
+			  WHERE r.post_type = 'revision' AND p.post_type IN (${postTypesList});`,
+
+			// Step 4: Delete term relationships for protected post types (from source dump)
+			`DELETE tr FROM \`${prefix}term_relationships\` tr
+			  INNER JOIN \`${prefix}posts\` p ON tr.object_id = p.ID
+			  WHERE p.post_type IN (${postTypesList});`,
+
+			// Step 5: Delete revisions of protected post types (from source dump)
+			`DELETE r FROM \`${prefix}posts\` r
+			  INNER JOIN \`${prefix}posts\` p ON r.post_parent = p.ID
+			  WHERE r.post_type = 'revision' AND p.post_type IN (${postTypesList});`,
+
+			// Step 6: Delete the protected post type rows themselves (from source dump)
+			`DELETE FROM \`${prefix}posts\` WHERE post_type IN (${postTypesList});`,
+
+			// Step 7: Restore original target rows from backup tables
+			`INSERT IGNORE INTO \`${prefix}posts\` SELECT * FROM \`${prefix}forge_backup_posts\`;`,
+			`INSERT IGNORE INTO \`${prefix}postmeta\` SELECT * FROM \`${prefix}forge_backup_postmeta\`;`,
+			`INSERT IGNORE INTO \`${prefix}term_relationships\` SELECT * FROM \`${prefix}forge_backup_term_relationships\`;`,
+			`INSERT IGNORE INTO \`${prefix}comments\` SELECT * FROM \`${prefix}forge_backup_comments\`;`,
+			`INSERT IGNORE INTO \`${prefix}commentmeta\` SELECT * FROM \`${prefix}forge_backup_commentmeta\`;`,
+
+			// Step 8: Drop temporary backup tables
+			`DROP TABLE IF EXISTS \`${prefix}forge_backup_commentmeta\`;`,
+			`DROP TABLE IF EXISTS \`${prefix}forge_backup_comments\`;`,
+			`DROP TABLE IF EXISTS \`${prefix}forge_backup_term_relationships\`;`,
+			`DROP TABLE IF EXISTS \`${prefix}forge_backup_postmeta\`;`,
+			`DROP TABLE IF EXISTS \`${prefix}forge_backup_posts\`;`
+		];
+
+		const sqlFile = `/tmp/forge_post_type_restore_${Date.now()}.sql`;
+		await executor.pushFile({
+			remotePath: sqlFile,
+			content: Buffer.from(queries.join('\n')),
+		});
+
+		const res = await executor.execute(`mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} < ${sqlFile}`);
+		await executor.execute(`rm -f ${sqlFile}`);
+
+		if (res.code !== 0) {
+			await tracker.track({
+				step: 'Protected Post Types — restore failed',
+				level: 'error',
+				detail: res.stderr,
+			});
+			throw new Error(`Protected Post Types — restore failed: ${res.stderr}`);
+		} else {
+			await tracker.track({
+				step: 'Protected Post Types — restored successfully',
+				level: 'info',
+			});
 		}
 	}
 }
