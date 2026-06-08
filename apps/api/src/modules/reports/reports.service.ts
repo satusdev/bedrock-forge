@@ -2,7 +2,7 @@ import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { InjectQueue } from "@nestjs/bullmq";
 import { Queue } from "bullmq";
 import { SettingsService } from "../settings/settings.service";
-import { PrismaService } from "../../prisma/prisma.service";
+import { ReportsRepository } from "./reports.repository";
 import { EncryptionService } from "../../common/encryption/encryption.service";
 import { QUEUES, JOB_TYPES } from "@bedrock-forge/shared";
 import {
@@ -20,7 +20,7 @@ export class ReportsService implements OnModuleInit {
 
   constructor(
     private readonly settings: SettingsService,
-    private readonly prisma: PrismaService,
+    private readonly repo: ReportsRepository,
     private readonly encryption: EncryptionService,
     @InjectQueue(QUEUES.REPORTS) private readonly reportsQueue: Queue,
   ) {}
@@ -89,66 +89,24 @@ export class ReportsService implements OnModuleInit {
   }
 
   async getHistory() {
-    const rows = await this.prisma.jobExecution.findMany({
-      where: { queue_name: QUEUES.REPORTS },
-      orderBy: { created_at: "desc" },
-      take: 50,
-      select: {
-        id: true,
-        bull_job_id: true,
-        job_type: true,
-        status: true,
-        progress: true,
-        last_error: true,
-        payload: true,
-        execution_log: true,
-        started_at: true,
-        completed_at: true,
-        created_at: true,
-      },
-    });
-    // BigInt IDs need to be serialised
-    return rows.map((r) => ({ ...r, id: String(r.id) }));
+    return this.repo.findHistory();
   }
 
   async getAvailableChannels() {
-    const channels = await this.prisma.notificationChannel.findMany({
-      where: { active: true },
-      orderBy: { name: "asc" },
-    });
-    return channels.map((c) => ({
-      id: Number(c.id),
-      name: c.name,
-      type: c.type,
-      slack_channel_id: c.slack_channel_id,
-      has_token: !!c.slack_bot_token_enc,
-      has_webhook: !!c.google_chat_webhook_url_enc,
-      active: c.active,
-      subscribed: c.events.includes("report.weekly"),
-    }));
+    return this.repo.findAvailableChannels();
   }
 
   async toggleChannelSubscription(
     id: number,
     subscribed: boolean,
   ): Promise<{ id: number; name: string; subscribed: boolean }> {
-    const channel = await this.prisma.notificationChannel.findUnique({
-      where: { id: BigInt(id) },
-    });
+    const channel = await this.repo.findChannelById(id);
     if (!channel) throw new Error(`Channel ${id} not found`);
 
     const events = channel.events.filter((e) => e !== "report.weekly");
     if (subscribed) events.push("report.weekly");
 
-    const updated = await this.prisma.notificationChannel.update({
-      where: { id: BigInt(id) },
-      data: { events },
-    });
-    return {
-      id: Number(updated.id),
-      name: updated.name,
-      subscribed: updated.events.includes("report.weekly"),
-    };
+    return this.repo.updateChannelEvents(id, events);
   }
 
   // ── private helpers ──────────────────────────────────────────────────────
