@@ -8,7 +8,6 @@ import {
   DEFAULT_JOB_OPTIONS,
   PaginationQuery,
 } from "@bedrock-forge/shared";
-import { PrismaService } from "../../prisma/prisma.service";
 import { ProjectsRepository } from "./projects.repository";
 import {
   CreateProjectDto,
@@ -27,7 +26,6 @@ export class ProjectsService {
 
   constructor(
     private readonly repo: ProjectsRepository,
-    private readonly prisma: PrismaService,
     @InjectQueue(QUEUES.PROJECTS) private readonly projectsQueue: Queue,
     private readonly domainsService: DomainsService,
     private readonly monitorsService: MonitorsService,
@@ -229,36 +227,16 @@ export class ProjectsService {
 
     // Create Project + Environment in a transaction
     const { project, environment, jobExecution } =
-      await this.prisma.$transaction(async (tx) => {
-        const project = await tx.project.create({
-          data: {
-            name,
-            client_id: BigInt(client_id),
-            ...(dto.hosting_package_id && {
-              hosting_package_id: BigInt(dto.hosting_package_id),
-            }),
-          },
-        });
-        const environment = await tx.environment.create({
-          data: {
-            project_id: project.id,
-            server_id: BigInt(server_id),
-            type: envType,
-            url: siteUrl,
-            root_path: rootPath,
-          },
-        });
-        const jobExecution = await tx.jobExecution.create({
-          data: {
-            queue_name: QUEUES.PROJECTS,
-            bull_job_id: "0", // placeholder — updated by worker
-            job_type: JOB_TYPES.PROJECT_CREATE_BEDROCK,
-            environment_id: environment.id,
-            server_id: BigInt(server_id),
-            status: "queued",
-          },
-        });
-        return { project, environment, jobExecution };
+      await this.repo.createFull({
+        name,
+        client_id: BigInt(client_id),
+        hosting_package_id: dto.hosting_package_id ? BigInt(dto.hosting_package_id) : undefined,
+        server_id: BigInt(server_id),
+        envType,
+        siteUrl,
+        rootPath,
+        queueName: QUEUES.PROJECTS,
+        jobType: JOB_TYPES.PROJECT_CREATE_BEDROCK,
       });
 
     // Enqueue the provisioning job
@@ -282,10 +260,7 @@ export class ProjectsService {
     );
 
     // Back-fill the bull_job_id now that we have it
-    await this.prisma.jobExecution.update({
-      where: { id: jobExecution.id },
-      data: { bull_job_id: String(job.id) },
-    });
+    await this.repo.updateBullJobId(jobExecution.id, String(job.id));
 
     return {
       project: { id: Number(project.id), name: project.name },

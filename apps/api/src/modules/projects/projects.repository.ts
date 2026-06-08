@@ -276,4 +276,55 @@ export class ProjectsRepository {
       return results;
     });
   }
+
+  async createFull(data: {
+    name: string;
+    client_id: bigint;
+    hosting_package_id?: bigint;
+    server_id: bigint;
+    envType: string;
+    siteUrl: string;
+    rootPath: string;
+    queueName: string;
+    jobType: string;
+  }) {
+    return this.prisma.$transaction(async (tx) => {
+      const project = await tx.project.create({
+        data: {
+          name: data.name,
+          client_id: data.client_id,
+          ...(data.hosting_package_id && {
+            hosting_package_id: data.hosting_package_id,
+          }),
+        },
+      });
+      const environment = await tx.environment.create({
+        data: {
+          project_id: project.id,
+          server_id: data.server_id,
+          type: data.envType,
+          url: data.siteUrl,
+          root_path: data.rootPath,
+        },
+      });
+      const jobExecution = await tx.jobExecution.create({
+        data: {
+          queue_name: data.queueName,
+          bull_job_id: "0",
+          job_type: data.jobType,
+          environment_id: environment.id,
+          server_id: data.server_id,
+          status: "queued",
+        },
+      });
+      return { project, environment, jobExecution };
+    });
+  }
+
+  async updateBullJobId(jobExecutionId: bigint, bullJobId: string) {
+    return this.prisma.jobExecution.update({
+      where: { id: jobExecutionId },
+      data: { bull_job_id: bullJobId },
+    });
+  }
 }
