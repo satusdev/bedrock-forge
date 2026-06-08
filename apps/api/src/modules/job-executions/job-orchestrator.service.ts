@@ -1,6 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { Queue } from "bullmq";
-import { PrismaService } from "../../prisma/prisma.service";
+import { JobExecutionsRepository } from "./job-executions.repository";
 import { randomUUID } from "crypto";
 import { DEFAULT_JOB_OPTIONS } from "@bedrock-forge/shared";
 
@@ -21,7 +21,7 @@ export interface EnqueueOptions<PayloadType = any> {
 export class JobOrchestratorService {
   private readonly logger = new Logger(JobOrchestratorService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly repo: JobExecutionsRepository) {}
 
   async enqueue<PayloadType = any>({
     queue,
@@ -38,16 +38,14 @@ export class JobOrchestratorService {
     const bullJobId = jobId || randomUUID();
 
     // Create JobExecution record
-    const exec = await this.prisma.jobExecution.create({
-      data: {
-        queue_name: queueName,
-        bull_job_id: bullJobId,
-        job_type: jobType,
-        status: "queued",
-        server_id: serverId ? BigInt(serverId) : null,
-        environment_id: environmentId ? BigInt(environmentId) : null,
-        payload: (payload || {}) as any,
-      },
+    const exec = await this.repo.create({
+      queue_name: queueName,
+      bull_job_id: bullJobId,
+      job_type: jobType,
+      status: "queued",
+      server_id: serverId ? BigInt(serverId) : null,
+      environment_id: environmentId ? BigInt(environmentId) : null,
+      payload: (payload || {}) as any,
     });
 
     const jobExecutionId = Number(exec.id);
@@ -84,13 +82,7 @@ export class JobOrchestratorService {
         }
       }
 
-      await this.prisma.jobExecution.update({
-        where: { id: exec.id },
-        data: {
-          status: "failed",
-          last_error: errMsg,
-        },
-      });
+      await this.repo.updateStatus(exec.id, "failed", errMsg);
 
       throw err;
     }

@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
+import { JobExecutionStatus } from "@prisma/client";
 
 export interface JobExecutionFilter {
   queue_name?: string;
@@ -173,5 +174,27 @@ export class JobExecutionsRepository {
     } catch {
       return undefined;
     }
+  }
+
+  async create(data: {
+    queue_name: string;
+    bull_job_id: string;
+    job_type: string;
+    status: JobExecutionStatus;
+    server_id: bigint | null;
+    environment_id: bigint | null;
+    payload: any;
+  }) {
+    return this.prisma.jobExecution.create({ data });
+  }
+
+  async updateStatus(id: bigint, status: JobExecutionStatus, error?: string) {
+    return this.prisma.jobExecution.update({
+      where: { id },
+      data: {
+        status,
+        last_error: error,
+      },
+    });
   }
 }
