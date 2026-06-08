@@ -1,6 +1,6 @@
-import { IsString } from 'class-validator';
+import { IsString } from "class-validator";
 
 export class SetSettingDto {
-	@IsString()
-	value!: string;
+  @IsString()
+  value!: string;
 }

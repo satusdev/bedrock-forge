@@ -1,11 +1,11 @@
-export { PageHeader } from './PageHeader';
-export { SearchBar } from './SearchBar';
-export { DataTable } from './DataTable';
-export type { Column } from './DataTable';
-export { Pagination } from './Pagination';
+export { PageHeader } from "./PageHeader";
+export { SearchBar } from "./SearchBar";
+export { DataTable } from "./DataTable";
+export type { Column } from "./DataTable";
+export { Pagination } from "./Pagination";
 export {
-	EmptyState,
-	ErrorState,
-	LoadingState,
-	QueryStateRenderer,
-} from './StateViews';
+  EmptyState,
+  ErrorState,
+  LoadingState,
+  QueryStateRenderer,
+} from "./StateViews";

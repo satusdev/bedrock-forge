@@ -1,169 +1,171 @@
 import {
-	Controller,
-	Get,
-	Put,
-	Delete,
-	Post,
-	Param,
-	Body,
-	HttpCode,
-	HttpStatus,
-	UseGuards,
-} from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
-import { RolesGuard } from '../../common/guards/roles.guard';
-import { Roles } from '../../common/decorators/roles.decorator';
-import { ROLES } from '@bedrock-forge/shared';
-import { SettingsService } from './settings.service';
-import { SetGdriveDto } from './dto/gdrive-settings.dto';
-import { SetSettingDto } from './dto/setting.dto';
-import { SetSshKeyDto } from './dto/ssh-key.dto';
-import { SetBillingSettingsDto } from './dto/billing-settings.dto';
-import { SetCloudflareSettingsDto, UpdateCloudflareDnsRecordDto } from './dto/cloudflare-settings.dto';
-import { TestWebhookDto } from './dto/test-webhook.dto';
+  Controller,
+  Get,
+  Put,
+  Delete,
+  Post,
+  Param,
+  Body,
+  HttpCode,
+  HttpStatus,
+  UseGuards,
+} from "@nestjs/common";
+import { AuthGuard } from "@nestjs/passport";
+import { RolesGuard } from "../../common/guards/roles.guard";
+import { Roles } from "../../common/decorators/roles.decorator";
+import { ROLES } from "@bedrock-forge/shared";
+import { SettingsService } from "./settings.service";
+import { SetGdriveDto } from "./dto/gdrive-settings.dto";
+import { SetSettingDto } from "./dto/setting.dto";
+import { SetSshKeyDto } from "./dto/ssh-key.dto";
+import { SetBillingSettingsDto } from "./dto/billing-settings.dto";
+import {
+  SetCloudflareSettingsDto,
+  UpdateCloudflareDnsRecordDto,
+} from "./dto/cloudflare-settings.dto";
+import { TestWebhookDto } from "./dto/test-webhook.dto";
 
-
-@Controller('settings')
-@UseGuards(AuthGuard('jwt'), RolesGuard)
+@Controller("settings")
+@UseGuards(AuthGuard("jwt"), RolesGuard)
 @Roles(ROLES.ADMIN)
 export class SettingsController {
-	constructor(private readonly svc: SettingsService) {}
+  constructor(private readonly svc: SettingsService) {}
 
-	/** Returns all non-sensitive settings as a key:value map. */
-	@Get() getAll() {
-		return this.svc.getAllPublic();
-	}
+  /** Returns all non-sensitive settings as a key:value map. */
+  @Get() getAll() {
+    return this.svc.getAllPublic();
+  }
 
-	@Get('public/billing')
-	@Roles(ROLES.MANAGER)
-	getBillingSettings() {
-		return this.svc.getBillingSettings();
-	}
+  @Get("public/billing")
+  @Roles(ROLES.MANAGER)
+  getBillingSettings() {
+    return this.svc.getBillingSettings();
+  }
 
-	@Put('billing')
-	@HttpCode(HttpStatus.NO_CONTENT)
-	async setBillingSettings(@Body() dto: SetBillingSettingsDto) {
-		await this.svc.setBillingSettings(dto);
-	}
+  @Put("billing")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async setBillingSettings(@Body() dto: SetBillingSettingsDto) {
+    await this.svc.setBillingSettings(dto);
+  }
 
-	// ── Global SSH Key ──────────────────────────────────────────────────────
+  // ── Global SSH Key ──────────────────────────────────────────────────────
 
-	/** Returns { has_key: boolean } — never exposes the actual value. */
-	@Get('ssh-key') async getSshKey() {
-		const has_key = await this.svc.hasEncrypted('global_ssh_private_key');
-		return { has_key };
-	}
+  /** Returns { has_key: boolean } — never exposes the actual value. */
+  @Get("ssh-key") async getSshKey() {
+    const has_key = await this.svc.hasEncrypted("global_ssh_private_key");
+    return { has_key };
+  }
 
-	/** Store or replace the global SSH private key (encrypted at rest). */
-	@Put('ssh-key') @HttpCode(HttpStatus.NO_CONTENT) async setSshKey(
-		@Body() dto: SetSshKeyDto,
-	) {
-		await this.svc.setEncrypted('global_ssh_private_key', dto.key);
-	}
+  /** Store or replace the global SSH private key (encrypted at rest). */
+  @Put("ssh-key") @HttpCode(HttpStatus.NO_CONTENT) async setSshKey(
+    @Body() dto: SetSshKeyDto,
+  ) {
+    await this.svc.setEncrypted("global_ssh_private_key", dto.key);
+  }
 
-	/** Remove the global SSH private key. */
-	@Delete('ssh-key') @HttpCode(HttpStatus.NO_CONTENT) async deleteSshKey() {
-		await this.svc.delete('global_ssh_private_key');
-	}
+  /** Remove the global SSH private key. */
+  @Delete("ssh-key") @HttpCode(HttpStatus.NO_CONTENT) async deleteSshKey() {
+    await this.svc.delete("global_ssh_private_key");
+  }
 
-	// ── Google Drive (rclone) ───────────────────────────────────────────────
+  // ── Google Drive (rclone) ───────────────────────────────────────────────
 
-	/** Returns { configured: boolean }. */
-	@Get('gdrive') async getGdrive() {
-		const configured = await this.svc.hasEncrypted('rclone_gdrive_config');
-		return { configured };
-	}
+  /** Returns { configured: boolean }. */
+  @Get("gdrive") async getGdrive() {
+    const configured = await this.svc.hasEncrypted("rclone_gdrive_config");
+    return { configured };
+  }
 
-	/** Store Google Drive OAuth token. */
-	@Put('gdrive') @HttpCode(HttpStatus.NO_CONTENT) async setGdrive(
-		@Body() dto: SetGdriveDto,
-	) {
-		await this.svc.setGdrive(dto.token);
-	}
+  /** Store Google Drive OAuth token. */
+  @Put("gdrive") @HttpCode(HttpStatus.NO_CONTENT) async setGdrive(
+    @Body() dto: SetGdriveDto,
+  ) {
+    await this.svc.setGdrive(dto.token);
+  }
 
-	/** Remove Google Drive configuration. */
-	@Delete('gdrive') @HttpCode(HttpStatus.NO_CONTENT) async deleteGdrive() {
-		await this.svc.delete('rclone_gdrive_config');
-	}
+  /** Remove Google Drive configuration. */
+  @Delete("gdrive") @HttpCode(HttpStatus.NO_CONTENT) async deleteGdrive() {
+    await this.svc.delete("rclone_gdrive_config");
+  }
 
-	/** Test Google Drive connection. */
-	@Post('gdrive/test') async testGdrive() {
-		return this.svc.testGdrive();
-	}
+  /** Test Google Drive connection. */
+  @Post("gdrive/test") async testGdrive() {
+    return this.svc.testGdrive();
+  }
 
-	// ── Cloudflare ──────────────────────────────────────────────────────────
+  // ── Cloudflare ──────────────────────────────────────────────────────────
 
-	@Get('cloudflare') async getCloudflare() {
-		return this.svc.getCloudflareConfig();
-	}
+  @Get("cloudflare") async getCloudflare() {
+    return this.svc.getCloudflareConfig();
+  }
 
-	@Put('cloudflare') @HttpCode(HttpStatus.NO_CONTENT) async setCloudflare(
-		@Body() dto: SetCloudflareSettingsDto,
-	) {
-		await this.svc.setCloudflareConfig(dto);
-	}
+  @Put("cloudflare") @HttpCode(HttpStatus.NO_CONTENT) async setCloudflare(
+    @Body() dto: SetCloudflareSettingsDto,
+  ) {
+    await this.svc.setCloudflareConfig(dto);
+  }
 
-	@Delete('cloudflare') @HttpCode(HttpStatus.NO_CONTENT) async deleteCloudflare() {
-		await this.svc.deleteCloudflareConfig();
-	}
+  @Delete("cloudflare")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async deleteCloudflare() {
+    await this.svc.deleteCloudflareConfig();
+  }
 
-	@Post('cloudflare/test') async testCloudflare() {
-		return this.svc.testCloudflare();
-	}
+  @Post("cloudflare/test") async testCloudflare() {
+    return this.svc.testCloudflare();
+  }
 
-	@Get('cloudflare/dns-records') async listCloudflareDnsRecords() {
-		return this.svc.listCloudflareDnsRecords();
-	}
+  @Get("cloudflare/dns-records") async listCloudflareDnsRecords() {
+    return this.svc.listCloudflareDnsRecords();
+  }
 
-	@Put('cloudflare/dns-records/:recordId') async updateCloudflareDnsRecord(
-		@Param('recordId') recordId: string,
-		@Body() dto: UpdateCloudflareDnsRecordDto,
-	) {
-		return this.svc.updateCloudflareDnsRecord(recordId, dto);
-	}
+  @Put("cloudflare/dns-records/:recordId") async updateCloudflareDnsRecord(
+    @Param("recordId") recordId: string,
+    @Body() dto: UpdateCloudflareDnsRecordDto,
+  ) {
+    return this.svc.updateCloudflareDnsRecord(recordId, dto);
+  }
 
-	@Post('cloudflare/cache/purge') async purgeCloudflareCache() {
-		return this.svc.purgeCloudflareCache();
-	}
+  @Post("cloudflare/cache/purge") async purgeCloudflareCache() {
+    return this.svc.purgeCloudflareCache();
+  }
 
-	@Put('cloudflare/development-mode') async setCloudflareDevelopmentMode(
-		@Body('enabled') enabled: boolean,
-	) {
-		return this.svc.setCloudflareDevelopmentMode(enabled);
-	}
+  @Put("cloudflare/development-mode") async setCloudflareDevelopmentMode(
+    @Body("enabled") enabled: boolean,
+  ) {
+    return this.svc.setCloudflareDevelopmentMode(enabled);
+  }
 
-	// ── System Backup Folder ID ─────────────────────────────────────────────
+  // ── System Backup Folder ID ─────────────────────────────────────────────
 
-	/** Returns { folder_id: string | null } — the Google Drive folder used for Forge self-backups. */
-	@Get('system-backup-folder') async getSystemBackupFolder() {
-		const result = await this.svc.get('forge_system_backup_folder_id');
-		return { folder_id: result?.value ?? null };
-	}
+  /** Returns { folder_id: string | null } — the Google Drive folder used for Forge self-backups. */
+  @Get("system-backup-folder") async getSystemBackupFolder() {
+    const result = await this.svc.get("forge_system_backup_folder_id");
+    return { folder_id: result?.value ?? null };
+  }
 
-	/** Save the Google Drive folder ID used for Forge system backups. */
-	@Put('system-backup-folder')
-	@HttpCode(HttpStatus.NO_CONTENT)
-	async setSystemBackupFolder(@Body() dto: SetSettingDto) {
-		await this.svc.set('forge_system_backup_folder_id', dto.value);
-	}
+  /** Save the Google Drive folder ID used for Forge system backups. */
+  @Put("system-backup-folder")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async setSystemBackupFolder(@Body() dto: SetSettingDto) {
+    await this.svc.set("forge_system_backup_folder_id", dto.value);
+  }
 
-	// ── Generic key/value settings ──────────────────────────────────────────
+  // ── Generic key/value settings ──────────────────────────────────────────
 
-	@Get(':key') get(@Param('key') key: string) {
-		return this.svc.get(key);
-	}
+  @Get(":key") get(@Param("key") key: string) {
+    return this.svc.get(key);
+  }
 
-	@Put(':key') set(@Param('key') key: string, @Body() dto: SetSettingDto) {
-		return this.svc.set(key, dto.value);
-	}
+  @Put(":key") set(@Param("key") key: string, @Body() dto: SetSettingDto) {
+    return this.svc.set(key, dto.value);
+  }
 
-	@Delete(':key') delete(@Param('key') key: string) {
-		return this.svc.delete(key);
-	}
+  @Delete(":key") delete(@Param("key") key: string) {
+    return this.svc.delete(key);
+  }
 
-	@Post('test-webhook') async testWebhook(
-		@Body() dto: TestWebhookDto,
-	) {
-		return this.svc.testWebhook(dto.type, dto.url);
-	}
+  @Post("test-webhook") async testWebhook(@Body() dto: TestWebhookDto) {
+    return this.svc.testWebhook(dto.type, dto.url);
+  }
 }

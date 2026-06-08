@@ -1,1 +1,1 @@
-export { EnvironmentsTab } from './environments/EnvironmentsTab';
+export { EnvironmentsTab } from "./environments/EnvironmentsTab";

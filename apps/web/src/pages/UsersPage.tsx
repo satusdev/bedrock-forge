@@ -1,477 +1,477 @@
-import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
-import { Pencil, Trash2, MoreHorizontal, Shield } from 'lucide-react';
-import { api } from '@/lib/api-client';
-import { toast } from '@/hooks/use-toast';
-import { useAuthStore } from '@/store/auth.store';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
-import { AlertDialog } from '@/components/ui/alert-dialog';
+import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { Pencil, Trash2, MoreHorizontal, Shield } from "lucide-react";
+import { api } from "@/lib/api-client";
+import { toast } from "@/hooks/use-toast";
+import { useAuthStore } from "@/store/auth.store";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { AlertDialog } from "@/components/ui/alert-dialog";
 import {
-	PageHeader,
-	SearchBar,
-	DataTable,
-	type Column,
-	Pagination,
-} from '@/components/crud';
+  PageHeader,
+  SearchBar,
+  DataTable,
+  type Column,
+  Pagination,
+} from "@/components/crud";
 import {
-	Dialog,
-	DialogContent,
-	DialogHeader,
-	DialogTitle,
-	DialogFooter,
-} from '@/components/ui/dialog';
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { BulkActionsBar } from '@/components/ui/bulk-actions-bar';
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { BulkActionsBar } from "@/components/ui/bulk-actions-bar";
 
 interface Role {
-	id: number;
-	name: string;
+  id: number;
+  name: string;
 }
 
 interface User {
-	id: number;
-	name: string;
-	email: string;
-	created_at: string;
-	roles: string[];
+  id: number;
+  name: string;
+  email: string;
+  created_at: string;
+  roles: string[];
 }
 
 interface PaginatedUsers {
-	data: User[];
-	total: number;
-	page: number;
-	limit: number;
-	totalPages: number;
+  data: User[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
 }
 
 const ROLE_COLORS: Record<string, string> = {
-	admin: 'destructive',
-	manager: 'default',
-	maintainer: 'warning',
-	client: 'secondary',
+  admin: "destructive",
+  manager: "default",
+  maintainer: "warning",
+  client: "secondary",
 };
 
 const userSchema = z.object({
-	name: z.string().min(2, 'At least 2 chars').max(100),
-	email: z.string().email('Invalid email'),
-	password: z
-		.string()
-		.min(12, 'Min 12 characters')
-		.max(128)
-		.regex(/[A-Z]/, 'Must contain an uppercase letter')
-		.regex(/[a-z]/, 'Must contain a lowercase letter')
-		.regex(/[0-9]/, 'Must contain a digit')
-		.regex(/[^A-Za-z0-9]/, 'Must contain a special character')
-		.optional()
-		.or(z.literal('')),
-	roles: z.array(z.string()).min(1, 'Pick at least one role'),
+  name: z.string().min(2, "At least 2 chars").max(100),
+  email: z.string().email("Invalid email"),
+  password: z
+    .string()
+    .min(12, "Min 12 characters")
+    .max(128)
+    .regex(/[A-Z]/, "Must contain an uppercase letter")
+    .regex(/[a-z]/, "Must contain a lowercase letter")
+    .regex(/[0-9]/, "Must contain a digit")
+    .regex(/[^A-Za-z0-9]/, "Must contain a special character")
+    .optional()
+    .or(z.literal("")),
+  roles: z.array(z.string()).min(1, "Pick at least one role"),
 });
 
 type UserForm = z.infer<typeof userSchema>;
 
 function UserFormDialog({
-	open,
-	onOpenChange,
-	initial,
-	allRoles,
-	onSuccess,
+  open,
+  onOpenChange,
+  initial,
+  allRoles,
+  onSuccess,
 }: {
-	open: boolean;
-	onOpenChange: (o: boolean) => void;
-	initial?: User;
-	allRoles: Role[];
-	onSuccess: () => void;
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  initial?: User;
+  allRoles: Role[];
+  onSuccess: () => void;
 }) {
-	const {
-		register,
-		handleSubmit,
-		setValue,
-		watch,
-		reset,
-		setError,
-		formState: { errors, isSubmitting },
-	} = useForm<UserForm>({
-		resolver: zodResolver(userSchema),
-		defaultValues: {
-			name: initial?.name ?? '',
-			email: initial?.email ?? '',
-			password: '',
-			roles: initial?.roles ?? [],
-		},
-	});
+  const {
+    register,
+    handleSubmit,
+    setValue,
+    watch,
+    reset,
+    setError,
+    formState: { errors, isSubmitting },
+  } = useForm<UserForm>({
+    resolver: zodResolver(userSchema),
+    defaultValues: {
+      name: initial?.name ?? "",
+      email: initial?.email ?? "",
+      password: "",
+      roles: initial?.roles ?? [],
+    },
+  });
 
-	const selectedRoles = watch('roles');
+  const selectedRoles = watch("roles");
 
-	function toggleRole(name: string) {
-		const current = selectedRoles ?? [];
-		setValue(
-			'roles',
-			current.includes(name)
-				? current.filter(r => r !== name)
-				: [...current, name],
-			{ shouldValidate: true },
-		);
-	}
+  function toggleRole(name: string) {
+    const current = selectedRoles ?? [];
+    setValue(
+      "roles",
+      current.includes(name)
+        ? current.filter((r) => r !== name)
+        : [...current, name],
+      { shouldValidate: true },
+    );
+  }
 
-	async function onSubmit(data: UserForm) {
-		try {
-			const payload: Record<string, unknown> = {
-				name: data.name,
-				email: data.email,
-				roles: data.roles,
-			};
-			if (data.password) payload['password'] = data.password;
+  async function onSubmit(data: UserForm) {
+    try {
+      const payload: Record<string, unknown> = {
+        name: data.name,
+        email: data.email,
+        roles: data.roles,
+      };
+      if (data.password) payload["password"] = data.password;
 
-			if (initial) {
-				await api.put(`/users/${initial.id}`, payload);
-				toast({ title: 'User updated' });
-			} else {
-				if (!data.password) {
-					toast({ title: 'Password is required', variant: 'destructive' });
-					return;
-				}
-				await api.post('/users', payload);
-				toast({ title: 'User created' });
-			}
-			reset();
-			onSuccess();
-			onOpenChange(false);
-		} catch (err) {
-			const message =
-				err instanceof Error ? err.message : 'Save failed. Please try again.';
-			setError('root', { message });
-		}
-	}
+      if (initial) {
+        await api.put(`/users/${initial.id}`, payload);
+        toast({ title: "User updated" });
+      } else {
+        if (!data.password) {
+          toast({ title: "Password is required", variant: "destructive" });
+          return;
+        }
+        await api.post("/users", payload);
+        toast({ title: "User created" });
+      }
+      reset();
+      onSuccess();
+      onOpenChange(false);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Save failed. Please try again.";
+      setError("root", { message });
+    }
+  }
 
-	return (
-		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className='sm:max-w-md'>
-				<DialogHeader>
-					<DialogTitle>{initial ? 'Edit User' : 'New User'}</DialogTitle>
-				</DialogHeader>
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{initial ? "Edit User" : "New User"}</DialogTitle>
+        </DialogHeader>
 
-				<form onSubmit={handleSubmit(onSubmit)} className='space-y-4'>
-					<div className='space-y-1'>
-						<Label htmlFor='u-name'>Name *</Label>
-						<Input id='u-name' {...register('name')} placeholder='Jane Smith' />
-						{errors.name && (
-							<p className='text-xs text-destructive'>{errors.name.message}</p>
-						)}
-					</div>
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <div className="space-y-1">
+            <Label htmlFor="u-name">Name *</Label>
+            <Input id="u-name" {...register("name")} placeholder="Jane Smith" />
+            {errors.name && (
+              <p className="text-xs text-destructive">{errors.name.message}</p>
+            )}
+          </div>
 
-					<div className='space-y-1'>
-						<Label htmlFor='u-email'>Email *</Label>
-						<Input
-							id='u-email'
-							type='email'
-							{...register('email')}
-							placeholder='jane@example.com'
-						/>
-						{errors.email && (
-							<p className='text-xs text-destructive'>{errors.email.message}</p>
-						)}
-					</div>
+          <div className="space-y-1">
+            <Label htmlFor="u-email">Email *</Label>
+            <Input
+              id="u-email"
+              type="email"
+              {...register("email")}
+              placeholder="jane@example.com"
+            />
+            {errors.email && (
+              <p className="text-xs text-destructive">{errors.email.message}</p>
+            )}
+          </div>
 
-					<div className='space-y-1'>
-						<Label htmlFor='u-password'>
-							{initial ? 'New Password (leave blank to keep)' : 'Password *'}
-						</Label>
-						<Input
-							id='u-password'
-							type='password'
-							{...register('password')}
-							placeholder='••••••••'
-						/>
-						{errors.password && (
-							<p className='text-xs text-destructive'>
-								{errors.password.message}
-							</p>
-						)}
-					</div>
+          <div className="space-y-1">
+            <Label htmlFor="u-password">
+              {initial ? "New Password (leave blank to keep)" : "Password *"}
+            </Label>
+            <Input
+              id="u-password"
+              type="password"
+              {...register("password")}
+              placeholder="••••••••"
+            />
+            {errors.password && (
+              <p className="text-xs text-destructive">
+                {errors.password.message}
+              </p>
+            )}
+          </div>
 
-					<div className='space-y-2'>
-						<Label>Roles *</Label>
-						<div className='flex flex-wrap gap-3'>
-							{allRoles.map(role => (
-								<label
-									key={role.id}
-									className='flex items-center gap-2 text-sm cursor-pointer'
-								>
-									<input
-										type='checkbox'
-										className='h-4 w-4 rounded accent-primary cursor-pointer'
-										checked={selectedRoles?.includes(role.name) ?? false}
-										onChange={() => toggleRole(role.name)}
-									/>
-									<span className='capitalize'>{role.name}</span>
-								</label>
-							))}
-						</div>
-						{errors.roles && (
-							<p className='text-xs text-destructive'>{errors.roles.message}</p>
-						)}
-					</div>
+          <div className="space-y-2">
+            <Label>Roles *</Label>
+            <div className="flex flex-wrap gap-3">
+              {allRoles.map((role) => (
+                <label
+                  key={role.id}
+                  className="flex items-center gap-2 text-sm cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded accent-primary cursor-pointer"
+                    checked={selectedRoles?.includes(role.name) ?? false}
+                    onChange={() => toggleRole(role.name)}
+                  />
+                  <span className="capitalize">{role.name}</span>
+                </label>
+              ))}
+            </div>
+            {errors.roles && (
+              <p className="text-xs text-destructive">{errors.roles.message}</p>
+            )}
+          </div>
 
-					<DialogFooter>
-						<Button
-							type='button'
-							variant='outline'
-							onClick={() => onOpenChange(false)}
-						>
-							Cancel
-						</Button>
-						<Button type='submit' disabled={isSubmitting}>
-							{isSubmitting ? 'Saving…' : initial ? 'Update' : 'Create'}
-						</Button>
-					</DialogFooter>
-				</form>
-			</DialogContent>
-		</Dialog>
-	);
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting ? "Saving…" : initial ? "Update" : "Create"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 export function UsersPage() {
-	const qc = useQueryClient();
-	const currentUser = useAuthStore(s => s.user);
-	const [page, setPage] = useState(1);
-	const [search, setSearch] = useState('');
-	const [searchInput, setSearchInput] = useState('');
-	const [createOpen, setCreateOpen] = useState(false);
-	const [editTarget, setEditTarget] = useState<User | null>(null);
-	const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
-	const [selectedIds, setSelectedIds] = useState<(string | number)[]>([]);
-	const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const qc = useQueryClient();
+  const currentUser = useAuthStore((s) => s.user);
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<User | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
+  const [selectedIds, setSelectedIds] = useState<(string | number)[]>([]);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
-	const { data, isLoading, isError, refetch } = useQuery({
-		queryKey: ['users', page, search],
-		queryFn: () =>
-			api.get<PaginatedUsers>(
-				`/users?page=${page}&limit=20${search ? `&search=${encodeURIComponent(search)}` : ''}`,
-			),
-	});
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ["users", page, search],
+    queryFn: () =>
+      api.get<PaginatedUsers>(
+        `/users?page=${page}&limit=20${search ? `&search=${encodeURIComponent(search)}` : ""}`,
+      ),
+  });
 
-	const { data: allRoles = [] } = useQuery({
-		queryKey: ['roles'],
-		queryFn: () => api.get<Role[]>('/users/roles'),
-	});
+  const { data: allRoles = [] } = useQuery({
+    queryKey: ["roles"],
+    queryFn: () => api.get<Role[]>("/users/roles"),
+  });
 
-	const deleteMutation = useMutation({
-		mutationFn: (id: number) => api.delete(`/users/${id}`),
-		onSuccess: () => {
-			qc.invalidateQueries({ queryKey: ['users'] });
-			setDeleteTarget(null);
-			toast({ title: 'User deleted' });
-		},
-		onError: () => toast({ title: 'Delete failed', variant: 'destructive' }),
-	});
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => api.delete(`/users/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["users"] });
+      setDeleteTarget(null);
+      toast({ title: "User deleted" });
+    },
+    onError: () => toast({ title: "Delete failed", variant: "destructive" }),
+  });
 
-	const bulkDeleteMutation = useMutation({
-		mutationFn: (ids: (string | number)[]) =>
-			Promise.all(ids.map(id => api.delete(`/users/${id}`))),
-		onSuccess: () => {
-			qc.invalidateQueries({ queryKey: ['users'] });
-			setSelectedIds([]);
-			setIsBulkDeleting(false);
-			toast({ title: 'Users deleted successfully' });
-		},
-		onError: () => {
-			setIsBulkDeleting(false);
-			toast({ title: 'Bulk delete failed', variant: 'destructive' });
-		},
-	});
+  const bulkDeleteMutation = useMutation({
+    mutationFn: (ids: (string | number)[]) =>
+      Promise.all(ids.map((id) => api.delete(`/users/${id}`))),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["users"] });
+      setSelectedIds([]);
+      setIsBulkDeleting(false);
+      toast({ title: "Users deleted successfully" });
+    },
+    onError: () => {
+      setIsBulkDeleting(false);
+      toast({ title: "Bulk delete failed", variant: "destructive" });
+    },
+  });
 
-	const totalPages = data?.totalPages ?? 1;
+  const totalPages = data?.totalPages ?? 1;
 
-	function invalidate() {
-		qc.invalidateQueries({ queryKey: ['users'] });
-	}
+  function invalidate() {
+    qc.invalidateQueries({ queryKey: ["users"] });
+  }
 
-	const columns: Column<User>[] = [
-		{
-			header: 'Name',
-			render: u => (
-				<div className='flex items-center gap-2'>
-					<div className='w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold shrink-0'>
-						{u.name
-							.split(' ')
-							.map(n => n[0])
-							.join('')
-							.toUpperCase()
-							.slice(0, 2)}
-					</div>
-					<span className='font-medium'>{u.name}</span>
-				</div>
-			),
-		},
-		{
-			header: 'Email',
-			render: u => (
-				<span className='text-muted-foreground text-xs'>{u.email}</span>
-			),
-		},
-		{
-			header: 'Roles',
-			render: u => (
-				<div className='flex flex-wrap gap-1'>
-					{u.roles.map(role => (
-						<Badge
-							key={role}
-							variant={
-								(ROLE_COLORS[role] ?? 'outline') as
-									| 'destructive'
-									| 'default'
-									| 'secondary'
-									| 'outline'
-							}
-							className='capitalize text-[10px] h-4 px-1.5'
-						>
-							<Shield className='h-2.5 w-2.5 mr-1' />
-							{role}
-						</Badge>
-					))}
-				</div>
-			),
-		},
-		{
-			header: 'Joined',
-			render: u => (
-				<span className='text-muted-foreground text-xs'>
-					{new Date(u.created_at).toLocaleDateString()}
-				</span>
-			),
-		},
-	];
+  const columns: Column<User>[] = [
+    {
+      header: "Name",
+      render: (u) => (
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold shrink-0">
+            {u.name
+              .split(" ")
+              .map((n) => n[0])
+              .join("")
+              .toUpperCase()
+              .slice(0, 2)}
+          </div>
+          <span className="font-medium">{u.name}</span>
+        </div>
+      ),
+    },
+    {
+      header: "Email",
+      render: (u) => (
+        <span className="text-muted-foreground text-xs">{u.email}</span>
+      ),
+    },
+    {
+      header: "Roles",
+      render: (u) => (
+        <div className="flex flex-wrap gap-1">
+          {u.roles.map((role) => (
+            <Badge
+              key={role}
+              variant={
+                (ROLE_COLORS[role] ?? "outline") as
+                  | "destructive"
+                  | "default"
+                  | "secondary"
+                  | "outline"
+              }
+              className="capitalize text-[10px] h-4 px-1.5"
+            >
+              <Shield className="h-2.5 w-2.5 mr-1" />
+              {role}
+            </Badge>
+          ))}
+        </div>
+      ),
+    },
+    {
+      header: "Joined",
+      render: (u) => (
+        <span className="text-muted-foreground text-xs">
+          {new Date(u.created_at).toLocaleDateString()}
+        </span>
+      ),
+    },
+  ];
 
-	return (
-		<div className='space-y-4 pb-20'>
-			<PageHeader
-				title='Users & Roles'
-				onCreate={() => setCreateOpen(true)}
-				createLabel='New User'
-			/>
+  return (
+    <div className="space-y-4 pb-20">
+      <PageHeader
+        title="Users & Roles"
+        onCreate={() => setCreateOpen(true)}
+        createLabel="New User"
+      />
 
-			<SearchBar
-				value={searchInput}
-				onChange={setSearchInput}
-				onSearch={() => {
-					setSearch(searchInput);
-					setPage(1);
-					setSelectedIds([]);
-				}}
-				onClear={() => {
-					setSearch('');
-					setSearchInput('');
-					setPage(1);
-					setSelectedIds([]);
-				}}
-				placeholder='Search users…'
-				totalCount={data?.total ?? 0}
-				totalLabel='total users'
-			/>
+      <SearchBar
+        value={searchInput}
+        onChange={setSearchInput}
+        onSearch={() => {
+          setSearch(searchInput);
+          setPage(1);
+          setSelectedIds([]);
+        }}
+        onClear={() => {
+          setSearch("");
+          setSearchInput("");
+          setPage(1);
+          setSelectedIds([]);
+        }}
+        placeholder="Search users…"
+        totalCount={data?.total ?? 0}
+        totalLabel="total users"
+      />
 
-			<DataTable
-				columns={columns}
-				data={data?.data ?? []}
-				isLoading={isLoading}
-				isError={isError}
-				onRetry={refetch}
-				rowKey={u => u.id}
-				selectedIds={selectedIds}
-				onSelectionChange={setSelectedIds}
-				emptyMessage={search ? 'No results for that search.' : 'No users yet.'}
-				renderActions={user => (
-					<DropdownMenu>
-						<DropdownMenuTrigger asChild>
-							<Button variant='ghost' size='icon' className='h-7 w-7'>
-								<MoreHorizontal className='h-4 w-4' />
-							</Button>
-						</DropdownMenuTrigger>
-						<DropdownMenuContent align='end'>
-							<DropdownMenuItem onClick={() => setEditTarget(user)}>
-								<Pencil className='h-4 w-4 mr-2' />
-								Edit
-							</DropdownMenuItem>
-							<DropdownMenuItem
-								className='text-destructive focus:text-destructive'
-								onClick={() => setDeleteTarget(user)}
-								disabled={user.id === currentUser?.id}
-							>
-								<Trash2 className='h-4 w-4 mr-2' />
-								Delete
-							</DropdownMenuItem>
-						</DropdownMenuContent>
-					</DropdownMenu>
-				)}
-			/>
+      <DataTable
+        columns={columns}
+        data={data?.data ?? []}
+        isLoading={isLoading}
+        isError={isError}
+        onRetry={refetch}
+        rowKey={(u) => u.id}
+        selectedIds={selectedIds}
+        onSelectionChange={setSelectedIds}
+        emptyMessage={search ? "No results for that search." : "No users yet."}
+        renderActions={(user) => (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-7 w-7">
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setEditTarget(user)}>
+                <Pencil className="h-4 w-4 mr-2" />
+                Edit
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onClick={() => setDeleteTarget(user)}
+                disabled={user.id === currentUser?.id}
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      />
 
-			<Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+      <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
 
-			<BulkActionsBar
-				selectedCount={selectedIds.length}
-				actions={[
-					{
-						label: 'Delete Selected',
-						icon: Trash2,
-						variant: 'destructive',
-						onClick: () => setIsBulkDeleting(true),
-					},
-				]}
-				onClear={() => setSelectedIds([])}
-			/>
+      <BulkActionsBar
+        selectedCount={selectedIds.length}
+        actions={[
+          {
+            label: "Delete Selected",
+            icon: Trash2,
+            variant: "destructive",
+            onClick: () => setIsBulkDeleting(true),
+          },
+        ]}
+        onClear={() => setSelectedIds([])}
+      />
 
-			<UserFormDialog
-				open={createOpen}
-				onOpenChange={setCreateOpen}
-				allRoles={allRoles}
-				onSuccess={invalidate}
-			/>
+      <UserFormDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        allRoles={allRoles}
+        onSuccess={invalidate}
+      />
 
-			{editTarget && (
-				<UserFormDialog
-					key={editTarget.id}
-					open
-					onOpenChange={o => !o && setEditTarget(null)}
-					initial={editTarget}
-					allRoles={allRoles}
-					onSuccess={invalidate}
-				/>
-			)}
+      {editTarget && (
+        <UserFormDialog
+          key={editTarget.id}
+          open
+          onOpenChange={(o) => !o && setEditTarget(null)}
+          initial={editTarget}
+          allRoles={allRoles}
+          onSuccess={invalidate}
+        />
+      )}
 
-			<AlertDialog
-				open={!!deleteTarget}
-				onOpenChange={o => !o && setDeleteTarget(null)}
-				title='Delete User'
-				description={`"${deleteTarget?.name}" will be permanently deleted.`}
-				confirmLabel='Delete'
-				onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
-				isPending={deleteMutation.isPending}
-			/>
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        title="Delete User"
+        description={`"${deleteTarget?.name}" will be permanently deleted.`}
+        confirmLabel="Delete"
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        isPending={deleteMutation.isPending}
+      />
 
-			<AlertDialog
-				open={isBulkDeleting}
-				onOpenChange={o => !o && setIsBulkDeleting(false)}
-				title='Delete Users'
-				description={`Are you sure you want to delete ${selectedIds.length} selected users? This action cannot be undone.`}
-				confirmLabel='Delete All'
-				confirmVariant='destructive'
-				onConfirm={() =>
-					bulkDeleteMutation.mutate(
-						selectedIds.filter(id => id !== currentUser?.id),
-					)
-				}
-				isPending={bulkDeleteMutation.isPending}
-			/>
-		</div>
-	);
+      <AlertDialog
+        open={isBulkDeleting}
+        onOpenChange={(o) => !o && setIsBulkDeleting(false)}
+        title="Delete Users"
+        description={`Are you sure you want to delete ${selectedIds.length} selected users? This action cannot be undone.`}
+        confirmLabel="Delete All"
+        confirmVariant="destructive"
+        onConfirm={() =>
+          bulkDeleteMutation.mutate(
+            selectedIds.filter((id) => id !== currentUser?.id),
+          )
+        }
+        isPending={bulkDeleteMutation.isPending}
+      />
+    </div>
+  );
 }

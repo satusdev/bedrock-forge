@@ -1,83 +1,79 @@
 import {
-	BadRequestException,
-	Injectable,
-	NotFoundException,
-} from '@nestjs/common';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
-import {
-	QUEUES,
-	JOB_TYPES,
-	SYNC_JOB_OPTIONS,
-} from '@bedrock-forge/shared';
-import { SyncCloneDto, SyncPushDto } from './dto/sync.dto';
-import { SyncRepository } from './sync.repository';
-import { JobOrchestratorService } from '../job-executions/job-orchestrator.service';
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import { InjectQueue } from "@nestjs/bullmq";
+import { Queue } from "bullmq";
+import { QUEUES, JOB_TYPES, SYNC_JOB_OPTIONS } from "@bedrock-forge/shared";
+import { SyncCloneDto, SyncPushDto } from "./dto/sync.dto";
+import { SyncRepository } from "./sync.repository";
+import { JobOrchestratorService } from "../job-executions/job-orchestrator.service";
 
 @Injectable()
 export class SyncService {
-	constructor(
-		private readonly repo: SyncRepository,
-		private readonly jobOrchestrator: JobOrchestratorService,
-		@InjectQueue(QUEUES.SYNC) private readonly queue: Queue,
-	) {}
+  constructor(
+    private readonly repo: SyncRepository,
+    private readonly jobOrchestrator: JobOrchestratorService,
+    @InjectQueue(QUEUES.SYNC) private readonly queue: Queue,
+  ) {}
 
-	async enqueueClone(dto: SyncCloneDto) {
-		// Validate target environment has a Google Drive folder configured.
-		// Sync overwrites the target DB; a safety backup to GDrive is mandatory.
-		// skipSafetyBackup bypasses this check — the user explicitly accepts the risk.
-		if (!dto.skipSafetyBackup) {
-			const targetEnv = await this.repo.findEnvironmentById(
-				dto.targetEnvironmentId,
-			);
-			if (!targetEnv.google_drive_folder_id) {
-				throw new BadRequestException(
-					'Target environment has no Google Drive folder configured. ' +
-						'A safety backup is required before sync. ' +
-						'Set a Google Drive folder on the target environment first.',
-				);
-			}
-		}
+  async enqueueClone(dto: SyncCloneDto) {
+    // Validate target environment has a Google Drive folder configured.
+    // Sync overwrites the target DB; a safety backup to GDrive is mandatory.
+    // skipSafetyBackup bypasses this check — the user explicitly accepts the risk.
+    if (!dto.skipSafetyBackup) {
+      const targetEnv = await this.repo.findEnvironmentById(
+        dto.targetEnvironmentId,
+      );
+      if (!targetEnv.google_drive_folder_id) {
+        throw new BadRequestException(
+          "Target environment has no Google Drive folder configured. " +
+            "A safety backup is required before sync. " +
+            "Set a Google Drive folder on the target environment first.",
+        );
+      }
+    }
 
-		return this.jobOrchestrator.enqueue({
-			queue: this.queue,
-			queueName: QUEUES.SYNC,
-			jobType: JOB_TYPES.SYNC_CLONE,
-			payload: dto,
-			environmentId: dto.targetEnvironmentId,
-			jobOptions: SYNC_JOB_OPTIONS,
-		});
-	}
+    return this.jobOrchestrator.enqueue({
+      queue: this.queue,
+      queueName: QUEUES.SYNC,
+      jobType: JOB_TYPES.SYNC_CLONE,
+      payload: dto,
+      environmentId: dto.targetEnvironmentId,
+      jobOptions: SYNC_JOB_OPTIONS,
+    });
+  }
 
-	async enqueuePush(dto: SyncPushDto) {
-		return this.jobOrchestrator.enqueue({
-			queue: this.queue,
-			queueName: QUEUES.SYNC,
-			jobType: JOB_TYPES.SYNC_PUSH,
-			payload: dto,
-			environmentId: dto.targetEnvironmentId,
-			jobOptions: SYNC_JOB_OPTIONS,
-		});
-	}
+  async enqueuePush(dto: SyncPushDto) {
+    return this.jobOrchestrator.enqueue({
+      queue: this.queue,
+      queueName: QUEUES.SYNC,
+      jobType: JOB_TYPES.SYNC_PUSH,
+      payload: dto,
+      environmentId: dto.targetEnvironmentId,
+      jobOptions: SYNC_JOB_OPTIONS,
+    });
+  }
 
-	async cancelJobExecution(id: number) {
-		const exec = await this.repo.findJobExecutionById(BigInt(id));
-		if (!exec) throw new NotFoundException(`JobExecution ${id} not found`);
-		if (exec.status !== 'active') {
-			throw new BadRequestException(
-				`Job execution ${id} is not active (status: ${exec.status})`,
-			);
-		}
+  async cancelJobExecution(id: number) {
+    const exec = await this.repo.findJobExecutionById(BigInt(id));
+    if (!exec) throw new NotFoundException(`JobExecution ${id} not found`);
+    if (exec.status !== "active") {
+      throw new BadRequestException(
+        `Job execution ${id} is not active (status: ${exec.status})`,
+      );
+    }
 
-		const client = await this.queue.client;
-		await client.set(`forge:cancel:${exec.bull_job_id}`, '1', 'EX', 3600);
+    const client = await this.queue.client;
+    await client.set(`forge:cancel:${exec.bull_job_id}`, "1", "EX", 3600);
 
-		await this.repo.updateJobExecution(BigInt(id), {
-			status: 'failed',
-			last_error: 'Cancelled by user',
-			completed_at: new Date(),
-		});
+    await this.repo.updateJobExecution(BigInt(id), {
+      status: "failed",
+      last_error: "Cancelled by user",
+      completed_at: new Date(),
+    });
 
-		return { cancelled: true };
-	}
+    return { cancelled: true };
+  }
 }

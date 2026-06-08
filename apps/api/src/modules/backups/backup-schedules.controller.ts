@@ -1,45 +1,45 @@
 import {
-	Body,
-	Controller,
-	Delete,
-	Get,
-	HttpCode,
-	HttpStatus,
-	Param,
-	ParseIntPipe,
-	Put,
-	UseGuards,
-} from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
-import { RolesGuard } from '../../common/guards/roles.guard';
-import { Roles } from '../../common/decorators/roles.decorator';
-import { ROLES } from '@bedrock-forge/shared';
-import { BackupSchedulesService } from './backup-schedules.service';
-import { UpsertBackupScheduleDto } from './dto/backup-schedule.dto';
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseIntPipe,
+  Put,
+  UseGuards,
+} from "@nestjs/common";
+import { AuthGuard } from "@nestjs/passport";
+import { RolesGuard } from "../../common/guards/roles.guard";
+import { Roles } from "../../common/decorators/roles.decorator";
+import { ROLES } from "@bedrock-forge/shared";
+import { BackupSchedulesService } from "./backup-schedules.service";
+import { UpsertBackupScheduleDto } from "./dto/backup-schedule.dto";
 
-@UseGuards(AuthGuard('jwt'), RolesGuard)
+@UseGuards(AuthGuard("jwt"), RolesGuard)
 @Roles(ROLES.MANAGER)
-@Controller('environments/:envId/backup-schedule')
+@Controller("environments/:envId/backup-schedule")
 export class BackupSchedulesController {
-	constructor(private readonly service: BackupSchedulesService) {}
+  constructor(private readonly service: BackupSchedulesService) {}
 
-	@Get()
-	findOne(@Param('envId', ParseIntPipe) envId: number) {
-		return this.service.findByEnvironment(envId);
-	}
+  @Get()
+  findOne(@Param("envId", ParseIntPipe) envId: number) {
+    return this.service.findByEnvironment(envId);
+  }
 
-	/** Create or update the backup schedule for an environment (upsert). */
-	@Put()
-	upsert(
-		@Param('envId', ParseIntPipe) envId: number,
-		@Body() dto: UpsertBackupScheduleDto,
-	) {
-		return this.service.upsert(envId, dto);
-	}
+  /** Create or update the backup schedule for an environment (upsert). */
+  @Put()
+  upsert(
+    @Param("envId", ParseIntPipe) envId: number,
+    @Body() dto: UpsertBackupScheduleDto,
+  ) {
+    return this.service.upsert(envId, dto);
+  }
 
-	@Delete()
-	@HttpCode(HttpStatus.NO_CONTENT)
-	remove(@Param('envId', ParseIntPipe) envId: number) {
-		return this.service.remove(envId);
-	}
+  @Delete()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  remove(@Param("envId", ParseIntPipe) envId: number) {
+    return this.service.remove(envId);
+  }
 }

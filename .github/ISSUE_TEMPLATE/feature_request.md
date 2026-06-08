@@ -1,9 +1,9 @@
 ---
 name: Feature Request
 about: Suggest an idea for Bedrock Forge
-title: '[Feature] '
+title: "[Feature] "
 labels: enhancement
-assignees: ''
+assignees: ""
 ---
 
 ## Problem Statement

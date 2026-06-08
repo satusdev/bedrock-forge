@@ -1,17 +1,17 @@
-import { Module } from '@nestjs/common';
-import { BullModule } from '@nestjs/bullmq';
-import { QUEUES } from '@bedrock-forge/shared';
-import { SyncController } from './sync.controller';
-import { SyncService } from './sync.service';
-import { SyncRepository } from './sync.repository';
-import { JobExecutionsModule } from '../job-executions/job-executions.module';
+import { Module } from "@nestjs/common";
+import { BullModule } from "@nestjs/bullmq";
+import { QUEUES } from "@bedrock-forge/shared";
+import { SyncController } from "./sync.controller";
+import { SyncService } from "./sync.service";
+import { SyncRepository } from "./sync.repository";
+import { JobExecutionsModule } from "../job-executions/job-executions.module";
 
 @Module({
-	imports: [
-		BullModule.registerQueue({ name: QUEUES.SYNC }),
-		JobExecutionsModule,
-	],
-	controllers: [SyncController],
-	providers: [SyncService, SyncRepository],
+  imports: [
+    BullModule.registerQueue({ name: QUEUES.SYNC }),
+    JobExecutionsModule,
+  ],
+  controllers: [SyncController],
+  providers: [SyncService, SyncRepository],
 })
 export class SyncModule {}

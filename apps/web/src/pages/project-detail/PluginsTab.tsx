@@ -1,1 +1,1 @@
-export { PluginsTab } from './plugins/PluginsTab';
+export { PluginsTab } from "./plugins/PluginsTab";

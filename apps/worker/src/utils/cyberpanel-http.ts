@@ -1,11 +1,11 @@
-import { request as httpRequest, IncomingMessage } from 'node:http';
-import { request as httpsRequest, RequestOptions } from 'node:https';
+import { request as httpRequest, IncomingMessage } from "node:http";
+import { request as httpsRequest, RequestOptions } from "node:https";
 
 /** Credentials for a CyberPanel admin API connection. */
 export interface CpCreds {
-	url: string;
-	username: string;
-	password: string;
+  url: string;
+  username: string;
+  password: string;
 }
 
 /**
@@ -13,12 +13,12 @@ export interface CpCreds {
  * Used when building inline SQL — always paired with explicit quoting.
  */
 export function escapeMysql(str: string): string {
-	return str
-		.replace(/\\/g, '\\\\')
-		.replace(/'/g, "\\'")
-		.replace(/\0/g, '\\0')
-		.replace(/\n/g, '\\n')
-		.replace(/\r/g, '\\r');
+  return str
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "\\'")
+    .replace(/\0/g, "\\0")
+    .replace(/\n/g, "\\n")
+    .replace(/\r/g, "\\r");
 }
 
 /**
@@ -31,79 +31,79 @@ export function escapeMysql(str: string): string {
  * Rejects with an Error if CyberPanel returns `{ status: 0 }`.
  */
 export function callCpApi(
-	creds: CpCreds,
-	endpoint: string,
-	body: Record<string, unknown>,
+  creds: CpCreds,
+  endpoint: string,
+  body: Record<string, unknown>,
 ): Promise<unknown> {
-	return new Promise((resolve, reject) => {
-		const base = creds.url.replace(/\/$/, '');
-		const payload = JSON.stringify({
-			adminUser: creds.username,
-			adminPass: creds.password,
-			...body,
-		});
+  return new Promise((resolve, reject) => {
+    const base = creds.url.replace(/\/$/, "");
+    const payload = JSON.stringify({
+      adminUser: creds.username,
+      adminPass: creds.password,
+      ...body,
+    });
 
-		const isHttps = base.startsWith('https://');
-		const url = new URL(`${base}${endpoint}`);
+    const isHttps = base.startsWith("https://");
+    const url = new URL(`${base}${endpoint}`);
 
-		const opts: RequestOptions = {
-			hostname: url.hostname,
-			port: url.port ? parseInt(url.port, 10) : isHttps ? 443 : 80,
-			path: url.pathname + url.search,
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				'Content-Length': Buffer.byteLength(payload),
-			},
-			// Default: verify TLS certificates. Set CYBERPANEL_TLS_VERIFY=false only
-			// when the CyberPanel instance uses a self-signed cert that cannot be
-			// replaced — understand that this opens the connection to MITM attacks.
-			rejectUnauthorized: process.env['CYBERPANEL_TLS_VERIFY'] !== 'false',
-		};
+    const opts: RequestOptions = {
+      hostname: url.hostname,
+      port: url.port ? parseInt(url.port, 10) : isHttps ? 443 : 80,
+      path: url.pathname + url.search,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(payload),
+      },
+      // Default: verify TLS certificates. Set CYBERPANEL_TLS_VERIFY=false only
+      // when the CyberPanel instance uses a self-signed cert that cannot be
+      // replaced — understand that this opens the connection to MITM attacks.
+      rejectUnauthorized: process.env["CYBERPANEL_TLS_VERIFY"] !== "false",
+    };
 
-		const req = isHttps
-			? httpsRequest(opts, handleResp)
-			: httpRequest(opts, handleResp);
+    const req = isHttps
+      ? httpsRequest(opts, handleResp)
+      : httpRequest(opts, handleResp);
 
-		function handleResp(res: IncomingMessage) {
-			const chunks: Buffer[] = [];
-			res.on('data', (c: Buffer) => chunks.push(c));
-			res.on('end', () => {
-				const raw = Buffer.concat(chunks).toString();
+    function handleResp(res: IncomingMessage) {
+      const chunks: Buffer[] = [];
+      res.on("data", (c: Buffer) => chunks.push(c));
+      res.on("end", () => {
+        const raw = Buffer.concat(chunks).toString();
 
-				// Reject early on non-2xx HTTP status (e.g. 401 HTML auth page)
-				if (res.statusCode && (res.statusCode < 200 || res.statusCode >= 300)) {
-					reject(
-						new Error(
-							`CyberPanel ${endpoint} HTTP ${res.statusCode}: ${raw.slice(0, 300)}`,
-						),
-					);
-					return;
-				}
+        // Reject early on non-2xx HTTP status (e.g. 401 HTML auth page)
+        if (res.statusCode && (res.statusCode < 200 || res.statusCode >= 300)) {
+          reject(
+            new Error(
+              `CyberPanel ${endpoint} HTTP ${res.statusCode}: ${raw.slice(0, 300)}`,
+            ),
+          );
+          return;
+        }
 
-				try {
-					const data = JSON.parse(raw) as Record<string, unknown>;
-					if (data.status === 0) {
-						const msg =
-							(data.error_message as string) ||
-							(data.errorMessage as string) ||
-							JSON.stringify(data);
-						reject(new Error(`CyberPanel ${endpoint} failed: ${msg}`));
-					} else {
-						resolve(data);
-					}
-				} catch (e) {
-					reject(
-						new Error(
-							`CyberPanel ${endpoint} response parse error: ${e}\nBody: ${raw.slice(0, 300)}`,
-						),
-					);
-				}
-			});
-		}
+        try {
+          const data = JSON.parse(raw) as Record<string, unknown>;
+          if (data.status === 0) {
+            const msg =
+              (data.error_message as string) ||
+              (data.errorMessage as string) ||
+              JSON.stringify(data);
+            reject(new Error(`CyberPanel ${endpoint} failed: ${msg}`));
+          } else {
+            resolve(data);
+          }
+        } catch (e) {
+          reject(
+            new Error(
+              `CyberPanel ${endpoint} response parse error: ${e}\nBody: ${raw.slice(0, 300)}`,
+            ),
+          );
+        }
+      });
+    }
 
-		req.on('error', reject);
-		req.write(payload);
-		req.end();
-	});
+    req.on("error", reject);
+    req.write(payload);
+    req.end();
+  });
 }

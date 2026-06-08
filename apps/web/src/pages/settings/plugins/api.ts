@@ -1,6 +1,7 @@
-import { api } from '@/lib/api-client';
-import { PluginInventoryResponse } from './types';
+import { api } from "@/lib/api-client";
+import { PluginInventoryResponse } from "./types";
 
 export const pluginsApi = {
-	getPluginInventory: () => api.get<PluginInventoryResponse>('/plugin-scans/inventory'),
+  getPluginInventory: () =>
+    api.get<PluginInventoryResponse>("/plugin-scans/inventory"),
 };

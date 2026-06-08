@@ -1,26 +1,26 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable } from "@nestjs/common";
 import {
-	JobExecutionsRepository,
-	JobExecutionFilter,
-} from './job-executions.repository';
+  JobExecutionsRepository,
+  JobExecutionFilter,
+} from "./job-executions.repository";
 
 @Injectable()
 export class JobExecutionsService {
-	constructor(private readonly repo: JobExecutionsRepository) {}
+  constructor(private readonly repo: JobExecutionsRepository) {}
 
-	list(filter: JobExecutionFilter, page: number, limit: number) {
-		return this.repo.findPaginated(filter, page, limit);
-	}
+  list(filter: JobExecutionFilter, page: number, limit: number) {
+    return this.repo.findPaginated(filter, page, limit);
+  }
 
-	findOne(id: number) {
-		return this.repo.findById(id);
-	}
+  findOne(id: number) {
+    return this.repo.findById(id);
+  }
 
-	findLog(id: number) {
-		return this.repo.findLog(id);
-	}
+  findLog(id: number) {
+    return this.repo.findLog(id);
+  }
 
-	findEnvIdByBullJobId(bullJobId: string, queueName?: string) {
-		return this.repo.findEnvIdByBullJobId(bullJobId, queueName);
-	}
+  findEnvIdByBullJobId(bullJobId: string, queueName?: string) {
+    return this.repo.findEnvIdByBullJobId(bullJobId, queueName);
+  }
 }

@@ -1,7 +1,7 @@
-import { IsString, MinLength } from 'class-validator';
+import { IsString, MinLength } from "class-validator";
 
 export class SetSshKeyDto {
-	@IsString()
-	@MinLength(20)
-	key!: string;
+  @IsString()
+  @MinLength(20)
+  key!: string;
 }

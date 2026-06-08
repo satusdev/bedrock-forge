@@ -1,96 +1,104 @@
-import { Test } from '@nestjs/testing';
-import { SettingsService } from './settings.service';
-import { SettingsRepository } from './settings.repository';
-import { EncryptionService } from '../../common/encryption/encryption.service';
-import { ConfigService } from '@nestjs/config';
+import { Test } from "@nestjs/testing";
+import { SettingsService } from "./settings.service";
+import { SettingsRepository } from "./settings.repository";
+import { EncryptionService } from "../../common/encryption/encryption.service";
+import { ConfigService } from "@nestjs/config";
 
 const makeRepo = () => ({
-	findAll: jest.fn(),
-	findByKey: jest.fn(),
-	upsert: jest.fn(),
-	delete: jest.fn(),
+  findAll: jest.fn(),
+  findByKey: jest.fn(),
+  upsert: jest.fn(),
+  delete: jest.fn(),
 });
 
 const makeEnc = () => ({
-	encrypt: jest.fn((v: string) => `enc:${v}`),
-	decrypt: jest.fn((v: string) => v.replace('enc:', '')),
+  encrypt: jest.fn((v: string) => `enc:${v}`),
+  decrypt: jest.fn((v: string) => v.replace("enc:", "")),
 });
 
 const makeConfig = () => ({
-	get: jest.fn((key: string) => {
-		if (key === 'RCLONE_REMOTE_NAME') return 'gdrive';
-		return null;
-	}),
+  get: jest.fn((key: string) => {
+    if (key === "RCLONE_REMOTE_NAME") return "gdrive";
+    return null;
+  }),
 });
 
-describe('SettingsService', () => {
-	let service: SettingsService;
-	let repo: ReturnType<typeof makeRepo>;
-	let enc: ReturnType<typeof makeEnc>;
-	let config: ReturnType<typeof makeConfig>;
+describe("SettingsService", () => {
+  let service: SettingsService;
+  let repo: ReturnType<typeof makeRepo>;
+  let enc: ReturnType<typeof makeEnc>;
+  let config: ReturnType<typeof makeConfig>;
 
-	beforeEach(async () => {
-		repo = makeRepo();
-		enc = makeEnc();
-		config = makeConfig();
-		const module = await Test.createTestingModule({
-			providers: [
-				SettingsService,
-				{ provide: SettingsRepository, useValue: repo },
-				{ provide: EncryptionService, useValue: enc },
-				{ provide: ConfigService, useValue: config },
-			],
-		}).compile();
+  beforeEach(async () => {
+    repo = makeRepo();
+    enc = makeEnc();
+    config = makeConfig();
+    const module = await Test.createTestingModule({
+      providers: [
+        SettingsService,
+        { provide: SettingsRepository, useValue: repo },
+        { provide: EncryptionService, useValue: enc },
+        { provide: ConfigService, useValue: config },
+      ],
+    }).compile();
 
-		service = module.get(SettingsService);
-	});
+    service = module.get(SettingsService);
+  });
 
-	it('get returns null if key not found', async () => {
-		repo.findByKey.mockResolvedValue(null);
-		expect(await service.get('missing')).toBeNull();
-	});
+  it("get returns null if key not found", async () => {
+    repo.findByKey.mockResolvedValue(null);
+    expect(await service.get("missing")).toBeNull();
+  });
 
-	it('get returns { key, value } when found', async () => {
-		repo.findByKey.mockResolvedValue({ key: 'site_name', value: 'Forge' });
-		expect(await service.get('site_name')).toEqual({ key: 'site_name', value: 'Forge' });
-	});
+  it("get returns { key, value } when found", async () => {
+    repo.findByKey.mockResolvedValue({ key: "site_name", value: "Forge" });
+    expect(await service.get("site_name")).toEqual({
+      key: "site_name",
+      value: "Forge",
+    });
+  });
 
-	it('set delegates to repo.upsert', async () => {
-		repo.upsert.mockResolvedValue({ key: 'k', value: 'v' });
-		await service.set('k', 'v');
-		expect(repo.upsert).toHaveBeenCalledWith('k', 'v');
-	});
+  it("set delegates to repo.upsert", async () => {
+    repo.upsert.mockResolvedValue({ key: "k", value: "v" });
+    await service.set("k", "v");
+    expect(repo.upsert).toHaveBeenCalledWith("k", "v");
+  });
 
-	it('setEncrypted stores encrypted value', async () => {
-		repo.upsert.mockResolvedValue(undefined);
-		await service.setEncrypted('api_key', 'my-secret');
-		expect(enc.encrypt).toHaveBeenCalledWith('my-secret');
-		expect(repo.upsert).toHaveBeenCalledWith('api_key', 'enc:my-secret');
-	});
+  it("setEncrypted stores encrypted value", async () => {
+    repo.upsert.mockResolvedValue(undefined);
+    await service.setEncrypted("api_key", "my-secret");
+    expect(enc.encrypt).toHaveBeenCalledWith("my-secret");
+    expect(repo.upsert).toHaveBeenCalledWith("api_key", "enc:my-secret");
+  });
 
-	it('getDecrypted returns null when key absent', async () => {
-		repo.findByKey.mockResolvedValue(null);
-		expect(await service.getDecrypted('missing')).toBeNull();
-	});
+  it("getDecrypted returns null when key absent", async () => {
+    repo.findByKey.mockResolvedValue(null);
+    expect(await service.getDecrypted("missing")).toBeNull();
+  });
 
-	it('getDecrypted decrypts stored value', async () => {
-		repo.findByKey.mockResolvedValue({ key: 'api_key', value: 'enc:my-secret' });
-		expect(await service.getDecrypted('api_key')).toBe('my-secret');
-	});
+  it("getDecrypted decrypts stored value", async () => {
+    repo.findByKey.mockResolvedValue({
+      key: "api_key",
+      value: "enc:my-secret",
+    });
+    expect(await service.getDecrypted("api_key")).toBe("my-secret");
+  });
 
-	it('getDecrypted returns null if decryption throws', async () => {
-		repo.findByKey.mockResolvedValue({ key: 'api_key', value: 'bad-cipher' });
-		enc.decrypt.mockImplementation(() => { throw new Error('invalid'); });
-		expect(await service.getDecrypted('api_key')).toBeNull();
-	});
+  it("getDecrypted returns null if decryption throws", async () => {
+    repo.findByKey.mockResolvedValue({ key: "api_key", value: "bad-cipher" });
+    enc.decrypt.mockImplementation(() => {
+      throw new Error("invalid");
+    });
+    expect(await service.getDecrypted("api_key")).toBeNull();
+  });
 
-	it('hasEncrypted returns false when absent', async () => {
-		repo.findByKey.mockResolvedValue(null);
-		expect(await service.hasEncrypted('k')).toBe(false);
-	});
+  it("hasEncrypted returns false when absent", async () => {
+    repo.findByKey.mockResolvedValue(null);
+    expect(await service.hasEncrypted("k")).toBe(false);
+  });
 
-	it('hasEncrypted returns true when present', async () => {
-		repo.findByKey.mockResolvedValue({ key: 'k', value: 'enc:x' });
-		expect(await service.hasEncrypted('k')).toBe(true);
-	});
+  it("hasEncrypted returns true when present", async () => {
+    repo.findByKey.mockResolvedValue({ key: "k", value: "enc:x" });
+    expect(await service.hasEncrypted("k")).toBe(true);
+  });
 });

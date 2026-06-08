@@ -1,3 +1,3 @@
 export interface SshKeyStatus {
-	has_key: boolean;
+  has_key: boolean;
 }

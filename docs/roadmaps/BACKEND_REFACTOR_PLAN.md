@@ -132,7 +132,7 @@ Acceptance:
 
 - [x] Command strings are built in small pure functions where practical.
 - [x] Tests assert command output for dangerous paths such as sync, backup, and
-  plugin management.
+      plugin management.
 - [x] Cleanup commands are still best-effort and logged.
 
 ## Phase 6: API Module Cleanup

@@ -1,141 +1,141 @@
-import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
-	ChevronDown,
-	ChevronUp,
-	Terminal,
-	Clock,
-	CheckCircle2,
-	XCircle,
-	AlertTriangle,
-	Copy,
-	Download,
-} from 'lucide-react';
-import { api } from '@/lib/api-client';
-import { Skeleton } from '@/components/ui/skeleton';
+  ChevronDown,
+  ChevronUp,
+  Terminal,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  Copy,
+  Download,
+} from "lucide-react";
+import { api } from "@/lib/api-client";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export interface ExecutionLogEntry {
-	ts: string;
-	step: string;
-	level: 'info' | 'warn' | 'error';
-	detail?: string;
-	command?: string;
-	stdout?: string;
-	stderr?: string;
-	exitCode?: number;
-	durationMs?: number;
+  ts: string;
+  step: string;
+  level: "info" | "warn" | "error";
+  detail?: string;
+  command?: string;
+  stdout?: string;
+  stderr?: string;
+  exitCode?: number;
+  durationMs?: number;
 }
 
 interface JobExecutionLog {
-	id: number;
-	status: string;
-	execution_log: ExecutionLogEntry[] | null;
+  id: number;
+  status: string;
+  execution_log: ExecutionLogEntry[] | null;
 }
 
-function LevelIcon({ level }: { level: ExecutionLogEntry['level'] }) {
-	if (level === 'error')
-		return (
-			<XCircle className='h-3.5 w-3.5 text-destructive flex-shrink-0 mt-0.5' />
-		);
-	if (level === 'warn')
-		return (
-			<AlertTriangle className='h-3.5 w-3.5 text-warning flex-shrink-0 mt-0.5' />
-		);
-	return (
-		<CheckCircle2 className='h-3.5 w-3.5 text-success flex-shrink-0 mt-0.5' />
-	);
+function LevelIcon({ level }: { level: ExecutionLogEntry["level"] }) {
+  if (level === "error")
+    return (
+      <XCircle className="h-3.5 w-3.5 text-destructive flex-shrink-0 mt-0.5" />
+    );
+  if (level === "warn")
+    return (
+      <AlertTriangle className="h-3.5 w-3.5 text-warning flex-shrink-0 mt-0.5" />
+    );
+  return (
+    <CheckCircle2 className="h-3.5 w-3.5 text-success flex-shrink-0 mt-0.5" />
+  );
 }
 
 function EntryRow({
-	entry,
-	isLast,
+  entry,
+  isLast,
 }: {
-	entry: ExecutionLogEntry;
-	isLast: boolean;
+  entry: ExecutionLogEntry;
+  isLast: boolean;
 }) {
-	const ts = new Date(entry.ts).toLocaleTimeString([], {
-		hour: '2-digit',
-		minute: '2-digit',
-		second: '2-digit',
-	});
+  const ts = new Date(entry.ts).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 
-	return (
-		<div className='flex gap-3'>
-			{/* timeline spine */}
-			<div className='flex flex-col items-center'>
-				<LevelIcon level={entry.level} />
-				{!isLast && <div className='w-px flex-1 bg-border mt-1' />}
-			</div>
+  return (
+    <div className="flex gap-3">
+      {/* timeline spine */}
+      <div className="flex flex-col items-center">
+        <LevelIcon level={entry.level} />
+        {!isLast && <div className="w-px flex-1 bg-border mt-1" />}
+      </div>
 
-			<div className='pb-3 min-w-0 flex-1'>
-				<div className='flex flex-wrap items-center gap-x-3 gap-y-0.5'>
-					<span
-						className={`text-xs font-medium ${
-							entry.level === 'error'
-								? 'text-destructive'
-								: entry.level === 'warn'
-									? 'text-warning'
-									: 'text-foreground'
-						}`}
-					>
-						{entry.step}
-					</span>
-					<span className='text-xs text-muted-foreground flex items-center gap-1'>
-						<Clock className='h-2.5 w-2.5' />
-						{ts}
-					</span>
-					{entry.durationMs !== undefined && (
-						<span className='text-xs text-muted-foreground'>
-							{entry.durationMs < 1000
-								? `${entry.durationMs}ms`
-								: `${(entry.durationMs / 1000).toFixed(1)}s`}
-						</span>
-					)}
-					{entry.exitCode !== undefined && (
-						<span
-							className={`text-xs font-mono px-1 rounded ${
-								entry.exitCode === 0
-									? 'bg-success/10 text-success'
-									: 'bg-destructive/10 text-destructive'
-							}`}
-						>
-							exit {entry.exitCode}
-						</span>
-					)}
-				</div>
+      <div className="pb-3 min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+          <span
+            className={`text-xs font-medium ${
+              entry.level === "error"
+                ? "text-destructive"
+                : entry.level === "warn"
+                  ? "text-warning"
+                  : "text-foreground"
+            }`}
+          >
+            {entry.step}
+          </span>
+          <span className="text-xs text-muted-foreground flex items-center gap-1">
+            <Clock className="h-2.5 w-2.5" />
+            {ts}
+          </span>
+          {entry.durationMs !== undefined && (
+            <span className="text-xs text-muted-foreground">
+              {entry.durationMs < 1000
+                ? `${entry.durationMs}ms`
+                : `${(entry.durationMs / 1000).toFixed(1)}s`}
+            </span>
+          )}
+          {entry.exitCode !== undefined && (
+            <span
+              className={`text-xs font-mono px-1 rounded ${
+                entry.exitCode === 0
+                  ? "bg-success/10 text-success"
+                  : "bg-destructive/10 text-destructive"
+              }`}
+            >
+              exit {entry.exitCode}
+            </span>
+          )}
+        </div>
 
-				{entry.detail && (
-					<p className='text-xs text-muted-foreground mt-0.5 break-all'>
-						{entry.detail}
-					</p>
-				)}
+        {entry.detail && (
+          <p className="text-xs text-muted-foreground mt-0.5 break-all">
+            {entry.detail}
+          </p>
+        )}
 
-				{entry.command && (
-					<div className='mt-1 flex items-start gap-1.5'>
-						<Terminal className='h-3 w-3 text-muted-foreground flex-shrink-0 mt-0.5' />
-						<code className='text-xs font-mono bg-muted rounded px-1.5 py-0.5 break-all'>
-							{entry.command}
-						</code>
-					</div>
-				)}
+        {entry.command && (
+          <div className="mt-1 flex items-start gap-1.5">
+            <Terminal className="h-3 w-3 text-muted-foreground flex-shrink-0 mt-0.5" />
+            <code className="text-xs font-mono bg-muted rounded px-1.5 py-0.5 break-all">
+              {entry.command}
+            </code>
+          </div>
+        )}
 
-				{(entry.stdout || entry.stderr) && (
-					<div className='mt-1.5 space-y-1'>
-						{entry.stdout && (
-							<pre className='text-xs bg-muted rounded p-2 overflow-x-auto whitespace-pre-wrap break-all max-h-24 overflow-y-auto'>
-								{entry.stdout}
-							</pre>
-						)}
-						{entry.stderr && (
-							<pre className='text-xs bg-destructive/10 text-destructive rounded p-2 overflow-x-auto whitespace-pre-wrap break-all max-h-24 overflow-y-auto'>
-								{entry.stderr}
-							</pre>
-						)}
-					</div>
-				)}
-			</div>
-		</div>
-	);
+        {(entry.stdout || entry.stderr) && (
+          <div className="mt-1.5 space-y-1">
+            {entry.stdout && (
+              <pre className="text-xs bg-muted rounded p-2 overflow-x-auto whitespace-pre-wrap break-all max-h-24 overflow-y-auto">
+                {entry.stdout}
+              </pre>
+            )}
+            {entry.stderr && (
+              <pre className="text-xs bg-destructive/10 text-destructive rounded p-2 overflow-x-auto whitespace-pre-wrap break-all max-h-24 overflow-y-auto">
+                {entry.stderr}
+              </pre>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -146,97 +146,97 @@ function EntryRow({
  * Pass `isActive=true` while a job is running to poll every 2 s.
  */
 export function ExecutionLogPanel({
-	jobExecutionId,
-	isActive = false,
+  jobExecutionId,
+  isActive = false,
 }: {
-	jobExecutionId: number | null;
-	isActive?: boolean;
+  jobExecutionId: number | null;
+  isActive?: boolean;
 }) {
-	const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState(false);
 
-	const { data, isLoading } = useQuery({
-		queryKey: ['execution-log', jobExecutionId],
-		queryFn: () =>
-			api.get<JobExecutionLog>(`/job-executions/${jobExecutionId}/log`),
-		enabled: jobExecutionId != null,
-		staleTime: isActive ? 0 : 10_000,
-		refetchInterval: isActive ? 2_000 : false,
-	});
+  const { data, isLoading } = useQuery({
+    queryKey: ["execution-log", jobExecutionId],
+    queryFn: () =>
+      api.get<JobExecutionLog>(`/job-executions/${jobExecutionId}/log`),
+    enabled: jobExecutionId != null,
+    staleTime: isActive ? 0 : 10_000,
+    refetchInterval: isActive ? 2_000 : false,
+  });
 
-	if (!jobExecutionId) return null;
+  if (!jobExecutionId) return null;
 
-	if (isLoading) {
-		return (
-			<div className='space-y-2 py-3'>
-				<Skeleton className='h-4 w-48' />
-				<Skeleton className='h-4 w-64' />
-				<Skeleton className='h-4 w-56' />
-			</div>
-		);
-	}
+  if (isLoading) {
+    return (
+      <div className="space-y-2 py-3">
+        <Skeleton className="h-4 w-48" />
+        <Skeleton className="h-4 w-64" />
+        <Skeleton className="h-4 w-56" />
+      </div>
+    );
+  }
 
-	const entries = data?.execution_log ?? [];
+  const entries = data?.execution_log ?? [];
 
-	if (entries.length === 0) {
-		return (
-			<p className='text-xs text-muted-foreground py-2'>
-				No execution log available for this job.
-			</p>
-		);
-	}
+  if (entries.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground py-2">
+        No execution log available for this job.
+      </p>
+    );
+  }
 
-	function formatAsText() {
-		return entries
-			.map(e =>
-				[new Date(e.ts).toLocaleTimeString(), e.step, e.detail, e.command]
-					.filter(Boolean)
-					.join(' | '),
-			)
-			.join('\n');
-	}
+  function formatAsText() {
+    return entries
+      .map((e) =>
+        [new Date(e.ts).toLocaleTimeString(), e.step, e.detail, e.command]
+          .filter(Boolean)
+          .join(" | "),
+      )
+      .join("\n");
+  }
 
-	function handleCopy() {
-		navigator.clipboard.writeText(formatAsText()).then(() => {
-			setCopied(true);
-			setTimeout(() => setCopied(false), 2000);
-		});
-	}
+  function handleCopy() {
+    navigator.clipboard.writeText(formatAsText()).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
 
-	function handleDownload() {
-		const blob = new Blob([formatAsText()], { type: 'text/plain' });
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement('a');
-		a.href = url;
-		a.download = `execution-log-${jobExecutionId}.txt`;
-		a.click();
-		URL.revokeObjectURL(url);
-	}
+  function handleDownload() {
+    const blob = new Blob([formatAsText()], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `execution-log-${jobExecutionId}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
-	return (
-		<div className='pt-2'>
-			<div className='flex items-center justify-end gap-2 mb-2'>
-				<button
-					type='button'
-					onClick={handleCopy}
-					className='inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors'
-				>
-					<Copy className='h-3.5 w-3.5' />
-					{copied ? 'Copied!' : 'Copy'}
-				</button>
-				<button
-					type='button'
-					onClick={handleDownload}
-					className='inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors'
-				>
-					<Download className='h-3.5 w-3.5' />
-					Download
-				</button>
-			</div>
-			{entries.map((entry, i) => (
-				<EntryRow key={i} entry={entry} isLast={i === entries.length - 1} />
-			))}
-		</div>
-	);
+  return (
+    <div className="pt-2">
+      <div className="flex items-center justify-end gap-2 mb-2">
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <Copy className="h-3.5 w-3.5" />
+          {copied ? "Copied!" : "Copy"}
+        </button>
+        <button
+          type="button"
+          onClick={handleDownload}
+          className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <Download className="h-3.5 w-3.5" />
+          Download
+        </button>
+      </div>
+      {entries.map((entry, i) => (
+        <EntryRow key={i} entry={entry} isLast={i === entries.length - 1} />
+      ))}
+    </div>
+  );
 }
 
 /**
@@ -245,27 +245,27 @@ export function ExecutionLogPanel({
  * Toggle button that controls whether the ExecutionLogPanel is shown.
  */
 export function ExpandLogButton({
-	expanded,
-	onToggle,
-	disabled,
+  expanded,
+  onToggle,
+  disabled,
 }: {
-	expanded: boolean;
-	onToggle: () => void;
-	disabled?: boolean;
+  expanded: boolean;
+  onToggle: () => void;
+  disabled?: boolean;
 }) {
-	return (
-		<button
-			onClick={onToggle}
-			disabled={disabled}
-			className='inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:pointer-events-none'
-			title={expanded ? 'Hide execution log' : 'Show execution log'}
-		>
-			{expanded ? (
-				<ChevronUp className='h-3.5 w-3.5' />
-			) : (
-				<ChevronDown className='h-3.5 w-3.5' />
-			)}
-			Log
-		</button>
-	);
+  return (
+    <button
+      onClick={onToggle}
+      disabled={disabled}
+      className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:pointer-events-none"
+      title={expanded ? "Hide execution log" : "Show execution log"}
+    >
+      {expanded ? (
+        <ChevronUp className="h-3.5 w-3.5" />
+      ) : (
+        <ChevronDown className="h-3.5 w-3.5" />
+      )}
+      Log
+    </button>
+  );
 }

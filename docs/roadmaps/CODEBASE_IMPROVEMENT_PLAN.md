@@ -70,7 +70,7 @@ Before starting refactors, make the working state explicit:
 Acceptance:
 
 - [x] `git status` is understood and no unrelated user changes are mixed into a
-  cleanup commit.
+      cleanup commit.
 - [x] `pnpm --filter @bedrock-forge/web type-check`
 - [x] `pnpm --filter @bedrock-forge/api build`
 - [x] `pnpm --filter @bedrock-forge/worker build`
@@ -109,9 +109,9 @@ Initial standards to create through code:
 Acceptance:
 
 - [x] At least one representative frontend feature uses feature-local `api.ts`,
-  `hooks.ts`, `types.ts`, and typed components.
+      `hooks.ts`, `types.ts`, and typed components.
 - [x] At least one worker processor uses a small extracted helper or service with
-  focused tests.
+      focused tests.
 - [x] New conventions are documented in the matching roadmap or development guide.
 
 ## Phase 3: High-Impact Refactors [IN PROGRESS]

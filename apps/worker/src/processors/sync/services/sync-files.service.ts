@@ -1,504 +1,512 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { Job } from 'bullmq';
-import { stat, mkdtemp, rm } from 'fs/promises';
-import { createReadStream } from 'fs';
-import { join } from 'path';
-import { tmpdir } from 'os';
-import { SshKeyService } from '../../../services/ssh-key.service';
-import { StepTracker } from '../../../services/step-tracker';
-import { createRemoteExecutor } from '@bedrock-forge/remote-executor';
+import { Injectable, Logger } from "@nestjs/common";
+import { Job } from "bullmq";
+import { stat, mkdtemp, rm } from "fs/promises";
+import { createReadStream } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
+import { SshKeyService } from "../../../services/ssh-key.service";
+import { StepTracker } from "../../../services/step-tracker";
+import { createRemoteExecutor } from "@bedrock-forge/remote-executor";
 import {
-	shellQuote,
-	flipProtocol,
-	fixCyberPanelOwnership,
-} from '../../../utils/processor-utils';
-import { WpLayout } from './layout-detector.service';
+  shellQuote,
+  flipProtocol,
+  fixCyberPanelOwnership,
+} from "../../../utils/processor-utils";
+import { WpLayout } from "./layout-detector.service";
 
 type Executor = Awaited<ReturnType<typeof createRemoteExecutor>>;
 
 @Injectable()
 export class SyncFilesService {
-	private readonly logger = new Logger(SyncFilesService.name);
+  private readonly logger = new Logger(SyncFilesService.name);
 
-	private readonly RSYNC_EXCLUDES = [
-		'.env',
-		'wp-config.php',
-		'.htaccess',
-		'storage/',
-		'node_modules/',
-	];
+  private readonly RSYNC_EXCLUDES = [
+    ".env",
+    "wp-config.php",
+    ".htaccess",
+    "storage/",
+    "node_modules/",
+  ];
 
-	constructor(private readonly sshKey: SshKeyService) {}
+  constructor(private readonly sshKey: SshKeyService) {}
 
-	/**
-	 * Sync site files from source → target via rsync over SSH.
-	 */
-	async pushFiles(
-		job: Job,
-		sourceEnv: { root_path: string },
-		targetEnv: {
-			root_path: string;
-			server: {
-				ip_address: string;
-				ssh_port: number;
-				ssh_user: string;
-				name: string;
-				ssh_private_key_encrypted: string | null;
-			};
-		},
-		sourceExecutor: Executor,
-		targetExecutor: Executor,
-		tracker: StepTracker,
-		protectedFileExcludes: string[] = [],
-	): Promise<void> {
-		const sourceSite = sourceEnv.root_path;
-		const targetSite = targetEnv.root_path;
+  /**
+   * Sync site files from source → target via rsync over SSH.
+   */
+  async pushFiles(
+    job: Job,
+    sourceEnv: { root_path: string },
+    targetEnv: {
+      root_path: string;
+      server: {
+        ip_address: string;
+        ssh_port: number;
+        ssh_user: string;
+        name: string;
+        ssh_private_key_encrypted: string | null;
+      };
+    },
+    sourceExecutor: Executor,
+    targetExecutor: Executor,
+    tracker: StepTracker,
+    protectedFileExcludes: string[] = [],
+  ): Promise<void> {
+    const sourceSite = sourceEnv.root_path;
+    const targetSite = targetEnv.root_path;
 
-		await tracker.track({
-			step: 'Checking source site directory',
-			level: 'info',
-			detail: sourceSite,
-		});
+    await tracker.track({
+      step: "Checking source site directory",
+      level: "info",
+      detail: sourceSite,
+    });
 
-		// Verify root_path exists on source
-		const checkResult = await sourceExecutor.execute(
-			`test -d ${shellQuote(sourceSite)} && echo ok || echo missing`,
-		);
-		if (checkResult.code !== 0 || checkResult.stdout.trim() === 'missing') {
-			await tracker.track({
-				step: 'Source site directory not found — skipping file sync',
-				level: 'warn',
-				detail: `${sourceSite} does not exist`,
-			});
-			return;
-		}
+    // Verify root_path exists on source
+    const checkResult = await sourceExecutor.execute(
+      `test -d ${shellQuote(sourceSite)} && echo ok || echo missing`,
+    );
+    if (checkResult.code !== 0 || checkResult.stdout.trim() === "missing") {
+      await tracker.track({
+        step: "Source site directory not found — skipping file sync",
+        level: "warn",
+        detail: `${sourceSite} does not exist`,
+      });
+      return;
+    }
 
-		// Check if rsync is available on both source and target
-		const [rsyncSrcCheck, rsyncTgtCheck] = await Promise.all([
-			sourceExecutor.execute(
-				'command -v rsync > /dev/null 2>&1 && echo ok || echo missing',
-			),
-			targetExecutor.execute(
-				'command -v rsync > /dev/null 2>&1 && echo ok || echo missing',
-			),
-		]);
-		const hasRsync =
-			rsyncSrcCheck.stdout.trim() === 'ok' &&
-			rsyncTgtCheck.stdout.trim() === 'ok';
+    // Check if rsync is available on both source and target
+    const [rsyncSrcCheck, rsyncTgtCheck] = await Promise.all([
+      sourceExecutor.execute(
+        "command -v rsync > /dev/null 2>&1 && echo ok || echo missing",
+      ),
+      targetExecutor.execute(
+        "command -v rsync > /dev/null 2>&1 && echo ok || echo missing",
+      ),
+    ]);
+    const hasRsync =
+      rsyncSrcCheck.stdout.trim() === "ok" &&
+      rsyncTgtCheck.stdout.trim() === "ok";
 
-		if (hasRsync) {
-			await this.pushFilesViaRsync(
-				job,
-				sourceSite,
-				targetSite,
-				targetEnv,
-				sourceExecutor,
-				tracker,
-				protectedFileExcludes,
-			);
-		} else {
-			await tracker.track({
-				step: 'rsync not available on source — using tar pipe relay',
-				level: 'warn',
-				detail: 'Falling back to tar + pull + push through worker',
-			});
-			await this.pushFilesViaTarRelay(
-				job,
-				sourceSite,
-				targetSite,
-				sourceExecutor,
-				targetExecutor,
-				tracker,
-				protectedFileExcludes,
-			);
-		}
+    if (hasRsync) {
+      await this.pushFilesViaRsync(
+        job,
+        sourceSite,
+        targetSite,
+        targetEnv,
+        sourceExecutor,
+        tracker,
+        protectedFileExcludes,
+      );
+    } else {
+      await tracker.track({
+        step: "rsync not available on source — using tar pipe relay",
+        level: "warn",
+        detail: "Falling back to tar + pull + push through worker",
+      });
+      await this.pushFilesViaTarRelay(
+        job,
+        sourceSite,
+        targetSite,
+        sourceExecutor,
+        targetExecutor,
+        tracker,
+        protectedFileExcludes,
+      );
+    }
 
-		await fixCyberPanelOwnership(targetExecutor, targetSite, tracker);
-	}
+    await fixCyberPanelOwnership(targetExecutor, targetSite, tracker);
+  }
 
-	/** rsync source → target using SSH, executed on the source server. */
-	private async pushFilesViaRsync(
-		job: Job,
-		sourceRoot: string,
-		targetRoot: string,
-		targetEnv: {
-			server: {
-				ip_address: string;
-				ssh_port: number;
-				ssh_user: string;
-				name: string;
-				ssh_private_key_encrypted: string | null;
-			};
-		},
-		sourceExecutor: Executor,
-		tracker: StepTracker,
-		protectedFileExcludes: string[] = [],
-	): Promise<void> {
-		// Upload worker's private key to source as a temp file
-		const keyPath = `/tmp/forge_push_key_${job.id}`;
-		const rawKey = await this.sshKey.resolvePrivateKey(targetEnv.server);
-		await sourceExecutor.pushFile({
-			remotePath: keyPath,
-			content: Buffer.from(rawKey),
-		});
-		await sourceExecutor.execute(`chmod 600 ${keyPath}`);
+  /** rsync source → target using SSH, executed on the source server. */
+  private async pushFilesViaRsync(
+    job: Job,
+    sourceRoot: string,
+    targetRoot: string,
+    targetEnv: {
+      server: {
+        ip_address: string;
+        ssh_port: number;
+        ssh_user: string;
+        name: string;
+        ssh_private_key_encrypted: string | null;
+      };
+    },
+    sourceExecutor: Executor,
+    tracker: StepTracker,
+    protectedFileExcludes: string[] = [],
+  ): Promise<void> {
+    // Upload worker's private key to source as a temp file
+    const keyPath = `/tmp/forge_push_key_${job.id}`;
+    const rawKey = await this.sshKey.resolvePrivateKey(targetEnv.server);
+    await sourceExecutor.pushFile({
+      remotePath: keyPath,
+      content: Buffer.from(rawKey),
+    });
+    await sourceExecutor.execute(`chmod 600 ${keyPath}`);
 
-		// Prepend '/' to anchor each pattern to the transfer root, so rsync won't
-		// strip nested directories with the same name inside plugins or themes.
-		const allExcludes = this.buildFileSyncExcludes(protectedFileExcludes);
-		const excludeFlags = allExcludes.map(
-			e => `--exclude=${shellQuote('/' + e)}`,
-		).join(' ');
+    // Prepend '/' to anchor each pattern to the transfer root, so rsync won't
+    // strip nested directories with the same name inside plugins or themes.
+    const allExcludes = this.buildFileSyncExcludes(protectedFileExcludes);
+    const excludeFlags = allExcludes
+      .map((e) => `--exclude=${shellQuote("/" + e)}`)
+      .join(" ");
 
-		const rsyncCmd = [
-			'rsync',
-			'-az',
-			'--delete',
-			'--no-owner',
-			'--no-group',
-			'--no-perms',
-			'--ignore-errors',
-			'--timeout=300',
-			excludeFlags,
-			`-e "ssh -i ${keyPath} -p ${targetEnv.server.ssh_port} -o StrictHostKeyChecking=no -o ConnectTimeout=30"`,
-			`${shellQuote(sourceRoot)}/`,
-			`${shellQuote(targetEnv.server.ssh_user)}@${targetEnv.server.ip_address}:${shellQuote(targetRoot)}/`,
-		].join(' ');
+    const rsyncCmd = [
+      "rsync",
+      "-az",
+      "--delete",
+      "--no-owner",
+      "--no-group",
+      "--no-perms",
+      "--ignore-errors",
+      "--timeout=300",
+      excludeFlags,
+      `-e "ssh -i ${keyPath} -p ${targetEnv.server.ssh_port} -o StrictHostKeyChecking=no -o ConnectTimeout=30"`,
+      `${shellQuote(sourceRoot)}/`,
+      `${shellQuote(targetEnv.server.ssh_user)}@${targetEnv.server.ip_address}:${shellQuote(targetRoot)}/`,
+    ].join(" ");
 
-		const loggedExcludes = allExcludes.join(', ');
-		await tracker.track({
-			step: 'Syncing site files via rsync',
-			level: 'info',
-			detail: `${sourceRoot} → ${targetEnv.server.ip_address}:${targetRoot} (excluding: ${loggedExcludes})`,
-			command: 'rsync -az --delete --no-perms [excludes] (key redacted)',
-		});
+    const loggedExcludes = allExcludes.join(", ");
+    await tracker.track({
+      step: "Syncing site files via rsync",
+      level: "info",
+      detail: `${sourceRoot} → ${targetEnv.server.ip_address}:${targetRoot} (excluding: ${loggedExcludes})`,
+      command: "rsync -az --delete --no-perms [excludes] (key redacted)",
+    });
 
-		const rsyncStart = Date.now();
-		const rsyncResult = await sourceExecutor.execute(rsyncCmd);
+    const rsyncStart = Date.now();
+    const rsyncResult = await sourceExecutor.execute(rsyncCmd);
 
-		// Cleanup key regardless of outcome
-		await sourceExecutor.execute(`rm -f ${keyPath}`).catch(() => {});
+    // Cleanup key regardless of outcome
+    await sourceExecutor.execute(`rm -f ${keyPath}`).catch(() => {});
 
-		await tracker.trackCommand(
-			'rsync site files',
-			'rsync -az --delete --no-perms [excludes] (key redacted)',
-			rsyncResult,
-			Date.now() - rsyncStart,
-		);
+    await tracker.trackCommand(
+      "rsync site files",
+      "rsync -az --delete --no-perms [excludes] (key redacted)",
+      rsyncResult,
+      Date.now() - rsyncStart,
+    );
 
-		const RSYNC_PARTIAL = 23; // partial transfer / some attrs not set
-		const rsyncOutput = rsyncResult.stderr || rsyncResult.stdout || '';
-		const isPermissionOnlyPartial =
-			rsyncResult.code === RSYNC_PARTIAL &&
-			this.isRsyncPermissionOnlyPartial(rsyncOutput);
+    const RSYNC_PARTIAL = 23; // partial transfer / some attrs not set
+    const rsyncOutput = rsyncResult.stderr || rsyncResult.stdout || "";
+    const isPermissionOnlyPartial =
+      rsyncResult.code === RSYNC_PARTIAL &&
+      this.isRsyncPermissionOnlyPartial(rsyncOutput);
 
-		if (
-			rsyncResult.code !== 0 &&
-			(rsyncResult.code !== RSYNC_PARTIAL || !isPermissionOnlyPartial)
-		) {
-			throw new Error(
-				`rsync failed (exit ${rsyncResult.code}): ${rsyncResult.stderr || rsyncResult.stdout}`,
-			);
-		}
+    if (
+      rsyncResult.code !== 0 &&
+      (rsyncResult.code !== RSYNC_PARTIAL || !isPermissionOnlyPartial)
+    ) {
+      throw new Error(
+        `rsync failed (exit ${rsyncResult.code}): ${rsyncResult.stderr || rsyncResult.stdout}`,
+      );
+    }
 
-		if (isPermissionOnlyPartial) {
-			const permLines = rsyncOutput
-				.split('\n')
-				.filter(l => l.includes('Operation not permitted') || l.includes('failed to set permissions'))
-				.join(' | ')
-				.slice(0, 400);
-			await tracker.track({
-				step: 'File sync complete (rsync) — some attrs skipped (root-owned files)',
-				level: 'warn',
-				detail:
-					(permLines || rsyncResult.stderr || 'Some file attributes could not be set') +
-					' — this is expected for intentionally root-owned files (e.g. wp-config.php) and does NOT affect the sync.',
-			});
-		} else {
-			await tracker.track({
-				step: 'File sync complete (rsync)',
-				level: 'info',
-				detail: rsyncResult.stdout.trim() || 'Done',
-			});
-		}
-	}
+    if (isPermissionOnlyPartial) {
+      const permLines = rsyncOutput
+        .split("\n")
+        .filter(
+          (l) =>
+            l.includes("Operation not permitted") ||
+            l.includes("failed to set permissions"),
+        )
+        .join(" | ")
+        .slice(0, 400);
+      await tracker.track({
+        step: "File sync complete (rsync) — some attrs skipped (root-owned files)",
+        level: "warn",
+        detail:
+          (permLines ||
+            rsyncResult.stderr ||
+            "Some file attributes could not be set") +
+          " — this is expected for intentionally root-owned files (e.g. wp-config.php) and does NOT affect the sync.",
+      });
+    } else {
+      await tracker.track({
+        step: "File sync complete (rsync)",
+        level: "info",
+        detail: rsyncResult.stdout.trim() || "Done",
+      });
+    }
+  }
 
-	private isRsyncPermissionOnlyPartial(output: string): boolean {
-		const meaningfulLines = output
-			.split('\n')
-			.map(line => line.trim())
-			.filter(line => line.length > 0)
-			.filter(line => !/^rsync error: .*code 23\b/.test(line));
+  private isRsyncPermissionOnlyPartial(output: string): boolean {
+    const meaningfulLines = output
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .filter((line) => !/^rsync error: .*code 23\b/.test(line));
 
-		return (
-			meaningfulLines.length > 0 &&
-			meaningfulLines.every(
-				line =>
-					line.includes('Operation not permitted') ||
-					line.includes('failed to set permissions'),
-			)
-		);
-	}
+    return (
+      meaningfulLines.length > 0 &&
+      meaningfulLines.every(
+        (line) =>
+          line.includes("Operation not permitted") ||
+          line.includes("failed to set permissions"),
+      )
+    );
+  }
 
-	private buildFileSyncExcludes(protectedFileExcludes: string[] = []): string[] {
-		const cleanProtected = protectedFileExcludes
-			.map(p => p.replace(/^\/+/, '').replace(/\/+/g, '/').trim())
-			.filter(p => p.length > 0 && !p.includes('..'));
+  private buildFileSyncExcludes(
+    protectedFileExcludes: string[] = [],
+  ): string[] {
+    const cleanProtected = protectedFileExcludes
+      .map((p) => p.replace(/^\/+/, "").replace(/\/+/g, "/").trim())
+      .filter((p) => p.length > 0 && !p.includes(".."));
 
-		return Array.from(new Set([...this.RSYNC_EXCLUDES, ...cleanProtected]));
-	}
+    return Array.from(new Set([...this.RSYNC_EXCLUDES, ...cleanProtected]));
+  }
 
-	/**
-	 * Fallback file sync: tar on source → pull through worker → untar on target.
-	 */
-	private async pushFilesViaTarRelay(
-		job: Job,
-		sourceContent: string,
-		targetContent: string,
-		sourceExecutor: Executor,
-		targetExecutor: Executor,
-		tracker: StepTracker,
-		protectedFileExcludes: string[] = [],
-	): Promise<void> {
-		const remoteTar = `/tmp/forge_push_content_${job.id}.tar.gz`;
+  /**
+   * Fallback file sync: tar on source → pull through worker → untar on target.
+   */
+  private async pushFilesViaTarRelay(
+    job: Job,
+    sourceContent: string,
+    targetContent: string,
+    sourceExecutor: Executor,
+    targetExecutor: Executor,
+    tracker: StepTracker,
+    protectedFileExcludes: string[] = [],
+  ): Promise<void> {
+    const remoteTar = `/tmp/forge_push_content_${job.id}.tar.gz`;
 
-		const allExcludes = this.buildFileSyncExcludes(protectedFileExcludes);
-		const tarExcludes = allExcludes.map(
-			e => `--exclude=${shellQuote('./' + e)}`,
-		).join(' ');
+    const allExcludes = this.buildFileSyncExcludes(protectedFileExcludes);
+    const tarExcludes = allExcludes
+      .map((e) => `--exclude=${shellQuote("./" + e)}`)
+      .join(" ");
 
-		const tarCmd = `tar -czf ${remoteTar} ${tarExcludes} -C ${shellQuote(sourceContent)} .`;
-		await tracker.track({
-			step: 'Archiving site files on source',
-			level: 'info',
-			command: tarCmd,
-		});
-		const tarStart = Date.now();
-		const tarResult = await sourceExecutor.execute(tarCmd);
-		await tracker.trackCommand(
-			'tar site files',
-			tarCmd,
-			tarResult,
-			Date.now() - tarStart,
-		);
+    const tarCmd = `tar -czf ${remoteTar} ${tarExcludes} -C ${shellQuote(sourceContent)} .`;
+    await tracker.track({
+      step: "Archiving site files on source",
+      level: "info",
+      command: tarCmd,
+    });
+    const tarStart = Date.now();
+    const tarResult = await sourceExecutor.execute(tarCmd);
+    await tracker.trackCommand(
+      "tar site files",
+      tarCmd,
+      tarResult,
+      Date.now() - tarStart,
+    );
 
-		if (tarResult.code !== 0) {
-			throw new Error(
-				`tar failed (exit ${tarResult.code}): ${tarResult.stderr}`,
-			);
-		}
+    if (tarResult.code !== 0) {
+      throw new Error(
+        `tar failed (exit ${tarResult.code}): ${tarResult.stderr}`,
+      );
+    }
 
-		await tracker.track({
-			step: 'Relaying site archive through worker (streaming)',
-			level: 'info',
-		});
-		const localTarDir = await mkdtemp(join(tmpdir(), 'forge-tar-'));
-		const localTarPath = join(localTarDir, `content_${job.id}.tar.gz`);
-		try {
-			await sourceExecutor.pullFileToPath(remoteTar, localTarPath);
-			await sourceExecutor.execute(`rm -f ${remoteTar}`).catch(() => {});
-			const tarStat = await stat(localTarPath);
-			await tracker.track({
-				step: `Archive pulled (${(tarStat.size / 1024 / 1024).toFixed(1)} MB) — pushing to target`,
-				level: 'info',
-			});
-			const tarStream = createReadStream(localTarPath);
-			await targetExecutor.pushFileFromStream(remoteTar, tarStream);
-		} finally {
-			await rm(localTarDir, { recursive: true, force: true });
-		}
+    await tracker.track({
+      step: "Relaying site archive through worker (streaming)",
+      level: "info",
+    });
+    const localTarDir = await mkdtemp(join(tmpdir(), "forge-tar-"));
+    const localTarPath = join(localTarDir, `content_${job.id}.tar.gz`);
+    try {
+      await sourceExecutor.pullFileToPath(remoteTar, localTarPath);
+      await sourceExecutor.execute(`rm -f ${remoteTar}`).catch(() => {});
+      const tarStat = await stat(localTarPath);
+      await tracker.track({
+        step: `Archive pulled (${(tarStat.size / 1024 / 1024).toFixed(1)} MB) — pushing to target`,
+        level: "info",
+      });
+      const tarStream = createReadStream(localTarPath);
+      await targetExecutor.pushFileFromStream(remoteTar, tarStream);
+    } finally {
+      await rm(localTarDir, { recursive: true, force: true });
+    }
 
-		await targetExecutor.execute(`mkdir -p ${shellQuote(targetContent)}`);
-		const extractCmd = `tar -xzf ${remoteTar} -C ${shellQuote(targetContent)}`;
-		await tracker.track({
-			step: 'Extracting site files on target',
-			level: 'info',
-			command: extractCmd,
-		});
-		const extractStart = Date.now();
-		const extractResult = await targetExecutor.execute(extractCmd);
-		await targetExecutor.execute(`rm -f ${remoteTar}`).catch(() => {});
-		await tracker.trackCommand(
-			'tar extract on target',
-			extractCmd,
-			extractResult,
-			Date.now() - extractStart,
-		);
+    await targetExecutor.execute(`mkdir -p ${shellQuote(targetContent)}`);
+    const extractCmd = `tar -xzf ${remoteTar} -C ${shellQuote(targetContent)}`;
+    await tracker.track({
+      step: "Extracting site files on target",
+      level: "info",
+      command: extractCmd,
+    });
+    const extractStart = Date.now();
+    const extractResult = await targetExecutor.execute(extractCmd);
+    await targetExecutor.execute(`rm -f ${remoteTar}`).catch(() => {});
+    await tracker.trackCommand(
+      "tar extract on target",
+      extractCmd,
+      extractResult,
+      Date.now() - extractStart,
+    );
 
-		if (extractResult.code !== 0) {
-			throw new Error(
-				`tar extract failed (exit ${extractResult.code}): ${extractResult.stderr}`,
-			);
-		}
+    if (extractResult.code !== 0) {
+      throw new Error(
+        `tar extract failed (exit ${extractResult.code}): ${extractResult.stderr}`,
+      );
+    }
 
-		await tracker.track({
-			step: 'File sync complete (tar relay)',
-			level: 'info',
-		});
-	}
+    await tracker.track({
+      step: "File sync complete (tar relay)",
+      level: "info",
+    });
+  }
 
-	/**
-	 * Search-replace hardcoded URLs in wp-content text files (CSS, JS, etc.).
-	 */
-	async replaceUrlsInFiles(
-		sourceUrl: string,
-		targetUrl: string,
-		wpContentPath: string,
-		executor: Executor,
-		tracker: StepTracker,
-		job: Job,
-	): Promise<void> {
-		const pairs: Array<[string, string]> = [[sourceUrl, targetUrl]];
-		const srcAlt = flipProtocol(sourceUrl);
-		const tgtAlt = flipProtocol(targetUrl);
-		if (srcAlt && tgtAlt && srcAlt !== targetUrl) {
-			pairs.push([srcAlt, tgtAlt]);
-		}
+  /**
+   * Search-replace hardcoded URLs in wp-content text files (CSS, JS, etc.).
+   */
+  async replaceUrlsInFiles(
+    sourceUrl: string,
+    targetUrl: string,
+    wpContentPath: string,
+    executor: Executor,
+    tracker: StepTracker,
+    job: Job,
+  ): Promise<void> {
+    const pairs: Array<[string, string]> = [[sourceUrl, targetUrl]];
+    const srcAlt = flipProtocol(sourceUrl);
+    const tgtAlt = flipProtocol(targetUrl);
+    if (srcAlt && tgtAlt && srcAlt !== targetUrl) {
+      pairs.push([srcAlt, tgtAlt]);
+    }
 
-		const jsonPairs: Array<[string, string]> = [];
-		for (const [old, nw] of pairs) {
-			const oj = old.replace(/\//g, '\\/');
-			const nj = nw.replace(/\//g, '\\/');
-			if (oj !== old) jsonPairs.push([oj, nj]);
-		}
+    const jsonPairs: Array<[string, string]> = [];
+    for (const [old, nw] of pairs) {
+      const oj = old.replace(/\//g, "\\/");
+      const nj = nw.replace(/\//g, "\\/");
+      if (oj !== old) jsonPairs.push([oj, nj]);
+    }
 
-		const urlEncodedPairs: Array<[string, string]> = [];
-		for (const [old, nw] of pairs) {
-			const oe = old.replace('://', '%3A%2F%2F');
-			const ne = nw.replace('://', '%3A%2F%2F');
-			if (oe !== old) urlEncodedPairs.push([oe, ne]);
-		}
+    const urlEncodedPairs: Array<[string, string]> = [];
+    for (const [old, nw] of pairs) {
+      const oe = old.replace("://", "%3A%2F%2F");
+      const ne = nw.replace("://", "%3A%2F%2F");
+      if (oe !== old) urlEncodedPairs.push([oe, ne]);
+    }
 
-		const allFilePairs = [...pairs, ...jsonPairs, ...urlEncodedPairs];
+    const allFilePairs = [...pairs, ...jsonPairs, ...urlEncodedPairs];
 
-		await tracker.track({
-			step: 'Replacing URLs in wp-content files',
-			level: 'info',
-			detail: `${wpContentPath} — ${allFilePairs.map(([o, n]) => `${o} → ${n}`).join(', ')}`,
-		});
+    await tracker.track({
+      step: "Replacing URLs in wp-content files",
+      level: "info",
+      detail: `${wpContentPath} — ${allFilePairs.map(([o, n]) => `${o} → ${n}`).join(", ")}`,
+    });
 
-		const checkResult = await executor.execute(
-			`test -d ${shellQuote(wpContentPath)} && echo ok || echo missing`,
-		);
-		if (checkResult.stdout.trim() !== 'ok') {
-			await tracker.track({
-				step: 'wp-content not found on target — skipping file URL replace',
-				level: 'warn',
-				detail: wpContentPath,
-			});
-			return;
-		}
+    const checkResult = await executor.execute(
+      `test -d ${shellQuote(wpContentPath)} && echo ok || echo missing`,
+    );
+    if (checkResult.stdout.trim() !== "ok") {
+      await tracker.track({
+        step: "wp-content not found on target — skipping file URL replace",
+        level: "warn",
+        detail: wpContentPath,
+      });
+      return;
+    }
 
-		const fileStart = Date.now();
-		let anyError = false;
+    const fileStart = Date.now();
+    let anyError = false;
 
-		for (const [oldUrl, newUrl] of allFilePairs) {
-			const sedEscape = (s: string) =>
-				s.replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
-			const oldSed = sedEscape(oldUrl);
-			const newSed = sedEscape(newUrl);
+    for (const [oldUrl, newUrl] of allFilePairs) {
+      const sedEscape = (s: string) =>
+        s.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
+      const oldSed = sedEscape(oldUrl);
+      const newSed = sedEscape(newUrl);
 
-			const sedCmd = [
-				`find ${shellQuote(wpContentPath)} -type f`,
-				`\\( -name '*.css' -o -name '*.js' -o -name '*.json' -o -name '*.html'`,
-				`-o -name '*.htm' -o -name '*.svg' -o -name '*.xml' -o -name '*.txt'`,
-				`-o -name '*.php' \\)`,
-				`-exec sed -i 's|${oldSed}|${newSed}|g' {} +`,
-			].join(' ');
+      const sedCmd = [
+        `find ${shellQuote(wpContentPath)} -type f`,
+        `\\( -name '*.css' -o -name '*.js' -o -name '*.json' -o -name '*.html'`,
+        `-o -name '*.htm' -o -name '*.svg' -o -name '*.xml' -o -name '*.txt'`,
+        `-o -name '*.php' \\)`,
+        `-exec sed -i 's|${oldSed}|${newSed}|g' {} +`,
+      ].join(" ");
 
-			const sedResult = await executor.execute(sedCmd);
-			if (sedResult.code !== 0) {
-				await tracker.track({
-					step: `File URL replace failed for ${oldUrl}`,
-					level: 'warn',
-					detail: sedResult.stderr.trim() || `exit ${sedResult.code}`,
-				});
-				anyError = true;
-			}
-		}
+      const sedResult = await executor.execute(sedCmd);
+      if (sedResult.code !== 0) {
+        await tracker.track({
+          step: `File URL replace failed for ${oldUrl}`,
+          level: "warn",
+          detail: sedResult.stderr.trim() || `exit ${sedResult.code}`,
+        });
+        anyError = true;
+      }
+    }
 
-		await tracker.track({
-			step: anyError
-				? 'File URL replace completed with warnings'
-				: 'File URL replace complete',
-			level: anyError ? 'warn' : 'info',
-			detail: `${wpContentPath}, ${allFilePairs.length} pair(s), extensions: css/js/json/html/svg/xml/txt/php`,
-			durationMs: Date.now() - fileStart,
-		});
+    await tracker.track({
+      step: anyError
+        ? "File URL replace completed with warnings"
+        : "File URL replace complete",
+      level: anyError ? "warn" : "info",
+      detail: `${wpContentPath}, ${allFilePairs.length} pair(s), extensions: css/js/json/html/svg/xml/txt/php`,
+      durationMs: Date.now() - fileStart,
+    });
 
-		if (anyError) {
-			throw new Error(
-				`File URL replacement failed for one or more URL patterns in ${wpContentPath}. ` +
-					`The target may contain stale source-domain URLs in static assets (CSS, JS). ` +
-					`Check the execution log above for per-pattern error details.`,
-			);
-		}
+    if (anyError) {
+      throw new Error(
+        `File URL replacement failed for one or more URL patterns in ${wpContentPath}. ` +
+          `The target may contain stale source-domain URLs in static assets (CSS, JS). ` +
+          `Check the execution log above for per-pattern error details.`,
+      );
+    }
 
-		await this.validateFileUrlReplacement(
-			sourceUrl,
-			targetUrl,
-			wpContentPath,
-			executor,
-			tracker,
-		);
-	}
+    await this.validateFileUrlReplacement(
+      sourceUrl,
+      targetUrl,
+      wpContentPath,
+      executor,
+      tracker,
+    );
+  }
 
-	/**
-	 * Verify that text assets under wp-content no longer contain the source URL.
-	 */
-	private async validateFileUrlReplacement(
-		sourceUrl: string,
-		targetUrl: string,
-		wpContentPath: string,
-		executor: Executor,
-		tracker: StepTracker,
-	): Promise<void> {
-		try {
-			const grepCmd = [
-				`find ${shellQuote(wpContentPath)} -type f`,
-				`\\( -name '*.css' -o -name '*.js' -o -name '*.json' -o -name '*.html'`,
-				`-o -name '*.htm' -o -name '*.svg' -o -name '*.xml' -o -name '*.txt'`,
-				`-o -name '*.php' \\)`,
-				`-exec grep -nHF -m 1 -- ${shellQuote(sourceUrl)} {} + 2>/dev/null`,
-			].join(' ');
-			const grepResult = await executor.execute(grepCmd);
+  /**
+   * Verify that text assets under wp-content no longer contain the source URL.
+   */
+  private async validateFileUrlReplacement(
+    sourceUrl: string,
+    targetUrl: string,
+    wpContentPath: string,
+    executor: Executor,
+    tracker: StepTracker,
+  ): Promise<void> {
+    try {
+      const grepCmd = [
+        `find ${shellQuote(wpContentPath)} -type f`,
+        `\\( -name '*.css' -o -name '*.js' -o -name '*.json' -o -name '*.html'`,
+        `-o -name '*.htm' -o -name '*.svg' -o -name '*.xml' -o -name '*.txt'`,
+        `-o -name '*.php' \\)`,
+        `-exec grep -nHF -m 1 -- ${shellQuote(sourceUrl)} {} + 2>/dev/null`,
+      ].join(" ");
+      const grepResult = await executor.execute(grepCmd);
 
-			if (grepResult.code === 0 && grepResult.stdout.trim()) {
-				const samples = grepResult.stdout
-					.trim()
-					.split('\n')
-					.slice(0, 10)
-					.join('; ');
-				throw new Error(
-					`File URL replacement did not complete: source URL (${sourceUrl}) is still present ` +
-						`in text assets under ${wpContentPath} after search-replace.\n` +
-						`Sample files: ${samples}.\n` +
-						`This would cause stale links or assets to render from the wrong domain.`,
-				);
-			}
-			if (grepResult.code > 1) {
-				throw new Error(
-					`File validation probe failed: ${(grepResult.stderr || grepResult.stdout || `exit ${grepResult.code}`).trim()}`,
-				);
-			}
+      if (grepResult.code === 0 && grepResult.stdout.trim()) {
+        const samples = grepResult.stdout
+          .trim()
+          .split("\n")
+          .slice(0, 10)
+          .join("; ");
+        throw new Error(
+          `File URL replacement did not complete: source URL (${sourceUrl}) is still present ` +
+            `in text assets under ${wpContentPath} after search-replace.\n` +
+            `Sample files: ${samples}.\n` +
+            `This would cause stale links or assets to render from the wrong domain.`,
+        );
+      }
+      if (grepResult.code > 1) {
+        throw new Error(
+          `File validation probe failed: ${(grepResult.stderr || grepResult.stdout || `exit ${grepResult.code}`).trim()}`,
+        );
+      }
 
-			await tracker.track({
-				step: 'File URL replacement verified — no stale source URLs remain in text assets',
-				level: 'info',
-				detail: `${wpContentPath} no longer contains ${sourceUrl} (expected target: ${targetUrl})`,
-			});
-		} catch (e) {
-			if (
-				e instanceof Error &&
-				e.message.includes('File URL replacement did not complete')
-			) {
-				throw e;
-			}
-			await tracker.track({
-				step: 'File URL replacement validation probe failed — could not verify text assets',
-				level: 'warn',
-				detail: e instanceof Error ? e.message : String(e),
-			});
-		}
-	}
+      await tracker.track({
+        step: "File URL replacement verified — no stale source URLs remain in text assets",
+        level: "info",
+        detail: `${wpContentPath} no longer contains ${sourceUrl} (expected target: ${targetUrl})`,
+      });
+    } catch (e) {
+      if (
+        e instanceof Error &&
+        e.message.includes("File URL replacement did not complete")
+      ) {
+        throw e;
+      }
+      await tracker.track({
+        step: "File URL replacement validation probe failed — could not verify text assets",
+        level: "warn",
+        detail: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
 }

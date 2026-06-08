@@ -1,12 +1,12 @@
-import { useQuery, UseQueryOptions } from '@tanstack/react-query';
-import { api } from '@/lib/api-client';
+import { useQuery, UseQueryOptions } from "@tanstack/react-query";
+import { api } from "@/lib/api-client";
 
 export interface ServerListItem {
-	id: number;
-	name: string;
-	ip_address: string;
-	ssh_port: number;
-	ssh_user: string;
+  id: number;
+  name: string;
+  ip_address: string;
+  ssh_port: number;
+  ssh_user: string;
 }
 
 /**
@@ -15,15 +15,15 @@ export interface ServerListItem {
  * cached response.
  */
 export function useServersList(
-	options?: Partial<UseQueryOptions<ServerListItem[]>>,
+  options?: Partial<UseQueryOptions<ServerListItem[]>>,
 ) {
-	return useQuery<ServerListItem[]>({
-		queryKey: ['servers-list'],
-		queryFn: () =>
-			api
-				.get<{ items: ServerListItem[] }>('/servers?limit=200')
-				.then(r => r.items),
-		staleTime: 60_000,
-		...options,
-	});
+  return useQuery<ServerListItem[]>({
+    queryKey: ["servers-list"],
+    queryFn: () =>
+      api
+        .get<{ items: ServerListItem[] }>("/servers?limit=200")
+        .then((r) => r.items),
+    staleTime: 60_000,
+    ...options,
+  });
 }

@@ -1,98 +1,98 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { Queue } from 'bullmq';
-import { PrismaService } from '../../prisma/prisma.service';
-import { randomUUID } from 'crypto';
-import { DEFAULT_JOB_OPTIONS } from '@bedrock-forge/shared';
+import { Injectable, Logger } from "@nestjs/common";
+import { Queue } from "bullmq";
+import { PrismaService } from "../../prisma/prisma.service";
+import { randomUUID } from "crypto";
+import { DEFAULT_JOB_OPTIONS } from "@bedrock-forge/shared";
 
 export interface EnqueueOptions<PayloadType = any> {
-	queue: Queue;
-	queueName: string;
-	jobType: string;
-	payload: PayloadType;
-	serverId?: bigint | number;
-	environmentId?: bigint | number;
-	jobId?: string;
-	jobOptions?: any;
-	beforeQueueAdd?: (jobExecutionId: number) => Promise<any>;
-	onFailure?: (jobExecutionId: number, error: string) => Promise<void>;
+  queue: Queue;
+  queueName: string;
+  jobType: string;
+  payload: PayloadType;
+  serverId?: bigint | number;
+  environmentId?: bigint | number;
+  jobId?: string;
+  jobOptions?: any;
+  beforeQueueAdd?: (jobExecutionId: number) => Promise<any>;
+  onFailure?: (jobExecutionId: number, error: string) => Promise<void>;
 }
 
 @Injectable()
 export class JobOrchestratorService {
-	private readonly logger = new Logger(JobOrchestratorService.name);
+  private readonly logger = new Logger(JobOrchestratorService.name);
 
-	constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-	async enqueue<PayloadType = any>({
-		queue,
-		queueName,
-		jobType,
-		payload,
-		serverId,
-		environmentId,
-		jobId,
-		jobOptions = DEFAULT_JOB_OPTIONS,
-		beforeQueueAdd,
-		onFailure,
-	}: EnqueueOptions<PayloadType>) {
-		const bullJobId = jobId || randomUUID();
+  async enqueue<PayloadType = any>({
+    queue,
+    queueName,
+    jobType,
+    payload,
+    serverId,
+    environmentId,
+    jobId,
+    jobOptions = DEFAULT_JOB_OPTIONS,
+    beforeQueueAdd,
+    onFailure,
+  }: EnqueueOptions<PayloadType>) {
+    const bullJobId = jobId || randomUUID();
 
-		// Create JobExecution record
-		const exec = await this.prisma.jobExecution.create({
-			data: {
-				queue_name: queueName,
-				bull_job_id: bullJobId,
-				job_type: jobType,
-				status: 'queued',
-				server_id: serverId ? BigInt(serverId) : null,
-				environment_id: environmentId ? BigInt(environmentId) : null,
-				payload: (payload || {}) as any,
-			},
-		});
+    // Create JobExecution record
+    const exec = await this.prisma.jobExecution.create({
+      data: {
+        queue_name: queueName,
+        bull_job_id: bullJobId,
+        job_type: jobType,
+        status: "queued",
+        server_id: serverId ? BigInt(serverId) : null,
+        environment_id: environmentId ? BigInt(environmentId) : null,
+        payload: (payload || {}) as any,
+      },
+    });
 
-		const jobExecutionId = Number(exec.id);
+    const jobExecutionId = Number(exec.id);
 
-		try {
-			// Resolve the exact payload/job data to send to the queue
-			const jobData = beforeQueueAdd
-				? await beforeQueueAdd(jobExecutionId)
-				: { ...payload, jobExecutionId };
+    try {
+      // Resolve the exact payload/job data to send to the queue
+      const jobData = beforeQueueAdd
+        ? await beforeQueueAdd(jobExecutionId)
+        : { ...payload, jobExecutionId };
 
-			const job = await queue.add(jobType, jobData, {
-				...jobOptions,
-				jobId: bullJobId,
-			});
+      const job = await queue.add(jobType, jobData, {
+        ...jobOptions,
+        jobId: bullJobId,
+      });
 
-			return { jobExecutionId, jobId: job.id, bullJobId };
-		} catch (err) {
-			const errMsg = err instanceof Error ? err.message : String(err);
-			this.logger.error(
-				`Failed to enqueue job ${jobType} for execution ${jobExecutionId}: ${errMsg}`,
-			);
+      return { jobExecutionId, jobId: job.id, bullJobId };
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.logger.error(
+        `Failed to enqueue job ${jobType} for execution ${jobExecutionId}: ${errMsg}`,
+      );
 
-			if (onFailure) {
-				try {
-					await onFailure(jobExecutionId, errMsg);
-				} catch (failHookErr) {
-					this.logger.error(
-						`onFailure hook failed for job ${jobType} execution ${jobExecutionId}: ${
-							failHookErr instanceof Error
-								? failHookErr.message
-								: String(failHookErr)
-						}`,
-					);
-				}
-			}
+      if (onFailure) {
+        try {
+          await onFailure(jobExecutionId, errMsg);
+        } catch (failHookErr) {
+          this.logger.error(
+            `onFailure hook failed for job ${jobType} execution ${jobExecutionId}: ${
+              failHookErr instanceof Error
+                ? failHookErr.message
+                : String(failHookErr)
+            }`,
+          );
+        }
+      }
 
-			await this.prisma.jobExecution.update({
-				where: { id: exec.id },
-				data: {
-					status: 'failed',
-					last_error: errMsg,
-				},
-			});
+      await this.prisma.jobExecution.update({
+        where: { id: exec.id },
+        data: {
+          status: "failed",
+          last_error: errMsg,
+        },
+      });
 
-			throw err;
-		}
-	}
+      throw err;
+    }
+  }
 }

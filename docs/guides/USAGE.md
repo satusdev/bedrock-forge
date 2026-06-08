@@ -49,18 +49,18 @@ is free text.
 
 Project tabs:
 
-| Tab          | Use it for                                                                            |
-| ------------ | ------------------------------------------------------------------------------------- |
-| Environments | Server/path/URL config, DB credential discovery, protected tables, tags.              |
-| Backups      | Create backups and manage backup schedules.                                           |
-| Plugins      | Scan, install, update, activate, deactivate, remove, and manage Composer constraints. |
-| Sync         | Clone or push files/database between environments.                                    |
-| Restore      | Restore backups to the originating environment.                                       |
-| Tools        | Cleanup, WP logs, debug mode, cron listing, cache and operational tools.              |
-| Files & Config | Remote `.env`, safe file browser, downloads, uploads archive, log tail, notes.     |
-| Drift        | Compare environment config against stored baseline/committed config.                  |
-| Themes       | Scan, install, update, activate, and delete themes.                                   |
-| WP Core      | Check WordPress core version and run core updates.                                    |
+| Tab            | Use it for                                                                            |
+| -------------- | ------------------------------------------------------------------------------------- |
+| Environments   | Server/path/URL config, DB credential discovery, protected tables, tags.              |
+| Backups        | Create backups and manage backup schedules.                                           |
+| Plugins        | Scan, install, update, activate, deactivate, remove, and manage Composer constraints. |
+| Sync           | Clone or push files/database between environments.                                    |
+| Restore        | Restore backups to the originating environment.                                       |
+| Tools          | Cleanup, WP logs, debug mode, cron listing, cache and operational tools.              |
+| Files & Config | Remote `.env`, safe file browser, downloads, uploads archive, log tail, notes.        |
+| Drift          | Compare environment config against stored baseline/committed config.                  |
+| Themes         | Scan, install, update, activate, and delete themes.                                   |
+| WP Core        | Check WordPress core version and run core updates.                                    |
 
 ## Plugins
 
@@ -123,18 +123,23 @@ When syncing databases between environments (such as cloning from `production` t
 > | Keep target post type content untouched during sync | **Protected Custom Post Types** |
 
 #### 1. Protected Tables
+
 Protected tables are specific database tables on the target environment that are **completely skipped** during the database import.
-* **How it works**: The source `mysqldump` is generated without those tables. The target's existing table data is never touched or overwritten. They are also excluded from URL search-replace.
-* **When to use**: Plugin-owned tables that are environment-specific and should never be overwritten — e.g. local SMTP settings, Wordfence scan logs, or WP Super Cache config.
-* **Configuration**: Enter the exact table names (e.g. `wp_smtp_settings, wp_wflogs`) in the **Protected Tables** field of the Environment settings modal.
+
+- **How it works**: The source `mysqldump` is generated without those tables. The target's existing table data is never touched or overwritten. They are also excluded from URL search-replace.
+- **When to use**: Plugin-owned tables that are environment-specific and should never be overwritten — e.g. local SMTP settings, Wordfence scan logs, or WP Super Cache config.
+- **Configuration**: Enter the exact table names (e.g. `wp_smtp_settings, wp_wflogs`) in the **Protected Tables** field of the Environment settings modal.
 
 #### 2. SQL Protection Queries
+
 SQL Protection Queries are custom SQL commands executed on the **target** database **immediately after** the dump is imported but **before** URL search-replace runs.
-* **How it works**: Forge pushes the queries to the target server, auto-detects the WordPress table prefix (via `information_schema`), substitutes `{prefix}` / `%prefix%` with the real prefix (e.g. `wp_` or `mysite_`), and runs all queries in sequence.
-* **When to use**: Sanitizing production data when pushing to staging or dev — delete orders, anonymize emails, clear API keys, etc.
-* **Configuration**: Enter one SQL query per line in the **SQL Protection Queries** text area of the Environment settings modal.
+
+- **How it works**: Forge pushes the queries to the target server, auto-detects the WordPress table prefix (via `information_schema`), substitutes `{prefix}` / `%prefix%` with the real prefix (e.g. `wp_` or `mysite_`), and runs all queries in sequence.
+- **When to use**: Sanitizing production data when pushing to staging or dev — delete orders, anonymize emails, clear API keys, etc.
+- **Configuration**: Enter one SQL query per line in the **SQL Protection Queries** text area of the Environment settings modal.
 
 ##### Use case: Delete a custom post type on import (e.g. wipe 'project' from staging)
+
 Use this when you do **not** want a post type to exist on the target after sync. The queries must be entered in dependency order (children before parents):
 
 ```sql
@@ -175,6 +180,7 @@ DELETE FROM {prefix}posts WHERE post_type = 'project';
 ```
 
 ##### Use case: Sanitize WooCommerce orders & customer data on staging
+
 ```sql
 -- Remove WooCommerce orders & shop logs
 DELETE FROM {prefix}posts WHERE post_type IN ('shop_order', 'shop_order_refund', 'wc_user_membership', 'wc_membership_plan');
@@ -186,15 +192,16 @@ DELETE FROM {prefix}usermeta WHERE meta_key = 'session_tokens';
 ```
 
 #### 3. Protected Custom Post Types
+
 Use this when you want to **keep** the target's existing content for a custom post type untouched — so that whatever is in production doesn't overwrite staging/dev data for that post type.
 
-* **When to use**: You have staging-specific projects, courses, lessons, or test content that you never want wiped out by a production sync.
-* **How it works** (full lifecycle):
+- **When to use**: You have staging-specific projects, courses, lessons, or test content that you never want wiped out by a production sync.
+- **How it works** (full lifecycle):
   1. **Pre-import backup**: Before the dump is imported, Forge connects to the target DB, auto-detects the table prefix, and copies all rows for the protected post types from `posts`, `postmeta`, `term_relationships`, `term_taxonomy`, `terms`, `comments`, and `commentmeta` — including their revisions and directly attached media — into temporary `_forge_backup_*` tables.
   2. **Safe import**: Forge skips the `DROP DATABASE` step so the backup tables survive the incoming dump.
   3. **Post-import restore**: After import, Forge deletes all rows for the protected post types that arrived from the source (posts, revisions, directly attached media, taxonomy links, comments, and metadata), then re-inserts the original target rows from the backup tables, and finally drops the backup tables.
   4. **File sync protection**: During database+files sync, Forge excludes upload files referenced by the protected post type's directly attached media from rsync/tar overwrite and deletion.
-* **Configuration**: Enter a comma-separated list of custom post type slugs in the **Protected Custom Post Types** field of the Environment settings modal.
+- **Configuration**: Enter a comma-separated list of custom post type slugs in the **Protected Custom Post Types** field of the Environment settings modal.
 
 ```
 project, course, lesson
@@ -205,7 +212,6 @@ project, course, lesson
 > **Note**: Protected Custom Post Types and SQL Protection Queries are not mutually exclusive. You could protect `course` posts on staging while also running sanitization queries for WooCommerce orders in the same sync.
 
 ## Files & Config
-
 
 Use **Project -> Files & Config** to reduce routine SSH usage.
 

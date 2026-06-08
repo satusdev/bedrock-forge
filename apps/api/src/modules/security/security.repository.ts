@@ -1,423 +1,423 @@
-import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service';
-import type { SecurityScanType } from '@bedrock-forge/shared';
-import type { SecurityScanStatus, SecuritySeverity } from '@prisma/client';
+import { Injectable } from "@nestjs/common";
+import { PrismaService } from "../../prisma/prisma.service";
+import type { SecurityScanType } from "@bedrock-forge/shared";
+import type { SecurityScanStatus, SecuritySeverity } from "@prisma/client";
 
 @Injectable()
 export class SecurityRepository {
-	constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-	createScan(data: {
-		scan_type: SecurityScanType;
-		server_id?: bigint;
-		environment_id?: bigint;
-		job_execution_id?: bigint;
-	}) {
-		return this.prisma.securityScan.create({
-			data: data as Parameters<
-				typeof this.prisma.securityScan.create
-			>[0]['data'],
-		});
-	}
+  createScan(data: {
+    scan_type: SecurityScanType;
+    server_id?: bigint;
+    environment_id?: bigint;
+    job_execution_id?: bigint;
+  }) {
+    return this.prisma.securityScan.create({
+      data: data as Parameters<
+        typeof this.prisma.securityScan.create
+      >[0]["data"],
+    });
+  }
 
-	updateScan(
-		id: bigint,
-		data: {
-			status?: SecurityScanStatus;
-			score?: number;
-			summary?: Record<string, number>;
-			findings?: unknown[];
-			error?: string;
-			started_at?: Date;
-			completed_at?: Date;
-		},
-	) {
-		return this.prisma.securityScan.update({
-			where: { id },
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			data: data as any,
-		});
-	}
+  updateScan(
+    id: bigint,
+    data: {
+      status?: SecurityScanStatus;
+      score?: number;
+      summary?: Record<string, number>;
+      findings?: unknown[];
+      error?: string;
+      started_at?: Date;
+      completed_at?: Date;
+    },
+  ) {
+    return this.prisma.securityScan.update({
+      where: { id },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      data: data as any,
+    });
+  }
 
-	findScanById(id: bigint) {
-		return this.prisma.securityScan.findUnique({ where: { id } });
-	}
+  findScanById(id: bigint) {
+    return this.prisma.securityScan.findUnique({ where: { id } });
+  }
 
-	/**
-	 * Get the latest completed scan per type for a server.
-	 */
-	async findLatestServerScans(serverId: bigint) {
-		return this.prisma.securityScan.findMany({
-			where: { server_id: serverId, status: 'completed' },
-			orderBy: { completed_at: 'desc' },
-			take: 50,
-		});
-	}
+  /**
+   * Get the latest completed scan per type for a server.
+   */
+  async findLatestServerScans(serverId: bigint) {
+    return this.prisma.securityScan.findMany({
+      where: { server_id: serverId, status: "completed" },
+      orderBy: { completed_at: "desc" },
+      take: 50,
+    });
+  }
 
-	async findLatestEnvironmentScans(environmentId: bigint) {
-		return this.prisma.securityScan.findMany({
-			where: { environment_id: environmentId, status: 'completed' },
-			orderBy: { completed_at: 'desc' },
-			take: 50,
-		});
-	}
+  async findLatestEnvironmentScans(environmentId: bigint) {
+    return this.prisma.securityScan.findMany({
+      where: { environment_id: environmentId, status: "completed" },
+      orderBy: { completed_at: "desc" },
+      take: 50,
+    });
+  }
 
-	async findServerScanHistory(serverId: bigint, page: number, limit: number) {
-		const [data, total] = await Promise.all([
-			this.prisma.securityScan.findMany({
-				where: { server_id: serverId },
-				orderBy: { created_at: 'desc' },
-				skip: (page - 1) * limit,
-				take: limit,
-				select: {
-					id: true,
-					scan_type: true,
-					status: true,
-					score: true,
-					summary: true,
-					error: true,
-					started_at: true,
-					completed_at: true,
-					created_at: true,
-				},
-			}),
-			this.prisma.securityScan.count({ where: { server_id: serverId } }),
-		]);
-		return { data, total };
-	}
+  async findServerScanHistory(serverId: bigint, page: number, limit: number) {
+    const [data, total] = await Promise.all([
+      this.prisma.securityScan.findMany({
+        where: { server_id: serverId },
+        orderBy: { created_at: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+        select: {
+          id: true,
+          scan_type: true,
+          status: true,
+          score: true,
+          summary: true,
+          error: true,
+          started_at: true,
+          completed_at: true,
+          created_at: true,
+        },
+      }),
+      this.prisma.securityScan.count({ where: { server_id: serverId } }),
+    ]);
+    return { data, total };
+  }
 
-	async findEnvironmentScanHistory(
-		environmentId: bigint,
-		page: number,
-		limit: number,
-	) {
-		const [data, total] = await Promise.all([
-			this.prisma.securityScan.findMany({
-				where: { environment_id: environmentId },
-				orderBy: { created_at: 'desc' },
-				skip: (page - 1) * limit,
-				take: limit,
-				select: {
-					id: true,
-					scan_type: true,
-					status: true,
-					score: true,
-					summary: true,
-					error: true,
-					started_at: true,
-					completed_at: true,
-					created_at: true,
-				},
-			}),
-			this.prisma.securityScan.count({
-				where: { environment_id: environmentId },
-			}),
-		]);
-		return { data, total };
-	}
+  async findEnvironmentScanHistory(
+    environmentId: bigint,
+    page: number,
+    limit: number,
+  ) {
+    const [data, total] = await Promise.all([
+      this.prisma.securityScan.findMany({
+        where: { environment_id: environmentId },
+        orderBy: { created_at: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+        select: {
+          id: true,
+          scan_type: true,
+          status: true,
+          score: true,
+          summary: true,
+          error: true,
+          started_at: true,
+          completed_at: true,
+          created_at: true,
+        },
+      }),
+      this.prisma.securityScan.count({
+        where: { environment_id: environmentId },
+      }),
+    ]);
+    return { data, total };
+  }
 
-	/**
-	 * For the overview: latest scan per server (all types combined into worst-case score).
-	 */
-	async findAllServersWithLatestScan() {
-		const servers = await this.prisma.server.findMany({
-			select: {
-				id: true,
-				name: true,
-				ip_address: true,
-				status: true,
-				security_scans: {
-					where: { status: 'completed' },
-					orderBy: { completed_at: 'desc' },
-					take: 10,
-					select: {
-						id: true,
-						scan_type: true,
-						score: true,
-						summary: true,
-						completed_at: true,
-					},
-				},
-			},
-		});
-		return servers;
-	}
+  /**
+   * For the overview: latest scan per server (all types combined into worst-case score).
+   */
+  async findAllServersWithLatestScan() {
+    const servers = await this.prisma.server.findMany({
+      select: {
+        id: true,
+        name: true,
+        ip_address: true,
+        status: true,
+        security_scans: {
+          where: { status: "completed" },
+          orderBy: { completed_at: "desc" },
+          take: 10,
+          select: {
+            id: true,
+            scan_type: true,
+            score: true,
+            summary: true,
+            completed_at: true,
+          },
+        },
+      },
+    });
+    return servers;
+  }
 
-	async findAllEnvironmentsWithLatestScan() {
-		const envs = await this.prisma.environment.findMany({
-			select: {
-				id: true,
-				type: true,
-				url: true,
-				root_path: true,
-				project: { select: { id: true, name: true } },
-				server: { select: { id: true, name: true } },
-				security_scans: {
-					where: { status: 'completed' },
-					orderBy: { completed_at: 'desc' },
-					take: 10,
-					select: {
-						id: true,
-						scan_type: true,
-						score: true,
-						summary: true,
-						completed_at: true,
-					},
-				},
-			},
-		});
-		return envs;
-	}
+  async findAllEnvironmentsWithLatestScan() {
+    const envs = await this.prisma.environment.findMany({
+      select: {
+        id: true,
+        type: true,
+        url: true,
+        root_path: true,
+        project: { select: { id: true, name: true } },
+        server: { select: { id: true, name: true } },
+        security_scans: {
+          where: { status: "completed" },
+          orderBy: { completed_at: "desc" },
+          take: 10,
+          select: {
+            id: true,
+            scan_type: true,
+            score: true,
+            summary: true,
+            completed_at: true,
+          },
+        },
+      },
+    });
+    return envs;
+  }
 
-	/**
-	 * Security logs: pull FAILED_LOGINS + SUCCESSFUL_LOGINS + AUTHORIZED_KEYS findings
-	 * from all completed SSH_AUDIT scans ordered by scan completion date.
-	 */
-	async findSecurityLogs(
-		filter: {
-			server_id?: number;
-			date_from?: Date;
-			date_to?: Date;
-		},
-		page: number,
-		limit: number,
-	) {
-		const where: Record<string, unknown> = {
-			scan_type: 'SSH_AUDIT',
-			status: 'completed',
-		};
-		if (filter.server_id) where['server_id'] = BigInt(filter.server_id);
-		if (filter.date_from || filter.date_to) {
-			where['completed_at'] = {
-				...(filter.date_from && { gte: filter.date_from }),
-				...(filter.date_to && { lte: filter.date_to }),
-			};
-		}
+  /**
+   * Security logs: pull FAILED_LOGINS + SUCCESSFUL_LOGINS + AUTHORIZED_KEYS findings
+   * from all completed SSH_AUDIT scans ordered by scan completion date.
+   */
+  async findSecurityLogs(
+    filter: {
+      server_id?: number;
+      date_from?: Date;
+      date_to?: Date;
+    },
+    page: number,
+    limit: number,
+  ) {
+    const where: Record<string, unknown> = {
+      scan_type: "SSH_AUDIT",
+      status: "completed",
+    };
+    if (filter.server_id) where["server_id"] = BigInt(filter.server_id);
+    if (filter.date_from || filter.date_to) {
+      where["completed_at"] = {
+        ...(filter.date_from && { gte: filter.date_from }),
+        ...(filter.date_to && { lte: filter.date_to }),
+      };
+    }
 
-		const [scans, total] = await Promise.all([
-			this.prisma.securityScan.findMany({
-				where,
-				orderBy: { completed_at: 'desc' },
-				skip: (page - 1) * limit,
-				take: limit,
-				select: {
-					id: true,
-					findings: true,
-					completed_at: true,
-					server: { select: { id: true, name: true, ip_address: true } },
-				},
-			}),
-			this.prisma.securityScan.count({ where }),
-		]);
+    const [scans, total] = await Promise.all([
+      this.prisma.securityScan.findMany({
+        where,
+        orderBy: { completed_at: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+        select: {
+          id: true,
+          findings: true,
+          completed_at: true,
+          server: { select: { id: true, name: true, ip_address: true } },
+        },
+      }),
+      this.prisma.securityScan.count({ where }),
+    ]);
 
-		return { scans, total };
-	}
+    return { scans, total };
+  }
 
-	// ─── Security Scan Schedules ─────────────────────────────────────────────────
+  // ─── Security Scan Schedules ─────────────────────────────────────────────────
 
-	upsertServerSchedule(
-		serverId: bigint,
-		data: {
-			scan_types: string[];
-			frequency: string;
-			hour: number;
-			minute: number;
-			day_of_week?: number | null;
-			day_of_month?: number | null;
-			enabled?: boolean;
-			notify_enabled?: boolean;
-			notify_threshold?: SecuritySeverity;
-		},
-	) {
-		return this.prisma.securityScanSchedule.upsert({
-			where: { server_id: serverId },
-			create: { server_id: serverId, ...data },
-			update: data,
-		});
-	}
+  upsertServerSchedule(
+    serverId: bigint,
+    data: {
+      scan_types: string[];
+      frequency: string;
+      hour: number;
+      minute: number;
+      day_of_week?: number | null;
+      day_of_month?: number | null;
+      enabled?: boolean;
+      notify_enabled?: boolean;
+      notify_threshold?: SecuritySeverity;
+    },
+  ) {
+    return this.prisma.securityScanSchedule.upsert({
+      where: { server_id: serverId },
+      create: { server_id: serverId, ...data },
+      update: data,
+    });
+  }
 
-	upsertEnvironmentSchedule(
-		environmentId: bigint,
-		data: {
-			scan_types: string[];
-			frequency: string;
-			hour: number;
-			minute: number;
-			day_of_week?: number | null;
-			day_of_month?: number | null;
-			enabled?: boolean;
-			notify_enabled?: boolean;
-			notify_threshold?: SecuritySeverity;
-		},
-	) {
-		return this.prisma.securityScanSchedule.upsert({
-			where: { environment_id: environmentId },
-			create: { environment_id: environmentId, ...data },
-			update: data,
-		});
-	}
+  upsertEnvironmentSchedule(
+    environmentId: bigint,
+    data: {
+      scan_types: string[];
+      frequency: string;
+      hour: number;
+      minute: number;
+      day_of_week?: number | null;
+      day_of_month?: number | null;
+      enabled?: boolean;
+      notify_enabled?: boolean;
+      notify_threshold?: SecuritySeverity;
+    },
+  ) {
+    return this.prisma.securityScanSchedule.upsert({
+      where: { environment_id: environmentId },
+      create: { environment_id: environmentId, ...data },
+      update: data,
+    });
+  }
 
-	findServerSchedule(serverId: bigint) {
-		return this.prisma.securityScanSchedule.findUnique({
-			where: { server_id: serverId },
-		});
-	}
+  findServerSchedule(serverId: bigint) {
+    return this.prisma.securityScanSchedule.findUnique({
+      where: { server_id: serverId },
+    });
+  }
 
-	findEnvironmentSchedule(environmentId: bigint) {
-		return this.prisma.securityScanSchedule.findUnique({
-			where: { environment_id: environmentId },
-		});
-	}
+  findEnvironmentSchedule(environmentId: bigint) {
+    return this.prisma.securityScanSchedule.findUnique({
+      where: { environment_id: environmentId },
+    });
+  }
 
-	deleteServerSchedule(serverId: bigint) {
-		return this.prisma.securityScanSchedule.deleteMany({
-			where: { server_id: serverId },
-		});
-	}
+  deleteServerSchedule(serverId: bigint) {
+    return this.prisma.securityScanSchedule.deleteMany({
+      where: { server_id: serverId },
+    });
+  }
 
-	deleteEnvironmentSchedule(environmentId: bigint) {
-		return this.prisma.securityScanSchedule.deleteMany({
-			where: { environment_id: environmentId },
-		});
-	}
+  deleteEnvironmentSchedule(environmentId: bigint) {
+    return this.prisma.securityScanSchedule.deleteMany({
+      where: { environment_id: environmentId },
+    });
+  }
 
-	// ─── Server Security Alerts ────────────────────────────────────────────────
+  // ─── Server Security Alerts ────────────────────────────────────────────────
 
-	findServerAlertSetting(serverId: bigint) {
-		return this.prisma.serverSecurityAlertSetting.findUnique({
-			where: { server_id: serverId },
-		});
-	}
+  findServerAlertSetting(serverId: bigint) {
+    return this.prisma.serverSecurityAlertSetting.findUnique({
+      where: { server_id: serverId },
+    });
+  }
 
-	upsertServerAlertSetting(
-		serverId: bigint,
-		data: {
-			enabled: boolean;
-			ssh_login_alerts_enabled: boolean;
-			file_change_alerts_enabled: boolean;
-			interval_minutes: number;
-			file_watch_paths: string[];
-		},
-	) {
-		return this.prisma.serverSecurityAlertSetting.upsert({
-			where: { server_id: serverId },
-			create: { server_id: serverId, ...data },
-			update: data,
-		});
-	}
+  upsertServerAlertSetting(
+    serverId: bigint,
+    data: {
+      enabled: boolean;
+      ssh_login_alerts_enabled: boolean;
+      file_change_alerts_enabled: boolean;
+      interval_minutes: number;
+      file_watch_paths: string[];
+    },
+  ) {
+    return this.prisma.serverSecurityAlertSetting.upsert({
+      where: { server_id: serverId },
+      create: { server_id: serverId, ...data },
+      update: data,
+    });
+  }
 
-	// ─── Finding Acknowledgements ────────────────────────────────────────────────
+  // ─── Finding Acknowledgements ────────────────────────────────────────────────
 
-	upsertAck(data: {
-		scope_key: string;
-		category: string;
-		title: string;
-		userId: bigint;
-		serverId?: bigint;
-		environmentId?: bigint;
-		note?: string | null;
-	}) {
-		const payload = {
-			scope_key: data.scope_key,
-			category: data.category,
-			title: data.title,
-			acknowledged_by: data.userId,
-			server_id: data.serverId ?? null,
-			environment_id: data.environmentId ?? null,
-			note: data.note ?? null,
-		};
-		return this.prisma.securityFindingAck.upsert({
-			where: {
-				scope_key_category_title: {
-					scope_key: data.scope_key,
-					category: data.category,
-					title: data.title,
-				},
-			},
-			create: payload,
-			update: {
-				acknowledged_by: data.userId,
-				note: data.note ?? null,
-			},
-		});
-	}
+  upsertAck(data: {
+    scope_key: string;
+    category: string;
+    title: string;
+    userId: bigint;
+    serverId?: bigint;
+    environmentId?: bigint;
+    note?: string | null;
+  }) {
+    const payload = {
+      scope_key: data.scope_key,
+      category: data.category,
+      title: data.title,
+      acknowledged_by: data.userId,
+      server_id: data.serverId ?? null,
+      environment_id: data.environmentId ?? null,
+      note: data.note ?? null,
+    };
+    return this.prisma.securityFindingAck.upsert({
+      where: {
+        scope_key_category_title: {
+          scope_key: data.scope_key,
+          category: data.category,
+          title: data.title,
+        },
+      },
+      create: payload,
+      update: {
+        acknowledged_by: data.userId,
+        note: data.note ?? null,
+      },
+    });
+  }
 
-	deleteAck(scope_key: string, category: string, title: string) {
-		return this.prisma.securityFindingAck.deleteMany({
-			where: { scope_key, category, title },
-		});
-	}
+  deleteAck(scope_key: string, category: string, title: string) {
+    return this.prisma.securityFindingAck.deleteMany({
+      where: { scope_key, category, title },
+    });
+  }
 
-	async findAcksByScopeKeys(scopeKeys: string[]): Promise<
-		Map<
-			string,
-			{
-				note: string | null;
-				acknowledged_by_name: string;
-				created_at: Date;
-			}
-		>
-	> {
-		if (scopeKeys.length === 0) return new Map();
-		const acks = await this.prisma.securityFindingAck.findMany({
-			where: { scope_key: { in: scopeKeys } },
-			include: { user: { select: { name: true } } },
-		});
-		const map = new Map<
-			string,
-			{ note: string | null; acknowledged_by_name: string; created_at: Date }
-		>();
-		for (const ack of acks) {
-			const key = `${ack.scope_key}::${ack.category}::${ack.title}`;
-			map.set(key, {
-				note: ack.note,
-				acknowledged_by_name: ack.user.name,
-				created_at: ack.created_at,
-			});
-		}
-		return map;
-	}
+  async findAcksByScopeKeys(scopeKeys: string[]): Promise<
+    Map<
+      string,
+      {
+        note: string | null;
+        acknowledged_by_name: string;
+        created_at: Date;
+      }
+    >
+  > {
+    if (scopeKeys.length === 0) return new Map();
+    const acks = await this.prisma.securityFindingAck.findMany({
+      where: { scope_key: { in: scopeKeys } },
+      include: { user: { select: { name: true } } },
+    });
+    const map = new Map<
+      string,
+      { note: string | null; acknowledged_by_name: string; created_at: Date }
+    >();
+    for (const ack of acks) {
+      const key = `${ack.scope_key}::${ack.category}::${ack.title}`;
+      map.set(key, {
+        note: ack.note,
+        acknowledged_by_name: ack.user.name,
+        created_at: ack.created_at,
+      });
+    }
+    return map;
+  }
 
-	/**
-	 * Returns the latest completed scan per (server_id, scan_type) and per
-	 * (environment_id, scan_type) using DISTINCT ON to avoid duplicating findings.
-	 * Includes server name/IP and environment type/project name for display.
-	 *
-	 * NOTE: PostgreSQL forbids ORDER BY inside individual parts of a UNION ALL.
-	 * Each DISTINCT ON query must live in its own CTE so the ORDER BY is scoped
-	 * to that CTE, then we union the CTEs together at the outer level.
-	 */
-	async findLatestCompletedScansWithFindings(): Promise<
-		{
-			id: bigint;
-			scan_type: string;
-			completed_at: Date | null;
-			findings: unknown;
-			server_id: bigint | null;
-			server_name: string | null;
-			server_ip: string | null;
-			environment_id: bigint | null;
-			environment_type: string | null;
-			project_name: string | null;
-		}[]
-	> {
-		// Use raw SQL for DISTINCT ON which Prisma doesn't support natively.
-		// Each DISTINCT ON query is wrapped in a CTE so each can have its own
-		// ORDER BY clause; the outer SELECT then UNIONs the two CTEs.
-		const rows = await this.prisma.$queryRaw<
-			{
-				id: bigint;
-				scan_type: string;
-				completed_at: Date | null;
-				findings: unknown;
-				server_id: bigint | null;
-				server_name: string | null;
-				server_ip: string | null;
-				environment_id: bigint | null;
-				environment_type: string | null;
-				project_name: string | null;
-			}[]
-		>`
+  /**
+   * Returns the latest completed scan per (server_id, scan_type) and per
+   * (environment_id, scan_type) using DISTINCT ON to avoid duplicating findings.
+   * Includes server name/IP and environment type/project name for display.
+   *
+   * NOTE: PostgreSQL forbids ORDER BY inside individual parts of a UNION ALL.
+   * Each DISTINCT ON query must live in its own CTE so the ORDER BY is scoped
+   * to that CTE, then we union the CTEs together at the outer level.
+   */
+  async findLatestCompletedScansWithFindings(): Promise<
+    {
+      id: bigint;
+      scan_type: string;
+      completed_at: Date | null;
+      findings: unknown;
+      server_id: bigint | null;
+      server_name: string | null;
+      server_ip: string | null;
+      environment_id: bigint | null;
+      environment_type: string | null;
+      project_name: string | null;
+    }[]
+  > {
+    // Use raw SQL for DISTINCT ON which Prisma doesn't support natively.
+    // Each DISTINCT ON query is wrapped in a CTE so each can have its own
+    // ORDER BY clause; the outer SELECT then UNIONs the two CTEs.
+    const rows = await this.prisma.$queryRaw<
+      {
+        id: bigint;
+        scan_type: string;
+        completed_at: Date | null;
+        findings: unknown;
+        server_id: bigint | null;
+        server_name: string | null;
+        server_ip: string | null;
+        environment_id: bigint | null;
+        environment_type: string | null;
+        project_name: string | null;
+      }[]
+    >`
 			WITH server_latest AS (
 				SELECT DISTINCT ON (ss.server_id, ss.scan_type)
 					ss.id,
@@ -461,155 +461,155 @@ export class SecurityRepository {
 			UNION ALL
 			SELECT * FROM env_latest
 		`;
-		return rows;
-	}
+    return rows;
+  }
 
-	findAllEnabledSchedules() {
-		return this.prisma.securityScanSchedule.findMany({
-			where: { enabled: true },
-			include: {
-				server: { select: { id: true, name: true } },
-				environment: { select: { id: true, type: true } },
-			},
-		});
-	}
+  findAllEnabledSchedules() {
+    return this.prisma.securityScanSchedule.findMany({
+      where: { enabled: true },
+      include: {
+        server: { select: { id: true, name: true } },
+        environment: { select: { id: true, type: true } },
+      },
+    });
+  }
 
-	updateScheduleLastRun(id: bigint, lastRunAt: Date) {
-		return this.prisma.securityScanSchedule.update({
-			where: { id },
-			data: { last_run_at: lastRunAt },
-		});
-	}
+  updateScheduleLastRun(id: bigint, lastRunAt: Date) {
+    return this.prisma.securityScanSchedule.update({
+      where: { id },
+      data: { last_run_at: lastRunAt },
+    });
+  }
 
-	findGlobalScanHistory(since: Date) {
-		return this.prisma.securityScan.findMany({
-			where: {
-				completed_at: { gte: since },
-				status: 'completed',
-				score: { not: null },
-			},
-			select: {
-				completed_at: true,
-				score: true,
-			},
-			orderBy: { completed_at: 'asc' },
-		});
-	}
+  findGlobalScanHistory(since: Date) {
+    return this.prisma.securityScan.findMany({
+      where: {
+        completed_at: { gte: since },
+        status: "completed",
+        score: { not: null },
+      },
+      select: {
+        completed_at: true,
+        score: true,
+      },
+      orderBy: { completed_at: "asc" },
+    });
+  }
 
-	// ─── Job Execution helpers ───────────────────────────────────────────────────
+  // ─── Job Execution helpers ───────────────────────────────────────────────────
 
-	createJobExecution(data: {
-		queue_name: string;
-		job_type: string;
-		status: string;
-		server_id?: bigint | null;
-		environment_id?: bigint | null;
-		payload?: Record<string, unknown>;
-	}) {
-		return this.prisma.jobExecution.create({
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			data: {
-				queue_name: data.queue_name,
-				bull_job_id: 'pending',
-				job_type: data.job_type,
-				status: data.status as any,
-				server_id: data.server_id ?? null,
-				environment_id: data.environment_id ?? null,
-				payload: (data.payload ?? {}) as any,
-			},
-		});
-	}
+  createJobExecution(data: {
+    queue_name: string;
+    job_type: string;
+    status: string;
+    server_id?: bigint | null;
+    environment_id?: bigint | null;
+    payload?: Record<string, unknown>;
+  }) {
+    return this.prisma.jobExecution.create({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      data: {
+        queue_name: data.queue_name,
+        bull_job_id: "pending",
+        job_type: data.job_type,
+        status: data.status as any,
+        server_id: data.server_id ?? null,
+        environment_id: data.environment_id ?? null,
+        payload: (data.payload ?? {}) as any,
+      },
+    });
+  }
 
-	updateJobExecutionBullId(id: bigint, bullJobId: string) {
-		return this.prisma.jobExecution.update({
-			where: { id },
-			data: { bull_job_id: bullJobId },
-		});
-	}
+  updateJobExecutionBullId(id: bigint, bullJobId: string) {
+    return this.prisma.jobExecution.update({
+      where: { id },
+      data: { bull_job_id: bullJobId },
+    });
+  }
 
-	updateJobExecution(
-		id: bigint,
-		data: {
-			status?: 'queued' | 'active' | 'completed' | 'failed' | 'dead_letter';
-			last_error?: string;
-			completed_at?: Date;
-		},
-	) {
-		return this.prisma.jobExecution.update({ where: { id }, data });
-	}
+  updateJobExecution(
+    id: bigint,
+    data: {
+      status?: "queued" | "active" | "completed" | "failed" | "dead_letter";
+      last_error?: string;
+      completed_at?: Date;
+    },
+  ) {
+    return this.prisma.jobExecution.update({ where: { id }, data });
+  }
 
-	failSecurityScans(ids: bigint[]) {
-		return this.prisma.securityScan.updateMany({
-			where: { id: { in: ids } },
-			data: { status: 'failed' },
-		});
-	}
+  failSecurityScans(ids: bigint[]) {
+    return this.prisma.securityScan.updateMany({
+      where: { id: { in: ids } },
+      data: { status: "failed" },
+    });
+  }
 
-	findSecurityReportHistory() {
-		return this.prisma.jobExecution.findMany({
-			where: {
-				queue_name: 'reports',
-				job_type: 'security:report-generate',
-			},
-			orderBy: { created_at: 'desc' },
-			take: 20,
-			select: {
-				id: true,
-				status: true,
-				progress: true,
-				last_error: true,
-				payload: true,
-				execution_log: true,
-				started_at: true,
-				completed_at: true,
-				created_at: true,
-			},
-		});
-	}
+  findSecurityReportHistory() {
+    return this.prisma.jobExecution.findMany({
+      where: {
+        queue_name: "reports",
+        job_type: "security:report-generate",
+      },
+      orderBy: { created_at: "desc" },
+      take: 20,
+      select: {
+        id: true,
+        status: true,
+        progress: true,
+        last_error: true,
+        payload: true,
+        execution_log: true,
+        started_at: true,
+        completed_at: true,
+        created_at: true,
+      },
+    });
+  }
 
-	findServerById(id: bigint) {
-		return this.prisma.server.findUnique({ where: { id } });
-	}
+  findServerById(id: bigint) {
+    return this.prisma.server.findUnique({ where: { id } });
+  }
 
-	findEnvironmentById(id: bigint) {
-		return this.prisma.environment.findUnique({ where: { id } });
-	}
+  findEnvironmentById(id: bigint) {
+    return this.prisma.environment.findUnique({ where: { id } });
+  }
 
-	createServerScansTransaction(
-		serverId: bigint,
-		executionId: bigint,
-		types: string[],
-	) {
-		return this.prisma.$transaction(
-			types.map(scanType =>
-				this.prisma.securityScan.create({
-					// eslint-disable-next-line @typescript-eslint/no-explicit-any
-					data: {
-						scan_type: scanType as SecurityScanType,
-						server_id: serverId,
-						job_execution_id: executionId,
-					} as any,
-				}),
-			),
-		);
-	}
+  createServerScansTransaction(
+    serverId: bigint,
+    executionId: bigint,
+    types: string[],
+  ) {
+    return this.prisma.$transaction(
+      types.map((scanType) =>
+        this.prisma.securityScan.create({
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          data: {
+            scan_type: scanType as SecurityScanType,
+            server_id: serverId,
+            job_execution_id: executionId,
+          } as any,
+        }),
+      ),
+    );
+  }
 
-	createEnvironmentScansTransaction(
-		environmentId: bigint,
-		executionId: bigint,
-		types: string[],
-	) {
-		return this.prisma.$transaction(
-			types.map(scanType =>
-				this.prisma.securityScan.create({
-					// eslint-disable-next-line @typescript-eslint/no-explicit-any
-					data: {
-						scan_type: scanType as SecurityScanType,
-						environment_id: environmentId,
-						job_execution_id: executionId,
-					} as any,
-				}),
-			),
-		);
-	}
+  createEnvironmentScansTransaction(
+    environmentId: bigint,
+    executionId: bigint,
+    types: string[],
+  ) {
+    return this.prisma.$transaction(
+      types.map((scanType) =>
+        this.prisma.securityScan.create({
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          data: {
+            scan_type: scanType as SecurityScanType,
+            environment_id: environmentId,
+            job_execution_id: executionId,
+          } as any,
+        }),
+      ),
+    );
+  }
 }

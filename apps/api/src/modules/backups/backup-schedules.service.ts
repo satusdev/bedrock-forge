@@ -1,133 +1,133 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
-import { QUEUES, JOB_TYPES } from '@bedrock-forge/shared';
-import { BackupSchedulesRepository } from './backup-schedules.repository';
-import { UpsertBackupScheduleDto } from './dto/backup-schedule.dto';
-import { EnvironmentsService } from '../environments/environments.service';
+import { Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { InjectQueue } from "@nestjs/bullmq";
+import { Queue } from "bullmq";
+import { QUEUES, JOB_TYPES } from "@bedrock-forge/shared";
+import { BackupSchedulesRepository } from "./backup-schedules.repository";
+import { UpsertBackupScheduleDto } from "./dto/backup-schedule.dto";
+import { EnvironmentsService } from "../environments/environments.service";
 
 @Injectable()
 export class BackupSchedulesService {
-	private readonly logger = new Logger(BackupSchedulesService.name);
+  private readonly logger = new Logger(BackupSchedulesService.name);
 
-	constructor(
-		private readonly repo: BackupSchedulesRepository,
-		private readonly envService: EnvironmentsService,
-		@InjectQueue(QUEUES.BACKUPS) private readonly backupsQueue: Queue,
-	) {}
+  constructor(
+    private readonly repo: BackupSchedulesRepository,
+    private readonly envService: EnvironmentsService,
+    @InjectQueue(QUEUES.BACKUPS) private readonly backupsQueue: Queue,
+  ) {}
 
-	async findByEnvironment(envId: number) {
-		return this.repo.findByEnvironment(BigInt(envId));
-	}
+  async findByEnvironment(envId: number) {
+    return this.repo.findByEnvironment(BigInt(envId));
+  }
 
-	async upsert(envId: number, dto: UpsertBackupScheduleDto) {
-		// Ensure the environment exists
-		const exists = await this.envService.existsById(BigInt(envId));
-		if (!exists) throw new NotFoundException(`Environment ${envId} not found`);
+  async upsert(envId: number, dto: UpsertBackupScheduleDto) {
+    // Ensure the environment exists
+    const exists = await this.envService.existsById(BigInt(envId));
+    if (!exists) throw new NotFoundException(`Environment ${envId} not found`);
 
-		const schedule = await this.repo.upsert(BigInt(envId), {
-			type: dto.type,
-			frequency: dto.frequency,
-			hour: dto.hour,
-			minute: dto.minute,
-			day_of_week: dto.day_of_week ?? null,
-			day_of_month: dto.day_of_month ?? null,
-			enabled: dto.enabled,
-			retention_count: dto.retention_count ?? null,
-			retention_days: dto.retention_days ?? null,
-		});
+    const schedule = await this.repo.upsert(BigInt(envId), {
+      type: dto.type,
+      frequency: dto.frequency,
+      hour: dto.hour,
+      minute: dto.minute,
+      day_of_week: dto.day_of_week ?? null,
+      day_of_month: dto.day_of_month ?? null,
+      enabled: dto.enabled,
+      retention_count: dto.retention_count ?? null,
+      retention_days: dto.retention_days ?? null,
+    });
 
-		// Sync the BullMQ repeatable job
-		await this.syncRepeatableJob(Number(schedule.id), envId, dto);
+    // Sync the BullMQ repeatable job
+    await this.syncRepeatableJob(Number(schedule.id), envId, dto);
 
-		return schedule;
-	}
+    return schedule;
+  }
 
-	async remove(envId: number) {
-		const schedule = await this.repo.findByEnvironment(BigInt(envId));
-		if (schedule) {
-			await this.removeRepeatableJob(Number(schedule.id));
-		}
-		await this.repo.delete(BigInt(envId));
-	}
+  async remove(envId: number) {
+    const schedule = await this.repo.findByEnvironment(BigInt(envId));
+    if (schedule) {
+      await this.removeRepeatableJob(Number(schedule.id));
+    }
+    await this.repo.delete(BigInt(envId));
+  }
 
-	// ── BullMQ repeatable job management ────────────────────────────────────
+  // ── BullMQ repeatable job management ────────────────────────────────────
 
-	private buildCronPattern(
-		dto: Pick<
-			UpsertBackupScheduleDto,
-			'frequency' | 'hour' | 'minute' | 'day_of_week' | 'day_of_month'
-		>,
-	): string {
-		switch (dto.frequency) {
-			case 'daily':
-				return `${dto.minute} ${dto.hour} * * *`;
-			case 'weekly':
-				return `${dto.minute} ${dto.hour} * * ${dto.day_of_week ?? 0}`;
-			case 'monthly':
-				return `${dto.minute} ${dto.hour} ${dto.day_of_month ?? 1} * *`;
-			default:
-				throw new Error(`Unknown frequency: ${dto.frequency}`);
-		}
-	}
+  private buildCronPattern(
+    dto: Pick<
+      UpsertBackupScheduleDto,
+      "frequency" | "hour" | "minute" | "day_of_week" | "day_of_month"
+    >,
+  ): string {
+    switch (dto.frequency) {
+      case "daily":
+        return `${dto.minute} ${dto.hour} * * *`;
+      case "weekly":
+        return `${dto.minute} ${dto.hour} * * ${dto.day_of_week ?? 0}`;
+      case "monthly":
+        return `${dto.minute} ${dto.hour} ${dto.day_of_month ?? 1} * *`;
+      default:
+        throw new Error(`Unknown frequency: ${dto.frequency}`);
+    }
+  }
 
-	private repeatableJobId(scheduleId: number): string {
-		return `backup-schedule-${scheduleId}`;
-	}
+  private repeatableJobId(scheduleId: number): string {
+    return `backup-schedule-${scheduleId}`;
+  }
 
-	private async syncRepeatableJob(
-		scheduleId: number,
-		envId: number,
-		dto: UpsertBackupScheduleDto,
-	) {
-		const jobId = this.repeatableJobId(scheduleId);
+  private async syncRepeatableJob(
+    scheduleId: number,
+    envId: number,
+    dto: UpsertBackupScheduleDto,
+  ) {
+    const jobId = this.repeatableJobId(scheduleId);
 
-		// Remove existing repeatable job first (idempotent sync)
-		await this.removeRepeatableJob(scheduleId);
+    // Remove existing repeatable job first (idempotent sync)
+    await this.removeRepeatableJob(scheduleId);
 
-		if (!dto.enabled) {
-			this.logger.log(
-				`Schedule ${scheduleId} disabled — repeatable job removed`,
-			);
-			return;
-		}
+    if (!dto.enabled) {
+      this.logger.log(
+        `Schedule ${scheduleId} disabled — repeatable job removed`,
+      );
+      return;
+    }
 
-		const pattern = this.buildCronPattern(dto);
-		this.logger.log(
-			`Registering repeatable job ${jobId} with cron ${pattern} for env ${envId}`,
-		);
+    const pattern = this.buildCronPattern(dto);
+    this.logger.log(
+      `Registering repeatable job ${jobId} with cron ${pattern} for env ${envId}`,
+    );
 
-		await this.backupsQueue.add(
-			JOB_TYPES.BACKUP_SCHEDULED,
-			{
-				scheduleId,
-				environmentId: envId,
-				type: dto.type,
-			},
-			{
-				jobId,
-				repeat: { pattern },
-				removeOnComplete: 10,
-				removeOnFail: 5,
-			},
-		);
-	}
+    await this.backupsQueue.add(
+      JOB_TYPES.BACKUP_SCHEDULED,
+      {
+        scheduleId,
+        environmentId: envId,
+        type: dto.type,
+      },
+      {
+        jobId,
+        repeat: { pattern },
+        removeOnComplete: 10,
+        removeOnFail: 5,
+      },
+    );
+  }
 
-	private async removeRepeatableJob(scheduleId: number) {
-		const jobId = this.repeatableJobId(scheduleId);
-		try {
-			// BullMQ v5: the custom jobId is in rj.id, NOT embedded in rj.key
-			const repeatableJobs = await this.backupsQueue.getRepeatableJobs();
-			for (const rj of repeatableJobs) {
-				if (rj.id === jobId) {
-					await this.backupsQueue.removeRepeatableByKey(rj.key);
-					this.logger.log(`Removed repeatable job key: ${rj.key}`);
-				}
-			}
-		} catch (err) {
-			this.logger.warn(
-				`Could not remove repeatable job for schedule ${scheduleId}: ${err}`,
-			);
-		}
-	}
+  private async removeRepeatableJob(scheduleId: number) {
+    const jobId = this.repeatableJobId(scheduleId);
+    try {
+      // BullMQ v5: the custom jobId is in rj.id, NOT embedded in rj.key
+      const repeatableJobs = await this.backupsQueue.getRepeatableJobs();
+      for (const rj of repeatableJobs) {
+        if (rj.id === jobId) {
+          await this.backupsQueue.removeRepeatableByKey(rj.key);
+          this.logger.log(`Removed repeatable job key: ${rj.key}`);
+        }
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Could not remove repeatable job for schedule ${scheduleId}: ${err}`,
+      );
+    }
+  }
 }

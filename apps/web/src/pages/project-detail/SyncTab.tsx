@@ -1,2 +1,2 @@
-export { SyncTab } from './sync/SyncTab';
-export { SyncTab as default } from './sync/SyncTab';
+export { SyncTab } from "./sync/SyncTab";
+export { SyncTab as default } from "./sync/SyncTab";

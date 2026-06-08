@@ -1,4 +1,4 @@
-import { IsOptional, IsString } from 'class-validator';
+import { IsOptional, IsString } from "class-validator";
 
 /**
  * EnqueuePluginScanDto
@@ -7,7 +7,7 @@ import { IsOptional, IsString } from 'class-validator';
  * Kept for module consistency and future extension (e.g. scan filters).
  */
 export class EnqueuePluginScanDto {
-	@IsOptional()
-	@IsString()
-	label?: string;
+  @IsOptional()
+  @IsString()
+  label?: string;
 }

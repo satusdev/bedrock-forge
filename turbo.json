@@ -1,31 +1,31 @@
 {
-	"$schema": "https://turbo.build/schema.json",
-	"globalDependencies": ["tsconfig.base.json", ".env"],
-	"tasks": {
-		"build": {
-			"dependsOn": ["^build"],
-			"outputs": ["dist/**"]
-		},
-		"dev": {
-			"cache": false,
-			"persistent": true
-		},
-		"test": {
-			"dependsOn": ["build"],
-			"outputs": ["coverage/**"]
-		},
-		"lint": {
-			"outputs": []
-		},
-		"type-check": {
-			"dependsOn": ["^type-check"],
-			"outputs": []
-		},
-		"db:generate": {
-			"outputs": ["node_modules/.prisma/client/**"]
-		},
-		"clean": {
-			"cache": false
-		}
-	}
+  "$schema": "https://turbo.build/schema.json",
+  "globalDependencies": ["tsconfig.base.json", ".env"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "test": {
+      "dependsOn": ["build"],
+      "outputs": ["coverage/**"]
+    },
+    "lint": {
+      "outputs": []
+    },
+    "type-check": {
+      "dependsOn": ["^type-check"],
+      "outputs": []
+    },
+    "db:generate": {
+      "outputs": ["node_modules/.prisma/client/**"]
+    },
+    "clean": {
+      "cache": false
+    }
+  }
 }

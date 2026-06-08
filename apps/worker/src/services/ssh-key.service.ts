@@ -1,6 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { EncryptionService } from '../encryption/encryption.service';
+import { Injectable, Logger } from "@nestjs/common";
+import { PrismaService } from "../prisma/prisma.service";
+import { EncryptionService } from "../encryption/encryption.service";
 
 /**
  * SshKeyService
@@ -20,53 +20,53 @@ import { EncryptionService } from '../encryption/encryption.service';
  */
 @Injectable()
 export class SshKeyService {
-	private readonly logger = new Logger(SshKeyService.name);
+  private readonly logger = new Logger(SshKeyService.name);
 
-	constructor(
-		private readonly prisma: PrismaService,
-		private readonly enc: EncryptionService,
-	) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly enc: EncryptionService,
+  ) {}
 
-	async resolvePrivateKey(server: {
-		name: string;
-		ssh_private_key_encrypted: string | null;
-	}): Promise<string> {
-		if (server.ssh_private_key_encrypted) {
-			try {
-				const decrypted = this.enc.decrypt(server.ssh_private_key_encrypted);
-				if (decrypted && decrypted.trimStart().startsWith('-----BEGIN')) {
-					return decrypted;
-				}
-				this.logger.warn(
-					`Per-server key for "${server.name}" decrypted but is not PEM-formatted — falling back to global key.`,
-				);
-			} catch (e) {
-				this.logger.warn(
-					`Per-server key decryption failed for "${server.name}" ` +
-						`(ENCRYPTION_KEY mismatch or corrupted payload) — ` +
-						`falling back to global key. Cause: ${e instanceof Error ? e.message : String(e)}`,
-				);
-			}
-		}
+  async resolvePrivateKey(server: {
+    name: string;
+    ssh_private_key_encrypted: string | null;
+  }): Promise<string> {
+    if (server.ssh_private_key_encrypted) {
+      try {
+        const decrypted = this.enc.decrypt(server.ssh_private_key_encrypted);
+        if (decrypted && decrypted.trimStart().startsWith("-----BEGIN")) {
+          return decrypted;
+        }
+        this.logger.warn(
+          `Per-server key for "${server.name}" decrypted but is not PEM-formatted — falling back to global key.`,
+        );
+      } catch (e) {
+        this.logger.warn(
+          `Per-server key decryption failed for "${server.name}" ` +
+            `(ENCRYPTION_KEY mismatch or corrupted payload) — ` +
+            `falling back to global key. Cause: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+    }
 
-		const globalSetting = await this.prisma.appSetting.findUnique({
-			where: { key: 'global_ssh_private_key' },
-		});
-		if (globalSetting?.value) {
-			try {
-				const decrypted = this.enc.decrypt(globalSetting.value);
-				if (decrypted && decrypted.trimStart().startsWith('-----BEGIN')) {
-					return decrypted;
-				}
-			} catch {
-				// Global key is also corrupted — fall through to the throw below
-			}
-		}
+    const globalSetting = await this.prisma.appSetting.findUnique({
+      where: { key: "global_ssh_private_key" },
+    });
+    if (globalSetting?.value) {
+      try {
+        const decrypted = this.enc.decrypt(globalSetting.value);
+        if (decrypted && decrypted.trimStart().startsWith("-----BEGIN")) {
+          return decrypted;
+        }
+      } catch {
+        // Global key is also corrupted — fall through to the throw below
+      }
+    }
 
-		throw new Error(
-			`No valid SSH key available for server "${server.name}". ` +
-				'Set a PEM-formatted private key on the server edit page, ' +
-				'or configure a global SSH key in Settings → SSH Key.',
-		);
-	}
+    throw new Error(
+      `No valid SSH key available for server "${server.name}". ` +
+        "Set a PEM-formatted private key on the server edit page, " +
+        "or configure a global SSH key in Settings → SSH Key.",
+    );
+  }
 }

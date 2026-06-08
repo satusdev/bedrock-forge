@@ -1,10 +1,10 @@
-import { Module } from '@nestjs/common';
-import { BullModule } from '@nestjs/bullmq';
-import { QUEUES } from '@bedrock-forge/shared';
-import { PluginScanProcessor } from './plugin-scan.processor';
+import { Module } from "@nestjs/common";
+import { BullModule } from "@nestjs/bullmq";
+import { QUEUES } from "@bedrock-forge/shared";
+import { PluginScanProcessor } from "./plugin-scan.processor";
 
 @Module({
-	imports: [BullModule.registerQueue({ name: QUEUES.PLUGIN_SCANS })],
-	providers: [PluginScanProcessor],
+  imports: [BullModule.registerQueue({ name: QUEUES.PLUGIN_SCANS })],
+  providers: [PluginScanProcessor],
 })
 export class PluginScanProcessorModule {}

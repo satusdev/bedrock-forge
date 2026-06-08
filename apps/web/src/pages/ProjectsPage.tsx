@@ -1,1037 +1,1046 @@
-import { useState, useMemo } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
+import { useState, useMemo } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import {
-	Pencil,
-	Trash2,
-	MoreHorizontal,
-	Server as ServerIcon,
-	Globe,
-	Layers,
-	ExternalLink,
-	History,
-	HardDrive,
-	FolderPlus,
-} from 'lucide-react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { api } from '@/lib/api-client';
-import { toast } from '@/hooks/use-toast';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
-import { AlertDialog } from '@/components/ui/alert-dialog';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { PageHeader, SearchBar, Pagination } from '@/components/crud';
+  Pencil,
+  Trash2,
+  MoreHorizontal,
+  Server as ServerIcon,
+  Globe,
+  Layers,
+  ExternalLink,
+  History,
+  HardDrive,
+  FolderPlus,
+} from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { api } from "@/lib/api-client";
+import { toast } from "@/hooks/use-toast";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { AlertDialog } from "@/components/ui/alert-dialog";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { PageHeader, SearchBar, Pagination } from "@/components/crud";
 import {
-	Dialog,
-	DialogContent,
-	DialogHeader,
-	DialogTitle,
-	DialogFooter,
-} from '@/components/ui/dialog';
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from '@/components/ui/select';
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Checkbox } from '@/components/ui/checkbox';
-import { BulkActionsBar } from '@/components/ui/bulk-actions-bar';
-import { EmptyState } from '@/components/ui/EmptyState';
-import { ImportFromServerDialog } from './projects/ImportFromServerDialog';
-import { CreateBedrockDialog } from './projects/CreateBedrockDialog';
-import { useServersList } from '@/hooks/useServersList';
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Checkbox } from "@/components/ui/checkbox";
+import { BulkActionsBar } from "@/components/ui/bulk-actions-bar";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { ImportFromServerDialog } from "./projects/ImportFromServerDialog";
+import { CreateBedrockDialog } from "./projects/CreateBedrockDialog";
+import { useServersList } from "@/hooks/useServersList";
 import {
-	ExecutionLogPanel,
-	ExpandLogButton,
-} from '@/components/ui/execution-log-panel';
-import { useWebSocketEvent } from '@/lib/websocket';
+  ExecutionLogPanel,
+  ExpandLogButton,
+} from "@/components/ui/execution-log-panel";
+import { useWebSocketEvent } from "@/lib/websocket";
 
 interface Client {
-	id: number;
-	name: string;
+  id: number;
+  name: string;
 }
 
 interface Package {
-	id: number;
-	name: string;
+  id: number;
+  name: string;
 }
 
 interface ProjectEnvironment {
-	id: number;
-	url: string;
-	type: string;
-	server: { id: number; name: string; ip_address: string };
-	monitors: { last_status: number | null; uptime_pct: string | null }[];
-	backups: { created_at: string; status: string }[];
+  id: number;
+  url: string;
+  type: string;
+  server: { id: number; name: string; ip_address: string };
+  monitors: { last_status: number | null; uptime_pct: string | null }[];
+  backups: { created_at: string; status: string }[];
 }
 
 interface Project {
-	id: number;
-	name: string;
-	status: 'active' | 'inactive' | 'archived';
-	client: { id: number; name: string };
-	hosting_package: { name: string } | null;
-	support_package: { name: string } | null;
-	_count: { environments: number };
-	environments: ProjectEnvironment[];
+  id: number;
+  name: string;
+  status: "active" | "inactive" | "archived";
+  client: { id: number; name: string };
+  hosting_package: { name: string } | null;
+  support_package: { name: string } | null;
+  _count: { environments: number };
+  environments: ProjectEnvironment[];
 }
 
 const projectSchema = z.object({
-	name: z.string().min(1, 'Name is required').max(150),
-	status: z.enum(['active', 'inactive', 'archived'], {
-		required_error: 'Status is required',
-	}),
-	client_id: z.coerce
-		.number({ invalid_type_error: 'Client is required' })
-		.positive('Client is required'),
-	hosting_package_id: z.coerce.number().optional(),
-	support_package_id: z.coerce.number().optional(),
+  name: z.string().min(1, "Name is required").max(150),
+  status: z.enum(["active", "inactive", "archived"], {
+    required_error: "Status is required",
+  }),
+  client_id: z.coerce
+    .number({ invalid_type_error: "Client is required" })
+    .positive("Client is required"),
+  hosting_package_id: z.coerce.number().optional(),
+  support_package_id: z.coerce.number().optional(),
 });
 type ProjectForm = z.infer<typeof projectSchema>;
 
-const STATUS_OPTIONS = ['active', 'inactive', 'archived'] as const;
+const STATUS_OPTIONS = ["active", "inactive", "archived"] as const;
 
 export function ProjectFormDialog({
-	open,
-	onOpenChange,
-	initial,
-	clients,
-	hostingPackages,
-	supportPackages,
-	onSuccess,
+  open,
+  onOpenChange,
+  initial,
+  clients,
+  hostingPackages,
+  supportPackages,
+  onSuccess,
 }: {
-	open: boolean;
-	onOpenChange: (o: boolean) => void;
-	initial?: Project;
-	clients: Client[];
-	hostingPackages: Package[];
-	supportPackages: Package[];
-	onSuccess: () => void;
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  initial?: Project;
+  clients: Client[];
+  hostingPackages: Package[];
+  supportPackages: Package[];
+  onSuccess: () => void;
 }) {
-	const {
-		register,
-		handleSubmit,
-		setValue,
-		reset,
-		setError,
-		formState: { errors, isSubmitting },
-	} = useForm<ProjectForm>({
-		resolver: zodResolver(projectSchema),
-		defaultValues: {
-			name: initial?.name ?? '',
-			status: initial?.status ?? 'active',
-			client_id: initial?.client.id ?? undefined,
-			hosting_package_id: undefined,
-			support_package_id: undefined,
-		},
-	});
+  const {
+    register,
+    handleSubmit,
+    setValue,
+    reset,
+    setError,
+    formState: { errors, isSubmitting },
+  } = useForm<ProjectForm>({
+    resolver: zodResolver(projectSchema),
+    defaultValues: {
+      name: initial?.name ?? "",
+      status: initial?.status ?? "active",
+      client_id: initial?.client.id ?? undefined,
+      hosting_package_id: undefined,
+      support_package_id: undefined,
+    },
+  });
 
-	async function onSubmit(data: ProjectForm) {
-		try {
-			const payload = {
-				name: data.name,
-				status: data.status,
-				client_id: data.client_id,
-				hosting_package_id: data.hosting_package_id || undefined,
-				support_package_id: data.support_package_id || undefined,
-			};
-			if (initial) {
-				await api.put(`/projects/${initial.id}`, payload);
-				toast({ title: 'Project updated' });
-			} else {
-				await api.post('/projects', payload);
-				toast({ title: 'Project created' });
-			}
-			reset();
-			onSuccess();
-			onOpenChange(false);
-		} catch (err) {
-			const message =
-				err instanceof Error ? err.message : 'Save failed. Please try again.';
-			setError('root', { message });
-		}
-	}
+  async function onSubmit(data: ProjectForm) {
+    try {
+      const payload = {
+        name: data.name,
+        status: data.status,
+        client_id: data.client_id,
+        hosting_package_id: data.hosting_package_id || undefined,
+        support_package_id: data.support_package_id || undefined,
+      };
+      if (initial) {
+        await api.put(`/projects/${initial.id}`, payload);
+        toast({ title: "Project updated" });
+      } else {
+        await api.post("/projects", payload);
+        toast({ title: "Project created" });
+      }
+      reset();
+      onSuccess();
+      onOpenChange(false);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Save failed. Please try again.";
+      setError("root", { message });
+    }
+  }
 
-	return (
-		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className='sm:max-w-lg'>
-				<DialogHeader>
-					<DialogTitle>{initial ? 'Edit Project' : 'New Project'}</DialogTitle>
-				</DialogHeader>
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{initial ? "Edit Project" : "New Project"}</DialogTitle>
+        </DialogHeader>
 
-				<form onSubmit={handleSubmit(onSubmit)} className='space-y-4'>
-					<div className='space-y-1'>
-						<Label htmlFor='p-name'>Name *</Label>
-						<Input id='p-name' {...register('name')} placeholder='My Website' />
-						{errors.name && (
-							<p className='text-xs text-destructive'>{errors.name.message}</p>
-						)}
-					</div>
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <div className="space-y-1">
+            <Label htmlFor="p-name">Name *</Label>
+            <Input id="p-name" {...register("name")} placeholder="My Website" />
+            {errors.name && (
+              <p className="text-xs text-destructive">{errors.name.message}</p>
+            )}
+          </div>
 
-					<div className='grid grid-cols-2 gap-3'>
-						<div className='space-y-1'>
-							<Label>Client *</Label>
-							<Select
-								defaultValue={initial?.client.id?.toString()}
-								onValueChange={v => setValue('client_id', Number(v))}
-							>
-								<SelectTrigger>
-									<SelectValue placeholder='Select client…' />
-								</SelectTrigger>
-								<SelectContent>
-									{clients.map(c => (
-										<SelectItem key={c.id} value={c.id.toString()}>
-											{c.name}
-										</SelectItem>
-									))}
-								</SelectContent>
-							</Select>
-							{errors.client_id && (
-								<p className='text-xs text-destructive'>
-									{errors.client_id.message}
-								</p>
-							)}
-						</div>
-						<div className='space-y-1'>
-							<Label>Status</Label>
-							<Select
-								defaultValue={initial?.status ?? 'active'}
-								onValueChange={v =>
-									setValue('status', v as 'active' | 'inactive' | 'archived')
-								}
-							>
-								<SelectTrigger>
-									<SelectValue />
-								</SelectTrigger>
-								<SelectContent>
-									{STATUS_OPTIONS.map(s => (
-										<SelectItem key={s} value={s}>
-											{s}
-										</SelectItem>
-									))}
-								</SelectContent>
-							</Select>
-						</div>
-					</div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label>Client *</Label>
+              <Select
+                defaultValue={initial?.client.id?.toString()}
+                onValueChange={(v) => setValue("client_id", Number(v))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select client…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {clients.map((c) => (
+                    <SelectItem key={c.id} value={c.id.toString()}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {errors.client_id && (
+                <p className="text-xs text-destructive">
+                  {errors.client_id.message}
+                </p>
+              )}
+            </div>
+            <div className="space-y-1">
+              <Label>Status</Label>
+              <Select
+                defaultValue={initial?.status ?? "active"}
+                onValueChange={(v) =>
+                  setValue("status", v as "active" | "inactive" | "archived")
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {STATUS_OPTIONS.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {s}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
 
-					{hostingPackages.length > 0 && (
-						<div className='space-y-1'>
-							<Label>Hosting Package</Label>
-							<Select
-								onValueChange={v =>
-									setValue('hosting_package_id', v ? Number(v) : undefined)
-								}
-							>
-								<SelectTrigger>
-									<SelectValue placeholder='None' />
-								</SelectTrigger>
-								<SelectContent>
-									{hostingPackages.map(p => (
-										<SelectItem key={p.id} value={p.id.toString()}>
-											{p.name}
-										</SelectItem>
-									))}
-								</SelectContent>
-							</Select>
-						</div>
-					)}
+          {hostingPackages.length > 0 && (
+            <div className="space-y-1">
+              <Label>Hosting Package</Label>
+              <Select
+                onValueChange={(v) =>
+                  setValue("hosting_package_id", v ? Number(v) : undefined)
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="None" />
+                </SelectTrigger>
+                <SelectContent>
+                  {hostingPackages.map((p) => (
+                    <SelectItem key={p.id} value={p.id.toString()}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
-					{supportPackages.length > 0 && (
-						<div className='space-y-1'>
-							<Label>Support Package</Label>
-							<Select
-								onValueChange={v =>
-									setValue('support_package_id', v ? Number(v) : undefined)
-								}
-							>
-								<SelectTrigger>
-									<SelectValue placeholder='None' />
-								</SelectTrigger>
-								<SelectContent>
-									{supportPackages.map(p => (
-										<SelectItem key={p.id} value={p.id.toString()}>
-											{p.name}
-										</SelectItem>
-									))}
-								</SelectContent>
-							</Select>
-						</div>
-					)}
+          {supportPackages.length > 0 && (
+            <div className="space-y-1">
+              <Label>Support Package</Label>
+              <Select
+                onValueChange={(v) =>
+                  setValue("support_package_id", v ? Number(v) : undefined)
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="None" />
+                </SelectTrigger>
+                <SelectContent>
+                  {supportPackages.map((p) => (
+                    <SelectItem key={p.id} value={p.id.toString()}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
-					<DialogFooter>
-						{errors.root && (
-							<p className='text-xs text-destructive w-full text-left'>
-								{errors.root.message}
-							</p>
-						)}
-						<Button
-							type='button'
-							variant='outline'
-							onClick={() => onOpenChange(false)}
-						>
-							Cancel
-						</Button>
-						<Button type='submit' disabled={isSubmitting}>
-							{isSubmitting ? 'Saving…' : initial ? 'Update' : 'Create'}
-						</Button>
-					</DialogFooter>
-				</form>
-			</DialogContent>
-		</Dialog>
-	);
+          <DialogFooter>
+            {errors.root && (
+              <p className="text-xs text-destructive w-full text-left">
+                {errors.root.message}
+              </p>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting ? "Saving…" : initial ? "Update" : "Create"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 const STATUS_VARIANT: Record<
-	string,
-	'success' | 'destructive' | 'secondary' | 'warning'
+  string,
+  "success" | "destructive" | "secondary" | "warning"
 > = {
-	active: 'success',
-	inactive: 'secondary',
-	archived: 'secondary',
-	pending: 'warning',
-	suspended: 'destructive',
-	cancelled: 'destructive',
+  active: "success",
+  inactive: "secondary",
+  archived: "secondary",
+  pending: "warning",
+  suspended: "destructive",
+  cancelled: "destructive",
 };
 
 function ProjectCard({
-	project,
-	onEdit,
-	onDelete,
-	onClick,
-	onBackupNow,
-	selected,
-	onSelect,
+  project,
+  onEdit,
+  onDelete,
+  onClick,
+  onBackupNow,
+  selected,
+  onSelect,
 }: {
-	project: Project;
-	onEdit: () => void;
-	onDelete: () => void;
-	onClick: () => void;
-	onBackupNow: (envId: number) => void;
-	selected: boolean;
-	onSelect: (val: boolean) => void;
+  project: Project;
+  onEdit: () => void;
+  onDelete: () => void;
+  onClick: () => void;
+  onBackupNow: (envId: number) => void;
+  selected: boolean;
+  onSelect: (val: boolean) => void;
 }) {
-	const servers = [
-		...new Map(project.environments.map(e => [e.server.id, e.server])).values(),
-	];
+  const servers = [
+    ...new Map(
+      project.environments.map((e) => [e.server.id, e.server]),
+    ).values(),
+  ];
 
-	function relativeTime(iso: string): string {
-		const diff = Date.now() - new Date(iso).getTime();
-		const h = Math.floor(diff / 3_600_000);
-		if (h < 1) return `${Math.floor(diff / 60_000)}m ago`;
-		if (h < 24) return `${h}h ago`;
-		return `${Math.floor(h / 24)}d ago`;
-	}
+  function relativeTime(iso: string): string {
+    const diff = Date.now() - new Date(iso).getTime();
+    const h = Math.floor(diff / 3_600_000);
+    if (h < 1) return `${Math.floor(diff / 60_000)}m ago`;
+    if (h < 24) return `${h}h ago`;
+    return `${Math.floor(h / 24)}d ago`;
+  }
 
-	function MonitorDot({ env }: { env: ProjectEnvironment }) {
-		const monitor = env.monitors?.[0] ?? null;
-		if (!monitor)
-			return (
-				<span
-					className='h-2 w-2 rounded-full bg-muted-foreground/40 shrink-0'
-					title='No monitor'
-				/>
-			);
-		const s = monitor.last_status;
-		if (s === null)
-			return (
-				<span
-					className='h-2 w-2 rounded-full bg-muted-foreground/40 shrink-0'
-					title='Pending'
-				/>
-			);
-		if (s === 200)
-			return (
-				<span
-					className='h-2 w-2 rounded-full bg-green-500 shrink-0'
-					title='Up'
-				/>
-			);
-		return (
-			<span
-				className='h-2 w-2 rounded-full bg-red-500 shrink-0'
-				title={`Down (${s})`}
-			/>
-		);
-	}
+  function MonitorDot({ env }: { env: ProjectEnvironment }) {
+    const monitor = env.monitors?.[0] ?? null;
+    if (!monitor)
+      return (
+        <span
+          className="h-2 w-2 rounded-full bg-muted-foreground/40 shrink-0"
+          title="No monitor"
+        />
+      );
+    const s = monitor.last_status;
+    if (s === null)
+      return (
+        <span
+          className="h-2 w-2 rounded-full bg-muted-foreground/40 shrink-0"
+          title="Pending"
+        />
+      );
+    if (s === 200)
+      return (
+        <span
+          className="h-2 w-2 rounded-full bg-green-500 shrink-0"
+          title="Up"
+        />
+      );
+    return (
+      <span
+        className="h-2 w-2 rounded-full bg-red-500 shrink-0"
+        title={`Down (${s})`}
+      />
+    );
+  }
 
-	return (
-		<Card
-			className={`group relative cursor-pointer hover:border-primary/50 transition-all duration-200 ${selected ? 'border-primary bg-primary/5 ring-1 ring-primary' : ''}`}
-			onClick={onClick}
-		>
-			<div
-				className='absolute top-3 left-3 z-10'
-				onClick={e => e.stopPropagation()}
-			>
-				<Checkbox
-					checked={selected}
-					onCheckedChange={v => onSelect(!!v)}
-					className={`transition-opacity ${selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
-				/>
-			</div>
+  return (
+    <Card
+      className={`group relative cursor-pointer hover:border-primary/50 transition-all duration-200 ${selected ? "border-primary bg-primary/5 ring-1 ring-primary" : ""}`}
+      onClick={onClick}
+    >
+      <div
+        className="absolute top-3 left-3 z-10"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <Checkbox
+          checked={selected}
+          onCheckedChange={(v) => onSelect(!!v)}
+          className={`transition-opacity ${selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+        />
+      </div>
 
-			<CardHeader className='pb-3 pl-10'>
-				<div className='flex items-start justify-between gap-2'>
-					<div className='min-w-0 flex-1'>
-						<h3 className='font-semibold text-sm truncate leading-tight'>
-							{project.name}
-						</h3>
-						<p className='text-xs text-muted-foreground mt-0.5 truncate'>
-							{project.client.name}
-						</p>
-					</div>
-					<div className='flex items-center gap-1.5 shrink-0'>
-						<Badge
-							variant={STATUS_VARIANT[project.status] ?? 'secondary'}
-							className='text-xs'
-						>
-							{project.status}
-						</Badge>
-						<DropdownMenu>
-							<DropdownMenuTrigger asChild>
-								<Button
-									variant='ghost'
-									size='icon'
-									className='h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity'
-									onClick={e => e.stopPropagation()}
-								>
-									<MoreHorizontal className='h-3.5 w-3.5' />
-								</Button>
-							</DropdownMenuTrigger>
-							<DropdownMenuContent align='end'>
-								<DropdownMenuItem
-									onClick={e => {
-										e.stopPropagation();
-										onEdit();
-									}}
-								>
-									<Pencil className='h-4 w-4 mr-2' />
-									Edit
-								</DropdownMenuItem>
-								<DropdownMenuItem
-									className='text-destructive focus:text-destructive'
-									onClick={e => {
-										e.stopPropagation();
-										onDelete();
-									}}
-								>
-									<Trash2 className='h-4 w-4 mr-2' />
-									Delete
-								</DropdownMenuItem>
-							</DropdownMenuContent>
-						</DropdownMenu>
-					</div>
-				</div>
-			</CardHeader>
+      <CardHeader className="pb-3 pl-10">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <h3 className="font-semibold text-sm truncate leading-tight">
+              {project.name}
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5 truncate">
+              {project.client.name}
+            </p>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Badge
+              variant={STATUS_VARIANT[project.status] ?? "secondary"}
+              className="text-xs"
+            >
+              {project.status}
+            </Badge>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <MoreHorizontal className="h-3.5 w-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEdit();
+                  }}
+                >
+                  <Pencil className="h-4 w-4 mr-2" />
+                  Edit
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-destructive focus:text-destructive"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete();
+                  }}
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+      </CardHeader>
 
-			<CardContent className='pt-0 pl-10 space-y-1.5'>
-				{project.environments.map(env => {
-					const lastBackup = env.backups[0];
-					return (
-						<div
-							key={env.id}
-							className='flex items-center gap-1.5 min-w-0 group/env'
-						>
-							<MonitorDot env={env} />
-							<a
-								href={env.url}
-								target='_blank'
-								rel='noreferrer'
-								className='text-xs text-primary hover:underline truncate flex items-center gap-1 flex-1 min-w-0'
-								onClick={e => e.stopPropagation()}
-							>
-								{env.url.replace(/^https?:\/\//, '')}
-								<ExternalLink className='h-2.5 w-2.5 shrink-0' />
-							</a>
-							<Badge
-								variant='outline'
-								className='text-[10px] px-1.5 py-0 shrink-0'
-							>
-								{env.type}
-							</Badge>
-							{lastBackup ? (
-								<span
-									className='text-[10px] text-muted-foreground shrink-0'
-									title={`Last backup: ${lastBackup.status}`}
-								>
-									{relativeTime(lastBackup.created_at)}
-								</span>
-							) : (
-								<span className='text-[10px] text-amber-500 shrink-0'>
-									no backup
-								</span>
-							)}
-							<Button
-								variant='ghost'
-								size='icon'
-								className='h-5 w-5 opacity-0 group-hover/env:opacity-100 transition-opacity shrink-0'
-								title='Backup now'
-								onClick={e => {
-									e.stopPropagation();
-									onBackupNow(env.id);
-								}}
-							>
-								<HardDrive className='h-3 w-3' />
-							</Button>
-						</div>
-					);
-				})}
-				{servers.length > 0 && (
-					<div className='flex items-center gap-1.5 min-w-0 pt-1 border-t border-border/50'>
-						<ServerIcon className='h-3.5 w-3.5 text-muted-foreground shrink-0' />
-						<span className='text-xs text-muted-foreground truncate'>
-							{servers.map(s => s.name).join(', ')}
-						</span>
-					</div>
-				)}
-				<div className='flex items-center gap-1.5'>
-					<Layers className='h-3.5 w-3.5 text-muted-foreground' />
-					<span className='text-xs text-muted-foreground'>
-						{project._count.environments}{' '}
-						{project._count.environments === 1 ? 'environment' : 'environments'}
-					</span>
-				</div>
-			</CardContent>
-		</Card>
-	);
+      <CardContent className="pt-0 pl-10 space-y-1.5">
+        {project.environments.map((env) => {
+          const lastBackup = env.backups[0];
+          return (
+            <div
+              key={env.id}
+              className="flex items-center gap-1.5 min-w-0 group/env"
+            >
+              <MonitorDot env={env} />
+              <a
+                href={env.url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-primary hover:underline truncate flex items-center gap-1 flex-1 min-w-0"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {env.url.replace(/^https?:\/\//, "")}
+                <ExternalLink className="h-2.5 w-2.5 shrink-0" />
+              </a>
+              <Badge
+                variant="outline"
+                className="text-[10px] px-1.5 py-0 shrink-0"
+              >
+                {env.type}
+              </Badge>
+              {lastBackup ? (
+                <span
+                  className="text-[10px] text-muted-foreground shrink-0"
+                  title={`Last backup: ${lastBackup.status}`}
+                >
+                  {relativeTime(lastBackup.created_at)}
+                </span>
+              ) : (
+                <span className="text-[10px] text-amber-500 shrink-0">
+                  no backup
+                </span>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-5 w-5 opacity-0 group-hover/env:opacity-100 transition-opacity shrink-0"
+                title="Backup now"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onBackupNow(env.id);
+                }}
+              >
+                <HardDrive className="h-3 w-3" />
+              </Button>
+            </div>
+          );
+        })}
+        {servers.length > 0 && (
+          <div className="flex items-center gap-1.5 min-w-0 pt-1 border-t border-border/50">
+            <ServerIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <span className="text-xs text-muted-foreground truncate">
+              {servers.map((s) => s.name).join(", ")}
+            </span>
+          </div>
+        )}
+        <div className="flex items-center gap-1.5">
+          <Layers className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-xs text-muted-foreground">
+            {project._count.environments}{" "}
+            {project._count.environments === 1 ? "environment" : "environments"}
+          </span>
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 // ─── Bedrock Jobs Dialog ─────────────────────────────────────────────────────
 
 interface BedrockJobRow {
-	id: number;
-	status: string;
-	progress: number | null;
-	last_error: string | null;
-	started_at: string | null;
-	completed_at: string | null;
-	created_at: string;
-	environment: {
-		id: number;
-		type: string;
-		url: string | null;
-		project: { id: number; name: string; client: { id: number; name: string } };
-	} | null;
+  id: number;
+  status: string;
+  progress: number | null;
+  last_error: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  environment: {
+    id: number;
+    type: string;
+    url: string | null;
+    project: { id: number; name: string; client: { id: number; name: string } };
+  } | null;
 }
 
 const BEDROCK_JOB_STATUS_VARIANT: Record<
-	string,
-	'success' | 'destructive' | 'info' | 'secondary'
+  string,
+  "success" | "destructive" | "info" | "secondary"
 > = {
-	completed: 'success',
-	failed: 'destructive',
-	active: 'info',
-	pending: 'secondary',
+  completed: "success",
+  failed: "destructive",
+  active: "info",
+  pending: "secondary",
 };
 
 function bedrockDuration(
-	started?: string | null,
-	completed?: string | null,
+  started?: string | null,
+  completed?: string | null,
 ): string {
-	if (!started) return '—';
-	const diff =
-		(completed ? new Date(completed).getTime() : Date.now()) -
-		new Date(started).getTime();
-	if (diff < 1000) return `${diff}ms`;
-	if (diff < 60_000) return `${(diff / 1000).toFixed(1)}s`;
-	return `${Math.floor(diff / 60_000)}m ${Math.floor((diff % 60_000) / 1000)}s`;
+  if (!started) return "—";
+  const diff =
+    (completed ? new Date(completed).getTime() : Date.now()) -
+    new Date(started).getTime();
+  if (diff < 1000) return `${diff}ms`;
+  if (diff < 60_000) return `${(diff / 1000).toFixed(1)}s`;
+  return `${Math.floor(diff / 60_000)}m ${Math.floor((diff % 60_000) / 1000)}s`;
 }
 
 function BedrockJobsDialog({
-	open,
-	onOpenChange,
+  open,
+  onOpenChange,
 }: {
-	open: boolean;
-	onOpenChange: (o: boolean) => void;
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
 }) {
-	const qc = useQueryClient();
-	const [expandedId, setExpandedId] = useState<number | null>(null);
+  const qc = useQueryClient();
+  const [expandedId, setExpandedId] = useState<number | null>(null);
 
-	const { data, isLoading } = useQuery({
-		queryKey: ['bedrock-jobs'],
-		queryFn: () =>
-			api.get<{ data: BedrockJobRow[]; total: number }>(
-				'/job-executions?queue_name=projects&limit=10',
-			),
-		enabled: open,
-		staleTime: 10_000,
-		refetchInterval: open ? 10_000 : false,
-	});
+  const { data, isLoading } = useQuery({
+    queryKey: ["bedrock-jobs"],
+    queryFn: () =>
+      api.get<{ data: BedrockJobRow[]; total: number }>(
+        "/job-executions?queue_name=projects&limit=10",
+      ),
+    enabled: open,
+    staleTime: 10_000,
+    refetchInterval: open ? 10_000 : false,
+  });
 
-	useWebSocketEvent('job:completed', () => {
-		qc.invalidateQueries({ queryKey: ['bedrock-jobs'] });
-	});
-	useWebSocketEvent('job:failed', () => {
-		qc.invalidateQueries({ queryKey: ['bedrock-jobs'] });
-	});
+  useWebSocketEvent("job:completed", () => {
+    qc.invalidateQueries({ queryKey: ["bedrock-jobs"] });
+  });
+  useWebSocketEvent("job:failed", () => {
+    qc.invalidateQueries({ queryKey: ["bedrock-jobs"] });
+  });
 
-	const rows = data?.data ?? [];
+  const rows = data?.data ?? [];
 
-	return (
-		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className='max-w-2xl'>
-				<DialogHeader>
-					<DialogTitle>Bedrock Provisioning Jobs</DialogTitle>
-				</DialogHeader>
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Bedrock Provisioning Jobs</DialogTitle>
+        </DialogHeader>
 
-				<div className='mt-2 max-h-[60vh] overflow-y-auto'>
-					{isLoading ? (
-						<div className='py-8 text-center text-sm text-muted-foreground'>
-							Loading…
-						</div>
-					) : rows.length === 0 ? (
-						<div className='py-8 text-center text-sm text-muted-foreground'>
-							No Bedrock provisioning jobs found.
-						</div>
-					) : (
-						<div className='divide-y rounded-md border'>
-							{rows.map(row => {
-								const isActive =
-									row.status === 'active' || row.status === 'pending';
-								const isExpanded = expandedId === row.id;
-								return (
-									<div key={row.id}>
-										<div className='flex items-center gap-3 px-4 py-3'>
-											<Badge
-												variant={
-													BEDROCK_JOB_STATUS_VARIANT[row.status] ?? 'secondary'
-												}
-												className='shrink-0 capitalize'
-											>
-												{row.status}
-											</Badge>
-											<div className='min-w-0 flex-1'>
-												{row.environment ? (
-													<p className='text-sm font-medium truncate'>
-														{row.environment.project.name}
-													</p>
-												) : (
-													<p className='text-sm text-muted-foreground'>—</p>
-												)}
-												{row.environment?.url && (
-													<p className='text-xs text-muted-foreground truncate'>
-														{row.environment.url}
-													</p>
-												)}
-												{row.last_error && (
-													<p
-														className='text-xs text-destructive truncate'
-														title={row.last_error}
-													>
-														{row.last_error}
-													</p>
-												)}
-											</div>
-											<div className='shrink-0 text-right text-xs text-muted-foreground space-y-0.5'>
-												<p>
-													{new Date(
-														row.started_at ?? row.created_at,
-													).toLocaleString([], {
-														dateStyle: 'short',
-														timeStyle: 'short',
-													})}
-												</p>
-												<p>
-													{bedrockDuration(row.started_at, row.completed_at)}
-												</p>
-											</div>
-											<ExpandLogButton
-												expanded={isExpanded}
-												onToggle={() =>
-													setExpandedId(isExpanded ? null : row.id)
-												}
-											/>
-										</div>
-										{isExpanded && (
-											<div className='px-4 pb-4 bg-muted/20'>
-												<ExecutionLogPanel
-													jobExecutionId={row.id}
-													isActive={isActive}
-												/>
-											</div>
-										)}
-									</div>
-								);
-							})}
-						</div>
-					)}
-				</div>
+        <div className="mt-2 max-h-[60vh] overflow-y-auto">
+          {isLoading ? (
+            <div className="py-8 text-center text-sm text-muted-foreground">
+              Loading…
+            </div>
+          ) : rows.length === 0 ? (
+            <div className="py-8 text-center text-sm text-muted-foreground">
+              No Bedrock provisioning jobs found.
+            </div>
+          ) : (
+            <div className="divide-y rounded-md border">
+              {rows.map((row) => {
+                const isActive =
+                  row.status === "active" || row.status === "pending";
+                const isExpanded = expandedId === row.id;
+                return (
+                  <div key={row.id}>
+                    <div className="flex items-center gap-3 px-4 py-3">
+                      <Badge
+                        variant={
+                          BEDROCK_JOB_STATUS_VARIANT[row.status] ?? "secondary"
+                        }
+                        className="shrink-0 capitalize"
+                      >
+                        {row.status}
+                      </Badge>
+                      <div className="min-w-0 flex-1">
+                        {row.environment ? (
+                          <p className="text-sm font-medium truncate">
+                            {row.environment.project.name}
+                          </p>
+                        ) : (
+                          <p className="text-sm text-muted-foreground">—</p>
+                        )}
+                        {row.environment?.url && (
+                          <p className="text-xs text-muted-foreground truncate">
+                            {row.environment.url}
+                          </p>
+                        )}
+                        {row.last_error && (
+                          <p
+                            className="text-xs text-destructive truncate"
+                            title={row.last_error}
+                          >
+                            {row.last_error}
+                          </p>
+                        )}
+                      </div>
+                      <div className="shrink-0 text-right text-xs text-muted-foreground space-y-0.5">
+                        <p>
+                          {new Date(
+                            row.started_at ?? row.created_at,
+                          ).toLocaleString([], {
+                            dateStyle: "short",
+                            timeStyle: "short",
+                          })}
+                        </p>
+                        <p>
+                          {bedrockDuration(row.started_at, row.completed_at)}
+                        </p>
+                      </div>
+                      <ExpandLogButton
+                        expanded={isExpanded}
+                        onToggle={() =>
+                          setExpandedId(isExpanded ? null : row.id)
+                        }
+                      />
+                    </div>
+                    {isExpanded && (
+                      <div className="px-4 pb-4 bg-muted/20">
+                        <ExecutionLogPanel
+                          jobExecutionId={row.id}
+                          isActive={isActive}
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
 
-				<DialogFooter>
-					<Button variant='outline' onClick={() => onOpenChange(false)}>
-						Close
-					</Button>
-				</DialogFooter>
-			</DialogContent>
-		</Dialog>
-	);
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 // ─── Skeleton ─────────────────────────────────────────────────────────────────
 
 function ProjectCardSkeleton() {
-	return (
-		<Card className='animate-pulse'>
-			<CardHeader className='pb-3'>
-				<div className='flex items-start justify-between gap-2'>
-					<div className='space-y-1.5 flex-1'>
-						<div className='h-4 bg-muted rounded w-3/4' />
-						<div className='h-3 bg-muted rounded w-1/2' />
-					</div>
-					<div className='h-5 bg-muted rounded w-14' />
-				</div>
-			</CardHeader>
-			<CardContent className='pt-0 space-y-2'>
-				<div className='h-3 bg-muted rounded w-full' />
-				<div className='h-3 bg-muted rounded w-2/3' />
-				<div className='h-3 bg-muted rounded w-1/3' />
-			</CardContent>
-		</Card>
-	);
+  return (
+    <Card className="animate-pulse">
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="space-y-1.5 flex-1">
+            <div className="h-4 bg-muted rounded w-3/4" />
+            <div className="h-3 bg-muted rounded w-1/2" />
+          </div>
+          <div className="h-5 bg-muted rounded w-14" />
+        </div>
+      </CardHeader>
+      <CardContent className="pt-0 space-y-2">
+        <div className="h-3 bg-muted rounded w-full" />
+        <div className="h-3 bg-muted rounded w-2/3" />
+        <div className="h-3 bg-muted rounded w-1/3" />
+      </CardContent>
+    </Card>
+  );
 }
 
 export function ProjectsPage() {
-	const qc = useQueryClient();
-	const navigate = useNavigate();
-	const [searchParams, setSearchParams] = useSearchParams();
-	const [page, setPage] = useState(1);
-	const [search, setSearch] = useState('');
-	const [searchInput, setSearchInput] = useState('');
-	const [clientFilter, setClientFilter] = useState(
-		searchParams.get('client_id') ?? '',
-	);
-	const [serverFilter, setServerFilter] = useState(
-		searchParams.get('server_id') ?? '',
-	);
-	const [createOpen, setCreateOpen] = useState(false);
-	const [importOpen, setImportOpen] = useState(false);
-	const [bedrockOpen, setBedrockOpen] = useState(false);
-	const [bedrockJobsOpen, setBedrockJobsOpen] = useState(false);
-	const [editTarget, setEditTarget] = useState<Project | null>(null);
-	const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [clientFilter, setClientFilter] = useState(
+    searchParams.get("client_id") ?? "",
+  );
+  const [serverFilter, setServerFilter] = useState(
+    searchParams.get("server_id") ?? "",
+  );
+  const [createOpen, setCreateOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [bedrockOpen, setBedrockOpen] = useState(false);
+  const [bedrockJobsOpen, setBedrockJobsOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<Project | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
 
-	// ── Selection State ──────────────────────────────────────────────────────
-	const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  // ── Selection State ──────────────────────────────────────────────────────
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
-	const { data, isLoading } = useQuery({
-		queryKey: ['projects', page, search, clientFilter, serverFilter],
-		queryFn: () => {
-			const qs = new URLSearchParams({ page: String(page), limit: '20' });
-			if (search) qs.set('search', search);
-			if (clientFilter) qs.set('client_id', clientFilter);
-			if (serverFilter) qs.set('server_id', serverFilter);
-			return api.get<{ items: Project[]; total: number }>(`/projects?${qs}`);
-		},
-	});
+  const { data, isLoading } = useQuery({
+    queryKey: ["projects", page, search, clientFilter, serverFilter],
+    queryFn: () => {
+      const qs = new URLSearchParams({ page: String(page), limit: "20" });
+      if (search) qs.set("search", search);
+      if (clientFilter) qs.set("client_id", clientFilter);
+      if (serverFilter) qs.set("server_id", serverFilter);
+      return api.get<{ items: Project[]; total: number }>(`/projects?${qs}`);
+    },
+  });
 
-	const { data: clients = [] } = useQuery({
-		queryKey: ['clients-list'],
-		queryFn: () =>
-			api.get<{ items: Client[] }>('/clients?limit=100').then(r => r.items),
-	});
+  const { data: clients = [] } = useQuery({
+    queryKey: ["clients-list"],
+    queryFn: () =>
+      api.get<{ items: Client[] }>("/clients?limit=100").then((r) => r.items),
+  });
 
-	const { data: servers = [] } = useServersList();
+  const { data: servers = [] } = useServersList();
 
-	const { data: hostingPkgs = [] } = useQuery({
-		queryKey: ['packages-hosting'],
-		queryFn: () => api.get<Package[]>('/packages/hosting'),
-	});
+  const { data: hostingPkgs = [] } = useQuery({
+    queryKey: ["packages-hosting"],
+    queryFn: () => api.get<Package[]>("/packages/hosting"),
+  });
 
-	const { data: supportPkgs = [] } = useQuery({
-		queryKey: ['packages-support'],
-		queryFn: () => api.get<Package[]>('/packages/support'),
-	});
+  const { data: supportPkgs = [] } = useQuery({
+    queryKey: ["packages-support"],
+    queryFn: () => api.get<Package[]>("/packages/support"),
+  });
 
-	const deleteMutation = useMutation({
-		mutationFn: (id: number) => api.delete(`/projects/${id}`),
-		onSuccess: () => {
-			qc.invalidateQueries({ queryKey: ['projects'] });
-			setDeleteTarget(null);
-			toast({ title: 'Project deleted' });
-		},
-		onError: () => toast({ title: 'Delete failed', variant: 'destructive' }),
-	});
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => api.delete(`/projects/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["projects"] });
+      setDeleteTarget(null);
+      toast({ title: "Project deleted" });
+    },
+    onError: () => toast({ title: "Delete failed", variant: "destructive" }),
+  });
 
-	const backupNowMutation = useMutation({
-		mutationFn: (environmentId: number) =>
-			api.post('/backups/create', {
-				environment_id: environmentId,
-				type: 'full',
-			}),
-		onSuccess: () => toast({ title: 'Backup queued' }),
-		onError: () =>
-			toast({ title: 'Failed to queue backup', variant: 'destructive' }),
-	});
+  const backupNowMutation = useMutation({
+    mutationFn: (environmentId: number) =>
+      api.post("/backups/create", {
+        environment_id: environmentId,
+        type: "full",
+      }),
+    onSuccess: () => toast({ title: "Backup queued" }),
+    onError: () =>
+      toast({ title: "Failed to queue backup", variant: "destructive" }),
+  });
 
-	const totalPages = data ? Math.ceil(data.total / 20) : 1;
+  const totalPages = data ? Math.ceil(data.total / 20) : 1;
 
-	function invalidate() {
-		qc.invalidateQueries({ queryKey: ['projects'] });
-	}
+  function invalidate() {
+    qc.invalidateQueries({ queryKey: ["projects"] });
+  }
 
-	const projects = data?.items ?? [];
+  const projects = data?.items ?? [];
 
-	// ── Selection Logic ──────────────────────────────────────────────────────
-	const toggleSelect = (id: number) => {
-		const next = new Set(selectedIds);
-		if (next.has(id)) next.delete(id);
-		else next.add(id);
-		setSelectedIds(next);
-	};
+  // ── Selection Logic ──────────────────────────────────────────────────────
+  const toggleSelect = (id: number) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedIds(next);
+  };
 
-	const clearSelection = () => setSelectedIds(new Set());
+  const clearSelection = () => setSelectedIds(new Set());
 
-	const isAllSelected =
-		projects.length > 0 && projects.every(p => selectedIds.has(p.id));
+  const isAllSelected =
+    projects.length > 0 && projects.every((p) => selectedIds.has(p.id));
 
-	const toggleAll = () => {
-		if (isAllSelected) {
-			const next = new Set(selectedIds);
-			projects.forEach(p => next.delete(p.id));
-			setSelectedIds(next);
-		} else {
-			const next = new Set(selectedIds);
-			projects.forEach(p => next.add(p.id));
-			setSelectedIds(next);
-		}
-	};
+  const toggleAll = () => {
+    if (isAllSelected) {
+      const next = new Set(selectedIds);
+      projects.forEach((p) => next.delete(p.id));
+      setSelectedIds(next);
+    } else {
+      const next = new Set(selectedIds);
+      projects.forEach((p) => next.add(p.id));
+      setSelectedIds(next);
+    }
+  };
 
-	const bulkDeleteMutation = useMutation({
-		mutationFn: async (ids: number[]) => {
-			for (const id of ids) {
-				await api.delete(`/projects/${id}`);
-			}
-		},
-		onSuccess: () => {
-			qc.invalidateQueries({ queryKey: ['projects'] });
-			clearSelection();
-			toast({ title: 'Projects deleted' });
-		},
-	});
+  const bulkDeleteMutation = useMutation({
+    mutationFn: async (ids: number[]) => {
+      for (const id of ids) {
+        await api.delete(`/projects/${id}`);
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["projects"] });
+      clearSelection();
+      toast({ title: "Projects deleted" });
+    },
+  });
 
-	return (
-		<div className='space-y-4'>
-			<PageHeader
-				title='Projects'
-				onCreate={() => setCreateOpen(true)}
-				createLabel='New Project'
-			>
-				<Button variant='outline' size='sm' onClick={() => setImportOpen(true)}>
-					<ServerIcon className='h-4 w-4 mr-1.5' />
-					Import from Server
-				</Button>
-				<Button
-					variant='outline'
-					size='sm'
-					onClick={() => setBedrockJobsOpen(true)}
-				>
-					<History className='h-4 w-4 mr-1.5' />
-					Bedrock Jobs
-				</Button>
-				<Button
-					variant='default'
-					size='sm'
-					onClick={() => setBedrockOpen(true)}
-				>
-					<Layers className='h-4 w-4 mr-1.5' />
-					Create Bedrock
-				</Button>
-			</PageHeader>
+  return (
+    <div className="space-y-4">
+      <PageHeader
+        title="Projects"
+        onCreate={() => setCreateOpen(true)}
+        createLabel="New Project"
+      >
+        <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
+          <ServerIcon className="h-4 w-4 mr-1.5" />
+          Import from Server
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setBedrockJobsOpen(true)}
+        >
+          <History className="h-4 w-4 mr-1.5" />
+          Bedrock Jobs
+        </Button>
+        <Button
+          variant="default"
+          size="sm"
+          onClick={() => setBedrockOpen(true)}
+        >
+          <Layers className="h-4 w-4 mr-1.5" />
+          Create Bedrock
+        </Button>
+      </PageHeader>
 
-			<SearchBar
-				value={searchInput}
-				onChange={setSearchInput}
-				onSearch={() => {
-					setSearch(searchInput);
-					setPage(1);
-				}}
-				onClear={() => {
-					setSearch('');
-					setSearchInput('');
-					setPage(1);
-				}}
-				placeholder='Search projects…'
-				totalCount={data?.total ?? 0}
-				totalLabel='total projects'
-			>
-				<div className='flex items-center gap-2'>
-					<Select
-						value={clientFilter}
-						onValueChange={v => {
-							setClientFilter(v);
-							setSearchParams(prev => {
-								if (v) prev.set('client_id', v);
-								else prev.delete('client_id');
-								return prev;
-							});
-							setPage(1);
-						}}
-					>
-						<SelectTrigger className='w-[160px] h-9'>
-							<SelectValue placeholder='All Clients' />
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value='all-clients'>All Clients</SelectItem>
-							{clients.map(c => (
-								<SelectItem key={c.id} value={c.id.toString()}>
-									{c.name}
-								</SelectItem>
-							))}
-						</SelectContent>
-					</Select>
+      <SearchBar
+        value={searchInput}
+        onChange={setSearchInput}
+        onSearch={() => {
+          setSearch(searchInput);
+          setPage(1);
+        }}
+        onClear={() => {
+          setSearch("");
+          setSearchInput("");
+          setPage(1);
+        }}
+        placeholder="Search projects…"
+        totalCount={data?.total ?? 0}
+        totalLabel="total projects"
+      >
+        <div className="flex items-center gap-2">
+          <Select
+            value={clientFilter}
+            onValueChange={(v) => {
+              setClientFilter(v);
+              setSearchParams((prev) => {
+                if (v) prev.set("client_id", v);
+                else prev.delete("client_id");
+                return prev;
+              });
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="w-[160px] h-9">
+              <SelectValue placeholder="All Clients" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all-clients">All Clients</SelectItem>
+              {clients.map((c) => (
+                <SelectItem key={c.id} value={c.id.toString()}>
+                  {c.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
-					<Select
-						value={serverFilter}
-						onValueChange={v => {
-							setServerFilter(v);
-							setSearchParams(prev => {
-								if (v) prev.set('server_id', v);
-								else prev.delete('server_id');
-								return prev;
-							});
-							setPage(1);
-						}}
-					>
-						<SelectTrigger className='w-[160px] h-9'>
-							<SelectValue placeholder='All Servers' />
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value='all-servers'>All Servers</SelectItem>
-							{servers.map(s => (
-								<SelectItem key={s.id} value={s.id.toString()}>
-									{s.name}
-								</SelectItem>
-							))}
-						</SelectContent>
-					</Select>
-				</div>
-			</SearchBar>
+          <Select
+            value={serverFilter}
+            onValueChange={(v) => {
+              setServerFilter(v);
+              setSearchParams((prev) => {
+                if (v) prev.set("server_id", v);
+                else prev.delete("server_id");
+                return prev;
+              });
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="w-[160px] h-9">
+              <SelectValue placeholder="All Servers" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all-servers">All Servers</SelectItem>
+              {servers.map((s) => (
+                <SelectItem key={s.id} value={s.id.toString()}>
+                  {s.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </SearchBar>
 
-			<div className='flex items-center justify-between px-1'>
-				<div className='flex items-center gap-2'>
-					<Checkbox
-						id='select-all'
-						checked={isAllSelected}
-						onCheckedChange={toggleAll}
-					/>
-					<Label htmlFor='select-all' className='text-sm font-normal cursor-pointer'>
-						Select all on this page
-					</Label>
-				</div>
-				<p className='text-xs text-muted-foreground'>
-					Showing {projects.length} of {data?.total ?? 0} projects
-				</p>
-			</div>
+      <div className="flex items-center justify-between px-1">
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="select-all"
+            checked={isAllSelected}
+            onCheckedChange={toggleAll}
+          />
+          <Label
+            htmlFor="select-all"
+            className="text-sm font-normal cursor-pointer"
+          >
+            Select all on this page
+          </Label>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Showing {projects.length} of {data?.total ?? 0} projects
+        </p>
+      </div>
 
-			{isLoading ? (
-				<div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'>
-					{Array.from({ length: 8 }).map((_, i) => (
-						<ProjectCardSkeleton key={i} />
-					))}
-				</div>
-			) : projects.length === 0 ? (
-				<EmptyState
-					icon={FolderPlus}
-					title='No projects found'
-					description='You haven’t created any projects yet. Start by creating a new project or importing one from a server.'
-					action={{
-						label: 'Create Project',
-						onClick: () => setCreateOpen(true),
-						icon: FolderPlus,
-					}}
-					className='py-20'
-				/>
-			) : (
-				<div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'>
-					{projects.map(project => (
-						<ProjectCard
-							key={project.id}
-							project={project}
-							selected={selectedIds.has(project.id)}
-							onSelect={() => toggleSelect(project.id)}
-							onEdit={() => setEditTarget(project)}
-							onDelete={() => setDeleteTarget(project)}
-							onClick={() => navigate(`/projects/${project.id}`)}
-							onBackupNow={envId => backupNowMutation.mutate(envId)}
-						/>
-					))}
-				</div>
-			)}
+      {isLoading ? (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <ProjectCardSkeleton key={i} />
+          ))}
+        </div>
+      ) : projects.length === 0 ? (
+        <EmptyState
+          icon={FolderPlus}
+          title="No projects found"
+          description="You haven’t created any projects yet. Start by creating a new project or importing one from a server."
+          action={{
+            label: "Create Project",
+            onClick: () => setCreateOpen(true),
+            icon: FolderPlus,
+          }}
+          className="py-20"
+        />
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {projects.map((project) => (
+            <ProjectCard
+              key={project.id}
+              project={project}
+              selected={selectedIds.has(project.id)}
+              onSelect={() => toggleSelect(project.id)}
+              onEdit={() => setEditTarget(project)}
+              onDelete={() => setDeleteTarget(project)}
+              onClick={() => navigate(`/projects/${project.id}`)}
+              onBackupNow={(envId) => backupNowMutation.mutate(envId)}
+            />
+          ))}
+        </div>
+      )}
 
-			{totalPages > 1 && (
-				<Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
-			)}
+      {totalPages > 1 && (
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          onPageChange={setPage}
+        />
+      )}
 
-			<ProjectFormDialog
-				open={createOpen || !!editTarget}
-				onOpenChange={o => {
-					setCreateOpen(o);
-					if (!o) setEditTarget(null);
-				}}
-				initial={editTarget ?? undefined}
-				clients={clients}
-				hostingPackages={hostingPkgs}
-				supportPackages={supportPkgs}
-				onSuccess={invalidate}
-			/>
+      <ProjectFormDialog
+        open={createOpen || !!editTarget}
+        onOpenChange={(o) => {
+          setCreateOpen(o);
+          if (!o) setEditTarget(null);
+        }}
+        initial={editTarget ?? undefined}
+        clients={clients}
+        hostingPackages={hostingPkgs}
+        supportPackages={supportPkgs}
+        onSuccess={invalidate}
+      />
 
-			<ImportFromServerDialog
-				open={importOpen}
-				onOpenChange={setImportOpen}
-				clients={clients}
-				onSuccess={invalidate}
-			/>
-			<CreateBedrockDialog
-				open={bedrockOpen}
-				onOpenChange={setBedrockOpen}
-				onSuccess={invalidate}
-			/>
-			<BedrockJobsDialog
-				open={bedrockJobsOpen}
-				onOpenChange={setBedrockJobsOpen}
-			/>
-			<AlertDialog
-				open={!!deleteTarget}
-				onOpenChange={o => !o && setDeleteTarget(null)}
-				title='Delete Project'
-				description={`Are you sure you want to delete "${deleteTarget?.name}"? This will also remove all associated environment records and monitoring history.`}
-				confirmLabel='Delete'
-				confirmVariant='destructive'
-				onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
-				isPending={deleteMutation.isPending}
-			/>
+      <ImportFromServerDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        clients={clients}
+        onSuccess={invalidate}
+      />
+      <CreateBedrockDialog
+        open={bedrockOpen}
+        onOpenChange={setBedrockOpen}
+        onSuccess={invalidate}
+      />
+      <BedrockJobsDialog
+        open={bedrockJobsOpen}
+        onOpenChange={setBedrockJobsOpen}
+      />
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        title="Delete Project"
+        description={`Are you sure you want to delete "${deleteTarget?.name}"? This will also remove all associated environment records and monitoring history.`}
+        confirmLabel="Delete"
+        confirmVariant="destructive"
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        isPending={deleteMutation.isPending}
+      />
 
-			<BulkActionsBar
-				selectedCount={selectedIds.size}
-				onClear={clearSelection}
-				actions={[
-					{
-						label: 'Delete',
-						icon: Trash2,
-						variant: 'destructive',
-						onClick: () => {
-							if (
-								confirm(
-									`Are you sure you want to delete ${selectedIds.size} projects?`,
-								)
-							) {
-								bulkDeleteMutation.mutate(Array.from(selectedIds));
-							}
-						},
-					},
-				]}
-			/>
-		</div>
-	);
+      <BulkActionsBar
+        selectedCount={selectedIds.size}
+        onClear={clearSelection}
+        actions={[
+          {
+            label: "Delete",
+            icon: Trash2,
+            variant: "destructive",
+            onClick: () => {
+              if (
+                confirm(
+                  `Are you sure you want to delete ${selectedIds.size} projects?`,
+                )
+              ) {
+                bulkDeleteMutation.mutate(Array.from(selectedIds));
+              }
+            },
+          },
+        ]}
+      />
+    </div>
+  );
 }

@@ -1,9 +1,9 @@
-import { useQuery, UseQueryOptions } from '@tanstack/react-query';
-import { api } from '@/lib/api-client';
+import { useQuery, UseQueryOptions } from "@tanstack/react-query";
+import { api } from "@/lib/api-client";
 
 export interface ClientListItem {
-	id: number;
-	name: string;
+  id: number;
+  name: string;
 }
 
 /**
@@ -12,15 +12,15 @@ export interface ClientListItem {
  * cached response and invalidations propagate everywhere.
  */
 export function useClientsList(
-	options?: Partial<UseQueryOptions<ClientListItem[]>>,
+  options?: Partial<UseQueryOptions<ClientListItem[]>>,
 ) {
-	return useQuery<ClientListItem[]>({
-		queryKey: ['clients-list'],
-		queryFn: () =>
-			api
-				.get<{ items: ClientListItem[] }>('/clients?limit=100')
-				.then(r => r.items),
-		staleTime: 60_000,
-		...options,
-	});
+  return useQuery<ClientListItem[]>({
+    queryKey: ["clients-list"],
+    queryFn: () =>
+      api
+        .get<{ items: ClientListItem[] }>("/clients?limit=100")
+        .then((r) => r.items),
+    staleTime: 60_000,
+    ...options,
+  });
 }

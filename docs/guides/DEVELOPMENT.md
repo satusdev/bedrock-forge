@@ -154,10 +154,10 @@ pnpm db:migrate -- --name add-<feature>
 ```typescript
 // <feature>.module.ts
 @Module({
-	imports: [PrismaModule],
-	controllers: [FeatureController],
-	providers: [FeatureService, FeatureRepository],
-	exports: [FeatureService],
+  imports: [PrismaModule],
+  controllers: [FeatureController],
+  providers: [FeatureService, FeatureRepository],
+  exports: [FeatureService],
 })
 export class FeatureModule {}
 ```
@@ -168,11 +168,11 @@ export class FeatureModule {}
 // <feature>.repository.ts
 @Injectable()
 export class FeatureRepository {
-	constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) {}
 
-	findMany(params: { skip: number; take: number }): Promise<Feature[]> {
-		return this.prisma.feature.findMany({ ...params });
-	}
+  findMany(params: { skip: number; take: number }): Promise<Feature[]> {
+    return this.prisma.feature.findMany({ ...params });
+  }
 }
 ```
 
@@ -182,11 +182,11 @@ export class FeatureRepository {
 // <feature>.service.ts
 @Injectable()
 export class FeatureService {
-	constructor(private repo: FeatureRepository) {}
+  constructor(private repo: FeatureRepository) {}
 
-	findAll(query: QueryFeatureDto): Promise<Feature[]> {
-		return this.repo.findMany({ skip: query.skip, take: query.limit });
-	}
+  findAll(query: QueryFeatureDto): Promise<Feature[]> {
+    return this.repo.findMany({ skip: query.skip, take: query.limit });
+  }
 }
 ```
 
@@ -194,15 +194,15 @@ export class FeatureService {
 
 ```typescript
 // <feature>.controller.ts
-@Controller('features')
+@Controller("features")
 @UseGuards(AuthGuard, RolesGuard)
 export class FeatureController {
-	constructor(private service: FeatureService) {}
+  constructor(private service: FeatureService) {}
 
-	@Get()
-	findAll(@Query() query: QueryFeatureDto) {
-		return this.service.findAll(query);
-	}
+  @Get()
+  findAll(@Query() query: QueryFeatureDto) {
+    return this.service.findAll(query);
+  }
 }
 ```
 
@@ -233,8 +233,8 @@ apps/worker/src/processors/<name>/
 
 ```typescript
 export const QUEUES = {
-	// ...existing queues
-	MY_QUEUE: 'my-queue',
+  // ...existing queues
+  MY_QUEUE: "my-queue",
 } as const;
 ```
 
@@ -247,10 +247,10 @@ export const QUEUES = {
 // <name>.processor.ts
 @Processor(QUEUES.MY_QUEUE)
 export class MyQueueProcessor extends WorkerHost {
-	async process(job: Job<MyJobPayload>): Promise<void> {
-		const payload = MyJobPayloadSchema.parse(job.data);
-		// ... implementation
-	}
+  async process(job: Job<MyJobPayload>): Promise<void> {
+    const payload = MyJobPayloadSchema.parse(job.data);
+    // ... implementation
+  }
 }
 ```
 
@@ -280,10 +280,10 @@ apps/web/src/features/<feature>/
 ```typescript
 // hooks/use-features.ts
 export function useFeatures(params: QueryParams) {
-	return useQuery({
-		queryKey: ['features', params],
-		queryFn: () => apiClient.get('/features', { params }),
-	});
+  return useQuery({
+    queryKey: ["features", params],
+    queryFn: () => apiClient.get("/features", { params }),
+  });
 }
 ```
 
@@ -294,17 +294,17 @@ export function useFeatures(params: QueryParams) {
 
 ```tsx
 const MyFeaturePage = lazy(
-	() => import('./features/<feature>/pages/<Feature>Page'),
+  () => import("./features/<feature>/pages/<Feature>Page"),
 );
 
 // inside the router:
 <Route
-	path='/my-feature'
-	element={
-		<Suspense fallback={<PageSkeleton />}>
-			<MyFeaturePage />
-		</Suspense>
-	}
+  path="/my-feature"
+  element={
+    <Suspense fallback={<PageSkeleton />}>
+      <MyFeaturePage />
+    </Suspense>
+  }
 />;
 ```
 
