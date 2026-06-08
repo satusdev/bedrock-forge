@@ -9,7 +9,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { SshKeyService } from '../../services/ssh-key.service';
 import { StepTracker } from '../../services/step-tracker';
 import { createRemoteExecutor } from '@bedrock-forge/remote-executor';
-import { QUEUES, JOB_TYPES } from '@bedrock-forge/shared';
+import { QUEUES, JOB_TYPES, SyncClonePayloadSchema, SyncPushPayloadSchema } from '@bedrock-forge/shared';
 import { shellQuote, createRemoteMyCnf, cleanupRemoteMyCnf } from '../../utils/processor-utils';
 import { LayoutDetectorService, WpLayout } from './services/layout-detector.service';
 import { ProtectedCptService, ProtectedPostTypeBackup } from './services/protected-cpt.service';
@@ -58,7 +58,7 @@ export class SyncProcessor extends WorkerHost {
 
 	private async processClone(job: Job, tracker: StepTracker) {
 		const { sourceEnvironmentId, targetEnvironmentId, jobExecutionId } =
-			job.data;
+			SyncClonePayloadSchema.parse(job.data);
 
 		await tracker.track({
 			step: 'Database sync started',
@@ -501,7 +501,7 @@ export class SyncProcessor extends WorkerHost {
 			scope,
 			jobExecutionId,
 			skipSafetyBackup,
-		} = job.data;
+		} = SyncPushPayloadSchema.parse(job.data);
 
 		await tracker.track({
 			step: 'Sync push started',

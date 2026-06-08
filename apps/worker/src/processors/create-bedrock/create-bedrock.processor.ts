@@ -6,7 +6,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { SshKeyService } from '../../services/ssh-key.service';
 import { EncryptionService } from '../../encryption/encryption.service';
 import { createRemoteExecutor } from '@bedrock-forge/remote-executor';
-import { QUEUES, JOB_TYPES, CreateBedrockPayload } from '@bedrock-forge/shared';
+import { QUEUES, JOB_TYPES, CreateBedrockPayloadSchema } from '@bedrock-forge/shared';
 import { callCpApi, CpCreds, escapeMysql } from '../../utils/cyberpanel-http';
 import {
 	shellQuote,
@@ -33,7 +33,7 @@ export class CreateBedrockProcessor extends WorkerHost {
 	async process(job: Job) {
 		if (job.name !== JOB_TYPES.PROJECT_CREATE_BEDROCK) return;
 
-		const data = job.data as CreateBedrockPayload;
+		const data = CreateBedrockPayloadSchema.parse(job.data);
 		const { environmentId, jobExecutionId, cyberpanel, sourceEnvironmentId } =
 			data;
 

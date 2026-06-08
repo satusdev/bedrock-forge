@@ -115,18 +115,17 @@ export type PluginScheduledUpdatePayload = z.infer<
 export const SyncClonePayloadSchema = z.object({
 	sourceEnvironmentId: z.number().int().positive(),
 	targetEnvironmentId: z.number().int().positive(),
-	includeDatabase: z.boolean().default(false),
-	includeFiles: z.boolean().default(true),
 	jobExecutionId: z.number().int().positive(),
-	skipSafetyBackup: z.boolean().default(false),
+	skipSafetyBackup: z.boolean().default(false).optional(),
 });
 export type SyncClonePayload = z.infer<typeof SyncClonePayloadSchema>;
 
 export const SyncPushPayloadSchema = z.object({
-	environmentId: z.number().int().positive(),
-	serverId: z.number().int().positive(),
-	localPath: z.string().min(1),
-	remotePath: z.string().min(1),
+	sourceEnvironmentId: z.number().int().positive(),
+	targetEnvironmentId: z.number().int().positive(),
+	scope: z.enum(['database', 'files', 'both']),
+	jobExecutionId: z.number().int().positive(),
+	skipSafetyBackup: z.boolean().default(false).optional(),
 });
 export type SyncPushPayload = z.infer<typeof SyncPushPayloadSchema>;
 

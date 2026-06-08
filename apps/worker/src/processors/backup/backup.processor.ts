@@ -9,7 +9,15 @@ import { RcloneService } from '../../services/rclone.service';
 import { SshKeyService } from '../../services/ssh-key.service';
 import { EncryptionService } from '../../encryption/encryption.service';
 import { createRemoteExecutor } from '@bedrock-forge/remote-executor';
-import { QUEUES, JOB_TYPES, DEFAULT_JOB_OPTIONS } from '@bedrock-forge/shared';
+import {
+	QUEUES,
+	JOB_TYPES,
+	DEFAULT_JOB_OPTIONS,
+	BackupDeleteFilePayloadSchema,
+	BackupScheduledPayloadSchema,
+	BackupRestorePayloadSchema,
+	BackupCreatePayloadSchema,
+} from '@bedrock-forge/shared';
 import { ConfigService } from '@nestjs/config';
 import {
 	fixCyberPanelOwnership,
@@ -63,54 +71,45 @@ export class BackupProcessor extends WorkerHost {
 	}
 
 	async process(job: Job) {
-		const {
-			environmentId,
-			type,
-			jobExecutionId,
-			backupId,
-			filePath,
-			scheduleId,
-		} = job.data as {
-			environmentId?: number;
-			type?: string;
-			jobExecutionId?: number;
-			backupId?: number;
-			filePath?: string;
-			scheduleId?: number;
-		};
-
 		// Fire-and-forget cloud file cleanup — no JobExecution involved
 		if (job.name === JOB_TYPES.BACKUP_DELETE_FILE) {
-			return this.handleDelete(filePath ?? '');
+			const { filePath } = BackupDeleteFilePayloadSchema.parse(job.data);
+			return this.handleDelete(filePath);
 		}
 
 		// Scheduled backup: create Backup + JobExecution rows, then run create flow
 		if (job.name === JOB_TYPES.BACKUP_SCHEDULED) {
+			const { scheduleId, environmentId, type } = BackupScheduledPayloadSchema.parse(job.data);
 			return this.handleScheduled(
 				job,
-				scheduleId!,
-				environmentId!,
-				type ?? 'full',
+				scheduleId,
+				environmentId,
+				type,
 			);
 		}
 
 		const isRestore = job.name === JOB_TYPES.BACKUP_RESTORE;
+		let backupId: number | undefined;
 
 		try {
 			if (isRestore) {
+				const { backupId: bid, environmentId, jobExecutionId } = BackupRestorePayloadSchema.parse(job.data);
+				backupId = bid;
 				await this.handleRestore(
 					job,
-					backupId!,
-					environmentId!,
-					jobExecutionId!,
+					backupId,
+					environmentId,
+					jobExecutionId,
 				);
 			} else {
+				const { environmentId, type, jobExecutionId, backupId: bid } = BackupCreatePayloadSchema.parse(job.data);
+				backupId = bid;
 				await this.handleCreate(
 					job,
-					environmentId!,
-					type!,
-					jobExecutionId!,
-					backupId!,
+					environmentId,
+					type,
+					jobExecutionId,
+					backupId,
 				);
 			}
 		} catch (err: unknown) {
