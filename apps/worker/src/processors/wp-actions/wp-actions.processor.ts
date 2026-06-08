@@ -1,7 +1,6 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
-import { readFileSync } from 'fs';
 import { join } from 'path';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SshKeyService } from '../../services/ssh-key.service';
@@ -10,7 +9,11 @@ import { createRemoteExecutor } from '@bedrock-forge/remote-executor';
 import { QUEUES, JOB_TYPES, DEFAULT_JOB_OPTIONS } from '@bedrock-forge/shared';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
-import { buildWpCliPrefix } from '../../utils/processor-utils';
+import {
+	shellQuote,
+	pushRemoteScript,
+	WpCliBuilder,
+} from '../../utils/processor-utils';
 
 export interface WpFixActionPayload {
 	environmentId: number;
@@ -118,13 +121,10 @@ export class WpActionsProcessor extends WorkerHost {
 			await job.updateProgress(20);
 			const scriptsPath = this.config.get<string>('scriptsPath')!;
 			const remoteScript = `/tmp/wp_actions_${job.id}.php`;
-			await executor.pushFile({
-				remotePath: remoteScript,
-				content: readFileSync(join(scriptsPath, 'wp-actions.php')),
-			});
+			await pushRemoteScript(executor, join(scriptsPath, 'wp-actions.php'), remoteScript);
 			await job.updateProgress(40);
 			const wpPath = await this.resolveWpPath(executor, env.root_path ?? '');
-			const wpCli = await this.buildWpCliContext(executor, wpPath);
+			const wpCli = await WpCliBuilder.create(executor, wpPath);
 			const phpCmd = wpCli.lsphpBin ? shellQuote(wpCli.lsphpBin) : 'php';
 			const envPrefix = wpCli.lsphpBin
 				? `env WP_CLI_PHP=${shellQuote(wpCli.lsphpBin)}`
@@ -134,10 +134,14 @@ export class WpActionsProcessor extends WorkerHost {
 				.join(' ') +
 				` --docroot=${shellQuote(env.root_path ?? '')} --wp-path=${shellQuote(wpPath)} --action=${shellQuote(action)}`;
 			const t0 = Date.now();
-			const result = await executor.execute(cmd, { timeout: 60_000 });
-			await executor
-				.execute(`rm -f ${remoteScript}`, { timeout: 5_000 })
-				.catch(() => {});
+			let result;
+			try {
+				result = await executor.execute(cmd, { timeout: 60_000 });
+			} finally {
+				await executor
+					.execute(`rm -f ${remoteScript}`, { timeout: 5_000 })
+					.catch(() => {});
+			}
 			const parsed = safeJsonParse(result.stdout);
 			await tracker.trackCommand(
 				'wp-actions.php',
@@ -172,16 +176,17 @@ export class WpActionsProcessor extends WorkerHost {
 			await job.updateProgress(20);
 			const scriptsPath = this.config.get<string>('scriptsPath')!;
 			const remoteScript = `/tmp/wp_debug_${job.id}.php`;
-			await executor.pushFile({
-				remotePath: remoteScript,
-				content: readFileSync(join(scriptsPath, 'wp-debug.php')),
-			});
+			await pushRemoteScript(executor, join(scriptsPath, 'wp-debug.php'), remoteScript);
 			const actionArg = enabled ? 'enable' : 'disable';
 			const cmd = `php ${remoteScript} --docroot=${shellQuote(env.root_path ?? '')} --action=${actionArg}`;
-			const result = await executor.execute(cmd, { timeout: 30_000 });
-			await executor
-				.execute(`rm -f ${remoteScript}`, { timeout: 5_000 })
-				.catch(() => {});
+			let result;
+			try {
+				result = await executor.execute(cmd, { timeout: 30_000 });
+			} finally {
+				await executor
+					.execute(`rm -f ${remoteScript}`, { timeout: 5_000 })
+					.catch(() => {});
+			}
 			const parsed = safeJsonParse(result.stdout);
 			await tracker.trackCommand('wp-debug.php', cmd, result, 0);
 			if (enabled && revertAfterMinutes && revertAfterMinutes > 0) {
@@ -241,16 +246,17 @@ export class WpActionsProcessor extends WorkerHost {
 			await job.updateProgress(20);
 			const scriptsPath = this.config.get<string>('scriptsPath')!;
 			const remoteScript = `/tmp/wp_logs_${job.id}.php`;
-			await executor.pushFile({
-				remotePath: remoteScript,
-				content: readFileSync(join(scriptsPath, 'wp-logs.php')),
-			});
+			await pushRemoteScript(executor, join(scriptsPath, 'wp-logs.php'), remoteScript);
 			const linesArg = lines ?? 100;
 			const cmd = `php ${remoteScript} --docroot=${shellQuote(env.root_path ?? '')} --type=${shellQuote(type)} --lines=${linesArg}`;
-			const result = await executor.execute(cmd, { timeout: 30_000 });
-			await executor
-				.execute(`rm -f ${remoteScript}`, { timeout: 5_000 })
-				.catch(() => {});
+			let result;
+			try {
+				result = await executor.execute(cmd, { timeout: 30_000 });
+			} finally {
+				await executor
+					.execute(`rm -f ${remoteScript}`, { timeout: 5_000 })
+					.catch(() => {});
+			}
 			const parsed = safeJsonParse(result.stdout);
 			await job.updateProgress(100);
 			await tracker.complete({ executionLog: parsed ?? {} });
@@ -270,15 +276,16 @@ export class WpActionsProcessor extends WorkerHost {
 			await job.updateProgress(20);
 			const scriptsPath = this.config.get<string>('scriptsPath')!;
 			const remoteScript = `/tmp/wp_cron_${job.id}.php`;
-			await executor.pushFile({
-				remotePath: remoteScript,
-				content: readFileSync(join(scriptsPath, 'wp-cron.php')),
-			});
+			await pushRemoteScript(executor, join(scriptsPath, 'wp-cron.php'), remoteScript);
 			const cmd = `php ${remoteScript} --docroot=${shellQuote(env.root_path ?? '')}`;
-			const result = await executor.execute(cmd, { timeout: 30_000 });
-			await executor
-				.execute(`rm -f ${remoteScript}`, { timeout: 5_000 })
-				.catch(() => {});
+			let result;
+			try {
+				result = await executor.execute(cmd, { timeout: 30_000 });
+			} finally {
+				await executor
+					.execute(`rm -f ${remoteScript}`, { timeout: 5_000 })
+					.catch(() => {});
+			}
 			const parsed = safeJsonParse(result.stdout);
 			await job.updateProgress(100);
 			await tracker.complete({ executionLog: parsed ?? {} });
@@ -302,19 +309,20 @@ export class WpActionsProcessor extends WorkerHost {
 			await job.updateProgress(20);
 			const scriptsPath = this.config.get<string>('scriptsPath')!;
 			const remoteScript = `/tmp/wp_cleanup_${job.id}.php`;
-			await executor.pushFile({
-				remotePath: remoteScript,
-				content: readFileSync(join(scriptsPath, 'wp-cleanup.php')),
-			});
+			await pushRemoteScript(executor, join(scriptsPath, 'wp-cleanup.php'), remoteScript);
 			const dryRunArg = dryRun ? ' --dry-run' : '';
 			const keepRevisionsArg =
 				keepRevisions != null ? ` --keep-revisions=${keepRevisions}` : '';
 			const cmd = `php ${remoteScript} --docroot=${shellQuote(env.root_path ?? '')}${dryRunArg}${keepRevisionsArg}`;
 			const t0 = Date.now();
-			const result = await executor.execute(cmd, { timeout: 120_000 });
-			await executor
-				.execute(`rm -f ${remoteScript}`, { timeout: 5_000 })
-				.catch(() => {});
+			let result;
+			try {
+				result = await executor.execute(cmd, { timeout: 120_000 });
+			} finally {
+				await executor
+					.execute(`rm -f ${remoteScript}`, { timeout: 5_000 })
+					.catch(() => {});
+			}
 			const parsed = safeJsonParse(result.stdout);
 			await tracker.trackCommand(
 				'wp-cleanup.php',
@@ -343,10 +351,9 @@ export class WpActionsProcessor extends WorkerHost {
 			const { executor, env } = await this.connectToEnv(environmentId, tracker);
 			await job.updateProgress(20);
 			const wpPath = await this.resolveWpPath(executor, env.root_path ?? '');
-			const wpCli = await this.buildWpCliContext(executor, wpPath);
-			const buildWpCmd = (args: string) => this.buildWpCmd(wpCli, args);
+			const wpCli = await WpCliBuilder.create(executor, wpPath);
 			const versionResult = await executor.execute(
-				buildWpCmd(`core version --skip-plugins --path=${shellQuote(wpPath)}`),
+				wpCli.buildCommand('core version --skip-plugins'),
 				{ timeout: 30_000 },
 			);
 			if (versionResult.code !== 0) {
@@ -356,9 +363,7 @@ export class WpActionsProcessor extends WorkerHost {
 			}
 			const currentVersion = versionResult.stdout.trim();
 			const checkResult = await executor.execute(
-				buildWpCmd(
-					`core check-update --format=json --skip-plugins --path=${shellQuote(wpPath)}`,
-				),
+				wpCli.buildCommand('core check-update --format=json --skip-plugins'),
 				{ timeout: 30_000 },
 			);
 			if (checkResult.code !== 0) {
@@ -399,12 +404,9 @@ export class WpActionsProcessor extends WorkerHost {
 			const { executor, env } = await this.connectToEnv(environmentId, tracker);
 			await job.updateProgress(20);
 			const wpPath = await this.resolveWpPath(executor, env.root_path ?? '');
-			const wpCli = await this.buildWpCliContext(executor, wpPath);
-			const buildWpCmd = (args: string) => this.buildWpCmd(wpCli, args);
+			const wpCli = await WpCliBuilder.create(executor, wpPath);
 			// Step 1: Update core files
-			const updateCmd = buildWpCmd(
-				`core update --skip-plugins --path=${shellQuote(wpPath)}`,
-			);
+			const updateCmd = wpCli.buildCommand('core update --skip-plugins');
 			const t0 = Date.now();
 			const updateResult = await executor.execute(updateCmd, {
 				timeout: 5 * 60_000,
@@ -422,9 +424,7 @@ export class WpActionsProcessor extends WorkerHost {
 			}
 			await job.updateProgress(70);
 			// Step 2: Run DB schema upgrades
-			const dbUpdateCmd = buildWpCmd(
-				`core update-db --skip-plugins --path=${shellQuote(wpPath)}`,
-			);
+			const dbUpdateCmd = wpCli.buildCommand('core update-db --skip-plugins');
 			const t1 = Date.now();
 			const dbUpdateResult = await executor.execute(dbUpdateCmd, {
 				timeout: 60_000,
@@ -442,7 +442,7 @@ export class WpActionsProcessor extends WorkerHost {
 			}
 			// Fetch the final version
 			const versionResult = await executor.execute(
-				buildWpCmd(`core version --skip-plugins --path=${shellQuote(wpPath)}`),
+				wpCli.buildCommand('core version --skip-plugins'),
 				{ timeout: 15_000 },
 			);
 			if (versionResult.code !== 0) {
@@ -484,12 +484,9 @@ export class WpActionsProcessor extends WorkerHost {
 			const { executor, env } = await this.connectToEnv(environmentId, tracker);
 			await job.updateProgress(20);
 			const wpPath = await this.resolveWpPath(executor, env.root_path ?? '');
-			const wpCli = await this.buildWpCliContext(executor, wpPath);
+			const wpCli = await WpCliBuilder.create(executor, wpPath);
 			const action = enabled ? 'activate' : 'deactivate';
-			const wpCmd = this.buildWpCmd(
-				wpCli,
-				`maintenance-mode ${action} --skip-plugins --path=${shellQuote(wpPath)}`,
-			);
+			const wpCmd = wpCli.buildCommand(`maintenance-mode ${action} --skip-plugins`);
 			const t0 = Date.now();
 			const wpResult = await executor.execute(wpCmd, { timeout: 30_000 });
 			await tracker.trackCommand(
@@ -570,34 +567,7 @@ export class WpActionsProcessor extends WorkerHost {
 		}
 	}
 
-	private async buildWpCliContext(
-		executor: Awaited<
-			ReturnType<
-				typeof import('@bedrock-forge/remote-executor').createRemoteExecutor
-			>
-		>,
-		wpPath: string,
-	) {
-		return buildWpCliPrefix(executor, wpPath);
-	}
 
-	private buildWpCmd(
-		context: Awaited<ReturnType<WpActionsProcessor['buildWpCliContext']>>,
-		args: string,
-	): string {
-		let phpAndWp: string;
-		if (context.lsphpBin && context.wpBin) {
-			phpAndWp = `${shellQuote(context.lsphpBin)} ${shellQuote(context.wpBin)}`;
-		} else if (context.lsphpBin) {
-			phpAndWp = `env WP_CLI_PHP=${shellQuote(context.lsphpBin)} wp`;
-		} else {
-			phpAndWp = 'wp';
-		}
-
-		return [context.prefix, phpAndWp, args.trim(), context.allowRootFlag]
-			.filter(Boolean)
-			.join(' ');
-	}
 
 	private async resolveWpPath(
 		executor: Awaited<
@@ -637,9 +607,7 @@ export class WpActionsProcessor extends WorkerHost {
 	}
 }
 
-function shellQuote(value: string): string {
-	return "'" + value.replace(/'/g, "'\\''") + "'";
-}
+
 
 function safeJsonParse(str: string): unknown {
 	try {

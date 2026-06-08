@@ -10,7 +10,7 @@ import { SshKeyService } from '../../services/ssh-key.service';
 import { StepTracker } from '../../services/step-tracker';
 import { createRemoteExecutor } from '@bedrock-forge/remote-executor';
 import { QUEUES, JOB_TYPES } from '@bedrock-forge/shared';
-import { shellQuote } from '../../utils/processor-utils';
+import { shellQuote, createRemoteMyCnf, cleanupRemoteMyCnf } from '../../utils/processor-utils';
 import { LayoutDetectorService, WpLayout } from './services/layout-detector.service';
 import { ProtectedCptService, ProtectedPostTypeBackup } from './services/protected-cpt.service';
 import { SyncDbService } from './services/sync-db.service';
@@ -191,56 +191,54 @@ export class SyncProcessor extends WorkerHost {
 
 		// Dump source DB
 		const dumpRemote = `/tmp/sync_${job.id}.sql`;
-		const srcMycnf = `/tmp/forge_sync_src_${job.id}.cnf`;
-		await sourceExecutor.pushFile({
-			remotePath: srcMycnf,
-			content: Buffer.from(
-				`[client]\nuser=${sourceCreds.dbUser}\npassword=${sourceCreds.dbPassword}\nhost=${sourceCreds.dbHost}\n`,
-			),
-		});
-		await sourceExecutor.execute(`chmod 600 ${srcMycnf}`);
+		const srcMycnf = await createRemoteMyCnf(sourceExecutor, sourceCreds, job.id ?? 'default', 'sync_src');
 
 		const cloneSafeProtected = this.syncDb.normalizeProtectedTables(
 			targetEnv.protected_tables ?? [],
 		);
-		const cloneIgnoreFlags =
-			cloneSafeProtected.length > 0
-				? ' ' +
-					cloneSafeProtected
-						.map(t => `--ignore-table=${sourceCreds.dbName}.${t}`)
-						.join(' ')
-				: '';
-		if (cloneSafeProtected.length > 0) {
+		let protectedPostTypesBackup: ProtectedPostTypeBackup | null = null;
+
+		try {
+			const cloneIgnoreFlags =
+				cloneSafeProtected.length > 0
+					? ' ' +
+						cloneSafeProtected
+							.map(t => `--ignore-table=${sourceCreds.dbName}.${t}`)
+							.join(' ')
+					: '';
+			if (cloneSafeProtected.length > 0) {
+				await tracker.track({
+					step: `Protected tables — excluding ${cloneSafeProtected.length} table(s) from dump`,
+					level: 'info',
+					detail: cloneSafeProtected.join(', '),
+				});
+			}
+			const maskedDump = `mysqldump --defaults-extra-file=*** --single-transaction --quick${cloneIgnoreFlags} ${sourceCreds.dbName}`;
+
 			await tracker.track({
-				step: `Protected tables — excluding ${cloneSafeProtected.length} table(s) from dump`,
+				step: 'Dumping source database',
 				level: 'info',
-				detail: cloneSafeProtected.join(', '),
+				command: maskedDump,
 			});
-		}
-		const maskedDump = `mysqldump --defaults-extra-file=*** --single-transaction --quick${cloneIgnoreFlags} ${sourceCreds.dbName}`;
-
-		await tracker.track({
-			step: 'Dumping source database',
-			level: 'info',
-			command: maskedDump,
-		});
-		const dumpStart = Date.now();
-		const dumpResult = await sourceExecutor.execute(
-			`mysqldump --defaults-extra-file=${srcMycnf} --single-transaction --quick${cloneIgnoreFlags} ${sourceCreds.dbName} > ${dumpRemote}`,
-			{ timeout: 10 * 60_000 },
-		);
-		await sourceExecutor.execute(`rm -f ${srcMycnf}`);
-		await tracker.trackCommand(
-			'mysqldump source database',
-			maskedDump,
-			dumpResult,
-			Date.now() - dumpStart,
-		);
-
-		if (dumpResult.code !== 0) {
-			throw new Error(
-				`mysqldump failed (exit ${dumpResult.code}): ${dumpResult.stderr}`,
+			const dumpStart = Date.now();
+			const dumpResult = await sourceExecutor.execute(
+				`mysqldump --defaults-extra-file=${srcMycnf} --single-transaction --quick${cloneIgnoreFlags} ${sourceCreds.dbName} > ${dumpRemote}`,
+				{ timeout: 10 * 60_000 },
 			);
+			await tracker.trackCommand(
+				'mysqldump source database',
+				maskedDump,
+				dumpResult,
+				Date.now() - dumpStart,
+			);
+
+			if (dumpResult.code !== 0) {
+				throw new Error(
+					`mysqldump failed (exit ${dumpResult.code}): ${dumpResult.stderr}`,
+				);
+			}
+		} finally {
+			await cleanupRemoteMyCnf(sourceExecutor, srcMycnf);
 		}
 
 		await job.updateProgress({ value: 55, step: 'Source database dumped' });
@@ -274,139 +272,127 @@ export class SyncProcessor extends WorkerHost {
 		await job.updateProgress({ value: 65, step: 'Dump transferred to target' });
 
 		// Import on target
-		const tgtMycnf = `/tmp/forge_sync_imp_${job.id}.cnf`;
-		await targetExecutor.pushFile({
-			remotePath: tgtMycnf,
-			content: Buffer.from(
-				`[client]\nuser=${targetCreds.dbUser}\npassword=${targetCreds.dbPassword}\nhost=${targetCreds.dbHost}\n`,
-			),
-		});
-		await targetExecutor.execute(`chmod 600 ${tgtMycnf}`);
-		let protectedPostTypesBackup: ProtectedPostTypeBackup | null = null;
-		if (targetEnv.protected_post_types && targetEnv.protected_post_types.length > 0) {
-			protectedPostTypesBackup = await this.protectedCpt.backupProtectedPostTypes(
-				targetExecutor,
-				targetCreds,
-				tgtMycnf,
-				targetEnv.protected_post_types,
-				tracker,
-			);
-		}
-
-		if (cloneSafeProtected.length > 0 || protectedPostTypesBackup) {
-			await tracker.track({
-				step: 'Protected tables — checking target database existence',
-				level: 'info',
-				detail: `Will preserve: ${cloneSafeProtected.join(', ')}`,
-			});
-			const dbExistsRes = await targetExecutor.execute(
-				`mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`SHOW DATABASES LIKE '${targetCreds.dbName}';`)}`,
-				{ timeout: 30_000 },
-			);
-			const dbExists =
-				dbExistsRes.code === 0 && dbExistsRes.stdout.trim().length > 0;
-
-			if (dbExists) {
-				await this.syncDb.trackProtectedTablePresence(
+		const tgtMycnf = await createRemoteMyCnf(targetExecutor, targetCreds, job.id ?? 'default', 'sync_imp');
+		try {
+			if (targetEnv.protected_post_types && targetEnv.protected_post_types.length > 0) {
+				protectedPostTypesBackup = await this.protectedCpt.backupProtectedPostTypes(
 					targetExecutor,
+					targetCreds,
 					tgtMycnf,
-					targetCreds.dbName,
-					cloneSafeProtected,
+					targetEnv.protected_post_types,
 					tracker,
 				);
+			}
+
+			if (cloneSafeProtected.length > 0 || protectedPostTypesBackup) {
 				await tracker.track({
-					step: 'Target database exists — skipping DROP/CREATE to preserve protected tables',
+					step: 'Protected tables — checking target database existence',
 					level: 'info',
-					detail:
-						'Unprotected tables replaced via DROP TABLE IF EXISTS in dump',
+					detail: `Will preserve: ${cloneSafeProtected.join(', ')}`,
 				});
+				const dbExistsRes = await targetExecutor.execute(
+					`mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`SHOW DATABASES LIKE '${targetCreds.dbName}';`)}`,
+					{ timeout: 30_000 },
+				);
+				const dbExists =
+					dbExistsRes.code === 0 && dbExistsRes.stdout.trim().length > 0;
+
+				if (dbExists) {
+					await this.syncDb.trackProtectedTablePresence(
+						targetExecutor,
+						tgtMycnf,
+						targetCreds.dbName,
+						cloneSafeProtected,
+						tracker,
+					);
+					await tracker.track({
+						step: 'Target database exists — skipping DROP/CREATE to preserve protected tables',
+						level: 'info',
+						detail:
+							'Unprotected tables replaced via DROP TABLE IF EXISTS in dump',
+					});
+				} else {
+					await tracker.track({
+						step: 'Target database does not exist — creating (no data at risk)',
+						level: 'info',
+						detail: targetCreds.dbName,
+					});
+					const createResult = await targetExecutor.execute(
+						`mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`CREATE DATABASE \`${targetCreds.dbName}\`;`)}`,
+						{ timeout: 2 * 60_000 },
+					);
+					if (createResult.code !== 0) {
+						throw new Error(
+							`Cannot create target database \`${targetCreds.dbName}\` — ` +
+								`ensure ${targetCreds.dbUser} has CREATE privilege then retry.\n` +
+								`Detail: ${createResult.stderr.trim()}`,
+						);
+					}
+				}
 			} else {
 				await tracker.track({
-					step: 'Target database does not exist — creating (no data at risk)',
+					step: 'Dropping and recreating target database (clean slate)',
 					level: 'info',
 					detail: targetCreds.dbName,
 				});
-				const createResult = await targetExecutor.execute(
-					`mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`CREATE DATABASE \`${targetCreds.dbName}\`;`)}`,
+				const dropCreateResult = await targetExecutor.execute(
+					`mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`DROP DATABASE IF EXISTS \`${targetCreds.dbName}\`; CREATE DATABASE \`${targetCreds.dbName}\`;`)}`,
 					{ timeout: 2 * 60_000 },
 				);
-				if (createResult.code !== 0) {
-					await targetExecutor
-						.execute(`rm -f ${tgtMycnf} ${dumpRemote}`)
-						.catch(() => {});
+				if (dropCreateResult.code !== 0) {
 					throw new Error(
-						`Cannot create target database \`${targetCreds.dbName}\` — ` +
-							`ensure ${targetCreds.dbUser} has CREATE privilege then retry.\n` +
-							`Detail: ${createResult.stderr.trim()}`,
+						`Cannot reset target database for a clean-slate import. ` +
+							`DROP DATABASE / CREATE DATABASE failed for \`${targetCreds.dbName}\` — ` +
+							`ensure ${targetCreds.dbUser} has DROP and CREATE privileges then retry.\n` +
+							`Detail: ${dropCreateResult.stderr.trim()}`,
 					);
 				}
 			}
-		} else {
+
+			const maskedImport = `mysql --defaults-extra-file=*** ${targetCreds.dbName}`;
+
 			await tracker.track({
-				step: 'Dropping and recreating target database (clean slate)',
+				step: 'Importing database on target',
 				level: 'info',
-				detail: targetCreds.dbName,
+				command: maskedImport,
 			});
-			const dropCreateResult = await targetExecutor.execute(
-				`mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`DROP DATABASE IF EXISTS \`${targetCreds.dbName}\`; CREATE DATABASE \`${targetCreds.dbName}\`;`)}`,
-				{ timeout: 2 * 60_000 },
+			const importStart = Date.now();
+			const importResult = await targetExecutor.execute(
+				`mysql --defaults-extra-file=${tgtMycnf} ${targetCreds.dbName} < ${dumpRemote}`,
+				{ timeout: 10 * 60_000 },
 			);
-			if (dropCreateResult.code !== 0) {
-				await targetExecutor
-					.execute(`rm -f ${tgtMycnf} ${dumpRemote}`)
-					.catch(() => {});
-				throw new Error(
-					`Cannot reset target database for a clean-slate import. ` +
-						`DROP DATABASE / CREATE DATABASE failed for \`${targetCreds.dbName}\` — ` +
-						`ensure ${targetCreds.dbUser} has DROP and CREATE privileges then retry.\n` +
-						`Detail: ${dropCreateResult.stderr.trim()}`,
+
+			if (importResult.code === 0 && protectedPostTypesBackup) {
+				await this.protectedCpt.restoreProtectedPostTypes(
+					targetExecutor,
+					targetCreds,
+					tgtMycnf,
+					targetEnv.protected_post_types ?? [],
+					protectedPostTypesBackup.prefix,
+					tracker,
 				);
 			}
-		}
 
-		const maskedImport = `mysql --defaults-extra-file=*** ${targetCreds.dbName}`;
-
-		await tracker.track({
-			step: 'Importing database on target',
-			level: 'info',
-			command: maskedImport,
-		});
-		const importStart = Date.now();
-		const importResult = await targetExecutor.execute(
-			`mysql --defaults-extra-file=${tgtMycnf} ${targetCreds.dbName} < ${dumpRemote}`,
-			{ timeout: 10 * 60_000 },
-		);
-
-		if (importResult.code === 0 && protectedPostTypesBackup) {
-			await this.protectedCpt.restoreProtectedPostTypes(
-				targetExecutor,
-				targetCreds,
-				tgtMycnf,
-				targetEnv.protected_post_types ?? [],
-				protectedPostTypesBackup.prefix,
-				tracker,
+			await tracker.trackCommand(
+				'mysql import on target',
+				maskedImport,
+				importResult,
+				Date.now() - importStart,
 			);
-		}
 
-		await targetExecutor.execute(`rm -f ${tgtMycnf}`);
-		await tracker.trackCommand(
-			'mysql import on target',
-			maskedImport,
-			importResult,
-			Date.now() - importStart,
-		);
-
-		const cleanTgtResult = await targetExecutor.execute(`rm -f ${dumpRemote}`);
-		await tracker.trackCommand(
-			'Target temp cleanup',
-			`rm -f ${dumpRemote}`,
-			cleanTgtResult,
-			0,
-		);
-
-		if (importResult.code !== 0) {
-			throw new Error(
-				`mysql import failed (exit ${importResult.code}): ${importResult.stderr}`,
+			if (importResult.code !== 0) {
+				throw new Error(
+					`mysql import failed (exit ${importResult.code}): ${importResult.stderr}`,
+				);
+			}
+		} finally {
+			await cleanupRemoteMyCnf(targetExecutor, tgtMycnf);
+			const cleanTgtResult = await targetExecutor.execute(`rm -f ${dumpRemote}`);
+			await tracker.trackCommand(
+				'Target temp cleanup',
+				`rm -f ${dumpRemote}`,
+				cleanTgtResult,
+				0,
 			);
 		}
 
@@ -631,28 +617,24 @@ export class SyncProcessor extends WorkerHost {
 					'target (protected file excludes)',
 					targetEnv.id,
 				);
-				const tgtMycnf = `/tmp/forge_files_protected_${job.id}.cnf`;
-				await targetExecutor.pushFile({
-					remotePath: tgtMycnf,
-					content: Buffer.from(
-						`[client]\nuser=${targetCreds.dbUser}\npassword=${targetCreds.dbPassword}\nhost=${targetCreds.dbHost}\n`,
-					),
-				});
-				await targetExecutor.execute(`chmod 600 ${tgtMycnf}`);
-				const protectedUploadPaths =
-					await this.protectedCpt.collectProtectedPostTypeUploadPaths(
-						targetExecutor,
-						targetCreds,
-						tgtMycnf,
-						targetEnv.protected_post_types,
-						tracker,
+				const tgtMycnf = await createRemoteMyCnf(targetExecutor, targetCreds, job.id ?? 'default', 'files_protected');
+				try {
+					const protectedUploadPaths =
+						await this.protectedCpt.collectProtectedPostTypeUploadPaths(
+							targetExecutor,
+							targetCreds,
+							tgtMycnf,
+							targetEnv.protected_post_types,
+							tracker,
+						);
+					protectedUploadFileExcludes = this.protectedCpt.buildProtectedUploadFileExcludes(
+						targetEnv.root_path,
+						targetPushLayout,
+						protectedUploadPaths,
 					);
-				await targetExecutor.execute(`rm -f ${tgtMycnf}`).catch(() => {});
-				protectedUploadFileExcludes = this.protectedCpt.buildProtectedUploadFileExcludes(
-					targetEnv.root_path,
-					targetPushLayout,
-					protectedUploadPaths,
-				);
+				} finally {
+					await cleanupRemoteMyCnf(targetExecutor, tgtMycnf);
+				}
 			} catch (e) {
 				await tracker.track({
 					step: 'Protected Post Types — upload file protection skipped',
@@ -825,55 +807,53 @@ export class SyncProcessor extends WorkerHost {
 
 		// Dump source
 		const dumpRemote = `/tmp/forge_push_${job.id}.sql`;
-		const srcMycnf = `/tmp/forge_push_src_${job.id}.cnf`;
-		await sourceExecutor.pushFile({
-			remotePath: srcMycnf,
-			content: Buffer.from(
-				`[client]\nuser=${sourceCreds.dbUser}\npassword=${sourceCreds.dbPassword}\nhost=${sourceCreds.dbHost}\n`,
-			),
-		});
-		await sourceExecutor.execute(`chmod 600 ${srcMycnf}`);
+		const srcMycnf = await createRemoteMyCnf(sourceExecutor, sourceCreds, job.id ?? 'default', 'push_src');
 
 		const pushSafeProtected = this.syncDb.normalizeProtectedTables(
 			targetEnv.protected_tables ?? [],
 		);
-		const pushIgnoreFlags =
-			pushSafeProtected.length > 0
-				? ' ' +
-					pushSafeProtected
-						.map(t => `--ignore-table=${sourceCreds.dbName}.${t}`)
-						.join(' ')
-				: '';
-		if (pushSafeProtected.length > 0) {
-			await tracker.track({
-				step: `Protected tables — excluding ${pushSafeProtected.length} table(s) from dump`,
-				level: 'info',
-				detail: pushSafeProtected.join(', '),
-			});
-		}
-		const maskedDump = `mysqldump --defaults-extra-file=*** --single-transaction --quick${pushIgnoreFlags} ${sourceCreds.dbName}`;
+		let protectedPostTypesBackup: ProtectedPostTypeBackup | null = null;
 
-		await tracker.track({
-			step: 'Dumping source database',
-			level: 'info',
-			command: maskedDump,
-		});
-		const dumpStart = Date.now();
-		const dumpResult = await sourceExecutor.execute(
-			`mysqldump --defaults-extra-file=${srcMycnf} --single-transaction --quick${pushIgnoreFlags} ${sourceCreds.dbName} > ${dumpRemote}`,
-			{ timeout: 10 * 60_000 },
-		);
-		await sourceExecutor.execute(`rm -f ${srcMycnf}`);
-		await tracker.trackCommand(
-			'mysqldump source database',
-			maskedDump,
-			dumpResult,
-			Date.now() - dumpStart,
-		);
-		if (dumpResult.code !== 0) {
-			throw new Error(
-				`mysqldump failed (exit ${dumpResult.code}): ${dumpResult.stderr}`,
+		try {
+			const pushIgnoreFlags =
+				pushSafeProtected.length > 0
+					? ' ' +
+						pushSafeProtected
+							.map(t => `--ignore-table=${sourceCreds.dbName}.${t}`)
+							.join(' ')
+					: '';
+			if (pushSafeProtected.length > 0) {
+				await tracker.track({
+					step: `Protected tables — excluding ${pushSafeProtected.length} table(s) from dump`,
+					level: 'info',
+					detail: pushSafeProtected.join(', '),
+				});
+			}
+			const maskedDump = `mysqldump --defaults-extra-file=*** --single-transaction --quick${pushIgnoreFlags} ${sourceCreds.dbName}`;
+
+			await tracker.track({
+				step: 'Dumping source database',
+				level: 'info',
+				command: maskedDump,
+			});
+			const dumpStart = Date.now();
+			const dumpResult = await sourceExecutor.execute(
+				`mysqldump --defaults-extra-file=${srcMycnf} --single-transaction --quick${pushIgnoreFlags} ${sourceCreds.dbName} > ${dumpRemote}`,
+				{ timeout: 10 * 60_000 },
 			);
+			await tracker.trackCommand(
+				'mysqldump source database',
+				maskedDump,
+				dumpResult,
+				Date.now() - dumpStart,
+			);
+			if (dumpResult.code !== 0) {
+				throw new Error(
+					`mysqldump failed (exit ${dumpResult.code}): ${dumpResult.stderr}`,
+				);
+			}
+		} finally {
+			await cleanupRemoteMyCnf(sourceExecutor, srcMycnf);
 		}
 
 		// Transfer via worker disk relay
@@ -894,132 +874,127 @@ export class SyncProcessor extends WorkerHost {
 		}
 
 		// Import on target
-		const tgtMycnf = `/tmp/forge_push_imp_${job.id}.cnf`;
-		await targetExecutor.pushFile({
-			remotePath: tgtMycnf,
-			content: Buffer.from(
-				`[client]\nuser=${targetCreds.dbUser}\npassword=${targetCreds.dbPassword}\nhost=${targetCreds.dbHost}\n`,
-			),
-		});
-		await targetExecutor.execute(`chmod 600 ${tgtMycnf}`);
-		let protectedPostTypesBackup: ProtectedPostTypeBackup | null = null;
-		if (targetEnv.protected_post_types && targetEnv.protected_post_types.length > 0) {
-			protectedPostTypesBackup = await this.protectedCpt.backupProtectedPostTypes(
-				targetExecutor,
-				targetCreds,
-				tgtMycnf,
-				targetEnv.protected_post_types,
-				tracker,
-			);
-		}
-
-		if (pushSafeProtected.length > 0 || protectedPostTypesBackup) {
-			await tracker.track({
-				step: 'Protected tables — checking target database existence',
-				level: 'info',
-				detail: `Will preserve: ${pushSafeProtected.join(', ')}`,
-			});
-			const dbExistsRes = await targetExecutor.execute(
-				`mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`SHOW DATABASES LIKE '${targetCreds.dbName}';`)}`,
-				{ timeout: 30_000 },
-			);
-			const dbExists =
-				dbExistsRes.code === 0 && dbExistsRes.stdout.trim().length > 0;
-
-			if (dbExists) {
-				await this.syncDb.trackProtectedTablePresence(
+		const tgtMycnf = await createRemoteMyCnf(targetExecutor, targetCreds, job.id ?? 'default', 'push_imp');
+		try {
+			if (targetEnv.protected_post_types && targetEnv.protected_post_types.length > 0) {
+				protectedPostTypesBackup = await this.protectedCpt.backupProtectedPostTypes(
 					targetExecutor,
+					targetCreds,
 					tgtMycnf,
-					targetCreds.dbName,
-					pushSafeProtected,
+					targetEnv.protected_post_types,
 					tracker,
 				);
+			}
+
+			if (pushSafeProtected.length > 0 || protectedPostTypesBackup) {
 				await tracker.track({
-					step: 'Target database exists — skipping DROP/CREATE to preserve protected tables',
+					step: 'Protected tables — checking target database existence',
 					level: 'info',
-					detail:
-						'Unprotected tables replaced via DROP TABLE IF EXISTS in dump',
+					detail: `Will preserve: ${pushSafeProtected.join(', ')}`,
 				});
+				const dbExistsRes = await targetExecutor.execute(
+					`mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`SHOW DATABASES LIKE '${targetCreds.dbName}';`)}`,
+					{ timeout: 30_000 },
+				);
+				const dbExists =
+					dbExistsRes.code === 0 && dbExistsRes.stdout.trim().length > 0;
+
+				if (dbExists) {
+					await this.syncDb.trackProtectedTablePresence(
+						targetExecutor,
+						tgtMycnf,
+						targetCreds.dbName,
+						pushSafeProtected,
+						tracker,
+					);
+					await tracker.track({
+						step: 'Target database exists — skipping DROP/CREATE to preserve protected tables',
+						level: 'info',
+						detail:
+							'Unprotected tables replaced via DROP TABLE IF EXISTS in dump',
+					});
+				} else {
+					await tracker.track({
+						step: 'Target database does not exist — creating (no data at risk)',
+						level: 'info',
+						detail: targetCreds.dbName,
+					});
+					const createResult = await targetExecutor.execute(
+						`mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`CREATE DATABASE \`${targetCreds.dbName}\`;`)}`,
+						{ timeout: 2 * 60_000 },
+					);
+					if (createResult.code !== 0) {
+						throw new Error(
+							`Cannot create target database \`${targetCreds.dbName}\` — ` +
+								`ensure ${targetCreds.dbUser} has CREATE privilege then retry.\n` +
+								`Detail: ${createResult.stderr.trim()}`,
+						);
+					}
+				}
 			} else {
 				await tracker.track({
-					step: 'Target database does not exist — creating (no data at risk)',
+					step: 'Dropping and recreating target database (clean slate)',
 					level: 'info',
 					detail: targetCreds.dbName,
 				});
-				const createResult = await targetExecutor.execute(
-					`mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`CREATE DATABASE \`${targetCreds.dbName}\`;`)}`,
+				const dropCreateResult = await targetExecutor.execute(
+					`mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`DROP DATABASE IF EXISTS \`${targetCreds.dbName}\`; CREATE DATABASE \`${targetCreds.dbName}\`;`)}`,
 					{ timeout: 2 * 60_000 },
 				);
-				if (createResult.code !== 0) {
-					await targetExecutor
-						.execute(`rm -f ${tgtMycnf} ${dumpRemote}`)
-						.catch(() => {});
+				if (dropCreateResult.code !== 0) {
 					throw new Error(
-						`Cannot create target database \`${targetCreds.dbName}\` — ` +
-							`ensure ${targetCreds.dbUser} has CREATE privilege then retry.\n` +
-							`Detail: ${createResult.stderr.trim()}`,
+						`Cannot reset target database for a clean-slate import. ` +
+							`DROP DATABASE / CREATE DATABASE failed for \`${targetCreds.dbName}\` — ` +
+							`ensure ${targetCreds.dbUser} has DROP and CREATE privileges then retry.\n` +
+							`Detail: ${dropCreateResult.stderr.trim()}`,
 					);
 				}
 			}
-		} else {
+
+			const maskedImport = `mysql --defaults-extra-file=*** ${targetCreds.dbName}`;
+
 			await tracker.track({
-				step: 'Dropping and recreating target database (clean slate)',
+				step: 'Importing database on target',
 				level: 'info',
-				detail: targetCreds.dbName,
+				command: maskedImport,
 			});
-			const dropCreateResult = await targetExecutor.execute(
-				`mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`DROP DATABASE IF EXISTS \`${targetCreds.dbName}\`; CREATE DATABASE \`${targetCreds.dbName}\`;`)}`,
-				{ timeout: 2 * 60_000 },
+			const importStart = Date.now();
+			const importResult = await targetExecutor.execute(
+				`mysql --defaults-extra-file=${tgtMycnf} ${targetCreds.dbName} < ${dumpRemote}`,
+				{ timeout: 10 * 60_000 },
 			);
-			if (dropCreateResult.code !== 0) {
-				await targetExecutor
-					.execute(`rm -f ${tgtMycnf} ${dumpRemote}`)
-					.catch(() => {});
-				throw new Error(
-					`Cannot reset target database for a clean-slate import. ` +
-						`DROP DATABASE / CREATE DATABASE failed for \`${targetCreds.dbName}\` — ` +
-						`ensure ${targetCreds.dbUser} has DROP and CREATE privileges then retry.\n` +
-						`Detail: ${dropCreateResult.stderr.trim()}`,
+
+			if (importResult.code === 0 && protectedPostTypesBackup) {
+				await this.protectedCpt.restoreProtectedPostTypes(
+					targetExecutor,
+					targetCreds,
+					tgtMycnf,
+					targetEnv.protected_post_types ?? [],
+					protectedPostTypesBackup.prefix,
+					tracker,
 				);
 			}
-		}
 
-		const maskedImport = `mysql --defaults-extra-file=*** ${targetCreds.dbName}`;
-
-		await tracker.track({
-			step: 'Importing database on target',
-			level: 'info',
-			command: maskedImport,
-		});
-		const importStart = Date.now();
-		const importResult = await targetExecutor.execute(
-			`mysql --defaults-extra-file=${tgtMycnf} ${targetCreds.dbName} < ${dumpRemote}`,
-			{ timeout: 10 * 60_000 },
-		);
-
-		if (importResult.code === 0 && protectedPostTypesBackup) {
-			await this.protectedCpt.restoreProtectedPostTypes(
-				targetExecutor,
-				targetCreds,
-				tgtMycnf,
-				targetEnv.protected_post_types ?? [],
-				protectedPostTypesBackup.prefix,
-				tracker,
+			await tracker.trackCommand(
+				'mysql import on target',
+				maskedImport,
+				importResult,
+				Date.now() - importStart,
 			);
-		}
 
-		await targetExecutor
-			.execute(`rm -f ${tgtMycnf} ${dumpRemote}`)
-			.catch(() => {});
-		await tracker.trackCommand(
-			'mysql import on target',
-			maskedImport,
-			importResult,
-			Date.now() - importStart,
-		);
-		if (importResult.code !== 0) {
-			throw new Error(
-				`mysql import failed (exit ${importResult.code}): ${importResult.stderr}`,
+			if (importResult.code !== 0) {
+				throw new Error(
+					`mysql import failed (exit ${importResult.code}): ${importResult.stderr}`,
+				);
+			}
+		} finally {
+			await cleanupRemoteMyCnf(targetExecutor, tgtMycnf);
+			const cleanTgtResult = await targetExecutor.execute(`rm -f ${dumpRemote}`);
+			await tracker.trackCommand(
+				'Target temp cleanup',
+				`rm -f ${dumpRemote}`,
+				cleanTgtResult,
+				0,
 			);
 		}
 

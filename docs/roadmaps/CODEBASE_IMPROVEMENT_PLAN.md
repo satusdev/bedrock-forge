@@ -103,8 +103,8 @@ Initial standards to create through code:
 
 - [x] Frontend feature API modules, query keys, hooks, and mutation toast patterns.
 - [x] Job execution UI wrappers around `ExecutionLogPanel`.
-- [ ] Worker job lifecycle helpers for active/completed/failed execution status.
-- [ ] Remote command builders for MySQL, WP-CLI, rsync, tar, and script execution.
+- [x] Worker job lifecycle helpers for active/completed/failed execution status.
+- [x] Remote command builders for MySQL, WP-CLI, rsync, tar, and script execution.
 
 Acceptance:
 
@@ -112,7 +112,7 @@ Acceptance:
   `hooks.ts`, `types.ts`, and typed components.
 - [x] At least one worker processor uses a small extracted helper or service with
   focused tests.
-- [ ] New conventions are documented in the matching roadmap or development guide.
+- [x] New conventions are documented in the matching roadmap or development guide.
 
 ## Phase 3: High-Impact Refactors [IN PROGRESS]
 

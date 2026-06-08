@@ -49,25 +49,25 @@ Acceptance:
 - [x] Existing response shapes remain compatible.
 - [x] Service tests cover enqueue failure behavior.
 
-## Phase 2: Worker Job Lifecycle
+## Phase 2: Worker Job Lifecycle [COMPLETED]
 
 Create worker utilities for common job execution state:
 
-- mark active at start.
-- mark completed on success.
-- mark failed with `last_error`.
-- create `StepTracker`.
-- check cancellation where supported.
+- [x] mark active at start.
+- [x] mark completed on success.
+- [x] mark failed with `last_error`.
+- [x] create `StepTracker`.
+- [x] check cancellation where supported.
 
 Do not hide domain logic inside the lifecycle helper.
 
 Acceptance:
 
-- Processors still clearly show job dispatch behavior.
-- Repeated `jobExecution.update` blocks are reduced.
-- Existing job status behavior remains unchanged.
+- [x] Processors still clearly show job dispatch behavior.
+- [x] Repeated `jobExecution.update` blocks are reduced.
+- [x] Existing job status behavior remains unchanged.
 
-## Phase 3: Sync Processor Extraction
+## Phase 3: Sync Processor Extraction [COMPLETED]
 
 Split `sync.processor.ts` by workflow:
 
@@ -84,56 +84,56 @@ processors/sync/
 
 Move and test:
 
-- protected table normalization and command flags.
-- MySQL dump/import command construction.
-- target DB preserve/drop-create decisions.
-- WP-CLI/PHP/SQL URL replacement command builders.
-- rsync/tar file sync behavior.
-- cache flush fallback behavior.
+- [x] protected table normalization and command flags.
+- [x] MySQL dump/import command construction.
+- [x] target DB preserve/drop-create decisions.
+- [x] WP-CLI/PHP/SQL URL replacement command builders.
+- [x] rsync/tar file sync behavior.
+- [x] cache flush fallback behavior.
 
 Acceptance:
 
-- `sync.processor.ts` becomes orchestration only.
-- Existing sync tests move to the owning service/helper.
-- Protected table tests remain intact.
+- [x] `sync.processor.ts` becomes orchestration only.
+- [x] Existing sync tests move to the owning service/helper.
+- [x] Protected table tests remain intact.
 
-## Phase 4: Security Processor Extraction
+## Phase 4: Security Processor Extraction [COMPLETED]
 
 Split the unified security processor while keeping one BullMQ consumer for the
 queue dispatch rule:
 
-- schedule scan due calculation.
-- alert polling.
-- file snapshot diffing.
-- server scan execution.
-- environment scan execution.
-- hardening execution.
+- [x] schedule scan due calculation.
+- [x] alert polling.
+- [x] file snapshot diffing.
+- [x] server scan execution.
+- [x] environment scan execution.
+- [x] hardening execution.
 
 Acceptance:
 
-- One `@Processor(QUEUES.SECURITY)` remains the dispatcher.
-- Domain services are injectable and tested independently.
-- No job type is silently ignored.
+- [x] One `@Processor(QUEUES.SECURITY)` remains the dispatcher.
+- [x] Domain services are injectable and tested independently.
+- [x] No job type is silently ignored.
 
-## Phase 5: Remote Script And Command Utilities
+## Phase 5: Remote Script And Command Utilities [COMPLETED]
 
 Create tested utilities for remote command patterns:
 
-- MySQL defaults-extra-file creation and cleanup.
-- WP-CLI command prefix and `--path` handling.
-- shell-safe table lists and file paths.
-- remote helper script push/execute/cleanup.
-- Composer command builders.
+- [x] MySQL defaults-extra-file creation and cleanup.
+- [x] WP-CLI command prefix and `--path` handling.
+- [x] shell-safe table lists and file paths.
+- [x] remote helper script push/execute/cleanup.
+- [x] Composer command builders.
 
 Keep PHP scripts for server-side work where they are the safest option, but
 document their CLI arguments and add script-level tests when possible.
 
 Acceptance:
 
-- Command strings are built in small pure functions where practical.
-- Tests assert command output for dangerous paths such as sync, backup, and
+- [x] Command strings are built in small pure functions where practical.
+- [x] Tests assert command output for dangerous paths such as sync, backup, and
   plugin management.
-- Cleanup commands are still best-effort and logged.
+- [x] Cleanup commands are still best-effort and logged.
 
 ## Phase 6: API Module Cleanup
 

@@ -1,7 +1,6 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
-import { readFileSync } from 'fs';
 import { join } from 'path';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SshKeyService } from '../../services/ssh-key.service';
@@ -14,12 +13,13 @@ import {
 	CustomPluginManagePayload,
 } from '@bedrock-forge/shared';
 import { ConfigService } from '@nestjs/config';
-import { buildWpCliPrefix } from '../../utils/processor-utils';
+import {
+	shellQuote,
+	pushRemoteScript,
+	WpCliBuilder,
+} from '../../utils/processor-utils';
 
-/** Wrap a string in single quotes for safe shell embedding on the remote host. */
-function shellQuote(value: string): string {
-	return "'" + value.replace(/'/g, "'\\''") + "'";
-}
+
 
 @Processor(QUEUES.CUSTOM_PLUGINS, { concurrency: 1 })
 export class CustomPluginProcessor extends WorkerHost {
@@ -104,13 +104,7 @@ export class CustomPluginProcessor extends WorkerHost {
 				level: 'info',
 			});
 
-			const scriptContent = readFileSync(
-				join(scriptsPath, 'custom-plugin-manager.php'),
-			);
-			await executor.pushFile({
-				remotePath: remoteScript,
-				content: scriptContent,
-			});
+			await pushRemoteScript(executor, join(scriptsPath, 'custom-plugin-manager.php'), remoteScript);
 
 			await job.updateProgress(20);
 
@@ -122,8 +116,8 @@ export class CustomPluginProcessor extends WorkerHost {
 				wpPathResult.stdout.trim() === 'bedrock'
 					? `${env.root_path}/web/wp`
 					: env.root_path;
-			const { lsphpBin } = await buildWpCliPrefix(executor, wpPath);
-			const phpCmd = lsphpBin ? shellQuote(lsphpBin) : 'php';
+			const wpCli = await WpCliBuilder.create(executor, wpPath);
+			const phpCmd = wpCli.lsphpBin ? shellQuote(wpCli.lsphpBin) : 'php';
 
 			const tokenArg = githubToken
 				? ` --github-token=${shellQuote(githubToken)}`
@@ -145,14 +139,21 @@ export class CustomPluginProcessor extends WorkerHost {
 			await tracker.track({
 				step: `Running custom-plugin-manager --action=${action}`,
 				level: 'info',
-				detail: `${slug} php=${lsphpBin ?? 'php'}`,
+				detail: `${slug} php=${wpCli.lsphpBin ?? 'php'}`,
 			});
 
 			const manageStart = Date.now();
-			const manageResult = await executor.execute(cmd, {
-				// composer install can take a while on first run
-				timeout: 10 * 60 * 1000,
-			});
+			let manageResult;
+			try {
+				manageResult = await executor.execute(cmd, {
+					// composer install can take a while on first run
+					timeout: 10 * 60 * 1000,
+				});
+			} finally {
+				await executor
+					.execute(`rm -f ${remoteScript}`, { timeout: 5_000 })
+					.catch(() => {});
+			}
 			await tracker.trackCommand(
 				`custom-plugin ${action}`,
 				cmd,
@@ -180,7 +181,6 @@ export class CustomPluginProcessor extends WorkerHost {
 			}
 
 			await job.updateProgress(70);
-			await executor.execute(`rm -f ${remoteScript}`);
 
 			// Update EnvironmentCustomPlugin junction table
 			if (action === 'add' || action === 'update') {

@@ -12,7 +12,9 @@ import {
 	shellQuote,
 	flipProtocol,
 	fixCyberPanelOwnership,
-	buildWpCliPrefix,
+	createRemoteMyCnf,
+	cleanupRemoteMyCnf,
+	WpCliBuilder,
 } from '../../utils/processor-utils';
 
 // concurrency=1: Bedrock provisioning runs composer, git clone, SSH commands.
@@ -40,7 +42,6 @@ export class CreateBedrockProcessor extends WorkerHost {
 			data: { status: 'active', started_at: new Date() },
 		});
 
-		const tempCleanup: Array<() => Promise<unknown>> = [];
 		let websiteCreated = false;
 		let cpCreds: CpCreds | null = null;
 		let domain: string | null = null;
@@ -192,62 +193,44 @@ export class CreateBedrockProcessor extends WorkerHost {
 
 				// ── Dump source DB ──
 				const dumpTmp = `/tmp/cb_clone_${job.id}.sql`;
-				const srcMycnf = `/tmp/cb_src_${job.id}.cnf`;
-
-				await srcExecutor.pushFile({
-					remotePath: srcMycnf,
-					content: Buffer.from(
-						`[client]\nuser=${srcCreds.dbUser}\npassword=${srcCreds.dbPassword}\nhost=${srcCreds.dbHost}\n`,
-					),
-				});
-				await srcExecutor.execute(`chmod 600 ${srcMycnf}`);
-				tempCleanup.push(() =>
-					srcExecutor.execute(`rm -f ${srcMycnf}`).catch(() => {}),
-				);
-
-				const dumpResult = await srcExecutor.execute(
-					`mysqldump --defaults-extra-file=${srcMycnf} --single-transaction --quick ${shellQuote(srcCreds.dbName)} > ${dumpTmp}`,
-				);
-				await srcExecutor.execute(`rm -f ${srcMycnf}`).catch(() => {});
-
-				if (dumpResult.code !== 0) {
-					throw new Error(
-						`mysqldump failed (exit ${dumpResult.code}): ${dumpResult.stderr}`,
+				const srcMycnf = await createRemoteMyCnf(srcExecutor, srcCreds, job.id ?? 'default', 'cb_src');
+				try {
+					const dumpResult = await srcExecutor.execute(
+						`mysqldump --defaults-extra-file=${srcMycnf} --single-transaction --quick ${shellQuote(srcCreds.dbName)} > ${dumpTmp}`,
 					);
+					if (dumpResult.code !== 0) {
+						throw new Error(
+							`mysqldump failed (exit ${dumpResult.code}): ${dumpResult.stderr}`,
+						);
+					}
+				} finally {
+					await cleanupRemoteMyCnf(srcExecutor, srcMycnf);
 				}
 				await job.updateProgress({ value: 50, step: 'Source database dumped' });
 
 				// ── Transfer + import ──
 				const dumpBuffer = await srcExecutor.pullFile(dumpTmp);
-				await srcExecutor.execute(`rm -f ${dumpTmp}`);
+				await srcExecutor.execute(`rm -f ${dumpTmp}`).catch(() => {});
 
 				const dbName = cyberpanel?.dbName ?? srcCreds.dbName;
 				const dbUser = cyberpanel?.dbUser ?? srcCreds.dbUser;
 				const dbPassword = cyberpanel?.dbPassword ?? srcCreds.dbPassword;
 				const dbHost = 'localhost';
 
-				const tgtMycnf = `/tmp/cb_tgt_${job.id}.cnf`;
+				const tgtMycnf = await createRemoteMyCnf(executor, { dbUser, dbPassword, dbHost }, job.id ?? 'default', 'cb_tgt');
 				await executor.pushFile({ remotePath: dumpTmp, content: dumpBuffer });
-				await executor.pushFile({
-					remotePath: tgtMycnf,
-					content: Buffer.from(
-						`[client]\nuser=${dbUser}\npassword=${dbPassword}\nhost=${dbHost}\n`,
-					),
-				});
-				await executor.execute(`chmod 600 ${tgtMycnf}`);
-				tempCleanup.push(() =>
-					executor.execute(`rm -f ${tgtMycnf} ${dumpTmp}`).catch(() => {}),
-				);
-
-				const importResult = await executor.execute(
-					`mysql --defaults-extra-file=${tgtMycnf} ${shellQuote(dbName)} < ${dumpTmp}`,
-				);
-				await executor.execute(`rm -f ${tgtMycnf} ${dumpTmp}`).catch(() => {});
-
-				if (importResult.code !== 0) {
-					throw new Error(
-						`mysql import failed (exit ${importResult.code}): ${importResult.stderr}`,
+				try {
+					const importResult = await executor.execute(
+						`mysql --defaults-extra-file=${tgtMycnf} ${shellQuote(dbName)} < ${dumpTmp}`,
 					);
+					if (importResult.code !== 0) {
+						throw new Error(
+							`mysql import failed (exit ${importResult.code}): ${importResult.stderr}`,
+						);
+					}
+				} finally {
+					await cleanupRemoteMyCnf(executor, tgtMycnf);
+					await executor.execute(`rm -f ${dumpTmp}`).catch(() => {});
 				}
 				await job.updateProgress({ value: 60, step: 'Database imported' });
 
@@ -266,14 +249,13 @@ export class CreateBedrockProcessor extends WorkerHost {
 					const keyTmp = `/tmp/cb_key_${job.id}`;
 					await executor.pushFile({ remotePath: keyTmp, content: srcKey });
 					await executor.execute(`chmod 600 ${keyTmp}`);
-					tempCleanup.push(() =>
-						executor.execute(`rm -f ${keyTmp}`).catch(() => {}),
-					);
-
-					await srcExecutor.execute(
-						`tar -cz -C ${shellQuote(srcPath)} . | ssh -o StrictHostKeyChecking=no -i ${keyTmp} ${srcEnv.server.ssh_user}@${server.ip_address} "mkdir -p ${shellQuote(tgtPath)} && tar -xz -C ${shellQuote(tgtPath)}"`,
-					);
-					await executor.execute(`rm -f ${keyTmp}`).catch(() => {});
+					try {
+						await srcExecutor.execute(
+							`tar -cz -C ${shellQuote(srcPath)} . | ssh -o StrictHostKeyChecking=no -i ${keyTmp} ${srcEnv.server.ssh_user}@${server.ip_address} "mkdir -p ${shellQuote(tgtPath)} && tar -xz -C ${shellQuote(tgtPath)}"`,
+						);
+					} finally {
+						await executor.execute(`rm -f ${keyTmp}`).catch(() => {});
+					}
 				}
 				await job.updateProgress({ value: 70, step: 'Files synced' });
 
@@ -282,68 +264,59 @@ export class CreateBedrockProcessor extends WorkerHost {
 				const tgtUrl = env.url ?? null;
 
 				if (srcUrl && tgtUrl && srcUrl !== tgtUrl) {
-					const srMycnf = `/tmp/cb_sr_${job.id}.cnf`;
+					const srMycnf = await createRemoteMyCnf(executor, { dbUser, dbPassword, dbHost: 'localhost' }, job.id ?? 'default', 'cb_sr');
 					const srSqlFile = `/tmp/cb_sr_${job.id}.sql`;
-					await executor.pushFile({
-						remotePath: srMycnf,
-						content: Buffer.from(
-							`[client]\nuser=${dbUser}\npassword=${dbPassword}\nhost=localhost\n`,
-						),
-					});
-					await executor.execute(`chmod 600 ${srMycnf}`);
-					tempCleanup.push(() =>
-						executor.execute(`rm -f ${srMycnf} ${srSqlFile}`).catch(() => {}),
-					);
+					try {
+						const pairs: Array<[string, string]> = [[srcUrl, tgtUrl]];
+						const alt = flipProtocol(srcUrl);
+						const altTgt = flipProtocol(tgtUrl);
+						if (alt && altTgt && alt !== tgtUrl) pairs.push([alt, altTgt]);
 
-					const pairs: Array<[string, string]> = [[srcUrl, tgtUrl]];
-					const alt = flipProtocol(srcUrl);
-					const altTgt = flipProtocol(tgtUrl);
-					if (alt && altTgt && alt !== tgtUrl) pairs.push([alt, altTgt]);
-
-					// Auto-detect WP table prefix; fallback 'wp_'
-					const prefixRes = await executor.execute(
-						`mysql --defaults-extra-file=${srMycnf} ${shellQuote(dbName)} -sN -e ${shellQuote(
-							`SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${escapeMysql(dbName)}' AND table_name LIKE '%options' LIMIT 1`,
-						)}`,
-					);
-					const p =
-						prefixRes.code === 0 && prefixRes.stdout.trim()
-							? prefixRes.stdout.trim()
-							: 'wp_';
-
-					const statements: string[] = [];
-					for (const [oldRaw, newRaw] of pairs) {
-						const o = escapeMysql(oldRaw);
-						const n = escapeMysql(newRaw);
-						statements.push(
-							`UPDATE \`${p}options\` SET option_value = REPLACE(option_value, '${o}', '${n}')`,
-							`UPDATE \`${p}posts\` SET post_content = REPLACE(post_content, '${o}', '${n}')`,
-							`UPDATE \`${p}posts\` SET post_excerpt = REPLACE(post_excerpt, '${o}', '${n}')`,
-							`UPDATE \`${p}postmeta\` SET meta_value = REPLACE(CAST(meta_value AS CHAR), '${o}', '${n}')`,
-							`UPDATE \`${p}usermeta\` SET meta_value = REPLACE(meta_value, '${o}', '${n}')`,
-							`UPDATE \`${p}comments\` SET comment_content = REPLACE(comment_content, '${o}', '${n}')`,
-							`UPDATE \`${p}comments\` SET comment_author_url = REPLACE(comment_author_url, '${o}', '${n}')`,
-							`UPDATE \`${p}commentmeta\` SET meta_value = REPLACE(meta_value, '${o}', '${n}')`,
-							`UPDATE \`${p}termmeta\` SET meta_value = REPLACE(meta_value, '${o}', '${n}')`,
-							`UPDATE \`${p}links\` SET link_url = REPLACE(link_url, '${o}', '${n}')`,
-							`UPDATE \`${p}links\` SET link_image = REPLACE(link_image, '${o}', '${n}')`,
-							`UPDATE \`${p}links\` SET link_rss = REPLACE(link_rss, '${o}', '${n}')`,
+						// Auto-detect WP table prefix; fallback 'wp_'
+						const prefixRes = await executor.execute(
+							`mysql --defaults-extra-file=${srMycnf} ${shellQuote(dbName)} -sN -e ${shellQuote(
+								`SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${escapeMysql(dbName)}' AND table_name LIKE '%options' LIMIT 1`,
+							)}`,
 						);
-					}
-					await executor.pushFile({
-						remotePath: srSqlFile,
-						content: Buffer.from(statements.join(';\n') + ';'),
-					});
-					const srResult = await executor.execute(
-						`mysql --defaults-extra-file=${srMycnf} ${shellQuote(dbName)} < ${srSqlFile}`,
-					);
-					await executor
-						.execute(`rm -f ${srMycnf} ${srSqlFile}`)
-						.catch(() => {});
-					if (srResult.code !== 0) {
-						this.logger.warn(
-							`URL search-replace SQL failed: ${srResult.stderr}`,
+						const p =
+							prefixRes.code === 0 && prefixRes.stdout.trim()
+								? prefixRes.stdout.trim()
+								: 'wp_';
+
+						const statements: string[] = [];
+						for (const [oldRaw, newRaw] of pairs) {
+							const o = escapeMysql(oldRaw);
+							const n = escapeMysql(newRaw);
+							statements.push(
+								`UPDATE \`${p}options\` SET option_value = REPLACE(option_value, '${o}', '${n}')`,
+								`UPDATE \`${p}posts\` SET post_content = REPLACE(post_content, '${o}', '${n}')`,
+								`UPDATE \`${p}posts\` SET post_excerpt = REPLACE(post_excerpt, '${o}', '${n}')`,
+								`UPDATE \`${p}postmeta\` SET meta_value = REPLACE(CAST(meta_value AS CHAR), '${o}', '${n}')`,
+								`UPDATE \`${p}usermeta\` SET meta_value = REPLACE(meta_value, '${o}', '${n}')`,
+								`UPDATE \`${p}comments\` SET comment_content = REPLACE(comment_content, '${o}', '${n}')`,
+								`UPDATE \`${p}comments\` SET comment_author_url = REPLACE(comment_author_url, '${o}', '${n}')`,
+								`UPDATE \`${p}commentmeta\` SET meta_value = REPLACE(meta_value, '${o}', '${n}')`,
+								`UPDATE \`${p}termmeta\` SET meta_value = REPLACE(meta_value, '${o}', '${n}')`,
+								`UPDATE \`${p}links\` SET link_url = REPLACE(link_url, '${o}', '${n}')`,
+								`UPDATE \`${p}links\` SET link_image = REPLACE(link_image, '${o}', '${n}')`,
+								`UPDATE \`${p}links\` SET link_rss = REPLACE(link_rss, '${o}', '${n}')`,
+							);
+						}
+						await executor.pushFile({
+							remotePath: srSqlFile,
+							content: Buffer.from(statements.join(';\n') + ';'),
+						});
+						const srResult = await executor.execute(
+							`mysql --defaults-extra-file=${srMycnf} ${shellQuote(dbName)} < ${srSqlFile}`,
 						);
+						if (srResult.code !== 0) {
+							this.logger.warn(
+								`URL search-replace SQL failed: ${srResult.stderr}`,
+							);
+						}
+					} finally {
+						await cleanupRemoteMyCnf(executor, srMycnf);
+						await executor.execute(`rm -f ${srSqlFile}`).catch(() => {});
 					}
 				}
 				await job.updateProgress({
@@ -379,32 +352,12 @@ export class CreateBedrockProcessor extends WorkerHost {
 				// Flush WordPress caches (WP-CLI preferred; disk cache fallback)
 				// Run as the site owner so their PHP-FPM environment (with mysqli) is used.
 				{
-					const {
-						prefix: flushPrefix,
-						allowRootFlag: flushFlag,
-						lsphpBin: flushLsphpBin,
-						wpBin: flushWpBin,
-					} = await buildWpCliPrefix(executor, tgtPath);
-					const wpFlush = (args: string): string => {
-						let phpAndWp: string;
-						if (flushLsphpBin && flushWpBin) {
-							phpAndWp = `${shellQuote(flushLsphpBin)} ${shellQuote(flushWpBin)}`;
-						} else if (flushLsphpBin) {
-							phpAndWp = `env WP_CLI_PHP=${shellQuote(flushLsphpBin)} wp`;
-						} else {
-							phpAndWp = 'wp';
-						}
-						return (
-							[flushPrefix, phpAndWp, args.trim(), flushFlag]
-								.filter(Boolean)
-								.join(' ') + ' 2>&1'
-						);
-					};
+					const wpCli = await WpCliBuilder.create(executor, tgtPath);
 					await executor
-						.execute(wpFlush(`cache flush --path=${shellQuote(tgtPath)}`))
+						.execute(wpCli.buildCommand('cache flush'))
 						.catch(() => {});
 					await executor
-						.execute(wpFlush(`rewrite flush --path=${shellQuote(tgtPath)}`))
+						.execute(wpCli.buildCommand('rewrite flush'))
 						.catch(() => {});
 				}
 				await executor
@@ -551,8 +504,6 @@ export class CreateBedrockProcessor extends WorkerHost {
 			}
 
 			throw err;
-		} finally {
-			await Promise.allSettled(tempCleanup.map(fn => fn()));
 		}
 	}
 
