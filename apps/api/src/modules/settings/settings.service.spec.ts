@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing';
 import { SettingsService } from './settings.service';
 import { SettingsRepository } from './settings.repository';
 import { EncryptionService } from '../../common/encryption/encryption.service';
+import { ConfigService } from '@nestjs/config';
 
 const makeRepo = () => ({
 	findAll: jest.fn(),
@@ -15,19 +16,29 @@ const makeEnc = () => ({
 	decrypt: jest.fn((v: string) => v.replace('enc:', '')),
 });
 
+const makeConfig = () => ({
+	get: jest.fn((key: string) => {
+		if (key === 'RCLONE_REMOTE_NAME') return 'gdrive';
+		return null;
+	}),
+});
+
 describe('SettingsService', () => {
 	let service: SettingsService;
 	let repo: ReturnType<typeof makeRepo>;
 	let enc: ReturnType<typeof makeEnc>;
+	let config: ReturnType<typeof makeConfig>;
 
 	beforeEach(async () => {
 		repo = makeRepo();
 		enc = makeEnc();
+		config = makeConfig();
 		const module = await Test.createTestingModule({
 			providers: [
 				SettingsService,
 				{ provide: SettingsRepository, useValue: repo },
 				{ provide: EncryptionService, useValue: enc },
+				{ provide: ConfigService, useValue: config },
 			],
 		}).compile();
 

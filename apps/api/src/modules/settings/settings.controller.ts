@@ -9,9 +9,6 @@ import {
 	HttpCode,
 	HttpStatus,
 	UseGuards,
-	BadRequestException,
-	InternalServerErrorException,
-	Logger,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -23,39 +20,12 @@ import { SetSettingDto } from './dto/setting.dto';
 import { SetSshKeyDto } from './dto/ssh-key.dto';
 import { SetBillingSettingsDto } from './dto/billing-settings.dto';
 import { SetCloudflareSettingsDto, UpdateCloudflareDnsRecordDto } from './dto/cloudflare-settings.dto';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
-import { writeFile, unlink, mkdir } from 'fs/promises';
-import { tmpdir } from 'os';
-import { join } from 'path';
-import { randomUUID } from 'crypto';
-import { ConfigService } from '@nestjs/config';
-
-const execFileAsync = promisify(execFile);
-
-interface RcloneOAuthToken {
-	access_token?: string;
-	token_type?: string;
-	refresh_token?: string;
-	expiry?: string;
-	[key: string]: unknown;
-}
-
-/** Build an rclone.conf INI string from a rclone OAuth token JSON string. */
-function buildRcloneConfig(remoteName: string, tokenJson: string): string {
-	return `[${remoteName}]\ntype = drive\nscope = drive\ntoken = ${tokenJson}\n`;
-}
 
 @Controller('settings')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @Roles(ROLES.ADMIN)
 export class SettingsController {
-	private readonly logger = new Logger(SettingsController.name);
-
-	constructor(
-		private readonly svc: SettingsService,
-		private readonly config: ConfigService,
-	) {}
+	constructor(private readonly svc: SettingsService) {}
 
 	/** Returns all non-sensitive settings as a key:value map. */
 	@Get() getAll() {
@@ -102,41 +72,11 @@ export class SettingsController {
 		return { configured };
 	}
 
-	/**
-	 * Store Google Drive OAuth token produced by `rclone authorize "drive"`.
-	 * Validates the token has access_token + refresh_token, converts to
-	 * rclone.conf format, and stores encrypted.
-	 */
+	/** Store Google Drive OAuth token. */
 	@Put('gdrive') @HttpCode(HttpStatus.NO_CONTENT) async setGdrive(
 		@Body() dto: SetGdriveDto,
 	) {
-		let parsed: RcloneOAuthToken;
-		try {
-			parsed = JSON.parse(dto.token.trim()) as RcloneOAuthToken;
-		} catch {
-			throw new BadRequestException(
-				'Invalid JSON — paste the token JSON printed by `rclone authorize "drive"`.',
-			);
-		}
-
-		const required = ['access_token', 'refresh_token'];
-		const missing = required.filter(k => !parsed[k]);
-		if (missing.length) {
-			throw new BadRequestException(
-				`Token JSON is missing required fields: ${missing.join(', ')}. ` +
-					'Make sure you copy the token JSON output by rclone authorize, not a credentials file.',
-			);
-		}
-
-		const remoteName = process.env.RCLONE_REMOTE_NAME ?? 'gdrive';
-		// Serialize on one line — rclone INI values must not contain newlines
-		const tokenOneLine = JSON.stringify(parsed);
-		const rcloneConf = buildRcloneConfig(remoteName, tokenOneLine);
-		await this.svc.setEncrypted('rclone_gdrive_config', rcloneConf);
-
-		this.logger.log(
-			'Google Drive configured via OAuth token (rclone authorize).',
-		);
+		await this.svc.setGdrive(dto.token);
 	}
 
 	/** Remove Google Drive configuration. */
@@ -144,179 +84,50 @@ export class SettingsController {
 		await this.svc.delete('rclone_gdrive_config');
 	}
 
+	/** Test Google Drive connection. */
+	@Post('gdrive/test') async testGdrive() {
+		return this.svc.testGdrive();
+	}
+
 	// ── Cloudflare ──────────────────────────────────────────────────────────
 
-	@Get('cloudflare')
-	async getCloudflare() {
-		const configured = await this.svc.hasEncrypted('cloudflare_api_token');
-		const zone = await this.svc.get('cloudflare_zone_id');
-		const zoneName = await this.svc.get('cloudflare_zone_name');
-		return {
-			configured,
-			zone_id: zone?.value ?? null,
-			zone_name: zoneName?.value ?? null,
-		};
+	@Get('cloudflare') async getCloudflare() {
+		return this.svc.getCloudflareConfig();
 	}
 
 	@Put('cloudflare') @HttpCode(HttpStatus.NO_CONTENT) async setCloudflare(
 		@Body() dto: SetCloudflareSettingsDto,
 	) {
-		await Promise.all([
-			this.svc.setEncrypted('cloudflare_api_token', dto.api_token.trim()),
-			this.svc.set('cloudflare_zone_id', dto.zone_id.trim()),
-			this.svc.set('cloudflare_zone_name', dto.zone_name?.trim() ?? ''),
-		]);
+		await this.svc.setCloudflareConfig(dto);
 	}
 
 	@Delete('cloudflare') @HttpCode(HttpStatus.NO_CONTENT) async deleteCloudflare() {
-		await Promise.all([
-			this.svc.delete('cloudflare_api_token').catch(() => undefined),
-			this.svc.delete('cloudflare_zone_id').catch(() => undefined),
-			this.svc.delete('cloudflare_zone_name').catch(() => undefined),
-		]);
+		await this.svc.deleteCloudflareConfig();
 	}
 
-	@Post('cloudflare/test')
-	async testCloudflare() {
-		const { token, zoneId } = await this.getCloudflareCredentials();
-		const result = await this.cloudflareFetch(token, `/zones/${zoneId}`);
-		return {
-			success: true,
-			message: `Connected to ${result.result?.name ?? zoneId}`,
-			zone: result.result,
-		};
+	@Post('cloudflare/test') async testCloudflare() {
+		return this.svc.testCloudflare();
 	}
 
-	@Get('cloudflare/dns-records')
-	async listCloudflareDnsRecords() {
-		const { token, zoneId } = await this.getCloudflareCredentials();
-		const result = await this.cloudflareFetch(
-			token,
-			`/zones/${zoneId}/dns_records?per_page=100`,
-		);
-		return result.result ?? [];
+	@Get('cloudflare/dns-records') async listCloudflareDnsRecords() {
+		return this.svc.listCloudflareDnsRecords();
 	}
 
-	@Put('cloudflare/dns-records/:recordId')
-	async updateCloudflareDnsRecord(
+	@Put('cloudflare/dns-records/:recordId') async updateCloudflareDnsRecord(
 		@Param('recordId') recordId: string,
 		@Body() dto: UpdateCloudflareDnsRecordDto,
 	) {
-		const { token, zoneId } = await this.getCloudflareCredentials();
-		const existing = await this.cloudflareFetch(
-			token,
-			`/zones/${zoneId}/dns_records/${recordId}`,
-		);
-		const current = existing.result;
-		const payload = {
-			type: dto.type ?? current.type,
-			name: dto.name ?? current.name,
-			content: dto.content ?? current.content,
-			ttl: current.ttl ?? 1,
-			proxied: dto.proxied ?? current.proxied ?? false,
-		};
-		const result = await this.cloudflareFetch(
-			token,
-			`/zones/${zoneId}/dns_records/${recordId}`,
-			{ method: 'PUT', body: JSON.stringify(payload) },
-		);
-		return result.result;
+		return this.svc.updateCloudflareDnsRecord(recordId, dto);
 	}
 
-	@Post('cloudflare/cache/purge')
-	async purgeCloudflareCache() {
-		const { token, zoneId } = await this.getCloudflareCredentials();
-		const result = await this.cloudflareFetch(
-			token,
-			`/zones/${zoneId}/purge_cache`,
-			{ method: 'POST', body: JSON.stringify({ purge_everything: true }) },
-		);
-		return { success: !!result.success };
+	@Post('cloudflare/cache/purge') async purgeCloudflareCache() {
+		return this.svc.purgeCloudflareCache();
 	}
 
-	@Put('cloudflare/development-mode')
-	async setCloudflareDevelopmentMode(@Body('enabled') enabled: boolean) {
-		const { token, zoneId } = await this.getCloudflareCredentials();
-		const result = await this.cloudflareFetch(
-			token,
-			`/zones/${zoneId}/settings/development_mode`,
-			{
-				method: 'PATCH',
-				body: JSON.stringify({ value: enabled ? 'on' : 'off' }),
-			},
-		);
-		return result.result;
-	}
-
-	/**
-	 * Test the stored Google Drive credentials by writing a temp rclone.conf
-	 * and running `rclone lsd`. Returns { success: boolean, message: string }.
-	 */
-	@Post('gdrive/test')
-	async testGdrive(): Promise<{ success: boolean; message: string }> {
-		const rcloneConf = await this.svc.getDecrypted('rclone_gdrive_config');
-		if (!rcloneConf) {
-			return { success: false, message: 'Google Drive is not configured.' };
-		}
-
-		const tmpConf = join(tmpdir(), `rclone_test_${randomUUID()}.conf`);
-		const remoteName = process.env.RCLONE_REMOTE_NAME ?? 'gdrive';
-
-		try {
-			await mkdir(tmpdir(), { recursive: true });
-			await writeFile(tmpConf, rcloneConf, { mode: 0o600 });
-
-			await execFileAsync('rclone', [
-				'lsd',
-				`${remoteName}:`,
-				'--config',
-				tmpConf,
-				'--max-depth',
-				'1',
-			]);
-
-			return { success: true, message: 'Connection successful.' };
-		} catch (err) {
-			const msg = err instanceof Error ? err.message : 'Unknown error';
-			this.logger.warn(`GDrive connection test failed: ${msg}`);
-			return {
-				success: false,
-				message: `Connection failed: ${msg}`,
-			};
-		} finally {
-			await unlink(tmpConf).catch(() => undefined);
-		}
-	}
-
-	private async getCloudflareCredentials() {
-		const token = await this.svc.getDecrypted('cloudflare_api_token');
-		const zone = await this.svc.get('cloudflare_zone_id');
-		if (!token || !zone?.value) {
-			throw new BadRequestException('Cloudflare is not configured.');
-		}
-		return { token, zoneId: zone.value };
-	}
-
-	private async cloudflareFetch(
-		token: string,
-		path: string,
-		init: RequestInit = {},
-	): Promise<any> {
-		const res = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
-			...init,
-			headers: {
-				Authorization: `Bearer ${token}`,
-				'Content-Type': 'application/json',
-				...(init.headers ?? {}),
-			},
-		});
-		const payload = await res.json().catch(() => null);
-		if (!res.ok || payload?.success === false) {
-			const message =
-				payload?.errors?.[0]?.message ?? res.statusText ?? 'Cloudflare request failed';
-			throw new BadRequestException(message);
-		}
-		return payload;
+	@Put('cloudflare/development-mode') async setCloudflareDevelopmentMode(
+		@Body('enabled') enabled: boolean,
+	) {
+		return this.svc.setCloudflareDevelopmentMode(enabled);
 	}
 
 	// ── System Backup Folder ID ─────────────────────────────────────────────
@@ -339,40 +150,18 @@ export class SettingsController {
 	@Get(':key') get(@Param('key') key: string) {
 		return this.svc.get(key);
 	}
+
 	@Put(':key') set(@Param('key') key: string, @Body() dto: SetSettingDto) {
 		return this.svc.set(key, dto.value);
 	}
+
 	@Delete(':key') delete(@Param('key') key: string) {
 		return this.svc.delete(key);
 	}
 
-	@Post('test-webhook')
-	async testWebhook(
+	@Post('test-webhook') async testWebhook(
 		@Body() dto: { type: 'slack' | 'discord' | 'google_chat'; url: string },
 	) {
-		if (!dto.url) throw new BadRequestException('Webhook URL is required');
-
-		const payload =
-			dto.type === 'slack' || dto.type === 'google_chat'
-				? { text: '✅ Bedrock Forge — Test Notification' }
-				: { content: '✅ Bedrock Forge — Test Notification' };
-
-		try {
-			const res = await fetch(dto.url, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify(payload),
-			});
-
-			if (!res.ok) {
-				const text = await res.text();
-				throw new Error(`Status ${res.status}: ${text}`);
-			}
-
-			return { success: true };
-		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			throw new BadRequestException(`Failed to send test notification: ${msg}`);
-		}
+		return this.svc.testWebhook(dto.type, dto.url);
 	}
 }
