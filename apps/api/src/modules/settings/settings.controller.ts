@@ -20,6 +20,8 @@ import { SetSettingDto } from './dto/setting.dto';
 import { SetSshKeyDto } from './dto/ssh-key.dto';
 import { SetBillingSettingsDto } from './dto/billing-settings.dto';
 import { SetCloudflareSettingsDto, UpdateCloudflareDnsRecordDto } from './dto/cloudflare-settings.dto';
+import { TestWebhookDto } from './dto/test-webhook.dto';
+
 
 @Controller('settings')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -160,7 +162,7 @@ export class SettingsController {
 	}
 
 	@Post('test-webhook') async testWebhook(
-		@Body() dto: { type: 'slack' | 'discord' | 'google_chat'; url: string },
+		@Body() dto: TestWebhookDto,
 	) {
 		return this.svc.testWebhook(dto.type, dto.url);
 	}
