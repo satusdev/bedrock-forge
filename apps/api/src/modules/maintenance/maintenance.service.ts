@@ -2,7 +2,7 @@ import { Injectable, Logger, OnApplicationBootstrap } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { readdir, rm, stat } from "fs/promises";
 import { join } from "path";
-import { PrismaService } from "../../prisma/prisma.service";
+import { MaintenanceRepository } from "./maintenance.repository";
 import { CleanupSchedulesRepository } from "../cleanup-schedules/cleanup-schedules.repository";
 import { WpActionsService } from "../wp-actions/wp-actions.service";
 
@@ -27,7 +27,7 @@ export class MaintenanceService implements OnApplicationBootstrap {
   private readonly logger = new Logger(MaintenanceService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repo: MaintenanceRepository,
     private readonly cleanupRepo: CleanupSchedulesRepository,
     private readonly wpActions: WpActionsService,
   ) {}
@@ -39,14 +39,7 @@ export class MaintenanceService implements OnApplicationBootstrap {
 
   private async recoverInterruptedJobs(): Promise<void> {
     try {
-      const recovered = await this.prisma.jobExecution.updateMany({
-        where: { status: "active" },
-        data: {
-          status: "failed",
-          last_error: "Process interrupted — forge was restarted",
-          completed_at: new Date(),
-        },
-      });
+      const recovered = await this.repo.failInterruptedJobs();
       if (recovered.count > 0) {
         this.logger.warn(
           `Startup recovery: marked ${recovered.count} interrupted job(s) as failed`,
@@ -98,30 +91,15 @@ export class MaintenanceService implements OnApplicationBootstrap {
 
     const results = await Promise.allSettled([
       // Expired or revoked refresh tokens
-      this.prisma.refreshToken.deleteMany({
-        where: {
-          OR: [{ expires_at: { lt: now } }, { revoked_at: { not: null } }],
-        },
-      }),
+      this.repo.deleteExpiredTokens(now),
       // Old notification logs
-      this.prisma.notificationLog.deleteMany({
-        where: { created_at: { lt: days90 } },
-      }),
+      this.repo.deleteOldNotificationLogs(days90),
       // Old audit logs
-      this.prisma.auditLog.deleteMany({
-        where: { created_at: { lt: days180 } },
-      }),
+      this.repo.deleteOldAuditLogs(days180),
       // Completed / failed job executions — keep 90 days for debugging
-      this.prisma.jobExecution.deleteMany({
-        where: {
-          status: { in: ["completed", "failed", "dead_letter"] },
-          completed_at: { lt: days90 },
-        },
-      }),
+      this.repo.deleteOldJobExecutions(days90),
       // In-app user notifications — unbounded without a TTL
-      this.prisma.userNotification.deleteMany({
-        where: { created_at: { lt: days90 } },
-      }),
+      this.repo.deleteOldUserNotifications(days90),
     ]);
 
     const labels = [
