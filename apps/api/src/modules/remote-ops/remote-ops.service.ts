@@ -7,7 +7,7 @@ import { createHash } from "crypto";
 import { basename } from "path";
 import { Prisma } from "@prisma/client";
 import { createRemoteExecutor } from "@bedrock-forge/remote-executor";
-import { PrismaService } from "../../prisma/prisma.service";
+import { RemoteOpsRepository } from "./remote-ops.repository";
 import { ServersService } from "../servers/servers.service";
 import {
   CreateEnvTemplateDto,
@@ -32,7 +32,7 @@ type EnvPair = {
 @Injectable()
 export class RemoteOpsService {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repo: RemoteOpsRepository,
     private readonly serversService: ServersService,
   ) {}
 
@@ -43,27 +43,18 @@ export class RemoteOpsService {
       MAX_EDIT_BYTES,
     );
     if (revealKey) {
-      await this.prisma.auditLog
-        .create({
-          data: {
-            user_id: userId ? BigInt(userId) : undefined,
-            action: "env_file.secret_reveal",
-            resource_type: "environment",
-            resource_id: BigInt(envId),
-            metadata: { key: revealKey },
-          },
-        })
-        .catch(() => undefined);
+      await this.repo.createAuditLog({
+        user_id: userId ? BigInt(userId) : undefined,
+        action: "env_file.secret_reveal",
+        resource_type: "environment",
+        resource_id: BigInt(envId),
+        metadata: { key: revealKey },
+      });
     }
     const variables = parseEnv(content).map((pair) =>
       this.maskEnvPair(pair, revealKey),
     );
-    const templates = await this.prisma.envVariableTemplate.findMany({
-      where: {
-        OR: [{ environment_type: null }, { environment_type: env.type }],
-      },
-      orderBy: [{ environment_type: "asc" }, { name: "asc" }],
-    });
+    const templates = await this.repo.findTemplatesByEnvType(env.type);
     const requiredKeys = Array.from(
       new Set(templates.flatMap((t) => t.required_keys)),
     );
@@ -112,23 +103,14 @@ export class RemoteOpsService {
     rightEnvId: number,
   ) {
     const [project, left, right] = await Promise.all([
-      this.prisma.project.findUnique({
-        where: { id: BigInt(projectId) },
-        select: { id: true },
-      }),
+      this.repo.findProjectById(projectId),
       this.readEnvFile(leftEnvId),
       this.readEnvFile(rightEnvId),
     ]);
     if (!project) throw new NotFoundException(`Project ${projectId} not found`);
     const [leftEnv, rightEnv] = await Promise.all([
-      this.prisma.environment.findUnique({
-        where: { id: BigInt(leftEnvId) },
-        select: { project_id: true, type: true },
-      }),
-      this.prisma.environment.findUnique({
-        where: { id: BigInt(rightEnvId) },
-        select: { project_id: true, type: true },
-      }),
+      this.repo.findEnvironmentById(leftEnvId),
+      this.repo.findEnvironmentById(rightEnvId),
     ]);
     if (
       !leftEnv ||
@@ -264,63 +246,51 @@ export class RemoteOpsService {
 
   async getNotes(resourceType: string, resourceId: string) {
     this.assertResourceType(resourceType);
-    return this.prisma.resourceNote.findMany({
-      where: { resource_type: resourceType, resource_id: BigInt(resourceId) },
-      orderBy: [{ pinned: "desc" }, { updated_at: "desc" }],
-    });
+    return this.repo.findNotes(resourceType, resourceId);
   }
 
   async createNote(dto: CreateResourceNoteDto, userId?: number) {
     this.assertResourceType(dto.resource_type);
     await this.assertResourceExists(dto.resource_type, dto.resource_id);
-    return this.prisma.resourceNote.create({
-      data: {
-        resource_type: dto.resource_type,
-        resource_id: BigInt(dto.resource_id),
-        body: dto.body.trim(),
-        pinned: dto.pinned ?? false,
-        created_by_id: userId ? BigInt(userId) : undefined,
-      },
+    return this.repo.createNote({
+      resource_type: dto.resource_type,
+      resource_id: BigInt(dto.resource_id),
+      body: dto.body.trim(),
+      pinned: dto.pinned ?? false,
+      created_by_id: userId ? BigInt(userId) : undefined,
     });
   }
 
   async updateNote(noteId: number, dto: UpdateResourceNoteDto) {
-    return this.prisma.resourceNote.update({
-      where: { id: BigInt(noteId) },
-      data: {
-        ...(dto.body !== undefined ? { body: dto.body.trim() } : {}),
-        ...(dto.pinned !== undefined ? { pinned: dto.pinned } : {}),
-      },
+    return this.repo.updateNote(noteId, {
+      ...(dto.body !== undefined ? { body: dto.body.trim() } : {}),
+      ...(dto.pinned !== undefined ? { pinned: dto.pinned } : {}),
     });
   }
 
   async deleteNote(noteId: number) {
-    await this.prisma.resourceNote.delete({ where: { id: BigInt(noteId) } });
+    await this.repo.deleteNote(noteId);
     return { success: true };
   }
 
   listEnvTemplates() {
-    return this.prisma.envVariableTemplate.findMany({
-      orderBy: [{ environment_type: "asc" }, { name: "asc" }],
-    });
+    return this.repo.findAllTemplates();
   }
 
   createEnvTemplate(dto: CreateEnvTemplateDto) {
-    return this.prisma.envVariableTemplate.create({
-      data: {
-        name: dto.name.trim(),
-        environment_type: dto.environment_type?.trim() || null,
-        required_keys: dto.required_keys.map((k) => k.trim()).filter(Boolean),
-        secret_keys: (dto.secret_keys ?? [])
-          .map((k) => k.trim())
-          .filter(Boolean),
-        defaults: dto.defaults as Prisma.InputJsonValue | undefined,
-      },
+    return this.repo.createTemplate({
+      name: dto.name.trim(),
+      environment_type: dto.environment_type?.trim() || null,
+      required_keys: dto.required_keys.map((k) => k.trim()).filter(Boolean),
+      secret_keys: (dto.secret_keys ?? [])
+        .map((k) => k.trim())
+        .filter(Boolean),
+      defaults: dto.defaults as Prisma.InputJsonValue | undefined,
     });
   }
 
   async deleteEnvTemplate(id: number) {
-    await this.prisma.envVariableTemplate.delete({ where: { id: BigInt(id) } });
+    await this.repo.deleteTemplate(id);
     return { success: true };
   }
 
@@ -407,11 +377,7 @@ export class RemoteOpsService {
   }
 
   private async validateEnvContent(environmentType: string, content: string) {
-    const templates = await this.prisma.envVariableTemplate.findMany({
-      where: {
-        OR: [{ environment_type: null }, { environment_type: environmentType }],
-      },
-    });
+    const templates = await this.repo.findTemplatesForValidation(environmentType);
     const required = Array.from(
       new Set(templates.flatMap((t) => t.required_keys)),
     );
@@ -487,10 +453,7 @@ export class RemoteOpsService {
   }
 
   private async requireEnvironment(envId: number) {
-    const env = await this.prisma.environment.findUnique({
-      where: { id: BigInt(envId) },
-      include: { server: true, project: { select: { name: true } } },
-    });
+    const env = await this.repo.findEnvironmentWithServerAndProject(envId);
     if (!env) throw new NotFoundException(`Environment ${envId} not found`);
     if (!env.root_path) {
       throw new BadRequestException("Environment has no root path configured");
@@ -511,13 +474,7 @@ export class RemoteOpsService {
   }
 
   private async assertResourceExists(resourceType: string, resourceId: string) {
-    const id = BigInt(resourceId);
-    const exists =
-      resourceType === "project"
-        ? await this.prisma.project.findUnique({ where: { id } })
-        : resourceType === "environment"
-          ? await this.prisma.environment.findUnique({ where: { id } })
-          : await this.prisma.server.findUnique({ where: { id } });
+    const exists = await this.repo.resourceExists(resourceType, resourceId);
     if (!exists) {
       throw new NotFoundException(`${resourceType} ${resourceId} not found`);
     }
