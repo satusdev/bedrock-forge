@@ -109,15 +109,11 @@ bedrock-forge/
 
 ---
 
-## Refactor Roadmaps
+## System Architecture
 
-Use these plans when cleaning up existing code or splitting large features. They
-define the current priorities, phase order, verification gates, and the main
-frontend/backend files that need attention.
+For a detailed walkthrough of the monorepo structure, folder layout, data flow, and feature modules:
 
-- [Overall codebase improvement plan](../roadmaps/CODEBASE_IMPROVEMENT_PLAN.md)
-- [Frontend refactor plan](../roadmaps/FRONTEND_REFACTOR_PLAN.md)
-- [Backend and worker refactor plan](../roadmaps/BACKEND_REFACTOR_PLAN.md)
+- [System Architecture and Features Guide](ARCHITECTURE.md)
 
 ---
 
