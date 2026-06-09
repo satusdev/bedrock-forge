@@ -206,7 +206,7 @@ describe("Composer manager PHP scripts", () => {
     }
   });
 
-  it("uses update-no-dev when requiring Composer-managed WordPress plugins", () => {
+  it("uses no-dev when requiring Composer-managed WordPress plugins", () => {
     const fixture = makeFixture("php");
     try {
       runPhp(
@@ -221,10 +221,10 @@ describe("Composer manager PHP scripts", () => {
 
       const composerLog = readFileSync(fixture.composerLog, "utf8");
       expect(composerLog).toContain(
-        "ARGS:require wpackagist-plugin/new-plugin --no-interaction --update-no-dev -W",
+        "ARGS:require wpackagist-plugin/new-plugin --no-interaction --no-dev -W",
       );
       expect(composerLog).not.toContain(
-        "ARGS:require wpackagist-plugin/new-plugin --no-interaction --no-dev -W",
+        "ARGS:require wpackagist-plugin/new-plugin --no-interaction --update-no-dev -W",
       );
     } finally {
       fixture.cleanup();
@@ -254,7 +254,7 @@ describe("Composer manager PHP scripts", () => {
       const composerLog = readFileSync(fixture.composerLog, "utf8");
       expect(composerLog).toContain(`PHP_BINARY=${phpBinary}`);
       expect(composerLog).toContain(
-        "ARGS:update satusdev/repo-fetcher --no-interaction --update-no-dev -W",
+        "ARGS:update satusdev/repo-fetcher --no-interaction --no-dev -W",
       );
     } finally {
       fixture.cleanup();
@@ -306,7 +306,7 @@ describe("Composer manager PHP scripts", () => {
       expect(composerLog).toContain("ALLOW=1");
       expect(composerLog).toContain("NOINT=1");
       expect(composerLog).toContain(
-        "ARGS:update satusdev/repo-fetcher --no-interaction --update-no-dev -W",
+        "ARGS:update satusdev/repo-fetcher --no-interaction --no-dev -W",
       );
       expect(composerLog).toContain("ARGS:install --no-dev --no-interaction");
     } finally {
