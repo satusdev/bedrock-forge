@@ -135,41 +135,41 @@ Acceptance:
       plugin management.
 - [x] Cleanup commands are still best-effort and logged.
 
-## Phase 6: API Module Cleanup
+## Phase 6: API Module Cleanup [COMPLETED]
 
-- Move inline controller DTOs into `dto/`.
-- Keep controllers thin: validate, authorize, call service.
-- Keep Prisma access in repositories.
-- Split broad services by independent domain behavior:
-  - settings integrations vs billing vs advanced settings.
-  - security scan orchestration vs findings vs schedules vs reporting.
-- Add repository methods instead of embedding Prisma query construction in
+- [x] Move inline controller DTOs into `dto/`.
+- [x] Keep controllers thin: validate, authorize, call service.
+- [x] Keep Prisma access in repositories.
+- [x] Split broad services by independent domain behavior:
+  - [x] settings integrations vs billing vs advanced settings.
+  - [x] security scan orchestration vs findings vs schedules vs reporting.
+- [x] Add repository methods instead of embedding Prisma query construction in
   services.
 
 Acceptance:
 
-- Controllers no longer contain helper functions or large DTO blocks.
-- Services do not import `PrismaService`.
-- Module tests still pass after each split.
+- [x] Controllers no longer contain helper functions or large DTO blocks.
+- [x] Services do not import `PrismaService`.
+- [x] Module tests still pass after each split.
 
-## Phase 7: Shared Contracts
+## Phase 7: Shared Contracts [COMPLETED]
 
 Expand `packages/shared` only for contracts used by more than one app:
 
-- job payload schemas.
-- scan output shapes.
-- common settings response shapes.
-- monitor/lighthouse result summaries.
-- notification event payloads.
+- [x] job payload schemas.
+- [x] scan output shapes.
+- [x] common settings response shapes.
+- [x] monitor/lighthouse result summaries.
+- [x] notification event payloads.
 
 Use Zod parsers for worker job payloads and JSON fields that cross process
 boundaries.
 
 Acceptance:
 
-- Worker processors parse job payloads before executing.
-- API and web share response types where contracts are stable.
-- Unsafe casts are reduced in production code.
+- [x] Worker processors parse job payloads before executing.
+- [x] API and web share response types where contracts are stable.
+- [x] Unsafe casts are reduced in production code.
 
 ## Verification Matrix
 

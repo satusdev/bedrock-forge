@@ -94,7 +94,7 @@ Acceptance:
 - [x] Each later refactor phase has a clear acceptance gate.
 - [x] No runtime code changes are required for documentation-only updates.
 
-## Phase 2: Shared Standards [PARTIALLY COMPLETED]
+## Phase 2: Shared Standards [COMPLETED]
 
 Establish conventions by extracting one representative feature at a time.
 Prefer small helpers with focused tests over broad abstractions.
@@ -114,7 +114,7 @@ Acceptance:
       focused tests.
 - [x] New conventions are documented in the matching roadmap or development guide.
 
-## Phase 3: High-Impact Refactors [IN PROGRESS]
+## Phase 3: High-Impact Refactors [COMPLETED]
 
 Prioritize high-churn and high-risk files, but do not start with the riskiest
 worker extraction while sync behavior is still settling.
@@ -123,12 +123,12 @@ Recommended order:
 
 - [x] `apps/web/src/pages/project-detail/PluginsTab.tsx` [COMPLETED]
 - [x] `apps/web/src/pages/project-detail/EnvironmentsTab.tsx` [COMPLETED]
-- [x] `apps/web/src/pages/project-detail/SyncTab.tsx`
-- [x] `apps/web/src/pages/project-detail/BackupsTab.tsx`
-- [x] `apps/web/src/pages/project-detail/ToolsTab.tsx`
+- [x] `apps/web/src/pages/project-detail/SyncTab.tsx` [COMPLETED]
+- [x] `apps/web/src/pages/project-detail/BackupsTab.tsx` [COMPLETED]
+- [x] `apps/web/src/pages/project-detail/ToolsTab.tsx` [COMPLETED]
 - [x] `apps/worker/src/processors/sync/sync.processor.ts` [COMPLETED]
 - [x] `apps/worker/src/processors/security/security-server-scan.processor.ts` [COMPLETED]
-- [x] `apps/api/src/modules/settings/settings.controller.ts`
+- [x] `apps/api/src/modules/settings/settings.controller.ts` [COMPLETED]
 - [x] `apps/api/src/modules/security/security.service.ts` [COMPLETED]
 
 Use the detailed frontend/backend plans for exact extraction shapes:
@@ -138,40 +138,40 @@ Use the detailed frontend/backend plans for exact extraction shapes:
 
 Acceptance:
 
-- Each extracted module has a clear purpose and limited public surface.
-- Tests/type checks pass after each feature-area refactor.
-- No unrelated product behavior changes are included.
-- File size drops because responsibilities moved to typed hooks, components, or
+- [x] Each extracted module has a clear purpose and limited public surface.
+- [x] Tests/type checks pass after each feature-area refactor.
+- [x] No unrelated product behavior changes are included.
+- [x] File size drops because responsibilities moved to typed hooks, components, or
   helpers, not because logic was deleted.
 
-## Phase 4: Type And Contract Tightening
+## Phase 4: Type And Contract Tightening [COMPLETED]
 
-- Move cross-app types into `packages/shared`.
-- Use Zod parsers for JSON job payloads and scan outputs where worker/API share
+- [x] Move cross-app types into `packages/shared`.
+- [x] Use Zod parsers for JSON job payloads and scan outputs where worker/API share
   contracts.
-- Replace local `any[]` and broad `Record<string, unknown>` types in product
+- [x] Replace local `any[]` and broad `Record<string, unknown>` types in product
   code with named interfaces.
-- Keep test-only casts where they simplify mocks, but isolate them in test
+- [x] Keep test-only casts where they simplify mocks, but isolate them in test
   helpers.
 
 Acceptance:
 
-- New API routes and worker jobs use shared payload contracts.
-- Feature response types are exported from feature API modules or shared package.
-- No new `any` in production code unless explicitly justified.
+- [x] New API routes and worker jobs use shared payload contracts.
+- [x] Feature response types are exported from feature API modules or shared package.
+- [x] No new `any` in production code unless explicitly justified.
 
-## Phase 5: Cleanup And Review
+## Phase 5: Cleanup And Review [COMPLETED]
 
-- Remove dead helper code and stale docs.
-- Review dependency drift and generated artifacts.
-- Add follow-up tickets for any remaining large files that were intentionally
+- [x] Remove dead helper code and stale docs.
+- [x] Review dependency drift and generated artifacts.
+- [x] Add follow-up tickets for any remaining large files that were intentionally
   deferred.
-- Update this roadmap with completed phases and deferred work.
+- [x] Update this roadmap with completed phases and deferred work.
 
 Acceptance:
 
-- Full build/test suite is run before merge.
-- Roadmap status is updated with completed and deferred items.
+- [x] Full build/test suite is run before merge.
+- [x] Roadmap status is updated with completed and deferred items.
 
 ## Recommended First Workstream
 
