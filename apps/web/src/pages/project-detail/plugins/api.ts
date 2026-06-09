@@ -1,4 +1,5 @@
 import { api } from "@/lib/api-client";
+import { WpOrgSearchResult } from "@bedrock-forge/shared";
 import {
   PluginScan,
   JobExecutionLogStatus,
@@ -9,7 +10,7 @@ import {
 
 export const pluginsApi = {
   searchWpOrg: (query: string) =>
-    api.get<any[]>(
+    api.get<WpOrgSearchResult[]>(
       `/plugin-scans/search-wp-org?query=${encodeURIComponent(query)}`,
     ),
 

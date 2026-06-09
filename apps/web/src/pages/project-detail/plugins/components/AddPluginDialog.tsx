@@ -1,6 +1,7 @@
 import { useState, useEffect, FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Search, Loader2, Plus } from "lucide-react";
+import { WpOrgSearchResult } from "@bedrock-forge/shared";
 import { pluginsApi } from "../api";
 import { toast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -41,7 +42,7 @@ export function AddPluginDialog({
   const [workflow, setWorkflow] = useState<"composer" | "manual">("composer");
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchResults, setSearchResults] = useState<WpOrgSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
 
   useEffect(() => {
@@ -149,7 +150,7 @@ export function AddPluginDialog({
                         {p.slug}
                       </span>
                       <p className="text-muted-foreground line-clamp-1 text-[11px]">
-                        {p.description}
+                        {p.short_description}
                       </p>
                       <p className="text-[10px] text-muted-foreground/80">
                         By {p.author}

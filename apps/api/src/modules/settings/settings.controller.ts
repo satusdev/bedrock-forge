@@ -13,8 +13,11 @@ import {
 import { AuthGuard } from "@nestjs/passport";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
-import { ROLES } from "@bedrock-forge/shared";
+import { ROLES, BillingSettingsResponse, CloudflareConfigResponse, GdriveConfigResponse } from "@bedrock-forge/shared";
 import { SettingsService } from "./settings.service";
+import { BillingSettingsService } from "./services/billing-settings.service";
+import { CloudflareSettingsService } from "./services/cloudflare-settings.service";
+import { GdriveSettingsService } from "./services/gdrive-settings.service";
 import { SetGdriveDto } from "./dto/gdrive-settings.dto";
 import { SetSettingDto } from "./dto/setting.dto";
 import { SetSshKeyDto } from "./dto/ssh-key.dto";
@@ -29,7 +32,12 @@ import { TestWebhookDto } from "./dto/test-webhook.dto";
 @UseGuards(AuthGuard("jwt"), RolesGuard)
 @Roles(ROLES.ADMIN)
 export class SettingsController {
-  constructor(private readonly svc: SettingsService) {}
+  constructor(
+    private readonly svc: SettingsService,
+    private readonly billing: BillingSettingsService,
+    private readonly cloudflare: CloudflareSettingsService,
+    private readonly gdrive: GdriveSettingsService,
+  ) {}
 
   /** Returns all non-sensitive settings as a key:value map. */
   @Get() getAll() {
@@ -38,14 +46,14 @@ export class SettingsController {
 
   @Get("public/billing")
   @Roles(ROLES.MANAGER)
-  getBillingSettings() {
-    return this.svc.getBillingSettings();
+  getBillingSettings(): Promise<BillingSettingsResponse> {
+    return this.billing.getBillingSettings();
   }
 
   @Put("billing")
   @HttpCode(HttpStatus.NO_CONTENT)
   async setBillingSettings(@Body() dto: SetBillingSettingsDto) {
-    await this.svc.setBillingSettings(dto);
+    await this.billing.setBillingSettings(dto);
   }
 
   // ── Global SSH Key ──────────────────────────────────────────────────────
@@ -71,69 +79,68 @@ export class SettingsController {
   // ── Google Drive (rclone) ───────────────────────────────────────────────
 
   /** Returns { configured: boolean }. */
-  @Get("gdrive") async getGdrive() {
-    const configured = await this.svc.hasEncrypted("rclone_gdrive_config");
-    return { configured };
+  @Get("gdrive") async getGdrive(): Promise<GdriveConfigResponse> {
+    return this.gdrive.getGdriveConfig();
   }
 
   /** Store Google Drive OAuth token. */
   @Put("gdrive") @HttpCode(HttpStatus.NO_CONTENT) async setGdrive(
     @Body() dto: SetGdriveDto,
   ) {
-    await this.svc.setGdrive(dto.token);
+    await this.gdrive.setGdrive(dto.token);
   }
 
   /** Remove Google Drive configuration. */
   @Delete("gdrive") @HttpCode(HttpStatus.NO_CONTENT) async deleteGdrive() {
-    await this.svc.delete("rclone_gdrive_config");
+    await this.gdrive.deleteGdrive();
   }
 
   /** Test Google Drive connection. */
   @Post("gdrive/test") async testGdrive() {
-    return this.svc.testGdrive();
+    return this.gdrive.testGdrive();
   }
 
   // ── Cloudflare ──────────────────────────────────────────────────────────
 
-  @Get("cloudflare") async getCloudflare() {
-    return this.svc.getCloudflareConfig();
+  @Get("cloudflare") async getCloudflare(): Promise<CloudflareConfigResponse> {
+    return this.cloudflare.getCloudflareConfig();
   }
 
   @Put("cloudflare") @HttpCode(HttpStatus.NO_CONTENT) async setCloudflare(
     @Body() dto: SetCloudflareSettingsDto,
   ) {
-    await this.svc.setCloudflareConfig(dto);
+    await this.cloudflare.setCloudflareConfig(dto);
   }
 
   @Delete("cloudflare")
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteCloudflare() {
-    await this.svc.deleteCloudflareConfig();
+    await this.cloudflare.deleteCloudflareConfig();
   }
 
   @Post("cloudflare/test") async testCloudflare() {
-    return this.svc.testCloudflare();
+    return this.cloudflare.testCloudflare();
   }
 
   @Get("cloudflare/dns-records") async listCloudflareDnsRecords() {
-    return this.svc.listCloudflareDnsRecords();
+    return this.cloudflare.listCloudflareDnsRecords();
   }
 
   @Put("cloudflare/dns-records/:recordId") async updateCloudflareDnsRecord(
     @Param("recordId") recordId: string,
     @Body() dto: UpdateCloudflareDnsRecordDto,
   ) {
-    return this.svc.updateCloudflareDnsRecord(recordId, dto);
+    return this.cloudflare.updateCloudflareDnsRecord(recordId, dto);
   }
 
   @Post("cloudflare/cache/purge") async purgeCloudflareCache() {
-    return this.svc.purgeCloudflareCache();
+    return this.cloudflare.purgeCloudflareCache();
   }
 
   @Put("cloudflare/development-mode") async setCloudflareDevelopmentMode(
     @Body("enabled") enabled: boolean,
   ) {
-    return this.svc.setCloudflareDevelopmentMode(enabled);
+    return this.cloudflare.setCloudflareDevelopmentMode(enabled);
   }
 
   // ── System Backup Folder ID ─────────────────────────────────────────────

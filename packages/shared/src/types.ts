@@ -424,3 +424,34 @@ export const PaginationQuerySchema = z.object({
   search: z.string().optional(),
 });
 export type PaginationQuery = z.infer<typeof PaginationQuerySchema>;
+
+// ─── Settings Response Types ──────────────────────────────────────────────────
+
+export const BillingSettingsResponseSchema = z.object({
+  currency_code: z.string(),
+  currency_locale: z.string(),
+});
+export type BillingSettingsResponse = z.infer<typeof BillingSettingsResponseSchema>;
+
+export const CloudflareConfigResponseSchema = z.object({
+  configured: z.boolean(),
+  zone_id: z.string().nullable(),
+  zone_name: z.string().nullable(),
+});
+export type CloudflareConfigResponse = z.infer<typeof CloudflareConfigResponseSchema>;
+
+export const GdriveConfigResponseSchema = z.object({
+  configured: z.boolean(),
+});
+export type GdriveConfigResponse = z.infer<typeof GdriveConfigResponseSchema>;
+
+export interface WpOrgSearchResult {
+  name: string;
+  slug: string;
+  version: string;
+  author: string;
+  short_description: string;
+  homepage: string;
+}
+
+
