@@ -15,6 +15,32 @@ import {
   WpCliBuilder,
 } from "../../utils/processor-utils";
 
+export function parseWpVersion(stdout: string): string {
+  const versionLines = stdout.trim().split("\n").map((l) => l.trim());
+  const matched = versionLines.find((l) =>
+    /^\d+\.\d+(?:\.\d+)?(?:-[a-zA-Z0-9.-]+)?$/.test(l),
+  );
+  return matched || versionLines[versionLines.length - 1] || "";
+}
+
+export function parseWpUpdatesJson(stdout: string): unknown[] {
+  const stdoutTrimmed = stdout.trim();
+  const jsonStartIndex = stdoutTrimmed.indexOf("[");
+  const jsonEndIndex = stdoutTrimmed.lastIndexOf("]");
+  if (
+    jsonStartIndex !== -1 &&
+    jsonEndIndex !== -1 &&
+    jsonEndIndex > jsonStartIndex
+  ) {
+    const jsonContent = stdoutTrimmed.substring(
+      jsonStartIndex,
+      jsonEndIndex + 1,
+    );
+    return JSON.parse(jsonContent) as unknown[];
+  }
+  return JSON.parse(stdoutTrimmed) as unknown[];
+}
+
 export interface WpFixActionPayload {
   environmentId: number;
   jobExecutionId: number;
@@ -412,7 +438,7 @@ export class WpActionsProcessor extends WorkerHost {
           `wp core version failed (exit ${versionResult.code}): ${versionResult.stderr}`,
         );
       }
-      const currentVersion = versionResult.stdout.trim();
+      const currentVersion = parseWpVersion(versionResult.stdout);
       const checkResult = await executor.execute(
         wpCli.buildCommand("core check-update --format=json --skip-plugins"),
         { timeout: 30_000 },
@@ -424,7 +450,7 @@ export class WpActionsProcessor extends WorkerHost {
       }
       let updates: unknown[] = [];
       try {
-        updates = JSON.parse(checkResult.stdout.trim()) as unknown[];
+        updates = parseWpUpdatesJson(checkResult.stdout) as unknown[];
       } catch {
         updates = [];
       }
@@ -506,7 +532,7 @@ export class WpActionsProcessor extends WorkerHost {
           `wp core version failed (exit ${versionResult.code}): ${versionResult.stderr}`,
         );
       }
-      const newVersion = versionResult.stdout.trim();
+      const newVersion = parseWpVersion(versionResult.stdout);
       const result = {
         updated: true,
         new_version: newVersion,
