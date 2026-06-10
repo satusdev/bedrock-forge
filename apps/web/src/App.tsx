@@ -99,6 +99,9 @@ const InvoiceDetailPage = lazy(() =>
 const TagsPage = lazy(() =>
   import("@/pages/TagsPage").then((m) => ({ default: m.TagsPage })),
 );
+const MaintenanceWindowsPage = lazy(() =>
+  import("@/pages/MaintenanceWindowsPage").then((m) => ({ default: m.MaintenanceWindowsPage })),
+);
 const NotFoundPage = lazy(() =>
   import("@/pages/NotFoundPage").then((m) => ({ default: m.NotFoundPage })),
 );
@@ -385,6 +388,14 @@ export default function App() {
                 element={
                   <ManagerRoute>
                     <SecurityPage />
+                  </ManagerRoute>
+                }
+              />
+              <Route
+                path="maintenance-windows"
+                element={
+                  <ManagerRoute>
+                    <MaintenanceWindowsPage />
                   </ManagerRoute>
                 }
               />

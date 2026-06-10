@@ -36,6 +36,9 @@ source .env.deploy
 CORS_ORIGIN="$DOMAIN"
 REMOTE_CORS_ORIGIN=$(printf '%q' "$CORS_ORIGIN")
 
+# Build customization
+INSTALL_CHROMIUM="${INSTALL_CHROMIUM:-false}"
+
 # ── Image tag (defaults to git short-sha for reproducibility) ─────────────────
 IMAGE_TAG="${IMAGE_TAG:-$(git rev-parse --short HEAD 2>/dev/null || echo "latest")}"
 FORGE_IMAGE="bedrock-forge/forge:${IMAGE_TAG}"
@@ -133,6 +136,7 @@ info "Building forge image → ${FORGE_IMAGE}"
 # shellcheck disable=SC2086
 docker build \
   ${NO_CACHE} \
+  --build-arg INSTALL_CHROMIUM="${INSTALL_CHROMIUM}" \
   --target runtime \
   --tag "${FORGE_IMAGE}" \
   --tag "bedrock-forge/forge:latest" \

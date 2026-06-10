@@ -28,11 +28,15 @@ export function LoginPage() {
   const { setAccessToken, setUser } = useAuthStore();
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [mfaRequired, setMfaRequired] = useState(false);
+  const [mfaCode, setMfaCode] = useState("");
+  const [verifyingMfa, setVerifyingMfa] = useState(false);
 
   const {
     register,
     handleSubmit,
     setValue,
+    getValues,
     formState: { errors, isSubmitting },
   } = useForm<FormData>({ resolver: zodResolver(schema) });
 
@@ -47,14 +51,45 @@ export function LoginPage() {
     setError("");
     try {
       const res = await api.post<{
+        mfaRequired?: boolean;
+        accessToken?: string;
+        user?: { id: number; email: string; name: string; roles: string[] };
+      }>("/auth/login", data);
+      if (res.mfaRequired) {
+        setMfaRequired(true);
+        return;
+      }
+      if (res.accessToken && res.user) {
+        setAccessToken(res.accessToken);
+        setUser(res.user);
+        navigate("/dashboard");
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Invalid credentials");
+    }
+  };
+
+  const onMfaSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    if (!/^\d{6}$/.test(mfaCode)) {
+      setError("MFA code must be exactly 6 digits");
+      return;
+    }
+    setVerifyingMfa(true);
+    try {
+      const data = getValues();
+      const res = await api.post<{
         accessToken: string;
         user: { id: number; email: string; name: string; roles: string[] };
-      }>("/auth/login", data);
+      }>("/auth/login", { ...data, code: mfaCode });
       setAccessToken(res.accessToken);
       setUser(res.user);
       navigate("/dashboard");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Invalid credentials");
+      setError(err instanceof Error ? err.message : "Invalid MFA code");
+    } finally {
+      setVerifyingMfa(false);
     }
   };
 
@@ -74,92 +109,148 @@ export function LoginPage() {
 
         <Card className="shadow-md">
           <CardHeader className="pb-4">
-            <CardTitle className="text-lg">Sign in</CardTitle>
+            <CardTitle className="text-lg">
+              {mfaRequired ? "Two-Factor Authentication" : "Sign in"}
+            </CardTitle>
             <CardDescription>
-              Enter your credentials to access the dashboard
+              {mfaRequired
+                ? "Enter the 6-digit verification code from your authenticator app"
+                : "Enter your credentials to access the dashboard"}
             </CardDescription>
           </CardHeader>
 
           <CardContent>
-            {import.meta.env.DEV && (
-              <button
-                type="button"
-                onClick={fillDevCredentials}
-                className="mb-4 w-full flex items-center justify-center gap-2 rounded-md border border-dashed border-amber-400 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 hover:bg-amber-100 transition-colors dark:border-amber-500 dark:bg-amber-950/30 dark:text-amber-400 dark:hover:bg-amber-950/50"
-              >
-                <Zap className="h-3.5 w-3.5" />
-                Fill seed credentials
-              </button>
-            )}
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  {...register("email")}
-                  type="email"
-                  placeholder="admin@example.com"
-                  autoComplete="email"
-                  autoFocus
-                />
-                {errors.email && (
-                  <p className="text-destructive text-xs">
-                    {errors.email.message}
-                  </p>
-                )}
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="password">Password</Label>
-                <div className="relative">
+            {mfaRequired ? (
+              <form onSubmit={onMfaSubmit} className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="mfaCode">Verification Code</Label>
                   <Input
-                    id="password"
-                    {...register("password")}
-                    type={showPassword ? "text" : "password"}
-                    placeholder="••••••••"
-                    autoComplete="current-password"
-                    className="pr-10"
+                    id="mfaCode"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={6}
+                    placeholder="000000"
+                    value={mfaCode}
+                    onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, ""))}
+                    autoFocus
                   />
+                </div>
+
+                {error && (
+                  <div className="rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2">
+                    <p className="text-destructive text-sm">{error}</p>
+                  </div>
+                )}
+
+                <Button type="submit" className="w-full" disabled={verifyingMfa}>
+                  {verifyingMfa ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Verifying…
+                    </>
+                  ) : (
+                    "Verify & Sign in"
+                  )}
+                </Button>
+
+                <div className="text-center">
                   <button
                     type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                    tabIndex={-1}
+                    onClick={() => {
+                      setMfaRequired(false);
+                      setMfaCode("");
+                      setError("");
+                    }}
+                    className="text-xs text-muted-foreground hover:text-foreground underline transition-colors"
                   >
-                    {showPassword ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
-                    <span className="sr-only">
-                      {showPassword ? "Hide password" : "Show password"}
-                    </span>
+                    Back to login
                   </button>
                 </div>
-                {errors.password && (
-                  <p className="text-destructive text-xs">
-                    {errors.password.message}
-                  </p>
+              </form>
+            ) : (
+              <>
+                {import.meta.env.DEV && (
+                  <button
+                    type="button"
+                    onClick={fillDevCredentials}
+                    className="mb-4 w-full flex items-center justify-center gap-2 rounded-md border border-dashed border-amber-400 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 hover:bg-amber-100 transition-colors dark:border-amber-500 dark:bg-amber-950/30 dark:text-amber-400 dark:hover:bg-amber-950/50"
+                  >
+                    <Zap className="h-3.5 w-3.5" />
+                    Fill seed credentials
+                  </button>
                 )}
-              </div>
+                <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="email">Email</Label>
+                    <Input
+                      id="email"
+                      {...register("email")}
+                      type="email"
+                      placeholder="admin@example.com"
+                      autoComplete="email"
+                      autoFocus
+                    />
+                    {errors.email && (
+                      <p className="text-destructive text-xs">
+                        {errors.email.message}
+                      </p>
+                    )}
+                  </div>
 
-              {error && (
-                <div className="rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2">
-                  <p className="text-destructive text-sm">{error}</p>
-                </div>
-              )}
+                  <div className="space-y-1.5">
+                    <Label htmlFor="password">Password</Label>
+                    <div className="relative">
+                      <Input
+                        id="password"
+                        {...register("password")}
+                        type={showPassword ? "text" : "password"}
+                        placeholder="••••••••"
+                        autoComplete="current-password"
+                        className="pr-10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((v) => !v)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                        tabIndex={-1}
+                      >
+                        {showPassword ? (
+                          <EyeOff className="h-4 w-4" />
+                        ) : (
+                          <Eye className="h-4 w-4" />
+                        )}
+                        <span className="sr-only">
+                          {showPassword ? "Hide password" : "Show password"}
+                        </span>
+                      </button>
+                    </div>
+                    {errors.password && (
+                      <p className="text-destructive text-xs">
+                        {errors.password.message}
+                      </p>
+                    )}
+                  </div>
 
-              <Button type="submit" className="w-full" disabled={isSubmitting}>
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Signing in…
-                  </>
-                ) : (
-                  "Sign in"
-                )}
-              </Button>
-            </form>
+                  {error && (
+                    <div className="rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2">
+                      <p className="text-destructive text-sm">{error}</p>
+                    </div>
+                  )}
+
+                  <Button type="submit" className="w-full" disabled={isSubmitting}>
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Signing in…
+                      </>
+                    ) : (
+                      "Sign in"
+                    )}
+                  </Button>
+                </form>
+              </>
+            )}
           </CardContent>
         </Card>
       </div>

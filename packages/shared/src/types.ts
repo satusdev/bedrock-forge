@@ -19,7 +19,7 @@ export interface WpDbCredentials {
 
 export const BackupCreatePayloadSchema = z.object({
   environmentId: z.number().int().positive(),
-  type: z.enum(["full", "db_only", "files_only"]),
+  type: z.enum(["full", "db_only", "files_only", "incremental"]),
   jobExecutionId: z.number().int().positive(),
   backupId: z.number().int().positive(),
 });
@@ -42,7 +42,7 @@ export type BackupDeleteFilePayload = z.infer<
 export const BackupScheduledPayloadSchema = z.object({
   scheduleId: z.number().int().positive(),
   environmentId: z.number().int().positive(),
-  type: z.enum(["full", "db_only", "files_only"]),
+  type: z.enum(["full", "db_only", "files_only", "incremental"]),
 });
 export type BackupScheduledPayload = z.infer<
   typeof BackupScheduledPayloadSchema
@@ -55,7 +55,7 @@ export type BackupFrequency = "daily" | "weekly" | "monthly";
 export interface BackupSchedule {
   id: number;
   environment_id: number;
-  type: "full" | "db_only" | "files_only";
+  type: "full" | "db_only" | "files_only" | "incremental";
   frequency: BackupFrequency;
   hour: number;
   minute: number;

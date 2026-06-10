@@ -1,8 +1,8 @@
-# ─── Stage 1: dependencies ──────────────────────────────────────────────────
+# ─── Stage 1: dependencies ───────────────────────────────────────────────────
 # Pin the exact pnpm version so corepack doesn't hit the network every build.
 FROM node:22-alpine AS deps
-ENV PNPM_HOME=/pnpm \
-    PATH="$PNPM_HOME:$PATH"
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
 WORKDIR /app
 
@@ -16,7 +16,8 @@ COPY packages/remote-executor/package.json ./packages/remote-executor/
 COPY prisma/schema.prisma ./prisma/
 COPY prisma.config.js ./
 
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+    pnpm install --frozen-lockfile
 
 # ─── Stage 2: builder ────────────────────────────────────────────────────────
 FROM deps AS builder
@@ -48,19 +49,31 @@ RUN node_modules/.bin/tsc \
       --outDir prisma \
       prisma/seed.ts
 
-# Prune dev dependencies — drops ~300 MB before we copy to runtime stage
-RUN pnpm prune --prod
+# Prune dev dependencies: remove node_modules and do a clean production-only
+# install via the BuildKit cache. This fully purges the local virtual store of
+# all devDependencies (TypeScript, Jest, webpack, etc.) because pnpm installs
+# into its content-addressed store at /pnpm/store, so a fresh --prod install
+# will only link the production subset. pnpm prune cannot do this because the
+# .pnpm virtual store entries remain even after prune.
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+    rm -rf node_modules && \
+    pnpm install --prod --frozen-lockfile && \
+    pnpm exec prisma generate
 
-# ─── Stage 3: runtime (API + Worker) ────────────────────────────────────────
+# ─── Stage 3: runtime (API + Worker) ─────────────────────────────────────────
 # Do NOT install corepack/pnpm here — the runtime only needs Node.js + the
 # compiled dist files and the pruned node_modules from the builder stage.
 FROM node:22-alpine AS runtime
 
+ARG INSTALL_CHROMIUM=false
+
 # rclone  — Google Drive backup uploads
 # whois   — domain WHOIS lookups
 # postgresql-client — pg_dump for Forge self-backup
-# chromium — local Lighthouse audits (no PageSpeed API quota)
-RUN apk add --no-cache rclone whois postgresql-client chromium && \
+# chromium — local Lighthouse audits (disabled by default to keep the image small;
+#            set INSTALL_CHROMIUM=true in .env.deploy to enable local Lighthouse)
+RUN apk add --no-cache rclone whois postgresql-client && \
+    if [ "$INSTALL_CHROMIUM" = "true" ]; then apk add --no-cache chromium; fi && \
     mkdir -p /home/node/.config/rclone && \
     chown -R node:node /home/node/.config && \
     mkdir -p /tmp/forge-backups /tmp/forge-system-backups && \
@@ -69,14 +82,14 @@ RUN apk add --no-cache rclone whois postgresql-client chromium && \
 WORKDIR /app
 USER node
 
-# Root node_modules (shared tooling: prisma CLI, etc.)
+# Root node_modules (shared tooling: prisma CLI for migrations, etc.)
 COPY --from=builder --chown=node:node /app/node_modules ./node_modules
 
 # Compiled application bundles
 COPY --from=builder --chown=node:node /app/apps/api/dist    ./apps/api/dist
 COPY --from=builder --chown=node:node /app/apps/worker/dist ./apps/worker/dist
 
-# Per-app node_modules (only what survived pnpm prune --prod)
+# Per-app node_modules (only what survived the production install)
 COPY --from=builder --chown=node:node /app/apps/api/node_modules    ./apps/api/node_modules
 COPY --from=builder --chown=node:node /app/apps/worker/node_modules ./apps/worker/node_modules
 
@@ -88,7 +101,7 @@ COPY --from=builder --chown=node:node /app/packages/remote-executor/package.json
 COPY --from=builder --chown=node:node /app/packages/remote-executor/node_modules ./packages/remote-executor/node_modules
 
 # Prisma — schema + compiled seed + generated client (already in node_modules)
-COPY --from=builder --chown=node:node /app/prisma ./prisma
+COPY --from=builder --chown=node:node /app/prisma        ./prisma
 COPY --from=builder --chown=node:node /app/prisma.config.js ./prisma.config.js
 
 # Worker shell scripts

@@ -16,3 +16,5 @@ coverage/
 .vscode/
 .idea/
 tasks/
+scratch/*
+temp.md
