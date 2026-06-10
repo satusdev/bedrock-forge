@@ -11,7 +11,10 @@ import {
   HttpCode,
   HttpStatus,
   UseGuards,
+  Res,
+  StreamableFile,
 } from "@nestjs/common";
+import { Response } from "express";
 import { AuthGuard } from "@nestjs/passport";
 import { InvoicesService } from "./invoices.service";
 import {
@@ -39,6 +42,21 @@ export class InvoicesController {
   @Get(":id")
   findOne(@Param("id", ParseIntPipe) id: number) {
     return this.invoicesService.findById(id);
+  }
+
+  @Get(":id/pdf")
+  async getPdf(
+    @Param("id", ParseIntPipe) id: number,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const pdfBuffer = await this.invoicesService.generatePdf(id);
+    const invoice: any = await this.invoicesService.findById(id);
+    res.set({
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="invoice-${invoice.invoice_number}.pdf"`,
+      "Content-Length": pdfBuffer.length.toString(),
+    });
+    return new StreamableFile(pdfBuffer);
   }
 
   @Post("generate")

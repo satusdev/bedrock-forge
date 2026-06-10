@@ -11,7 +11,9 @@ import {
   ChevronRight,
   Package,
   Send,
+  Download,
 } from "lucide-react";
+import { useAuthStore } from "@/store/auth.store";
 import { api } from "@/lib/api-client";
 import { toast } from "@/hooks/use-toast";
 import { useBillingSettings } from "@/hooks/useBillingSettings";
@@ -645,6 +647,33 @@ export function InvoicesPage() {
   const [generateOpen, setGenerateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Invoice | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [downloadingIds, setDownloadingIds] = useState<Record<number, boolean>>({});
+
+  const downloadInvoicePdf = async (id: number, invoiceNumber: string) => {
+    setDownloadingIds((prev) => ({ ...prev, [id]: true }));
+    try {
+      const { accessToken } = useAuthStore.getState();
+      const res = await fetch(`/api/invoices/${id}/pdf`, {
+        headers: {
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        },
+      });
+      if (!res.ok) throw new Error("Failed to download PDF");
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `invoice-${invoiceNumber}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      toast({ title: "Failed to download PDF", variant: "destructive" });
+    } finally {
+      setDownloadingIds((prev) => ({ ...prev, [id]: false }));
+    }
+  };
 
   const params = new URLSearchParams({ page: String(page), limit: "20" });
   if (statusFilter) params.set("status", statusFilter);
@@ -909,6 +938,13 @@ export function InvoicesPage() {
                   <FileText className="h-4 w-4 mr-2" />
                   View Details
                 </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => downloadInvoicePdf(inv.id, inv.invoice_number)}
+                disabled={downloadingIds[inv.id]}
+              >
+                <Download className="h-4 w-4 mr-2" />
+                {downloadingIds[inv.id] ? "Downloading..." : "Download PDF"}
               </DropdownMenuItem>
               {inv.status === "draft" && (
                 <DropdownMenuItem

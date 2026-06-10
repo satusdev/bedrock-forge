@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -10,7 +11,9 @@ import {
   Calendar,
   User,
   FolderKanban,
+  Download,
 } from "lucide-react";
+import { useAuthStore } from "@/store/auth.store";
 import { api } from "@/lib/api-client";
 import { toast } from "@/hooks/use-toast";
 import { useBillingSettings } from "@/hooks/useBillingSettings";
@@ -103,6 +106,35 @@ export function InvoiceDetailPage() {
     queryFn: () => api.get(`/invoices/${id}`),
     enabled: !!id,
   });
+
+  const [downloading, setDownloading] = useState(false);
+
+  const downloadPdf = async () => {
+    if (!invoice) return;
+    setDownloading(true);
+    try {
+      const { accessToken } = useAuthStore.getState();
+      const res = await fetch(`/api/invoices/${id}/pdf`, {
+        headers: {
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        },
+      });
+      if (!res.ok) throw new Error("Failed to download PDF");
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `invoice-${invoice.invoice_number}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      toast({ title: "Failed to download PDF", variant: "destructive" });
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   const markPaid = useMutation({
     mutationFn: () => api.put(`/invoices/${id}/mark-paid`, {}),
@@ -219,6 +251,15 @@ export function InvoiceDetailPage() {
               Mark Paid
             </Button>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={downloadPdf}
+            disabled={downloading}
+          >
+            <Download className="h-4 w-4 mr-1.5" />
+            {downloading ? "Downloading..." : "Download PDF"}
+          </Button>
           <Button variant="outline" size="sm" onClick={() => window.print()}>
             <Printer className="h-4 w-4 mr-1.5" />
             Print

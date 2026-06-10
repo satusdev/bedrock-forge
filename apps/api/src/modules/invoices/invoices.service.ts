@@ -6,6 +6,8 @@ import {
   BadRequestException,
 } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
+import * as puppeteer from "puppeteer-core";
+import { existsSync } from "fs";
 import { InvoicesRepository } from "./invoices.repository";
 import { NotificationsService } from "../notifications/notifications.service";
 import {
@@ -82,6 +84,277 @@ export class InvoicesService {
     const inv = await this.repo.findById(id);
     if (!inv) throw new NotFoundException(`Invoice #${id} not found`);
     return this.serialise(inv);
+  }
+
+  async generatePdf(id: number): Promise<Buffer> {
+    const rawInv = await this.repo.findById(id);
+    if (!rawInv) throw new NotFoundException(`Invoice #${id} not found`);
+    const inv = this.serialise(rawInv);
+
+    const chromePath = process.env.LIGHTHOUSE_CHROME_PATH || 
+                       process.env.CHROME_PATH || 
+                       (existsSync('/usr/bin/google-chrome-stable') ? '/usr/bin/google-chrome-stable' : null) ||
+                       (existsSync('/usr/bin/google-chrome') ? '/usr/bin/google-chrome' : null) ||
+                       (existsSync('/usr/bin/chromium-browser') ? '/usr/bin/chromium-browser' : null) ||
+                       (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : null);
+
+    if (!chromePath) {
+      throw new Error('Chromium executable not found. Please install Chromium or set CHROME_PATH.');
+    }
+
+    const browser = await puppeteer.launch({
+      executablePath: chromePath,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+      headless: true,
+    });
+
+    try {
+      const page = await browser.newPage();
+      const html = this.buildInvoiceHtml(inv);
+      await page.setContent(html, { waitUntil: 'domcontentloaded' });
+      const pdf = await page.pdf({
+        format: 'A4',
+        printBackground: true,
+        margin: {
+          top: '20mm',
+          bottom: '20mm',
+          left: '20mm',
+          right: '20mm',
+        },
+      });
+      return Buffer.from(pdf);
+    } finally {
+      await browser.close();
+    }
+  }
+
+  private buildInvoiceHtml(inv: any): string {
+    const formatDate = (d: any) => {
+      if (!d) return '—';
+      const date = new Date(d);
+      return date.toISOString().slice(0, 10);
+    };
+
+    const client = inv.client || {};
+    const project = inv.project || {};
+
+    let hostingRow = '';
+    if (inv.hosting_package_snapshot && inv.hosting_amount > 0) {
+      hostingRow = `
+        <tr>
+          <td>
+            <strong>Hosting Package: ${inv.hosting_package_snapshot}</strong>
+            <div style="font-size: 12px; color: #6b7280; margin-top: 4px;">Monthly WordPress hosting plan.</div>
+          </td>
+          <td style="text-align: right; vertical-align: middle;">€${inv.hosting_amount.toFixed(2)}</td>
+        </tr>
+      `;
+    }
+
+    let supportRow = '';
+    if (inv.support_package_snapshot && inv.support_amount > 0) {
+      supportRow = `
+        <tr>
+          <td>
+            <strong>Support & Maintenance: ${inv.support_package_snapshot}</strong>
+            <div style="font-size: 12px; color: #6b7280; margin-top: 4px;">Updates, security scans, and operational support.</div>
+          </td>
+          <td style="text-align: right; vertical-align: middle;">€${inv.support_amount.toFixed(2)}</td>
+        </tr>
+      `;
+    }
+
+    const subtotal = inv.hosting_amount + inv.support_amount;
+    const total = inv.total_amount;
+
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Invoice ${inv.invoice_number}</title>
+  <style>
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      color: #1f2937;
+      margin: 0;
+      padding: 0;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .invoice-container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 40px;
+      border-bottom: 2px solid #f3f4f6;
+      padding-bottom: 20px;
+    }
+    .logo {
+      font-size: 22px;
+      font-weight: 700;
+      color: #4f46e5;
+      letter-spacing: -0.025em;
+    }
+    .status-badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .status-badge.status-paid { background-color: #ecfdf5; color: #065f46; }
+    .status-badge.status-sent { background-color: #eff6ff; color: #1e40af; }
+    .status-badge.status-overdue { background-color: #fef2f2; color: #991b1b; }
+    .status-badge.status-draft { background-color: #f3f4f6; color: #374151; }
+    .status-badge.status-cancelled { background-color: #f5f5f5; color: #555555; }
+    
+    .meta-grid {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 40px;
+      gap: 40px;
+    }
+    .meta-block {
+      flex: 1;
+    }
+    .meta-block h3 {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #6b7280;
+      margin: 0 0 8px 0;
+    }
+    .meta-block p {
+      margin: 0 0 4px 0;
+      font-size: 13px;
+    }
+    .table-container {
+      margin-bottom: 30px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }
+    th {
+      background-color: #f9fafb;
+      padding: 10px 14px;
+      font-weight: 600;
+      font-size: 11px;
+      text-transform: uppercase;
+      color: #4b5563;
+      border-bottom: 2px solid #e5e7eb;
+    }
+    td {
+      padding: 14px;
+      border-bottom: 1px solid #f3f4f6;
+    }
+    .totals {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 20px;
+    }
+    .totals-table {
+      width: 280px;
+    }
+    .totals-table td {
+      padding: 6px 12px;
+      border: none;
+    }
+    .totals-table tr.grand-total td {
+      font-weight: 700;
+      font-size: 15px;
+      color: #111827;
+      border-top: 2px solid #e5e7eb;
+      padding-top: 10px;
+    }
+    .notes-section {
+      margin-top: 50px;
+      border-top: 1px solid #e5e7eb;
+      padding-top: 20px;
+      font-size: 12px;
+      color: #6b7280;
+    }
+  </style>
+</head>
+<body>
+  <div class="invoice-container">
+    <div class="header">
+      <div>
+        <div class="logo">BEDROCK FORGE</div>
+        <div style="font-size: 11px; color: #6b7280; margin-top: 4px;">Automated WordPress Hosting & Maintenance Operations</div>
+      </div>
+      <div style="text-align: right;">
+        <span class="status-badge status-${inv.status}">${inv.status}</span>
+        <div style="margin-top: 8px;">
+          <strong style="font-size: 16px; color: #111827;">${inv.invoice_number}</strong>
+        </div>
+      </div>
+    </div>
+    
+    <div class="meta-grid">
+      <div class="meta-block">
+        <h3>Billed To</h3>
+        <p><strong>${client.name}</strong></p>
+        ${client.email ? `<p>${client.email}</p>` : ''}
+        ${client.phone ? `<p>${client.phone}</p>` : ''}
+      </div>
+      <div class="meta-block" style="text-align: right;">
+        <h3>Invoice Details</h3>
+        <p><strong>Date Issued:</strong> ${formatDate(inv.created_at)}</p>
+        <p><strong>Due Date:</strong> ${formatDate(inv.due_date)}</p>
+        <p><strong>Billing Period:</strong> ${formatDate(inv.period_start)} to ${formatDate(inv.period_end)}</p>
+        <p><strong>Project:</strong> ${project.name || '—'}</p>
+      </div>
+    </div>
+    
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>Description</th>
+            <th style="text-align: right; width: 120px;">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${hostingRow}
+          ${supportRow}
+        </tbody>
+      </table>
+    </div>
+    
+    <div class="totals">
+      <table class="totals-table">
+        <tbody>
+          <tr>
+            <td style="color: #6b7280;">Subtotal</td>
+            <td style="text-align: right;">€${subtotal.toFixed(2)}</td>
+          </tr>
+          <tr class="grand-total">
+            <td>Total Due</td>
+            <td style="text-align: right;">€${total.toFixed(2)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    
+    ${inv.notes ? `
+    <div class="notes-section">
+      <h3 style="font-size: 11px; text-transform: uppercase; margin: 0 0 6px 0; color: #374151;">Notes</h3>
+      <p style="margin: 0; line-height: 1.5;">${inv.notes}</p>
+    </div>
+    ` : ''}
+  </div>
+</body>
+</html>
+    `;
   }
 
   async generate(dto: GenerateInvoiceDto) {
