@@ -15,6 +15,7 @@ import {
   Terminal,
   Cpu,
   MemoryStick,
+  History,
 } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { toast } from "@/hooks/use-toast";
@@ -24,6 +25,8 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ServerFormDialog } from "./ServersPage";
+import { ResourceActivityFeed } from "@/components/ResourceActivityFeed";
+
 
 interface Environment {
   id: number;
@@ -338,7 +341,7 @@ function EnvironmentsTab({ environments }: { environments: Environment[] }) {
             {envs.map((env) => (
               <div
                 key={env.id}
-                className="px-4 py-3 flex items-center justify-between gap-4"
+                className="px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4"
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <Badge
@@ -360,7 +363,7 @@ function EnvironmentsTab({ environments }: { environments: Environment[] }) {
                     </a>
                   )}
                 </div>
-                <code className="text-xs text-muted-foreground font-mono truncate max-w-xs">
+                <code className="text-xs text-muted-foreground font-mono truncate max-w-none sm:max-w-xs">
                   {env.root_path}
                 </code>
               </div>
@@ -579,6 +582,10 @@ export function ServerDetailPage() {
               </span>
             )}
           </TabsTrigger>
+          <TabsTrigger value="activity">
+            <History className="h-3.5 w-3.5 mr-1.5" />
+            Activity
+          </TabsTrigger>
         </TabsList>
 
         <div className="mt-4">
@@ -587,6 +594,12 @@ export function ServerDetailPage() {
           </TabsContent>
           <TabsContent value="environments">
             <EnvironmentsTab environments={server.environments ?? []} />
+          </TabsContent>
+          <TabsContent value="activity">
+            <div className="border rounded-lg p-4">
+              <h3 className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wide">Server Activity Log</h3>
+              <ResourceActivityFeed resourceType="server" resourceId={server.id} />
+            </div>
           </TabsContent>
         </div>
       </Tabs>

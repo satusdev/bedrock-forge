@@ -10,6 +10,7 @@ export class AuditLogsService {
       user_id?: number;
       action?: string;
       resource_type?: string;
+      resource_id?: number;
       date_from?: Date;
       date_to?: Date;
     },
@@ -25,6 +26,7 @@ export class AuditLogsService {
       totalPages: Math.ceil(total / limit),
     };
   }
+
 
   findOne(id: number) {
     return this.repo.findById(id);

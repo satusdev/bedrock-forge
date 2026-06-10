@@ -37,6 +37,12 @@ export class QueryAuditLogDto {
   resource_type?: string;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  resource_id?: number;
+
+  @IsOptional()
   @IsDateString()
   date_from?: string;
 
@@ -44,3 +50,4 @@ export class QueryAuditLogDto {
   @IsDateString()
   date_to?: string;
 }
+

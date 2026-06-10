@@ -30,6 +30,7 @@ export class AuditLogsController {
         user_id: query.user_id,
         action: query.action,
         resource_type: query.resource_type,
+        resource_id: query.resource_id,
         date_from: query.date_from ? new Date(query.date_from) : undefined,
         date_to: query.date_to ? new Date(query.date_to) : undefined,
       },

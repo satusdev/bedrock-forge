@@ -5,9 +5,11 @@ interface AuditLogFilter {
   user_id?: number;
   action?: string;
   resource_type?: string;
+  resource_id?: number;
   date_from?: Date;
   date_to?: Date;
 }
+
 
 @Injectable()
 export class AuditLogsRepository {
@@ -20,6 +22,7 @@ export class AuditLogsRepository {
         action: { contains: filter.action, mode: "insensitive" as const },
       }),
       ...(filter.resource_type && { resource_type: filter.resource_type }),
+      ...(filter.resource_id && { resource_id: BigInt(filter.resource_id) }),
       ...(filter.date_from || filter.date_to
         ? {
             created_at: {
@@ -29,6 +32,7 @@ export class AuditLogsRepository {
           }
         : {}),
     };
+
 
     const [data, total] = await Promise.all([
       this.prisma.auditLog.findMany({

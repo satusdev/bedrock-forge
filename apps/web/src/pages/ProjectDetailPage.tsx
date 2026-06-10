@@ -18,6 +18,7 @@ import {
   Palette,
   Cpu,
   FileCog,
+  ListChecks,
 } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
@@ -35,6 +36,8 @@ import { ThemesTab } from "./project-detail/ThemesTab";
 import { WpCoreTab } from "./project-detail/WpCoreTab";
 import { RemoteOpsTab } from "./project-detail/RemoteOpsTab";
 import { ProjectFormDialog } from "./ProjectsPage";
+import { ResourceActivityFeed } from "@/components/ResourceActivityFeed";
+
 
 interface Server {
   id: number;
@@ -389,7 +392,15 @@ export function ProjectDetailPage() {
             <Cpu className="h-3.5 w-3.5 opacity-70" />
             WP Core
           </TabsTrigger>
+          <TabsTrigger
+            value="activity"
+            className="gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+          >
+            <ListChecks className="h-3.5 w-3.5 opacity-70" />
+            Activity
+          </TabsTrigger>
         </TabsList>
+
 
         <TabsContent value="environments">
           {activatedTabs.has("environments") && (
@@ -454,7 +465,15 @@ export function ProjectDetailPage() {
             />
           )}
         </TabsContent>
+
+        <TabsContent value="activity">
+          <div className="border rounded-xl p-5">
+            <h3 className="text-sm font-semibold mb-4 text-muted-foreground uppercase tracking-wide">Project Activity Log</h3>
+            <ResourceActivityFeed resourceType="project" resourceId={projectId} />
+          </div>
+        </TabsContent>
       </Tabs>
+
 
       <ProjectFormDialog
         open={editOpen}

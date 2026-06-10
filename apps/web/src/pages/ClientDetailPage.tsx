@@ -9,12 +9,15 @@ import {
   Tag,
   Receipt,
   Pencil,
+  ListChecks,
 } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { ClientFormDialog } from "./ClientsPage";
+import { ResourceActivityFeed } from "@/components/ResourceActivityFeed";
+
 
 interface TagItem {
   id: number;
@@ -293,7 +296,23 @@ export function ClientDetailPage() {
         )}
       </div>
 
+      {/* Activity Feed */}
+      <div>
+        <h2 className="font-semibold flex items-center gap-2 mb-3">
+          <ListChecks className="h-4 w-4" />
+          Activity
+        </h2>
+        <div className="border rounded-lg p-4">
+          <ResourceActivityFeed
+            resourceType="client"
+            resourceId={client.id}
+            limit={15}
+          />
+        </div>
+      </div>
+
       {editOpen && (
+
         <ClientFormDialog
           open={editOpen}
           onOpenChange={setEditOpen}
