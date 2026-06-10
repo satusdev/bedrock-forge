@@ -675,6 +675,37 @@ export class MonitorProcessor extends WorkerHost {
     payload: Record<string, unknown>,
   ) {
     try {
+      if (payload.environmentId) {
+        const envId = BigInt(payload.environmentId as number);
+        const now = new Date();
+        const activeMaintenance = await this.prisma.maintenanceWindow.count({
+          where: {
+            OR: [
+              {
+                resource_type: "environment",
+                resource_id: envId,
+                starts_at: { lte: now },
+                ends_at: { gte: now },
+              },
+              {
+                resource_type: "server",
+                server: {
+                  environments: {
+                    some: { id: envId }
+                  }
+                },
+                starts_at: { lte: now },
+                ends_at: { gte: now },
+              }
+            ]
+          }
+        });
+        if (activeMaintenance > 0) {
+          this.logger.log(`Suppressing notification ${eventType} for environment ${payload.environmentId} due to active maintenance window.`);
+          return;
+        }
+      }
+
       await this.notificationsQueue.add(
         JOB_TYPES.NOTIFICATION_SEND,
         { eventType, payload },
