@@ -16,8 +16,10 @@ model User {
   id            BigInt    @id @default(autoincrement())
   email         String    @unique
   name          String
-  password_hash String
-  created_at    DateTime  @default(now()) @db.Timestamptz()
+  password_hash         String
+  mfa_enabled           Boolean   @default(false)
+  totp_secret_encrypted String?
+  created_at            DateTime  @default(now()) @db.Timestamptz()
   updated_at    DateTime  @updatedAt @db.Timestamptz()
 
   user_roles          UserRole[]
@@ -26,6 +28,7 @@ model User {
   notifications       UserNotification[]
   finding_acks        SecurityFindingAck[]
   resource_notes      ResourceNote[]
+  maintenance_windows MaintenanceWindow[]
 
   @@map("users")
 }
@@ -174,6 +177,7 @@ model Server {
   ssh_user                String   @default("root")
   ssh_private_key_encrypted String // AES-256-GCM encrypted
   provider                String?  // e.g. "hetzner", "digitalocean", "vultr"
+  cost_monthly            Decimal? @db.Decimal(10, 2) // Monthly server cost for margin tracking
   status                  ServerStatus @default(unknown)
   cyberpanel_login        Json?    // Encrypted JSON: { url, username, password }
   cyberpanel_version      String?  // Detected from /usr/local/CyberCP/version.txt via SSH
@@ -186,6 +190,7 @@ model Server {
   security_scan_schedules  SecurityScanSchedule[]
   security_alert_setting   ServerSecurityAlertSetting?
   finding_acks             SecurityFindingAck[]
+  maintenance_windows      MaintenanceWindow[]
 
   @@map("servers")
 }
@@ -237,6 +242,8 @@ model Environment {
   sql_protection_queries String[] @default([]) // SQL queries run on target after DB push/clone to protect/sanitize/filter data
   protected_post_types   String[] @default([]) // WP custom post types preserved on target during DB push/clone
   is_baseline       Boolean  @default(false) // marked as the canonical reference env for drift detection
+  is_multisite      Boolean  @default(false) // WordPress Multisite installation
+  multisite_url     String?  // Primary site URL used for WP-CLI --url flag on multisite
   created_at        DateTime @default(now()) @db.Timestamptz()
   updated_at        DateTime @updatedAt @db.Timestamptz()
 
@@ -257,6 +264,7 @@ model Environment {
   security_scan_schedules   SecurityScanSchedule?
   finding_acks              SecurityFindingAck[]
   lighthouse_audits         LighthouseAudit[]
+  maintenance_windows       MaintenanceWindow[]
 
   @@index([project_id])
   @@index([server_id])
@@ -318,6 +326,7 @@ enum BackupType {
   full
   db_only
   files_only
+  incremental
 }
 
 enum BackupStatus {
@@ -777,10 +786,12 @@ model Invoice {
 model NotificationChannel {
   id                    BigInt   @id @default(autoincrement())
   name                  String
-  type                  String   @default("slack") // extensible
+  type                  String   @default("slack") // extensible: slack | google_chat | webhook
   slack_bot_token_enc   String?  // AES-256-GCM encrypted bot token
   slack_channel_id      String?
   google_chat_webhook_url_enc String? // AES-256-GCM encrypted incoming webhook URL
+  webhook_url_enc       String?  // AES-256-GCM encrypted generic webhook URL
+  webhook_secret_enc    String?  // AES-256-GCM encrypted HMAC signing secret (optional)
   events                String[] // Array of NotificationEventType strings
   active                Boolean  @default(true)
   created_at            DateTime @default(now()) @db.Timestamptz()
@@ -966,4 +977,30 @@ model SecurityFindingAck {
   @@unique([scope_key, category, title])
   @@index([scope_key])
   @@map("security_finding_acks")
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// MAINTENANCE WINDOWS
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Suppresses monitor alerts and security alert polling during planned maintenance.
+model MaintenanceWindow {
+  id             BigInt    @id @default(autoincrement())
+  resource_type  String    // "server" | "environment" | "project"
+  resource_id    BigInt    // the ID of the server or environment or project
+  server_id      BigInt?   // set when resource_type = "server"
+  environment_id BigInt?   // set when resource_type = "environment"
+  reason         String?   @db.Text
+  starts_at      DateTime  @db.Timestamptz()
+  ends_at        DateTime  @db.Timestamptz()
+  created_by_id  BigInt?
+  created_at     DateTime  @default(now()) @db.Timestamptz()
+
+  created_by  User?        @relation(fields: [created_by_id], references: [id], onDelete: SetNull)
+  server      Server?      @relation(fields: [server_id], references: [id], onDelete: Cascade)
+  environment Environment? @relation(fields: [environment_id], references: [id], onDelete: Cascade)
+
+  @@index([resource_type, resource_id])
+  @@index([starts_at, ends_at])
+  @@map("maintenance_windows")
 }
