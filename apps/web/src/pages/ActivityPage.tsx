@@ -261,7 +261,7 @@ export function ActivityPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-2">
           <ClipboardList className="h-5 w-5 text-muted-foreground" />
           <h1 className="text-xl font-semibold">Activity Log</h1>
@@ -317,7 +317,7 @@ export function ActivityPage() {
       </div>
 
       {/* Table */}
-      <div className="border rounded-lg overflow-hidden">
+      <div className="border rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-muted/50">
             <tr>

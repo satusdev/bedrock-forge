@@ -32,6 +32,7 @@ import {
   FileBarChart,
   AlertTriangle,
   Tag,
+  Calendar,
 } from "lucide-react";
 
 interface NavItemDef {
@@ -70,6 +71,12 @@ const NAV_GROUPS: NavGroup[] = [
         to: "/security",
         label: "Security",
         icon: ShieldAlert,
+        minRole: "manager",
+      },
+      {
+        to: "/maintenance-windows",
+        label: "Maintenance",
+        icon: Calendar,
         minRole: "manager",
       },
       { to: "/activity", label: "Activity", icon: ClipboardList },
