@@ -13,6 +13,7 @@ import {
   ParseIntPipe,
   Res,
   UnauthorizedException,
+  BadRequestException,
 } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { Throttle } from "@nestjs/throttler";
@@ -40,16 +41,20 @@ export class AuthController {
     @Req() req: ExpressRequest,
     @Res({ passthrough: true }) res: ExpressResponse,
   ): Promise<any> {
-    const tokenPair = await this.authService.login(
+    const result = await this.authService.login(
       dto.email,
       dto.password,
+      dto.code,
       req.headers["user-agent"],
       req.ip,
     );
-    this.setRefreshCookie(res, tokenPair.refreshToken);
+    if ("mfaRequired" in result) {
+      return { mfaRequired: true };
+    }
+    this.setRefreshCookie(res, result.refreshToken);
     return {
-      accessToken: tokenPair.accessToken,
-      user: tokenPair.user,
+      accessToken: result.accessToken,
+      user: result.user,
     };
   }
 
@@ -130,6 +135,30 @@ export class AuthController {
     @Param("id", ParseIntPipe) sessionId: number,
   ) {
     await this.authService.revokeSession(user.id, sessionId);
+  }
+
+  @Post("mfa/setup")
+  @UseGuards(AuthGuard("jwt"))
+  async setupMfa(@CurrentUser() user: AuthenticatedUser) {
+    return this.authService.generateMfaSetup(user.id);
+  }
+
+  @Post("mfa/enable")
+  @UseGuards(AuthGuard("jwt"))
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async enableMfa(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body("code") code: string,
+  ) {
+    if (!code) throw new BadRequestException("MFA code is required");
+    await this.authService.enableMfa(user.id, code);
+  }
+
+  @Post("mfa/disable")
+  @UseGuards(AuthGuard("jwt"))
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async disableMfa(@CurrentUser() user: AuthenticatedUser) {
+    await this.authService.disableMfa(user.id);
   }
 
   private setRefreshCookie(res: ExpressResponse, refreshToken: string): void {

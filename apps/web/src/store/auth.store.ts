@@ -6,6 +6,7 @@ interface User {
   email: string;
   name: string;
   roles: string[];
+  mfa_enabled?: boolean;
 }
 
 interface AuthState {

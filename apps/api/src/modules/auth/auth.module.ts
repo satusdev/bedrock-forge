@@ -6,6 +6,7 @@ import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
 import { AuthRepository } from "./auth.repository";
 import { JwtStrategy } from "./jwt.strategy";
+import { EncryptionModule } from "../../common/encryption/encryption.module";
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { JwtStrategy } from "./jwt.strategy";
         },
       }),
     }),
+    EncryptionModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, AuthRepository, JwtStrategy],

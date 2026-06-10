@@ -124,6 +124,16 @@ export class AuthRepository {
     });
   }
 
+  async updateMfa(userId: bigint, mfaEnabled: boolean, totpSecretEncrypted: string | null) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        mfa_enabled: mfaEnabled,
+        totp_secret_encrypted: totpSecretEncrypted,
+      },
+    });
+  }
+
   async ensureDefaultRolesExist() {
     const roles = ["admin", "manager", "maintainer", "client"];
     for (const name of roles) {

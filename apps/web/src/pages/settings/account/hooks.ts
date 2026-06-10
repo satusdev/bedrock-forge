@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/hooks/use-toast";
+import { useAuthStore } from "@/store/auth.store";
 import { accountApi } from "./api";
 
 export function useSshKeyStatus() {
@@ -48,6 +49,93 @@ export function useChangePasswordMutation(onSuccessCallback?: () => void) {
       toast({
         title: "Failed to change password",
         description: e?.message,
+        variant: "destructive",
+      }),
+  });
+}
+
+export function useSessionsQuery() {
+  return useQuery({
+    queryKey: ["auth-sessions"],
+    queryFn: accountApi.getSessions,
+    refetchOnWindowFocus: true,
+  });
+}
+
+export function useRevokeSessionMutation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => accountApi.revokeSession(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["auth-sessions"] });
+      toast({ title: "Session revoked" });
+    },
+    onError: () =>
+      toast({ title: "Failed to revoke session", variant: "destructive" }),
+  });
+}
+
+export function useRevokeAllSessionsMutation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: accountApi.revokeAllSessions,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["auth-sessions"] });
+      toast({ title: "All other sessions revoked" });
+    },
+    onError: () =>
+      toast({ title: "Failed to revoke all sessions", variant: "destructive" }),
+  });
+}
+
+export function useSetupMfaMutation() {
+  return useMutation({
+    mutationFn: accountApi.setupMfa,
+    onError: (e: any) =>
+      toast({
+        title: "Failed to generate MFA setup",
+        description: e?.message || e,
+        variant: "destructive",
+      }),
+  });
+}
+
+export function useEnableMfaMutation(onSuccessCallback?: () => void) {
+  const setUser = useAuthStore((s) => s.setUser);
+  const user = useAuthStore((s) => s.user);
+  return useMutation({
+    mutationFn: accountApi.enableMfa,
+    onSuccess: () => {
+      if (user) {
+        setUser({ ...user, mfa_enabled: true });
+      }
+      if (onSuccessCallback) onSuccessCallback();
+      toast({ title: "Two-factor authentication enabled" });
+    },
+    onError: (e: any) =>
+      toast({
+        title: "Failed to enable 2FA",
+        description: e?.message || "Invalid verification code",
+        variant: "destructive",
+      }),
+  });
+}
+
+export function useDisableMfaMutation() {
+  const setUser = useAuthStore((s) => s.setUser);
+  const user = useAuthStore((s) => s.user);
+  return useMutation({
+    mutationFn: accountApi.disableMfa,
+    onSuccess: () => {
+      if (user) {
+        setUser({ ...user, mfa_enabled: false });
+      }
+      toast({ title: "Two-factor authentication disabled" });
+    },
+    onError: (e: any) =>
+      toast({
+        title: "Failed to disable 2FA",
+        description: e?.message || e,
         variant: "destructive",
       }),
   });

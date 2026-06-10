@@ -1,4 +1,4 @@
-import { IsEmail, IsString, MinLength, Matches } from "class-validator";
+import { IsEmail, IsString, MinLength, Matches, IsOptional } from "class-validator";
 
 export class RegisterDto {
   @IsEmail()
@@ -24,6 +24,11 @@ export class LoginDto {
   @IsString()
   @MinLength(1)
   password!: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{6}$/, { message: "MFA code must be exactly 6 digits" })
+  code?: string;
 }
 
 export class RefreshTokenDto {

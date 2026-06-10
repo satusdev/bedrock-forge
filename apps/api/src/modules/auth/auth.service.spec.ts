@@ -5,6 +5,7 @@ import { UnauthorizedException } from "@nestjs/common";
 import * as bcrypt from "bcryptjs";
 import { AuthService } from "./auth.service";
 import { AuthRepository } from "./auth.repository";
+import { EncryptionService } from "../../common/encryption/encryption.service";
 
 const mockUser = {
   id: BigInt(1),
@@ -12,6 +13,7 @@ const mockUser = {
   name: "Test User",
   password_hash: "$2a$12$placeholder",
   user_roles: [{ role: { name: "admin" } }],
+  mfa_enabled: false,
 };
 
 const makeRepo = () => ({
@@ -52,6 +54,7 @@ describe("AuthService", () => {
         { provide: AuthRepository, useValue: repo },
         { provide: JwtService, useValue: jwt },
         { provide: ConfigService, useValue: makeConfig() },
+        { provide: EncryptionService, useValue: { encrypt: jest.fn(), decrypt: jest.fn() } },
       ],
     }).compile();
 
@@ -84,7 +87,7 @@ describe("AuthService", () => {
       });
       repo.storeRefreshToken.mockResolvedValue(undefined);
 
-      const result = await service.login("test@forge.local", "secret");
+      const result = (await service.login("test@forge.local", "secret")) as any;
       expect(result.accessToken).toBe("signed-access-token");
       expect(result.refreshToken).toBeDefined();
       expect(result.user.email).toBe("test@forge.local");

@@ -8,12 +8,14 @@ import { JwtService } from "@nestjs/jwt";
 import { ConfigService } from "@nestjs/config";
 import * as bcrypt from "bcryptjs";
 import * as crypto from "crypto";
+import * as QRCode from "qrcode";
 import { AuthRepository } from "./auth.repository";
+import { EncryptionService } from "../../common/encryption/encryption.service";
 
 export interface TokenPair {
   accessToken: string;
   refreshToken: string;
-  user: { id: number; email: string; name: string; roles: string[] };
+  user: { id: number; email: string; name: string; roles: string[]; mfa_enabled: boolean };
 }
 
 @Injectable()
@@ -22,14 +24,16 @@ export class AuthService {
     private readonly repo: AuthRepository,
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
+    private readonly encryption: EncryptionService,
   ) {}
 
   async login(
     email: string,
     password: string,
+    code?: string,
     userAgent?: string,
     ipAddress?: string,
-  ): Promise<TokenPair> {
+  ): Promise<TokenPair | { mfaRequired: boolean }> {
     const user = await this.repo.findUserByEmail(email);
     if (!user) {
       throw new UnauthorizedException("Invalid credentials");
@@ -40,12 +44,27 @@ export class AuthService {
       throw new UnauthorizedException("Invalid credentials");
     }
 
+    if (user.mfa_enabled) {
+      if (!code) {
+        return { mfaRequired: true };
+      }
+      if (!user.totp_secret_encrypted) {
+        throw new UnauthorizedException("MFA configuration error");
+      }
+      const secret = this.encryption.decrypt(user.totp_secret_encrypted);
+      const isMfaValid = this.verifyTOTP(secret, code);
+      if (!isMfaValid) {
+        throw new UnauthorizedException("Invalid MFA code");
+      }
+    }
+
     const roles = user.user_roles.map((ur: any) => ur.role.name);
     return this.issueTokens(
       Number(user.id),
       user.email,
       user.name,
       roles,
+      user.mfa_enabled,
       userAgent,
       ipAddress,
     );
@@ -77,6 +96,7 @@ export class AuthService {
       user.email,
       user.name,
       roles,
+      user.mfa_enabled,
       userAgent,
       ipAddress,
     );
@@ -137,6 +157,44 @@ export class AuthService {
     await this.repo.revokeAllUserRefreshTokens(BigInt(userId));
   }
 
+  /* ── MFA ───────────────────────────────────────────────────────────── */
+
+  async generateMfaSetup(userId: number): Promise<{ secret: string; qrCodeDataUrl: string }> {
+    const user = await this.repo.findUserById(userId);
+    if (!user) throw new NotFoundException("User not found");
+
+    const secret = this.generateBase32Secret();
+    const encryptedSecret = this.encryption.encrypt(secret);
+    await this.repo.updateMfa(BigInt(userId), false, encryptedSecret);
+
+    const otpauthUrl = `otpauth://totp/Bedrock%20Forge:${encodeURIComponent(user.email)}?secret=${secret}&issuer=Bedrock%20Forge`;
+    const qrCodeDataUrl = await QRCode.toDataURL(otpauthUrl);
+
+    return { secret, qrCodeDataUrl };
+  }
+
+  async enableMfa(userId: number, code: string): Promise<void> {
+    const user = await this.repo.findUserById(userId);
+    if (!user) throw new NotFoundException("User not found");
+    if (!user.totp_secret_encrypted) {
+      throw new BadRequestException("MFA not set up yet. Generate setup first.");
+    }
+
+    const secret = this.encryption.decrypt(user.totp_secret_encrypted);
+    const isMfaValid = this.verifyTOTP(secret, code);
+    if (!isMfaValid) {
+      throw new BadRequestException("Invalid MFA verification code");
+    }
+
+    await this.repo.updateMfa(BigInt(userId), true, user.totp_secret_encrypted);
+  }
+
+  async disableMfa(userId: number): Promise<void> {
+    const user = await this.repo.findUserById(userId);
+    if (!user) throw new NotFoundException("User not found");
+    await this.repo.updateMfa(BigInt(userId), false, null);
+  }
+
   refreshExpiresMs(): number {
     const raw = this.config.get<string>("jwt.refreshExpiresIn") ?? "30d";
     // Parse simple duration strings: Nd, Nh, Nm, Ns
@@ -157,6 +215,7 @@ export class AuthService {
     email: string,
     name: string,
     roles: string[],
+    mfaEnabled: boolean,
     userAgent?: string,
     ipAddress?: string,
   ): Promise<TokenPair> {
@@ -183,11 +242,75 @@ export class AuthService {
     return {
       accessToken,
       refreshToken: rawRefreshToken,
-      user: { id: userId, email, name, roles },
+      user: { id: userId, email, name, roles, mfa_enabled: mfaEnabled },
     };
   }
 
   private hashToken(token: string): string {
     return crypto.createHash("sha256").update(token).digest("hex");
+  }
+
+  private base32Decode(str: string): Buffer {
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    const cleanStr = str.replace(/=+$/, "").toUpperCase();
+    let bits = 0;
+    let val = 0;
+    const bytes: number[] = [];
+
+    for (let i = 0; i < cleanStr.length; i++) {
+      const idx = alphabet.indexOf(cleanStr[i]);
+      if (idx === -1) {
+        throw new Error("Invalid base32 character");
+      }
+      val = (val << 5) | idx;
+      bits += 5;
+      if (bits >= 8) {
+        bytes.push((val >> (bits - 8)) & 255);
+        bits -= 8;
+      }
+    }
+    return Buffer.from(bytes);
+  }
+
+  private generateTOTP(secretBase32: string, timeStepIndex: number): string {
+    const key = this.base32Decode(secretBase32);
+    const buffer = Buffer.alloc(8);
+    const high = Math.floor(timeStepIndex / 0x100000000);
+    const low = timeStepIndex % 0x100000000;
+    buffer.writeUInt32BE(high, 0);
+    buffer.writeUInt32BE(low, 4);
+
+    const hmac = crypto.createHmac("sha1", key).update(buffer).digest();
+
+    const offset = hmac[hmac.length - 1] & 0xf;
+    const code =
+      ((hmac[offset] & 0x7f) << 24) |
+      ((hmac[offset + 1] & 0xff) << 16) |
+      ((hmac[offset + 2] & 0xff) << 8) |
+      (hmac[offset + 3] & 0xff);
+
+    const otp = code % 1000000;
+    return otp.toString().padStart(6, "0");
+  }
+
+  private verifyTOTP(secretBase32: string, token: string): boolean {
+    if (!/^\d{6}$/.test(token)) return false;
+    const now = Math.floor(Date.now() / 1000 / 30);
+    for (let i = -1; i <= 1; i++) {
+      if (this.generateTOTP(secretBase32, now + i) === token) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private generateBase32Secret(length = 16): string {
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    let secret = "";
+    const bytes = crypto.randomBytes(length);
+    for (let i = 0; i < length; i++) {
+      secret += alphabet[bytes[i] % 32];
+    }
+    return secret;
   }
 }
