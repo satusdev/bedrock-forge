@@ -81,6 +81,7 @@ const EVENT_GROUPS: Record<string, string[]> = {
     "security.ssh_login",
     "security.ssh_failed_login_spike",
     "security.file_changes",
+    "config.drift_detected",
   ],
 };
 
@@ -91,10 +92,11 @@ const ALL_EVENTS = Object.values(EVENT_GROUPS).flat();
 interface NotificationChannel {
   id: number;
   name: string;
-  type: "slack" | "google_chat";
+  type: "slack" | "google_chat" | "webhook";
   slack_channel_id: string | null;
   has_token: boolean;
   has_webhook: boolean;
+  has_webhook_url: boolean;
   events: string[];
   active: boolean;
   created_at: string;
@@ -114,10 +116,12 @@ interface NotificationLog {
 const channelSchema = z
   .object({
     name: z.string().min(1, "Required").max(100),
-    type: z.enum(["google_chat", "slack"]),
+    type: z.enum(["google_chat", "slack", "webhook"]),
     slack_bot_token: z.string().optional().or(z.literal("")),
     slack_channel_id: z.string().max(100).optional().or(z.literal("")),
     google_chat_webhook_url: z.string().max(2000).optional().or(z.literal("")),
+    webhook_url: z.string().max(2000).optional().or(z.literal("")),
+    webhook_secret: z.string().max(500).optional().or(z.literal("")),
     events: z.array(z.string()).min(1, "Pick at least one event"),
     active: z.boolean().default(true),
   })
@@ -127,6 +131,13 @@ const channelSchema = z
         code: z.ZodIssueCode.custom,
         path: ["slack_channel_id"],
         message: "Slack channel ID is required",
+      });
+    }
+    if (data.type === "webhook" && !data.webhook_url) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["webhook_url"],
+        message: "Webhook URL is required",
       });
     }
   });
@@ -159,6 +170,8 @@ function ChannelFormDialog({
       slack_bot_token: "",
       slack_channel_id: initial?.slack_channel_id ?? "",
       google_chat_webhook_url: "",
+      webhook_url: "",
+      webhook_secret: "",
       events: initial?.events ?? [],
       active: initial?.active ?? true,
     },
@@ -217,12 +230,24 @@ function ChannelFormDialog({
         });
         return;
       }
+      if (
+        data.type === "webhook" &&
+        !data.webhook_url &&
+        (!initial || !initial.has_webhook_url || initial.type !== "webhook")
+      ) {
+        setError("webhook_url", {
+          message: "Webhook URL is required",
+        });
+        return;
+      }
 
       const payload: Record<string, unknown> = {
         name: data.name,
         type: data.type,
         slack_channel_id: data.slack_channel_id || undefined,
         google_chat_webhook_url: data.google_chat_webhook_url || undefined,
+        webhook_url: data.webhook_url || undefined,
+        webhook_secret: data.webhook_secret || undefined,
         events: data.events,
         active: data.active,
       };
@@ -270,6 +295,7 @@ function ChannelFormDialog({
               <SelectContent>
                 <SelectItem value="google_chat">Google Chat</SelectItem>
                 <SelectItem value="slack">Slack</SelectItem>
+                <SelectItem value="webhook">Generic Webhook</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -286,7 +312,7 @@ function ChannelFormDialog({
             )}
           </div>
 
-          {selectedType === "google_chat" ? (
+          {selectedType === "google_chat" && (
             <div className="space-y-1">
               <Label htmlFor="nc-google-chat-webhook">
                 Google Chat Webhook URL{" "}
@@ -305,7 +331,9 @@ function ChannelFormDialog({
                 </p>
               )}
             </div>
-          ) : (
+          )}
+
+          {selectedType === "slack" && (
             <>
               <div className="space-y-1">
                 <Label htmlFor="nc-token">
@@ -336,6 +364,47 @@ function ChannelFormDialog({
                 {errors.slack_channel_id && (
                   <p className="text-xs text-destructive">
                     {errors.slack_channel_id.message}
+                  </p>
+                )}
+              </div>
+            </>
+          )}
+
+          {selectedType === "webhook" && (
+            <>
+              <div className="space-y-1">
+                <Label htmlFor="nc-webhook-url">
+                  Webhook URL{" "}
+                  {initial?.has_webhook_url ? "(leave blank to keep existing)" : "*"}
+                </Label>
+                <Input
+                  id="nc-webhook-url"
+                  type="text"
+                  {...register("webhook_url")}
+                  placeholder="https://your-api.com/webhooks"
+                  autoComplete="off"
+                />
+                {errors.webhook_url && (
+                  <p className="text-xs text-destructive">
+                    {errors.webhook_url.message}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="nc-webhook-secret">
+                  HMAC Signing Secret (Optional)
+                </Label>
+                <Input
+                  id="nc-webhook-secret"
+                  type="password"
+                  {...register("webhook_secret")}
+                  placeholder="Secret key for X-Forge-Signature header validation"
+                  autoComplete="off"
+                />
+                {errors.webhook_secret && (
+                  <p className="text-xs text-destructive">
+                    {errors.webhook_secret.message}
                   </p>
                 )}
               </div>
@@ -509,7 +578,7 @@ export function NotificationsPage() {
       header: "Type",
       render: (c) => (
         <Badge variant="secondary" className="capitalize">
-          {c.type === "google_chat" ? "Google Chat" : "Slack"}
+          {c.type === "google_chat" ? "Google Chat" : c.type === "webhook" ? "Webhook" : "Slack"}
         </Badge>
       ),
     },
@@ -521,6 +590,10 @@ export function NotificationsPage() {
             ? c.has_webhook
               ? "Webhook configured"
               : "—"
+            : c.type === "webhook"
+            ? c.has_webhook_url
+              ? "URL configured"
+              : "—"
             : (c.slack_channel_id ?? "—")}
         </span>
       ),
@@ -530,6 +603,12 @@ export function NotificationsPage() {
       render: (c) =>
         c.type === "google_chat" ? (
           c.has_webhook ? (
+            <CheckCircle2 className="h-4 w-4 text-green-500" />
+          ) : (
+            <XCircle className="h-4 w-4 text-muted-foreground" />
+          )
+        ) : c.type === "webhook" ? (
+          c.has_webhook_url ? (
             <CheckCircle2 className="h-4 w-4 text-green-500" />
           ) : (
             <XCircle className="h-4 w-4 text-muted-foreground" />

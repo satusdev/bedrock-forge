@@ -1,5 +1,8 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { Cron, CronExpression } from "@nestjs/schedule";
 import { ConfigDriftRepository } from "./config-drift.repository";
+import { NotificationsService } from "../notifications/notifications.service";
+
 
 export interface Plugin {
   slug: string;
@@ -27,7 +30,13 @@ export interface PhpDiff {
 
 @Injectable()
 export class ConfigDriftService {
-  constructor(private readonly repo: ConfigDriftRepository) {}
+  private readonly logger = new Logger(ConfigDriftService.name);
+
+  constructor(
+    private readonly repo: ConfigDriftRepository,
+    private readonly notifications: NotificationsService,
+  ) {}
+
 
   async getDrift(projectId: number) {
     const envs = await this.repo.getProjectEnvironmentsWithScans(
@@ -100,7 +109,66 @@ export class ConfigDriftService {
     return { baselineEnvId: null };
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
+  // ── Drift Alerting Cron ───────────────────────────────────────────────────
+
+  /**
+   * Daily at 08:00 — scan all projects with a baseline for config drift.
+   * If any diffs are found, dispatch a `config.drift_detected` notification.
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_8AM)
+  async checkDriftForAllProjects(): Promise<void> {
+    let projectIds: bigint[];
+    try {
+      projectIds = await this.repo.findProjectIdsWithBaseline();
+    } catch (err) {
+      this.logger.error(`Drift check failed to list projects: ${err}`);
+      return;
+    }
+
+    if (projectIds.length === 0) return;
+
+    for (const projectId of projectIds) {
+      try {
+        const result = await this.getDrift(Number(projectId));
+
+        const drifted = result.diffs.filter(
+          (d) =>
+            d.pluginDiffs.some((p) => p.status !== "match") ||
+            d.phpDiffs.length > 0 ||
+            d.warnWpDebugEnabled,
+        );
+
+        if (drifted.length === 0) continue;
+
+        const totalMismatches = drifted.reduce(
+          (sum, d) => sum + d.pluginDiffs.filter((p) => p.status !== "match").length,
+          0,
+        );
+
+        this.notifications.dispatch("config.drift_detected", {
+          projectId: Number(projectId),
+          baselineEnvId: result.baselineEnvId,
+          driftedEnvironments: drifted.length,
+          totalMismatches,
+          environments: drifted.map((d) => ({
+            environmentId: d.environmentId,
+            type: d.type,
+            url: d.url,
+            mismatchCount: d.pluginDiffs.filter((p) => p.status !== "match").length,
+            phpDriftCount: d.phpDiffs.length,
+            warnWpDebug: d.warnWpDebugEnabled,
+          })),
+        });
+
+        this.logger.warn(
+          `Config drift detected for project #${projectId}: ${drifted.length} environment(s) drifted`,
+        );
+      } catch (err) {
+        this.logger.error(`Drift check failed for project #${projectId}: ${err}`);
+      }
+    }
+  }
+
 
   private extractPlugins(
     scan: { plugins: unknown } | null,

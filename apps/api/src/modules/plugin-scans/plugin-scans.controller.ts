@@ -12,6 +12,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
+import { Throttle } from "@nestjs/throttler";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
 import { ROLES } from "@bedrock-forge/shared";
@@ -50,16 +51,19 @@ export class PluginScansController {
   }
 
   @Post("environment/:envId/scan")
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   enqueueScan(@Param("envId", ParseIntPipe) envId: number) {
     return this.svc.enqueueScan(envId);
   }
 
   @Post("bulk/scan")
+  @Throttle({ default: { ttl: 60_000, limit: 2 } })
   enqueueBulkScan() {
     return this.svc.enqueueBulkScan();
   }
 
   @Post("environment/:envId/plugins")
+  @Throttle({ default: { ttl: 60_000, limit: 10 } })
   addPlugin(
     @Param("envId", ParseIntPipe) envId: number,
     @Body() dto: PluginManageDto,
@@ -75,6 +79,7 @@ export class PluginScansController {
   }
 
   @Delete("environment/:envId/plugins/:slug")
+  @Throttle({ default: { ttl: 60_000, limit: 10 } })
   removePlugin(
     @Param("envId", ParseIntPipe) envId: number,
     @Param("slug") slug: string,
@@ -97,6 +102,7 @@ export class PluginScansController {
   }
 
   @Put("environment/:envId/plugins/:slug/status")
+  @Throttle({ default: { ttl: 60_000, limit: 10 } })
   toggleStatus(
     @Param("envId", ParseIntPipe) envId: number,
     @Param("slug") slug: string,
@@ -112,6 +118,7 @@ export class PluginScansController {
   }
 
   @Post("environment/:envId/plugins/:slug/migrate-to-composer")
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   migrateToComposer(
     @Param("envId", ParseIntPipe) envId: number,
     @Param("slug") slug: string,
@@ -127,6 +134,7 @@ export class PluginScansController {
   }
 
   @Put("environment/:envId/plugins/:slug")
+  @Throttle({ default: { ttl: 60_000, limit: 10 } })
   updatePlugin(
     @Param("envId", ParseIntPipe) envId: number,
     @Param("slug") slug: string,
@@ -142,6 +150,7 @@ export class PluginScansController {
   }
 
   @Put("environment/:envId/plugins")
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   updateAllPlugins(
     @Param("envId", ParseIntPipe) envId: number,
     @Body() dto: UpdateAllPluginsDto,

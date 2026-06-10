@@ -55,6 +55,8 @@ export class NotificationProcessor extends WorkerHost {
       slack_bot_token_enc: string | null;
       slack_channel_id: string | null;
       google_chat_webhook_url_enc: string | null;
+      webhook_url_enc?: string | null;
+      webhook_secret_enc?: string | null;
     },
     eventType: string,
     payload: Record<string, unknown>,
@@ -67,9 +69,12 @@ export class NotificationProcessor extends WorkerHost {
 
       if (channel.type === "google_chat") {
         await this.sendGoogleChat(channel, text);
+      } else if (channel.type === "webhook") {
+        await this.sendWebhook(channel, eventType, payload);
       } else {
         await this.sendSlack(channel, text);
       }
+
 
       status = "sent";
       this.logger.log(
@@ -116,6 +121,43 @@ export class NotificationProcessor extends WorkerHost {
     });
   }
 
+  private async sendWebhook(
+    channel: { webhook_url_enc?: string | null; webhook_secret_enc?: string | null; name: string },
+    eventType: string,
+    payload: Record<string, unknown>,
+  ) {
+    if (!channel.webhook_url_enc) {
+      throw new Error("Missing webhook URL");
+    }
+
+    const webhookUrl = this.encryption.decrypt(channel.webhook_url_enc);
+    const body = JSON.stringify({
+      event: eventType,
+      payload,
+      timestamp: new Date().toISOString(),
+      source: "bedrock-forge",
+    });
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "X-Forge-Event": eventType,
+    };
+
+    // Optional HMAC-SHA256 signature
+    if (channel.webhook_secret_enc) {
+      const secret = this.encryption.decrypt(channel.webhook_secret_enc);
+      const { createHmac } = await import("crypto");
+      const sig = createHmac("sha256", secret).update(body).digest("hex");
+      headers["X-Forge-Signature"] = `sha256=${sig}`;
+    }
+
+    const res = await fetch(webhookUrl, { method: "POST", headers, body });
+    if (!res.ok) {
+      const respBody = await res.text().catch(() => "");
+      throw new Error(`Webhook returned ${res.status}: ${respBody}`);
+    }
+  }
+
   private async sendGoogleChat(
     channel: { google_chat_webhook_url_enc: string | null },
     text: string,
@@ -140,8 +182,11 @@ export class NotificationProcessor extends WorkerHost {
   }
 
   private providerLabel(type: string): string {
-    return type === "google_chat" ? "Google Chat" : "Slack";
+    if (type === "google_chat") return "Google Chat";
+    if (type === "webhook") return "Webhook";
+    return "Slack";
   }
+
 
   private async createInAppNotification(
     eventType: string,
@@ -439,6 +484,19 @@ export class NotificationProcessor extends WorkerHost {
           `Period: ${payload.dateRange ?? "?"} | Backups: ${payload.successfulBackups ?? "?"} ok / ${payload.failedBackups ?? "?"} failed | Monitors down: ${payload.monitorsDown ?? "?"}`,
         );
         break;
+      case "config.drift_detected": {
+        const envs = Array.isArray(payload.environments) ? payload.environments : [];
+        lines.push(
+          `⚠️ Config drift detected for project #${payload.projectId ?? "?"}`,
+          `${payload.driftedEnvironments ?? "?"} environment(s) drifted | ${payload.totalMismatches ?? "?"} total plugin mismatches`,
+        );
+        for (const env of envs.slice(0, 5)) {
+          lines.push(
+            `• ${(env as Record<string, unknown>).type ?? "env"} (${(env as Record<string, unknown>).url ?? "?"}): ${(env as Record<string, unknown>).mismatchCount ?? 0} mismatches`,
+          );
+        }
+        break;
+      }
       default:
         lines.push(JSON.stringify(payload, null, 2).slice(0, 500));
     }

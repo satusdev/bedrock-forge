@@ -9,6 +9,7 @@ import {
   ParseIntPipe,
 } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
+import { Throttle } from "@nestjs/throttler";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
 import { ROLES } from "@bedrock-forge/shared";
@@ -22,11 +23,13 @@ export class SyncController {
   constructor(private readonly svc: SyncService) {}
 
   @Post("clone")
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   enqueueClone(@Body() dto: SyncCloneDto) {
     return this.svc.enqueueClone(dto);
   }
 
   @Post("push")
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   enqueuePush(@Body() dto: SyncPushDto) {
     return this.svc.enqueuePush(dto);
   }

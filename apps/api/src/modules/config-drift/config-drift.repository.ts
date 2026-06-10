@@ -19,6 +19,16 @@ export class ConfigDriftRepository {
     });
   }
 
+  /** Return all distinct project IDs that have at least one baseline environment. */
+  async findProjectIdsWithBaseline(): Promise<bigint[]> {
+    const envs = await this.prisma.environment.findMany({
+      where: { is_baseline: true },
+      select: { project_id: true },
+      distinct: ["project_id"],
+    });
+    return envs.map((e) => e.project_id);
+  }
+
   async setBaseline(projectId: bigint, envId: bigint) {
     await this.prisma.$transaction([
       this.prisma.environment.updateMany({

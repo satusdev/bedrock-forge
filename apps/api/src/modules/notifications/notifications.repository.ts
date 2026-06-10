@@ -34,6 +34,8 @@ export class NotificationsRepository {
     slack_bot_token_enc?: string | null;
     slack_channel_id?: string | null;
     google_chat_webhook_url_enc?: string | null;
+    webhook_url_enc?: string | null;
+    webhook_secret_enc?: string | null;
     events: string[];
     active?: boolean;
   }) {
@@ -44,11 +46,14 @@ export class NotificationsRepository {
         slack_bot_token_enc: data.slack_bot_token_enc ?? null,
         slack_channel_id: data.slack_channel_id ?? null,
         google_chat_webhook_url_enc: data.google_chat_webhook_url_enc ?? null,
+        webhook_url_enc: data.webhook_url_enc ?? null,
+        webhook_secret_enc: data.webhook_secret_enc ?? null,
         events: data.events,
         active: data.active ?? true,
       },
     });
   }
+
 
   updateChannel(
     id: number,
@@ -58,6 +63,8 @@ export class NotificationsRepository {
       slack_bot_token_enc?: string | null;
       slack_channel_id?: string | null;
       google_chat_webhook_url_enc?: string | null;
+      webhook_url_enc?: string | null;
+      webhook_secret_enc?: string | null;
       events?: string[];
       active?: boolean;
     },
@@ -67,6 +74,7 @@ export class NotificationsRepository {
       data,
     });
   }
+
 
   removeChannel(id: number) {
     return this.prisma.notificationChannel.delete({

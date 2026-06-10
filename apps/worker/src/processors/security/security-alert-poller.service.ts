@@ -94,12 +94,28 @@ export class SecurityAlertPollerService {
           setting.last_checked_at ??
           new Date(now.getTime() - setting.interval_minutes * 60_000);
 
+        // Check if server is currently in a scheduled maintenance window
+        const activeMaintenance = await this.prisma.maintenanceWindow.count({
+          where: {
+            resource_type: "server",
+            resource_id: setting.server_id,
+            starts_at: { lte: now },
+            ends_at: { gte: now },
+          },
+        });
+        const suppressNotifications = activeMaintenance > 0;
+        if (suppressNotifications) {
+          this.logger.log(
+            `Suppressing security alert notifications for server ${Number(setting.server_id)} due to active maintenance window.`,
+          );
+        }
+
         if (setting.ssh_login_alerts_enabled) {
-          await this.pollAuthLogs(setting, executor, windowStart, now);
+          await this.pollAuthLogs(setting, executor, windowStart, now, suppressNotifications);
         }
 
         if (setting.file_change_alerts_enabled) {
-          await this.pollFileChanges(setting, executor, windowStart, now);
+          await this.pollFileChanges(setting, executor, windowStart, now, suppressNotifications);
         }
 
         await this.prisma.serverSecurityAlertSetting.update({
@@ -134,6 +150,7 @@ export class SecurityAlertPollerService {
     executor: ReturnType<typeof createRemoteExecutor>,
     windowStart: Date,
     windowEnd: Date,
+    suppressNotifications: boolean,
   ) {
     const result = await executor.execute(
       this.buildAuthLogCommand(windowStart),
@@ -146,45 +163,49 @@ export class SecurityAlertPollerService {
 
     const successful = this.parseSuccessfulLogins(output);
     for (const login of successful) {
-      await this.notificationsQueue.add(
-        JOB_TYPES.NOTIFICATION_SEND,
-        {
-          eventType: "security.ssh_login",
-          payload: {
-            serverId: Number(setting.server_id),
-            serverName: setting.server.name,
-            serverIp: setting.server.ip_address,
-            user: login.user,
-            sourceIp: login.sourceIp,
-            authMethod: login.authMethod,
-            timestamp: login.timestamp,
-            rawExcerpt: login.rawExcerpt,
+      if (!suppressNotifications) {
+        await this.notificationsQueue.add(
+          JOB_TYPES.NOTIFICATION_SEND,
+          {
+            eventType: "security.ssh_login",
+            payload: {
+              serverId: Number(setting.server_id),
+              serverName: setting.server.name,
+              serverIp: setting.server.ip_address,
+              user: login.user,
+              sourceIp: login.sourceIp,
+              authMethod: login.authMethod,
+              timestamp: login.timestamp,
+              rawExcerpt: login.rawExcerpt,
+            },
           },
-        },
-        { removeOnComplete: 100, removeOnFail: 100 },
-      );
+          { removeOnComplete: 100, removeOnFail: 100 },
+        );
+      }
     }
 
     const failuresBySource = this.parseFailedLoginCounts(output);
     for (const [sourceIp, count] of failuresBySource.entries()) {
       if (count < FAILED_LOGIN_SPIKE_THRESHOLD) continue;
-      await this.notificationsQueue.add(
-        JOB_TYPES.NOTIFICATION_SEND,
-        {
-          eventType: "security.ssh_failed_login_spike",
-          payload: {
-            serverId: Number(setting.server_id),
-            serverName: setting.server.name,
-            serverIp: setting.server.ip_address,
-            sourceIp,
-            count,
-            threshold: FAILED_LOGIN_SPIKE_THRESHOLD,
-            windowStart: windowStart.toISOString(),
-            windowEnd: windowEnd.toISOString(),
+      if (!suppressNotifications) {
+        await this.notificationsQueue.add(
+          JOB_TYPES.NOTIFICATION_SEND,
+          {
+            eventType: "security.ssh_failed_login_spike",
+            payload: {
+              serverId: Number(setting.server_id),
+              serverName: setting.server.name,
+              serverIp: setting.server.ip_address,
+              sourceIp,
+              count,
+              threshold: FAILED_LOGIN_SPIKE_THRESHOLD,
+              windowStart: windowStart.toISOString(),
+              windowEnd: windowEnd.toISOString(),
+            },
           },
-        },
-        { removeOnComplete: 100, removeOnFail: 100 },
-      );
+          { removeOnComplete: 100, removeOnFail: 100 },
+        );
+      }
     }
   }
 
@@ -203,6 +224,7 @@ export class SecurityAlertPollerService {
     executor: ReturnType<typeof createRemoteExecutor>,
     windowStart: Date,
     windowEnd: Date,
+    suppressNotifications: boolean,
   ) {
     const watchPaths = this.expandWatchPaths(
       setting.file_watch_paths,
@@ -227,28 +249,30 @@ export class SecurityAlertPollerService {
 
     if (!previousSnapshot || !this.hasFileChanges(changes)) return;
 
-    await this.notificationsQueue.add(
-      JOB_TYPES.NOTIFICATION_SEND,
-      {
-        eventType: "security.file_changes",
-        payload: {
-          serverId: Number(setting.server_id),
-          serverName: setting.server.name,
-          serverIp: setting.server.ip_address,
-          windowStart: windowStart.toISOString(),
-          windowEnd: windowEnd.toISOString(),
-          addedCount: changes.added.length,
-          modifiedCount: changes.modified.length,
-          deletedCount: changes.deleted.length,
-          topChangedPaths: [
-            ...changes.added,
-            ...changes.modified,
-            ...changes.deleted,
-          ].slice(0, 12),
+    if (!suppressNotifications) {
+      await this.notificationsQueue.add(
+        JOB_TYPES.NOTIFICATION_SEND,
+        {
+          eventType: "security.file_changes",
+          payload: {
+            serverId: Number(setting.server_id),
+            serverName: setting.server.name,
+            serverIp: setting.server.ip_address,
+            windowStart: windowStart.toISOString(),
+            windowEnd: windowEnd.toISOString(),
+            addedCount: changes.added.length,
+            modifiedCount: changes.modified.length,
+            deletedCount: changes.deleted.length,
+            topChangedPaths: [
+              ...changes.added,
+              ...changes.modified,
+              ...changes.deleted,
+            ].slice(0, 12),
+          },
         },
-      },
-      { removeOnComplete: 100, removeOnFail: 100 },
-    );
+        { removeOnComplete: 100, removeOnFail: 100 },
+      );
+    }
   }
 
   private buildAuthLogCommand(windowStart: Date): string {
