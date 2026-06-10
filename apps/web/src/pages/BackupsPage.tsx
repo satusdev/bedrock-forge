@@ -22,6 +22,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Pagination } from "@/components/crud";
 import { Badge } from "@/components/ui/badge";
@@ -73,6 +81,7 @@ const BACKUP_TYPES = [
   { value: "full", label: "Full (files + DB)" },
   { value: "db_only", label: "Database only" },
   { value: "files_only", label: "Files only" },
+  { value: "incremental", label: "Incremental (files + DB)" },
 ];
 
 export function BackupsPage() {
@@ -81,6 +90,7 @@ export function BackupsPage() {
   const [backupType, setBackupType] = useState<string>("full");
   const [page, setPage] = useState(1);
   const [restoreTarget, setRestoreTarget] = useState<Backup | null>(null);
+  const [restoreTargetEnvId, setRestoreTargetEnvId] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Backup | null>(null);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
@@ -128,10 +138,11 @@ export function BackupsPage() {
   });
 
   const restoreBackup = useMutation({
-    mutationFn: (backupId: number) =>
-      api.post("/backups/restore", { backupId }),
+    mutationFn: ({ backupId, targetEnvironmentId }: { backupId: number; targetEnvironmentId?: number }) =>
+      api.post("/backups/restore", { backupId, targetEnvironmentId }),
     onSuccess: () => {
       setRestoreTarget(null);
+      setRestoreTargetEnvId(null);
       toast({ title: "Restore job queued" });
     },
     onError: () => toast({ title: "Restore failed", variant: "destructive" }),
@@ -450,7 +461,10 @@ export function BackupsPage() {
                                   variant="outline"
                                   size="sm"
                                   className="h-7 text-xs shadow-sm"
-                                  onClick={() => setRestoreTarget(b)}
+                                  onClick={() => {
+                                    setRestoreTarget(b);
+                                    setRestoreTargetEnvId(envId);
+                                  }}
                                   disabled={restoreBackup.isPending}
                                 >
                                   <RotateCcw className="h-3 w-3 mr-1" />
@@ -548,18 +562,95 @@ export function BackupsPage() {
         onClear={() => setSelectedIds([])}
       />
 
-      <AlertDialog
+      <Dialog
         open={!!restoreTarget}
-        onOpenChange={(o) => !o && setRestoreTarget(null)}
-        title="Restore Backup"
-        description={`Restore the ${restoreTarget?.type} backup from ${restoreTarget ? new Date(restoreTarget.created_at).toLocaleString() : ""}? This will overwrite the current site.`}
-        confirmLabel="Restore"
-        confirmVariant="destructive"
-        onConfirm={() =>
-          restoreTarget && restoreBackup.mutate(restoreTarget.id)
-        }
-        isPending={restoreBackup.isPending}
-      />
+        onOpenChange={(o) => {
+          if (!o) {
+            setRestoreTarget(null);
+            setRestoreTargetEnvId(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Restore Backup</DialogTitle>
+            <DialogDescription>
+              Restore the {restoreTarget?.type} backup from{" "}
+              {restoreTarget ? new Date(restoreTarget.created_at).toLocaleString() : ""}.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="restore-target-env">Target Environment</Label>
+              <Select
+                value={restoreTargetEnvId?.toString() ?? ""}
+                onValueChange={(v) => setRestoreTargetEnvId(v ? Number(v) : null)}
+              >
+                <SelectTrigger id="restore-target-env" className="w-full">
+                  <SelectValue placeholder="Select target environment…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {envs?.map((e) => (
+                    <SelectItem key={e.id} value={e.id.toString()}>
+                      {e.project.name} — {e.type} ({e.server.name})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {restoreTarget && restoreTargetEnvId && restoreTargetEnvId !== envId && (
+              <div className="rounded-lg border border-warning/20 bg-warning/10 p-3.5 text-warning space-y-1">
+                <p className="font-semibold text-sm">Cross-Environment Restore Detected</p>
+                <p className="text-xs opacity-90 leading-relaxed">
+                  You are restoring this backup to a different environment. The system will automatically:
+                </p>
+                <ul className="list-disc list-inside text-xs opacity-90 pl-1 space-y-0.5">
+                  <li>Rewrite URLs in options, posts, metadata, comments, and links</li>
+                  <li>Perform a deep search-replace across all assets in the files</li>
+                  <li>Update on-server DB credentials and settings</li>
+                  <li>Flush the WordPress cache and rewrite rules</li>
+                </ul>
+              </div>
+            )}
+
+            <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-destructive">
+              <p className="font-medium text-sm">Warning: Destructive Operation</p>
+              <p className="text-xs mt-0.5 opacity-80">
+                This will overwrite the target site's files and database. This action cannot be undone.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRestoreTarget(null);
+                setRestoreTargetEnvId(null);
+              }}
+              disabled={restoreBackup.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (restoreTarget && restoreTargetEnvId) {
+                  restoreBackup.mutate({
+                    backupId: restoreTarget.id,
+                    targetEnvironmentId: restoreTargetEnvId,
+                  });
+                }
+              }}
+              disabled={restoreBackup.isPending || !restoreTargetEnvId}
+            >
+              {restoreBackup.isPending ? "Restoring…" : "Restore Backup"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog
         open={!!deleteTarget}

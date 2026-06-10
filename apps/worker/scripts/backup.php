@@ -12,7 +12,7 @@ if (PHP_VERSION_ID < 70000) {
     exit(1);
 }
 
-$opts = getopt('', ['docroot:', 'type:', 'output:', 'restore', 'file:', 'db-name:', 'db-user:', 'db-pass:', 'db-host:']);
+$opts = getopt('', ['docroot:', 'type:', 'output:', 'restore', 'file:', 'db-name:', 'db-user:', 'db-pass:', 'db-host:', 'site-url:']);
 
 $docroot = $opts['docroot'] ?? null;
 $type    = $opts['type'] ?? 'full';
@@ -27,6 +27,7 @@ $cliDbUser = $opts['db-user'] ?? null;
 // Fall back to --db-pass CLI arg for backward compatibility only.
 $cliDbPass = (getenv('FORGE_DB_PASS') !== false ? getenv('FORGE_DB_PASS') : null) ?? ($opts['db-pass'] ?? null);
 $cliDbHost = $opts['db-host'] ?? null;
+$cliSiteUrl = $opts['site-url'] ?? null;
 
 if (!$docroot || !is_dir($docroot)) {
     fwrite(STDERR, "ERROR: Invalid or missing --docroot\n");
@@ -130,17 +131,45 @@ if ($restore) {
     if (!empty($sqlFiles)) {
         $sqlFile = $sqlFiles[0];
 
-        // Resolve credentials: on-disk config first, stored CLI args as fallback
-        $creds      = parseWpConfig($docroot);
-        $missingCred = false;
-        foreach (['DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_HOST'] as $required) {
-            if (empty($creds[$required])) { $missingCred = true; break; }
-        }
-        if ($missingCred && $cliDbName && $cliDbUser && $cliDbPass && $cliDbHost) {
+        // Resolve credentials: CLI inputs override on-disk config during restore.
+        $creds = parseWpConfig($docroot);
+        if ($cliDbName && $cliDbUser && $cliDbPass && $cliDbHost) {
             $creds['DB_NAME']     = $cliDbName;
             $creds['DB_USER']     = $cliDbUser;
             $creds['DB_PASSWORD'] = $cliDbPass;
             $creds['DB_HOST']     = $cliDbHost;
+
+            // Write back to config files
+            $envFile = $docroot . '/.env';
+            if (file_exists($envFile)) {
+                $envContent = file_get_contents($envFile);
+                $envContent = preg_replace("/^DB_NAME\s*=.*/m", "DB_NAME='{$cliDbName}'", $envContent);
+                $envContent = preg_replace("/^DB_USER\s*=.*/m", "DB_USER='{$cliDbUser}'", $envContent);
+                $envContent = preg_replace("/^DB_PASSWORD\s*=.*/m", "DB_PASSWORD='{$cliDbPass}'", $envContent);
+                $envContent = preg_replace("/^DB_HOST\s*=.*/m", "DB_HOST='{$cliDbHost}'", $envContent);
+                if ($cliSiteUrl) {
+                    $envContent = preg_replace("/^WP_HOME\s*=.*/m", "WP_HOME='{$cliSiteUrl}'", $envContent);
+                }
+                file_put_contents($envFile, $envContent);
+            } else {
+                $configFile = $docroot . '/wp-config.php';
+                if (!file_exists($configFile)) {
+                    $configFile = $docroot . '/config/application.php';
+                }
+                if (file_exists($configFile)) {
+                    $configContent = file_get_contents($configFile);
+                    $configContent = preg_replace("/define\s*\(\s*['\"]DB_NAME['\"]\s*,\s*['\"][^'\"]*['\"]\s*\)/", "define('DB_NAME', '{$cliDbName}')", $configContent);
+                    $configContent = preg_replace("/define\s*\(\s*['\"]DB_USER['\"]\s*,\s*['\"][^'\"]*['\"]\s*\)/", "define('DB_USER', '{$cliDbUser}')", $configContent);
+                    $configContent = preg_replace("/define\s*\(\s*['\"]DB_PASSWORD['\"]\s*,\s*['\"][^'\"]*['\"]\s*\)/", "define('DB_PASSWORD', '{$cliDbPass}')", $configContent);
+                    $configContent = preg_replace("/define\s*\(\s*['\"]DB_HOST['\"]\s*,\s*['\"][^'\"]*['\"]\s*\)/", "define('DB_HOST', '{$cliDbHost}')", $configContent);
+
+                    $configContent = preg_replace("/Config::define\s*\(\s*['\"]DB_NAME['\"]\s*,\s*['\"][^'\"]*['\"]\s*\)/", "Config::define('DB_NAME', '{$cliDbName}')", $configContent);
+                    $configContent = preg_replace("/Config::define\s*\(\s*['\"]DB_USER['\"]\s*,\s*['\"][^'\"]*['\"]\s*\)/", "Config::define('DB_USER', '{$cliDbUser}')", $configContent);
+                    $configContent = preg_replace("/Config::define\s*\(\s*['\"]DB_PASSWORD['\"]\s*,\s*['\"][^'\"]*['\"]\s*\)/", "Config::define('DB_PASSWORD', '{$cliDbPass}')", $configContent);
+                    $configContent = preg_replace("/Config::define\s*\(\s*['\"]DB_HOST['\"]\s*,\s*['\"][^'\"]*['\"]\s*\)/", "Config::define('DB_HOST', '{$cliDbHost}')", $configContent);
+                    file_put_contents($configFile, $configContent);
+                }
+            }
         }
 
         $canImport = !empty($creds['DB_NAME']) && !empty($creds['DB_USER'])
@@ -284,8 +313,9 @@ function parseEnvFile(string $path): array {
 
 $parts        = [];
 $dbDumpFile   = null;
+$isIncremental = ($type === 'incremental');
 
-if ($type === 'full' || $type === 'db_only') {
+if ($type === 'full' || $type === 'db_only' || $isIncremental) {
     $creds = parseWpConfig($docroot);
 
     // Determine credential source for diagnostic logging
@@ -362,6 +392,40 @@ if ($type === 'full' || $type === 'db_only') {
     $parts[] = $dbDumpFile;
 }
 
+$basename = basename($docroot);
+$cacheDir = null;
+
+if ($isIncremental) {
+    $parentDir = dirname($docroot);
+    $cacheDir = $parentDir . '/.forge_backup_cache';
+    if (!is_dir($cacheDir)) {
+        if (!mkdir($cacheDir, 0755, true)) {
+            fwrite(STDERR, "ERROR: Could not create incremental backup cache directory: {$cacheDir}\n");
+            exit(1);
+        }
+    }
+
+    $latestDir = $cacheDir . '/latest/' . $basename;
+    $currentDir = $cacheDir . '/current/' . $basename;
+
+    @mkdir($cacheDir . '/latest', 0755, true);
+    @mkdir($cacheDir . '/current', 0755, true);
+
+    $rsyncFlags = '-a --delete';
+    if (is_dir($latestDir)) {
+        $rsyncFlags .= ' --link-dest=' . escapeshellarg($latestDir);
+    }
+
+    $rsyncCmd = "rsync {$rsyncFlags} " . escapeshellarg($docroot . '/') . ' ' . escapeshellarg($currentDir . '/');
+    fwrite(STDERR, "Executing incremental rsync: {$rsyncCmd}\n");
+    exec($rsyncCmd . ' 2>&1', $rsyncOut, $rsyncCode);
+    if ($rsyncCode !== 0) {
+        fwrite(STDERR, "ERROR: Incremental rsync failed (exit {$rsyncCode}): " . implode("\n", $rsyncOut) . "\n");
+        exec('rm -rf ' . escapeshellarg($cacheDir . '/current'));
+        exit($rsyncCode);
+    }
+}
+
 // Use pigz (parallel gzip) when available for faster compression on multi-core
 // servers. Falls back to standard gzip transparently.
 $pigz = trim(shell_exec('which pigz 2>/dev/null') ?? '');
@@ -373,6 +437,8 @@ if ($pigz) {
 
 if ($type === 'full' || $type === 'files_only') {
     $tarCmd .= ' -C ' . escapeshellarg(dirname($docroot)) . ' ' . escapeshellarg(basename($docroot));
+} elseif ($isIncremental) {
+    $tarCmd .= ' -C ' . escapeshellarg($cacheDir . '/current') . ' ' . escapeshellarg(basename($docroot));
 }
 
 foreach ($parts as $part) {
@@ -390,11 +456,22 @@ if ($dbDumpFile && file_exists($dbDumpFile)) {
 // occurs when the site receives traffic during the backup. The archive is still
 // valid and complete. Only exit codes >= 2 indicate a real failure.
 if ($code > 1) {
+    if ($isIncremental && $cacheDir) {
+        exec('rm -rf ' . escapeshellarg($cacheDir . '/current'));
+    }
     fwrite(STDERR, "ERROR: tar failed (exit {$code}): " . implode("\n", $out) . "\n");
     exit($code);
 }
 if ($code === 1) {
     fwrite(STDERR, "WARNING: tar exited 1 (file changed during read) — backup archive is still valid\n");
+}
+
+if ($isIncremental && $cacheDir) {
+    // Promote current to latest
+    exec('rm -rf ' . escapeshellarg($cacheDir . '/latest'));
+    @mkdir($cacheDir . '/latest', 0755, true);
+    exec('mv ' . escapeshellarg($cacheDir . '/current/' . $basename) . ' ' . escapeshellarg($cacheDir . '/latest/' . $basename));
+    exec('rm -rf ' . escapeshellarg($cacheDir . '/current'));
 }
 
 $size = file_exists($output) ? filesize($output) : 0;

@@ -23,6 +23,10 @@ import {
   fixCyberPanelOwnership,
   shellQuote,
   pushRemoteScript,
+  createRemoteMyCnf,
+  cleanupRemoteMyCnf,
+  flipProtocol,
+  WpCliBuilder,
 } from "../../utils/processor-utils";
 
 const STAGING_DIR = "/tmp/forge-backups";
@@ -455,6 +459,7 @@ export class BackupProcessor extends WorkerHost {
 
     const backup = await this.prisma.backup.findUniqueOrThrow({
       where: { id: BigInt(backupId) },
+      include: { environment: true },
     });
 
     if (!backup.file_path) {
@@ -646,7 +651,9 @@ export class BackupProcessor extends WorkerHost {
         throw new Error("Cancelled by user");
       }
 
-      const restoreCmd = `${storedCredsEnv}php ${remoteScript} --restore --file=${remoteBackupPath} --docroot=${env.root_path}${storedCredsArgs ? " " + storedCredsArgs : ""}`;
+      const isCrossRestore = backup.environment_id !== BigInt(environmentId);
+      const siteUrlArg = isCrossRestore ? ` --site-url=${shellQuote(env.url)}` : "";
+      const restoreCmd = `${storedCredsEnv}php ${remoteScript} --restore --file=${remoteBackupPath} --docroot=${env.root_path}${storedCredsArgs ? " " + storedCredsArgs : ""}${siteUrlArg}`;
       const maskedCmd = restoreCmd.replace(
         /FORGE_DB_PASS='[^']*'/,
         "FORGE_DB_PASS='***'",
@@ -695,6 +702,138 @@ export class BackupProcessor extends WorkerHost {
 
       // ── Step D+: Fix file ownership ─────────────────────────────────────
       await fixCyberPanelOwnership(executor, env.root_path, tracker);
+
+      // ── Step D++: Run URL search-replace if Cross-Environment Restore ──
+      if (isCrossRestore) {
+        const srcUrl = backup.environment?.url;
+        const tgtUrl = env.url;
+
+        if (srcUrl && tgtUrl && srcUrl !== tgtUrl) {
+          await tracker.track({
+            step: "Running cross-environment URL search-replace",
+            level: "info",
+            detail: `${srcUrl} → ${tgtUrl}`,
+          });
+
+          // Fetch target DB credentials
+          const targetCreds = await this.prisma.wpDbCredentials.findUnique({
+            where: { environment_id: BigInt(environmentId) },
+          });
+
+          if (targetCreds) {
+            const dbName = this.encryption.decrypt(targetCreds.db_name_encrypted);
+            const dbUser = this.encryption.decrypt(targetCreds.db_user_encrypted);
+            const dbPass = this.encryption.decrypt(targetCreds.db_password_encrypted);
+            const dbHost = this.encryption.decrypt(targetCreds.db_host_encrypted);
+
+            const srMycnf = await createRemoteMyCnf(
+              executor,
+              { dbUser, dbPassword: dbPass, dbHost },
+              job.id ?? "default",
+              "forge_sr_restore",
+            );
+            const srSqlFile = `/tmp/forge_sr_restore_${job.id}.sql`;
+
+            try {
+              const pairs: Array<[string, string]> = [[srcUrl, tgtUrl]];
+              const alt = flipProtocol(srcUrl);
+              const altTgt = flipProtocol(tgtUrl);
+              if (alt && altTgt && alt !== tgtUrl) pairs.push([alt, altTgt]);
+
+              // Auto-detect WP table prefix; fallback 'wp_'
+              const prefixRes = await executor.execute(
+                `mysql --defaults-extra-file=${srMycnf} ${shellQuote(dbName)} -sN -e ${shellQuote(
+                  `SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${dbName}' AND table_name LIKE '%options' LIMIT 1`,
+                )}`,
+              );
+              const p =
+                prefixRes.code === 0 && prefixRes.stdout.trim()
+                  ? prefixRes.stdout.trim()
+                  : "wp_";
+
+              const statements: string[] = [];
+              for (const [oldRaw, newRaw] of pairs) {
+                const o = oldRaw.replace(/'/g, "\\'");
+                const n = newRaw.replace(/'/g, "\\'");
+                statements.push(
+                  `UPDATE \`${p}options\` SET option_value = REPLACE(option_value, '${o}', '${n}')`,
+                  `UPDATE \`${p}posts\` SET post_content = REPLACE(post_content, '${o}', '${n}')`,
+                  `UPDATE \`${p}posts\` SET post_excerpt = REPLACE(post_excerpt, '${o}', '${n}')`,
+                  `UPDATE \`${p}postmeta\` SET meta_value = REPLACE(CAST(meta_value AS CHAR), '${o}', '${n}')`,
+                  `UPDATE \`${p}usermeta\` SET meta_value = REPLACE(meta_value, '${o}', '${n}')`,
+                  `UPDATE \`${p}comments\` SET comment_content = REPLACE(comment_content, '${o}', '${n}')`,
+                  `UPDATE \`${p}comments\` SET comment_author_url = REPLACE(comment_author_url, '${o}', '${n}')`,
+                  `UPDATE \`${p}commentmeta\` SET meta_value = REPLACE(meta_value, '${o}', '${n}')`,
+                  `UPDATE \`${p}termmeta\` SET meta_value = REPLACE(meta_value, '${o}', '${n}')`,
+                  `UPDATE \`${p}links\` SET link_url = REPLACE(link_url, '${o}', '${n}')`,
+                  `UPDATE \`${p}links\` SET link_image = REPLACE(link_image, '${o}', '${n}')`,
+                  `UPDATE \`${p}links\` SET link_rss = REPLACE(link_rss, '${o}', '${n}')`,
+                );
+              }
+              await executor.pushFile({
+                remotePath: srSqlFile,
+                content: Buffer.from(statements.join(";\n") + ";"),
+              });
+              const srResult = await executor.execute(
+                `mysql --defaults-extra-file=${srMycnf} ${shellQuote(dbName)} < ${srSqlFile}`,
+              );
+              if (srResult.code !== 0) {
+                await tracker.track({
+                  step: "URL search-replace SQL failed",
+                  level: "warn",
+                  detail: srResult.stderr,
+                });
+              } else {
+                await tracker.track({
+                  step: "URL search-replace SQL completed",
+                  level: "info",
+                });
+              }
+            } finally {
+              await cleanupRemoteMyCnf(executor, srMycnf);
+              await executor.execute(`rm -f ${srSqlFile}`).catch(() => {});
+            }
+
+            // Replace hardcoded URLs in wp-content files (CSS, JS, PHP, etc.)
+            const sedEscape = (s: string) =>
+              s.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
+            const wpContent = `${env.root_path}/wp-content`;
+            const filePairs: Array<[string, string]> = [[srcUrl, tgtUrl]];
+            const altSrc = flipProtocol(srcUrl);
+            const altTgt = flipProtocol(tgtUrl);
+            if (altSrc && altTgt && altSrc !== tgtUrl)
+              filePairs.push([altSrc, altTgt]);
+
+            for (const [oldUrl, newUrl] of filePairs) {
+              await executor
+                .execute(
+                  [
+                    `find ${shellQuote(wpContent)} -type f`,
+                    `\\( -name '*.css' -o -name '*.js' -o -name '*.json' -o -name '*.html'`,
+                    `-o -name '*.htm' -o -name '*.svg' -o -name '*.xml' -o -name '*.txt'`,
+                    `-o -name '*.php' \\)`,
+                    `-exec sed -i 's|${sedEscape(oldUrl)}|${sedEscape(newUrl)}|g' {} +`,
+                  ].join(" "),
+                )
+                .catch(() => {});
+            }
+
+            // Flush caches
+            const wpCli = await WpCliBuilder.create(executor, env.root_path);
+            await executor
+              .execute(wpCli.buildCommand("cache flush"))
+              .catch(() => {});
+            await executor
+              .execute(wpCli.buildCommand("rewrite flush"))
+              .catch(() => {});
+            await executor
+              .execute(
+                `rm -rf ${shellQuote(env.root_path)}/wp-content/cache ${shellQuote(env.root_path)}/wp-content/et-cache 2>/dev/null; true`,
+              )
+              .catch(() => {});
+          }
+        }
+      }
 
       await job.updateProgress({
         value: 95,

@@ -16,6 +16,7 @@ import {
 import { Response } from "express";
 import { spawn } from "child_process";
 import { AuthGuard } from "@nestjs/passport";
+import { Throttle } from "@nestjs/throttler";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
 import { ROLES } from "@bedrock-forge/shared";
@@ -141,11 +142,13 @@ export class BackupsController {
   }
 
   @Post("create")
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   enqueueCreate(@Body() dto: EnqueueBackupDto) {
     return this.svc.enqueueCreate(dto);
   }
 
   @Post("restore")
+  @Throttle({ default: { ttl: 60_000, limit: 3 } })
   enqueueRestore(@Body() dto: RestoreBackupDto) {
     return this.svc.enqueueRestore(dto);
   }

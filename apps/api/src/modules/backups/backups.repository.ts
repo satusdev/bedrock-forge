@@ -5,7 +5,7 @@ import { PrismaService } from "../../prisma/prisma.service";
 export interface CreateBackupData {
   environment_id: bigint;
   job_execution_id?: bigint;
-  type: "full" | "db_only" | "files_only";
+  type: "full" | "db_only" | "files_only" | "incremental";
   status: "pending" | "running" | "completed" | "failed";
   file_path?: string;
   size_bytes?: bigint;
@@ -113,7 +113,7 @@ export class BackupsRepository {
     },
     backupData: {
       environment_id: bigint;
-      type: "full" | "db_only" | "files_only";
+      type: "full" | "db_only" | "files_only" | "incremental";
       status: "pending" | "running" | "completed" | "failed";
     },
   ) {

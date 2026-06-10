@@ -101,15 +101,25 @@ export class BackupsService {
 
   async enqueueRestore(dto: RestoreBackupDto) {
     const backup = await this.findOne(dto.backupId);
+    let targetEnvId = Number(backup.environment_id);
+
+    if (dto.targetEnvironmentId) {
+      const targetEnv = await this.repo.findEnvironment(BigInt(dto.targetEnvironmentId));
+      if (!targetEnv) {
+        throw new NotFoundException(`Target environment ${dto.targetEnvironmentId} not found`);
+      }
+      targetEnvId = dto.targetEnvironmentId;
+    }
+
     const bullJobId = randomUUID();
     const exec = await this.repo.createJobExecution({
       queue_name: QUEUES.BACKUPS,
       job_type: JOB_TYPES.BACKUP_RESTORE,
       bull_job_id: bullJobId,
-      environment_id: backup.environment_id,
+      environment_id: BigInt(targetEnvId),
       payload: {
         backupId: dto.backupId,
-        environmentId: Number(backup.environment_id),
+        environmentId: targetEnvId,
       } as Record<string, number>,
     });
     let job;
@@ -118,7 +128,7 @@ export class BackupsService {
         JOB_TYPES.BACKUP_RESTORE,
         {
           backupId: dto.backupId,
-          environmentId: Number(backup.environment_id),
+          environmentId: targetEnvId,
           jobExecutionId: Number(exec.id),
         },
         { ...BACKUP_JOB_OPTIONS, jobId: bullJobId },
