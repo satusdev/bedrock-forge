@@ -291,6 +291,7 @@ export function MonitorDetailPage() {
   const navigate = useNavigate();
   const monitorId = Number(id);
   const [logPage, setLogPage] = useState(1);
+  const [resultsPage, setResultsPage] = useState(1);
 
   const { data: monitor, isLoading } = useQuery({
     queryKey: ["monitor", monitorId],
@@ -307,10 +308,19 @@ export function MonitorDetailPage() {
     refetchInterval: 30_000,
   });
 
-  const { data: resultsData } = useQuery({
-    queryKey: ["monitor-results", monitorId],
+  const { data: chartData } = useQuery({
+    queryKey: ["monitor-chart-results", monitorId],
     queryFn: () =>
       api.get<PaginatedResults>(`/monitors/${monitorId}/results?limit=100`),
+    refetchInterval: 30_000,
+  });
+
+  const { data: resultsData } = useQuery({
+    queryKey: ["monitor-results", monitorId, resultsPage],
+    queryFn: () =>
+      api.get<PaginatedResults>(
+        `/monitors/${monitorId}/results?page=${resultsPage}&limit=10`,
+      ),
     refetchInterval: 30_000,
   });
 
@@ -320,6 +330,7 @@ export function MonitorDetailPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["monitor", monitorId] });
       qc.invalidateQueries({ queryKey: ["monitor-results", monitorId] });
+      qc.invalidateQueries({ queryKey: ["monitor-chart-results", monitorId] });
       qc.invalidateQueries({ queryKey: ["monitor-logs", monitorId] });
       toast({ title: "Health check triggered successfully" });
     },
@@ -356,7 +367,8 @@ export function MonitorDetailPage() {
   }
 
   const uptimePct = parseFloat(String(monitor.uptime_pct ?? 0));
-  const results = resultsData?.items ?? monitor.monitor_results ?? [];
+  const results = resultsData?.items ?? monitor.monitor_results?.slice(0, 10) ?? [];
+  const chartResults = chartData?.items ?? monitor.monitor_results ?? [];
   const logs = logsData?.items ?? [];
 
   return (
@@ -605,7 +617,7 @@ export function MonitorDetailPage() {
           <CardTitle className="text-sm">Response Time History</CardTitle>
         </CardHeader>
         <CardContent>
-          <ResponseTimeChart results={results} />
+          <ResponseTimeChart results={chartResults} />
         </CardContent>
       </Card>
 
@@ -643,7 +655,7 @@ export function MonitorDetailPage() {
         <CardHeader className="pb-2">
           <CardTitle className="text-sm">Recent Checks</CardTitle>
         </CardHeader>
-        <CardContent className="p-0">
+        <CardContent className="p-0 pb-4">
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
@@ -678,7 +690,7 @@ export function MonitorDetailPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {results.slice(0, 50).map((r) => (
+                {results.map((r) => (
                   <tr
                     key={r.id}
                     className="hover:bg-muted/30 transition-colors"
@@ -690,7 +702,7 @@ export function MonitorDetailPage() {
                       <div className="flex items-center gap-1.5">
                         <StatusDot statusCode={r.status_code} />
                         <span
-                          className={
+                           className={
                             r.is_up
                               ? "text-green-600 dark:text-green-400 font-medium"
                               : "text-destructive font-medium"
@@ -740,6 +752,15 @@ export function MonitorDetailPage() {
               </tbody>
             </table>
           </div>
+          {resultsData && resultsData.total > 10 && (
+            <div className="mt-4 px-4">
+              <Pagination
+                page={resultsPage}
+                totalPages={Math.ceil(resultsData.total / 10)}
+                onPageChange={setResultsPage}
+              />
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
