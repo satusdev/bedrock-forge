@@ -94,4 +94,10 @@ export class MonitorsController {
   @Put(":id/deactivate") deactivate(@Param("id", ParseIntPipe) id: number) {
     return this.svc.toggle(id, false);
   }
+
+  @Post(":id/trigger")
+  @HttpCode(HttpStatus.OK)
+  trigger(@Param("id", ParseIntPipe) id: number) {
+    return this.svc.triggerCheck(id);
+  }
 }

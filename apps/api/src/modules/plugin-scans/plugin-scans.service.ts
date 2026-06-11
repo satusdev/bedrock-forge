@@ -203,6 +203,9 @@ export class PluginScansService {
       installed.map(async (entry) => {
         const latestVersion = await this.github.getLatestTag(
           entry.custom_plugin.repo_url,
+          entry.custom_plugin.repo_path,
+          entry.custom_plugin.type,
+          entry.custom_plugin.slug,
         );
         if (latestVersion !== null) {
           await this.repo.updateEnvironmentCustomPlugin(

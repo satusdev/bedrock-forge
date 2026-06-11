@@ -29,6 +29,9 @@ type MockPrisma = {
   lighthouseAudit: {
     update: jest.Mock;
   };
+  maintenanceWindow: {
+    count: jest.Mock;
+  };
 };
 
 function makePrisma(): MockPrisma {
@@ -53,6 +56,9 @@ function makePrisma(): MockPrisma {
     },
     lighthouseAudit: {
       update: jest.fn().mockResolvedValue({}),
+    },
+    maintenanceWindow: {
+      count: jest.fn().mockResolvedValue(0),
     },
   };
 }

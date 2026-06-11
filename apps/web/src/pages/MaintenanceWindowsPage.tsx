@@ -249,14 +249,16 @@ export function MaintenanceWindowsPage() {
   const [deleteTarget, setDeleteTarget] = useState<MaintenanceWindow | null>(null);
 
   const {
-    data = [],
+    data: response,
     isLoading,
     isError,
     refetch,
-  } = useQuery<MaintenanceWindow[]>({
+  } = useQuery<{ data: MaintenanceWindow[]; total: number }>({
     queryKey: ["maintenance-windows"],
     queryFn: () => api.get("/maintenance-windows"),
   });
+
+  const data = response?.data ?? [];
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => api.delete(`/maintenance-windows/${id}`),

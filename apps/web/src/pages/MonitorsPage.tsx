@@ -18,6 +18,7 @@ import {
   ChevronDown,
   ChevronUp,
   Activity,
+  RefreshCw,
 } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { toast } from "@/hooks/use-toast";
@@ -587,6 +588,21 @@ export function MonitorsPage() {
     onError: () => toast({ title: "Update failed", variant: "destructive" }),
   });
 
+  const triggerMutation = useMutation({
+    mutationFn: (id: number) => api.post(`/monitors/${id}/trigger`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["monitors"] });
+      toast({ title: "Health check triggered successfully" });
+    },
+    onError: (err) => {
+      toast({
+        title: "Failed to trigger check",
+        description: err instanceof Error ? err.message : "Error",
+        variant: "destructive",
+      });
+    },
+  });
+
   // ── Selection Logic ──────────────────────────────────────────────────────
   const toggleSelect = (id: number) => {
     const next = new Set(selectedIds);
@@ -759,27 +775,40 @@ export function MonitorsPage() {
           actionsHeader={
             <Checkbox checked={isAllSelected} onCheckedChange={toggleAll} />
           }
-          renderActions={(m) => (
-            <div className="flex items-center gap-1">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                onClick={() => setEditTarget(m)}
-                title="Edit monitor"
-              >
-                <Pencil className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-destructive hover:text-destructive"
-                onClick={() => setDeleteTarget(m)}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </div>
-          )}
+          renderActions={(m) => {
+            const isPending = triggerMutation.isPending && triggerMutation.variables === m.id;
+            return (
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                  onClick={() => triggerMutation.mutate(m.id)}
+                  disabled={triggerMutation.isPending}
+                  title="Trigger check now"
+                >
+                  <RefreshCw className={`h-4 w-4 ${isPending ? "animate-spin" : ""}`} />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                  onClick={() => setEditTarget(m)}
+                  title="Edit monitor"
+                >
+                  <Pencil className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-destructive hover:text-destructive"
+                  onClick={() => setDeleteTarget(m)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            );
+          }}
         />
       )}
 

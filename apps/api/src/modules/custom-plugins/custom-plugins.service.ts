@@ -61,8 +61,13 @@ export class CustomPluginsService {
     return this.repo.delete(BigInt(id));
   }
 
-  async getLatestTag(repoUrl: string): Promise<string | null> {
-    return this.github.getLatestTag(repoUrl);
+  async getLatestTag(
+    repoUrl: string,
+    repoPath: string = ".",
+    type: string = "plugin",
+    slug?: string,
+  ): Promise<string | null> {
+    return this.github.getLatestTag(repoUrl, repoPath, type, slug);
   }
 
   async getInventory(id: number) {
@@ -138,7 +143,12 @@ export class CustomPluginsService {
 
   async checkVersions(id: number) {
     const plugin = await this.findById(id);
-    const latestVersion = await this.github.getLatestTag(plugin.repo_url);
+    const latestVersion = await this.github.getLatestTag(
+      plugin.repo_url,
+      plugin.repo_path,
+      plugin.type,
+      plugin.slug,
+    );
     const result = await this.repo.updateLatestVersionForInstallations(
       BigInt(id),
       latestVersion,

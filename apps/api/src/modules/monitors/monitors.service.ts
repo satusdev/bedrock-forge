@@ -109,6 +109,20 @@ export class MonitorsService {
     return this.repo.update(BigInt(id), { enabled: active });
   }
 
+  async triggerCheck(id: number) {
+    const monitor = await this.findOne(id);
+    await this.queue.add(
+      JOB_TYPES.MONITOR_CHECK,
+      { monitorId: Number(monitor.id) },
+      {
+        ...DEFAULT_JOB_OPTIONS,
+        jobId: `manual-monitor-${monitor.id}-${Date.now()}`,
+      },
+    );
+    return { success: true, message: `Check triggered for monitor ${id}` };
+  }
+
+
   private async registerRepeatable(monitor: {
     id: bigint;
     interval_seconds: number;

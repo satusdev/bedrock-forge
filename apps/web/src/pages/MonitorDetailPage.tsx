@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { isHttpStatusWorking } from "@bedrock-forge/shared";
 import {
   ArrowLeft,
@@ -12,6 +12,7 @@ import {
   Shield,
   Globe,
   Type,
+  RefreshCw,
 } from "lucide-react";
 import {
   AreaChart,
@@ -23,6 +24,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { api } from "@/lib/api-client";
+import { toast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -312,6 +314,24 @@ export function MonitorDetailPage() {
     refetchInterval: 30_000,
   });
 
+  const qc = useQueryClient();
+  const triggerMutation = useMutation({
+    mutationFn: () => api.post(`/monitors/${monitorId}/trigger`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["monitor", monitorId] });
+      qc.invalidateQueries({ queryKey: ["monitor-results", monitorId] });
+      qc.invalidateQueries({ queryKey: ["monitor-logs", monitorId] });
+      toast({ title: "Health check triggered successfully" });
+    },
+    onError: (err) => {
+      toast({
+        title: "Failed to trigger health check",
+        description: err instanceof Error ? err.message : "Error",
+        variant: "destructive",
+      });
+    },
+  });
+
   if (isLoading) {
     return (
       <div className="space-y-4">
@@ -342,42 +362,55 @@ export function MonitorDetailPage() {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-start gap-3">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 mt-0.5 shrink-0"
-          onClick={() => navigate("/monitors")}
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <StatusDot statusCode={monitor.last_status} />
-            <a
-              href={monitor.environment.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-mono text-sm text-primary hover:underline truncate"
-            >
-              {monitor.environment.url}
-            </a>
-            <Badge variant="outline" className="text-xs capitalize">
-              {monitor.environment.type}
-            </Badge>
-            {!monitor.enabled && (
-              <Badge variant="secondary" className="text-xs">
-                Paused
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3 flex-1 min-w-0">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 mt-0.5 shrink-0"
+            onClick={() => navigate("/monitors")}
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <StatusDot statusCode={monitor.last_status} />
+              <a
+                href={monitor.environment.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-mono text-sm text-primary hover:underline truncate"
+              >
+                {monitor.environment.url}
+              </a>
+              <Badge variant="outline" className="text-xs capitalize">
+                {monitor.environment.type}
               </Badge>
-            )}
+              {!monitor.enabled && (
+                <Badge variant="secondary" className="text-xs">
+                  Paused
+                </Badge>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Checks every {monitor.interval_seconds}s ·{" "}
+              {monitor.last_checked_at
+                ? `Last checked ${new Date(monitor.last_checked_at).toLocaleString()}`
+                : "Never checked"}
+            </p>
           </div>
-          <p className="text-xs text-muted-foreground mt-1">
-            Checks every {monitor.interval_seconds}s ·{" "}
-            {monitor.last_checked_at
-              ? `Last checked ${new Date(monitor.last_checked_at).toLocaleString()}`
-              : "Never checked"}
-          </p>
         </div>
+
+        <Button
+          variant="outline"
+          size="sm"
+          className="flex items-center gap-1.5 shrink-0"
+          onClick={() => triggerMutation.mutate()}
+          disabled={triggerMutation.isPending}
+        >
+          <RefreshCw className={`h-4 w-4 ${triggerMutation.isPending ? "animate-spin" : ""}`} />
+          {triggerMutation.isPending ? "Checking..." : "Ping Now"}
+        </Button>
       </div>
 
       {/* Stat cards */}
