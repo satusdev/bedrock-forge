@@ -22,8 +22,8 @@ const newSettingSchema = z.object({
     .string()
     .min(1, "Key is required")
     .regex(
-      /^[a-z0-9_.-]+$/,
-      "Only lowercase letters, digits, underscores, dots, dashes",
+      /^[a-zA-Z0-9_.-]+$/,
+      "Only letters, digits, underscores, dots, dashes",
     ),
   value: z.string().min(1, "Value is required"),
 });

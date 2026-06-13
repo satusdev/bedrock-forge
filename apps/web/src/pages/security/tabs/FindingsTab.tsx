@@ -46,7 +46,7 @@ export function FindingsTab({
     initialActions: string[];
   } | null>(null);
 
-  const params = new URLSearchParams({ page: String(page), limit: "50" });
+  const params = new URLSearchParams({ page: String(page), limit: "10" });
   if (sevFilter.length > 0) params.set("severity", sevFilter.join(","));
   if (sourceFilter.startsWith("server:"))
     params.set("server_id", sourceFilter.slice(7));

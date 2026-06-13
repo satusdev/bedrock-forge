@@ -303,7 +303,7 @@ export function MonitorDetailPage() {
     queryKey: ["monitor-logs", monitorId, logPage],
     queryFn: () =>
       api.get<PaginatedLogs>(
-        `/monitors/${monitorId}/logs?page=${logPage}&limit=20`,
+        `/monitors/${monitorId}/logs?page=${logPage}&limit=10`,
       ),
     refetchInterval: 30_000,
   });
@@ -636,11 +636,11 @@ export function MonitorDetailPage() {
           ) : (
             <>
               <IncidentLog logs={logs} />
-              {logsData && logsData.total > 20 && (
+               {logsData && logsData.total > 10 && (
                 <div className="mt-4">
                   <Pagination
                     page={logPage}
-                    totalPages={Math.ceil(logsData.total / 20)}
+                    totalPages={Math.ceil(logsData.total / 10)}
                     onPageChange={setLogPage}
                   />
                 </div>

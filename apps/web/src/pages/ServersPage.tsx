@@ -422,12 +422,12 @@ export function ServersPage() {
     queryKey: ["servers", page, search],
     queryFn: () =>
       api.get<{ items: Server[]; total: number }>(
-        `/servers?page=${page}&limit=20${search ? `&search=${encodeURIComponent(search)}` : ""}`,
+        `/servers?page=${page}&limit=10${search ? `&search=${encodeURIComponent(search)}` : ""}`,
       ),
   });
 
   const servers = data?.items ?? [];
-  const totalPages = data ? Math.ceil(data.total / 20) : 1;
+  const totalPages = data ? Math.ceil(data.total / 10) : 1;
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => api.delete(`/servers/${id}`),

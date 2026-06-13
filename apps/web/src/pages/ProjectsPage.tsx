@@ -729,7 +729,7 @@ export function ProjectsPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["projects", page, search, clientFilter, serverFilter],
     queryFn: () => {
-      const qs = new URLSearchParams({ page: String(page), limit: "20" });
+      const qs = new URLSearchParams({ page: String(page), limit: "10" });
       if (search) qs.set("search", search);
       if (clientFilter) qs.set("client_id", clientFilter);
       if (serverFilter) qs.set("server_id", serverFilter);
@@ -776,7 +776,7 @@ export function ProjectsPage() {
       toast({ title: "Failed to queue backup", variant: "destructive" }),
   });
 
-  const totalPages = data ? Math.ceil(data.total / 20) : 1;
+  const totalPages = data ? Math.ceil(data.total / 10) : 1;
 
   function invalidate() {
     qc.invalidateQueries({ queryKey: ["projects"] });

@@ -19,7 +19,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { PageHeader } from "@/components/crud";
+import { PageHeader, Pagination } from "@/components/crud";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -81,6 +81,7 @@ export function LighthousePage() {
   const [environmentId, setEnvironmentId] = useState<string>("");
   const [strategy, setStrategy] = useState<"mobile" | "desktop">("mobile");
   const [urlOverride, setUrlOverride] = useState("");
+  const [page, setPage] = useState(1);
 
   const { data: environments = [] } = useQuery<Environment[]>({
     queryKey: ["environments"],
@@ -98,14 +99,17 @@ export function LighthousePage() {
     refetchInterval: 30_000,
   });
 
-  const { data: history = [] } = useQuery<LighthouseAudit[]>({
-    queryKey: ["lighthouse", "history", environmentId],
+  const { data: historyData } = useQuery<{ items: LighthouseAudit[]; total: number }>({
+    queryKey: ["lighthouse", "history", environmentId, page],
     queryFn: () =>
       api.get(
-        `/lighthouse/history?limit=20${environmentId ? `&environment_id=${environmentId}` : ""}`,
+        `/lighthouse/history?page=${page}&limit=10${environmentId ? `&environment_id=${environmentId}` : ""}`,
       ),
     refetchInterval: 30_000,
   });
+
+  const history = historyData?.items ?? [];
+  const totalPages = historyData ? Math.ceil(historyData.total / 10) : 1;
 
   const trigger = useMutation({
     mutationFn: () =>
@@ -167,7 +171,13 @@ export function LighthousePage() {
           <label className="text-xs font-medium text-muted-foreground">
             Environment
           </label>
-          <Select value={environmentId} onValueChange={setEnvironmentId}>
+          <Select
+            value={environmentId}
+            onValueChange={(val) => {
+              setEnvironmentId(val);
+              setPage(1);
+            }}
+          >
             <SelectTrigger>
               <SelectValue placeholder="Select environment" />
             </SelectTrigger>
@@ -440,6 +450,15 @@ export function LighthousePage() {
             </div>
           )}
         </div>
+        {totalPages > 1 && (
+          <div className="border-t p-4">
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              onPageChange={setPage}
+            />
+          </div>
+        )}
       </section>
     </div>
   );

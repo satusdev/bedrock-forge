@@ -257,7 +257,7 @@ export function UsersPage() {
     queryKey: ["users", page, search],
     queryFn: () =>
       api.get<PaginatedUsers>(
-        `/users?page=${page}&limit=20${search ? `&search=${encodeURIComponent(search)}` : ""}`,
+        `/users?page=${page}&limit=10${search ? `&search=${encodeURIComponent(search)}` : ""}`,
       ),
   });
 

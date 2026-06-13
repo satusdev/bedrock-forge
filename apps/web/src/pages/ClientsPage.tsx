@@ -248,7 +248,7 @@ export function ClientsPage() {
     queryKey: ["clients", page, search],
     queryFn: () =>
       api.get<PaginatedClients>(
-        `/clients?page=${page}&limit=20${search ? `&search=${encodeURIComponent(search)}` : ""}`,
+        `/clients?page=${page}&limit=10${search ? `&search=${encodeURIComponent(search)}` : ""}`,
       ),
   });
 
@@ -282,7 +282,7 @@ export function ClientsPage() {
     },
   });
 
-  const totalPages = data ? Math.ceil(data.total / 20) : 1;
+  const totalPages = data ? Math.ceil(data.total / 10) : 1;
 
   function invalidate() {
     qc.invalidateQueries({ queryKey: ["clients"] });

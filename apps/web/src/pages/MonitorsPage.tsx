@@ -87,7 +87,7 @@ interface PaginatedMonitors {
   total: number;
 }
 
-const PAGE_LIMIT = 20;
+const PAGE_LIMIT = 10;
 
 const INTERVALS = [
   { value: "30", label: "30 seconds" },

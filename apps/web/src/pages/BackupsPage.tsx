@@ -117,7 +117,7 @@ export function BackupsPage() {
     queryKey: ["backups", envId, page],
     queryFn: () =>
       api.get<PaginatedBackups>(
-        `/backups/environment/${envId}?page=${page}&limit=20`,
+        `/backups/environment/${envId}?page=${page}&limit=10`,
       ),
     enabled: !!envId,
     refetchInterval: 15_000,
@@ -207,7 +207,7 @@ export function BackupsPage() {
 
   const selectedEnv = envs?.find((e) => e.id === envId);
   const missingFolderId = !!selectedEnv && !selectedEnv.google_drive_folder_id;
-  const totalPages = backupsData ? Math.ceil(backupsData.total / 20) : 1;
+  const totalPages = backupsData ? Math.ceil(backupsData.total / 10) : 1;
   const [expandedLogId, setExpandedLogId] = useState<number | null>(null);
 
   const toggleSelectAll = () => {

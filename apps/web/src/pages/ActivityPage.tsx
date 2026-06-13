@@ -225,7 +225,7 @@ export function ActivityPage() {
   const [page, setPage] = useState(1);
   const [queueFilter, setQueueFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
-  const LIMIT = 25;
+  const LIMIT = 10;
 
   const queryKey = ["job-executions", page, queueFilter, statusFilter];
 

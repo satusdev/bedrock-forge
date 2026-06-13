@@ -177,7 +177,7 @@ export function DomainsPage() {
   const [selectedIds, setSelectedIds] = useState<(string | number)[]>([]);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
-  const limit = 20;
+  const limit = 10;
 
   const { data, isLoading, isError, refetch } = useQuery<PaginatedDomains>({
     queryKey: ["domains", page, search],

@@ -59,7 +59,7 @@ interface AuditLogsResponse {
   totalPages: number;
 }
 
-const LIMIT = 25;
+const LIMIT = 10;
 
 function MetadataCell({
   metadata,

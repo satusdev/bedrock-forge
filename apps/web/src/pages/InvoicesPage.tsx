@@ -675,7 +675,7 @@ export function InvoicesPage() {
     }
   };
 
-  const params = new URLSearchParams({ page: String(page), limit: "20" });
+  const params = new URLSearchParams({ page: String(page), limit: "10" });
   if (statusFilter) params.set("status", statusFilter);
   if (yearFilter) params.set("year", yearFilter);
   if (clientFilter) params.set("client_id", clientFilter);
@@ -719,7 +719,7 @@ export function InvoicesPage() {
     onError: () => toast({ title: "Delete failed", variant: "destructive" }),
   });
 
-  const totalPages = data ? Math.ceil(data.total / 20) : 1;
+  const totalPages = data ? Math.ceil(data.total / 10) : 1;
 
   function toggleExpand(inv: Invoice) {
     setExpandedId((prev) => (prev === inv.id ? null : inv.id));

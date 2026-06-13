@@ -229,7 +229,7 @@ export function RestoreTab({
     queryKey: ["restore-history", selectedEnvId],
     queryFn: () =>
       api.get<RestoreHistoryPage>(
-        `/job-executions?queue_name=backups&job_type=backup%3Arestore&environment_ids=${selectedEnvId}&limit=20`,
+        `/job-executions?queue_name=backups&job_type=backup%3Arestore&environment_ids=${selectedEnvId}&limit=10`,
       ),
     enabled: !!selectedEnvId,
     staleTime: 15_000,

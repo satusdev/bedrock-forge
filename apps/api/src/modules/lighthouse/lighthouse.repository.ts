@@ -34,11 +34,15 @@ export class LighthouseRepository {
     return rows.map((row) => this.serializeAudit(row));
   }
 
-  async findHistory(environmentId?: number, limit = 50) {
+  async findHistory(environmentId?: number, page = 1, limit = 10) {
+    const where = environmentId ? { environment_id: BigInt(environmentId) } : {};
+    const total = await this.prisma.lighthouseAudit.count({ where });
+    const skip = (page - 1) * limit;
     const rows = await this.prisma.lighthouseAudit.findMany({
-      where: environmentId ? { environment_id: BigInt(environmentId) } : {},
+      where,
       orderBy: { created_at: "desc" },
-      take: Math.min(100, Math.max(1, limit)),
+      skip,
+      take: limit,
       include: {
         environment: {
           select: {
@@ -50,7 +54,10 @@ export class LighthouseRepository {
         },
       },
     });
-    return rows.map((row) => this.serializeAudit(row));
+    return {
+      items: rows.map((row) => this.serializeAudit(row)),
+      total,
+    };
   }
 
   async findById(id: bigint) {

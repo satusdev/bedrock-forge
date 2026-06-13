@@ -20,7 +20,7 @@ export function SecurityLogsTab({ servers }: { servers: ServerSummary[] }) {
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
 
-  const params = new URLSearchParams({ page: String(page), limit: "50" });
+  const params = new URLSearchParams({ page: String(page), limit: "10" });
   if (serverId !== "all") params.set("server_id", serverId);
   if (dateFrom) params.set("date_from", dateFrom);
   if (dateTo) params.set("date_to", dateTo);
