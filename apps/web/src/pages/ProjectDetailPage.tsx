@@ -35,6 +35,7 @@ import { DriftTab } from "./project-detail/DriftTab";
 import { ThemesTab } from "./project-detail/ThemesTab";
 import { WpCoreTab } from "./project-detail/WpCoreTab";
 import { RemoteOpsTab } from "./project-detail/RemoteOpsTab";
+import { SecurityTab } from "./project-detail/SecurityTab";
 import { ProjectFormDialog } from "./ProjectsPage";
 import { ResourceActivityFeed } from "@/components/ResourceActivityFeed";
 
@@ -393,6 +394,13 @@ export function ProjectDetailPage() {
             WP Core
           </TabsTrigger>
           <TabsTrigger
+            value="security"
+            className="gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+          >
+            <Shield className="h-3.5 w-3.5 opacity-70" />
+            Security
+          </TabsTrigger>
+          <TabsTrigger
             value="activity"
             className="gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
           >
@@ -463,6 +471,12 @@ export function ProjectDetailPage() {
               projectName={project.name}
               environments={environments}
             />
+          )}
+        </TabsContent>
+
+        <TabsContent value="security">
+          {activatedTabs.has("security") && (
+            <SecurityTab projectId={projectId} environments={environments} />
           )}
         </TabsContent>
 
