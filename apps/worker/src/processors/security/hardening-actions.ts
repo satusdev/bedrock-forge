@@ -639,12 +639,23 @@ async function blockSensitiveFiles(
 ): Promise<HardeningActionResult> {
   const action = "BLOCK_SENSITIVE_FILES";
   const htaccess = `${webRoot}/.htaccess`;
-  const check = await run(
+  const wpContentDir = `${webRoot}/wp-content`;
+  const appHtaccess = `${wpContentDir}/.htaccess`;
+  const rootCheck = await run(
     exec,
     `grep -q "_bf_sensitive_block_" "${htaccess}" 2>/dev/null`,
   );
-  if (check.code === 0)
-    return skip(action, "Sensitive file block already present");
+  const appCheck = await run(
+    exec,
+    `grep -q "_bf_app_path_guard_" "${appHtaccess}" 2>/dev/null`,
+  );
+  if (rootCheck.code === 0 && appCheck.code === 0)
+    return skip(action, "Sensitive file and Bedrock app path blocks present");
+
+  const mkDir = await run(exec, `mkdir -p "${wpContentDir}"`);
+  if (mkDir.code !== 0)
+    return fail(action, mkDir.stderr || "Cannot create wp-content dir");
+
   const denyBlock = [
     "  <IfModule mod_authz_core.c>",
     "    Require all denied",
@@ -664,13 +675,52 @@ async function blockSensitiveFiles(
     denyBlock,
     "</FilesMatch>",
   ].join("\n");
-  const write = await run(
-    exec,
-    `printf '%s\\n' '${block.replace(/'/g, "'\\''")}' >> "${htaccess}"`,
+
+  if (rootCheck.code !== 0) {
+    const writeRoot = await run(
+      exec,
+      `printf '%s\\n' '${block.replace(/'/g, "'\\''")}' >> "${htaccess}"`,
+    );
+    if (writeRoot.code !== 0)
+      return fail(action, writeRoot.stderr || "Failed to write .htaccess");
+  }
+
+  if (appCheck.code !== 0) {
+    const appGuard = [
+      "",
+      "# _bf_app_path_guard_ Deny unsafe direct file access in wp-content/app",
+      "Options -Indexes",
+      '<FilesMatch "^\\.">',
+      denyBlock,
+      "</FilesMatch>",
+      '<FilesMatch "\\.(php|php3|php4|php5|phtml|phar|pl|py|jsp|asp|aspx|cgi|sh|log|ini|conf|bak|sql|env|gz|tar|zip)$">',
+      denyBlock,
+      "</FilesMatch>",
+      '<FilesMatch "^(composer\\.(json|lock)|package\\.json|yarn\\.lock|pnpm-lock\\.yaml|\\.htpasswd)$">',
+      denyBlock,
+      "</FilesMatch>",
+      "<IfModule mod_rewrite.c>",
+      "  RewriteEngine On",
+      "  RewriteCond %{REQUEST_FILENAME} -f",
+      "  RewriteCond %{REQUEST_URI} !\\.(css|js|mjs|map|json|jpg|jpeg|png|gif|webp|svg|ico|woff|woff2|ttf|eot|otf|pdf|txt|xml|mp4|webm|mp3|wav|avif)$ [NC]",
+      "  RewriteRule ^ - [F,L]",
+      "</IfModule>",
+    ].join("\n");
+    const writeApp = await run(
+      exec,
+      `printf '%s\\n' '${appGuard.replace(/'/g, "'\\''")}' >> "${appHtaccess}"`,
+    );
+    if (writeApp.code !== 0)
+      return fail(
+        action,
+        writeApp.stderr || "Failed to write wp-content .htaccess",
+      );
+  }
+
+  return ok(
+    action,
+    `Sensitive file access blocked in ${htaccess}; Bedrock app path guard enforced in ${appHtaccess}`,
   );
-  if (write.code !== 0)
-    return fail(action, write.stderr || "Failed to write .htaccess");
-  return ok(action, `Sensitive file access blocked in ${htaccess}`);
 }
 
 async function disableFileEditor(

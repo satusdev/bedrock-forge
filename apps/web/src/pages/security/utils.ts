@@ -86,7 +86,11 @@ export function getFixAction(
       return "BLOCK_DEBUG_LOG";
     if (
       category === "VERSION_DISCLOSURE" &&
-      (t.includes(".env") || t.includes("composer") || t.includes("sensitive"))
+      (t.includes(".env") ||
+        t.includes("composer") ||
+        t.includes("sensitive") ||
+        t.includes("bedrock /app") ||
+        t.includes("app path"))
     )
       return "BLOCK_SENSITIVE_FILES";
     if (

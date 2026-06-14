@@ -124,7 +124,10 @@ export const ENVIRONMENT_HARDENING_ACTIONS = [
   {
     id: "DELETE_PHP_UPLOAD_FILES",
     label: "Delete PHP files in uploads",
-    description: "Remove .php files found inside wp-content/uploads",
+    description:
+      "Opt-in cleanup: remove .php files found inside wp-content/uploads",
+    risky: true,
+    defaultSelected: false,
   },
   {
     id: "CLEAN_HTACCESS_REDIRECTS",
@@ -160,12 +163,33 @@ export const ENVIRONMENT_HARDENING_ACTIONS = [
     id: "FORCE_REINSTALL_CORE",
     label: "Force reinstall WP core",
     description:
-      "Overwrites core files with a fresh copy to remove unauthorized changes",
+      "Opt-in repair: overwrites core files with a fresh copy to remove unauthorized changes",
+    risky: true,
+    defaultSelected: false,
   },
   {
     id: "UPDATE_ALL_PLUGINS",
     label: "Update all plugins",
     description:
-      "Brings all plugins to the latest version to patch vulnerabilities",
+      "Opt-in update: brings all plugins to the latest version to patch vulnerabilities",
+    risky: true,
+    defaultSelected: false,
   },
 ] as const;
+
+export const DEFAULT_ENVIRONMENT_HARDENING_ACTION_IDS =
+  ENVIRONMENT_HARDENING_ACTIONS.filter(
+    (action) =>
+      !("defaultSelected" in action) || action.defaultSelected !== false,
+  ).map((action) => action.id);
+
+export const RISKY_ENVIRONMENT_HARDENING_ACTION_IDS =
+  ENVIRONMENT_HARDENING_ACTIONS.filter(
+    (action) => "risky" in action && action.risky,
+  ).map((action) => action.id);
+
+export function isRiskyEnvironmentHardeningAction(id: string): boolean {
+  return RISKY_ENVIRONMENT_HARDENING_ACTION_IDS.includes(
+    id as (typeof RISKY_ENVIRONMENT_HARDENING_ACTION_IDS)[number],
+  );
+}

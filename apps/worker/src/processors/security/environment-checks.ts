@@ -327,13 +327,17 @@ export async function runWpAudit(
 
   if (siteUrl && siteUrl.startsWith("http")) {
     const cleanUrl = siteUrl.replace(/\/$/, "");
+    const probeStatus = async (path: string): Promise<string> => {
+      const { stdout } = await exec.execute(
+        `curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${cleanUrl}${path}" 2>/dev/null || echo 000`,
+        { timeout: 15000 },
+      );
+      return stdout.trim();
+    };
 
     // xmlrpc.php exposed — common DDoS amplification and brute-force vector
-    const { stdout: xmlrpcCode } = await exec.execute(
-      `curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${cleanUrl}/xmlrpc.php" 2>/dev/null || echo 000`,
-      { timeout: 15000 },
-    );
-    if (xmlrpcCode.trim() === "200") {
+    const xmlrpcCode = await probeStatus("/xmlrpc.php");
+    if (xmlrpcCode === "200") {
       findings.push(
         makeFinding(
           "high",
@@ -351,11 +355,8 @@ export async function runWpAudit(
     }
 
     // readme.html accessible — reveals WordPress version
-    const { stdout: readmeCode } = await exec.execute(
-      `curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${cleanUrl}/readme.html" 2>/dev/null || echo 000`,
-      { timeout: 15000 },
-    );
-    if (readmeCode.trim() === "200") {
+    const readmeCode = await probeStatus("/readme.html");
+    if (readmeCode === "200") {
       findings.push(
         makeFinding(
           "medium",
@@ -401,11 +402,8 @@ export async function runWpAudit(
     }
 
     // .git directory exposed — full source code disclosure
-    const { stdout: gitHeadCode } = await exec.execute(
-      `curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${cleanUrl}/.git/HEAD" 2>/dev/null || echo 000`,
-      { timeout: 15000 },
-    );
-    if (gitHeadCode.trim() === "200") {
+    const gitHeadCode = await probeStatus("/.git/HEAD");
+    if (gitHeadCode === "200") {
       findings.push(
         makeFinding(
           "high",
@@ -422,11 +420,8 @@ export async function runWpAudit(
     }
 
     // wp-content/debug.log accessible — may expose credentials and stack traces
-    const { stdout: debugLogCode } = await exec.execute(
-      `curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${cleanUrl}/wp-content/debug.log" 2>/dev/null || echo 000`,
-      { timeout: 15000 },
-    );
-    if (debugLogCode.trim() === "200") {
+    const debugLogCode = await probeStatus("/wp-content/debug.log");
+    if (debugLogCode === "200") {
       findings.push(
         makeFinding(
           "high",
@@ -443,11 +438,8 @@ export async function runWpAudit(
     }
 
     // .env accessible — critical credential exposure (common in misconfigured Bedrock installs)
-    const { stdout: envFileCode } = await exec.execute(
-      `curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${cleanUrl}/.env" 2>/dev/null || echo 000`,
-      { timeout: 15000 },
-    );
-    if (envFileCode.trim() === "200") {
+    const envFileCode = await probeStatus("/.env");
+    if (envFileCode === "200") {
       findings.push(
         makeFinding(
           "critical",
@@ -458,6 +450,70 @@ export async function runWpAudit(
             remediation:
               'For Bedrock: ensure the web root is /web, not the project root. Block via .htaccess: <Files ".env"> deny from all </Files>.',
             resource: `${cleanUrl}/.env`,
+          },
+        ),
+      );
+    }
+
+    const bedrockAppProbes: {
+      path: string;
+      title: string;
+      severity: "critical" | "high" | "medium";
+      description: string;
+    }[] = [
+      {
+        path: "/app/.env",
+        title: "Bedrock /app/.env is publicly accessible",
+        severity: "critical",
+        description:
+          "The Bedrock app path exposes an .env file over HTTP. This can disclose database credentials, API keys, and salts.",
+      },
+      {
+        path: "/app/debug.log",
+        title: "Bedrock /app/debug.log is publicly accessible",
+        severity: "high",
+        description:
+          "The Bedrock app path exposes debug.log over HTTP. Logs can include credentials, paths, plugin errors, and stack traces.",
+      },
+      {
+        path: "/app/error_log",
+        title: "Bedrock /app/error_log is publicly accessible",
+        severity: "high",
+        description:
+          "The Bedrock app path exposes an error_log file over HTTP. Logs can include sensitive runtime details.",
+      },
+      {
+        path: "/app/composer.json",
+        title: "Bedrock /app/composer.json is publicly accessible",
+        severity: "medium",
+        description:
+          "Composer metadata is reachable through the Bedrock app path. This reveals package names and versions useful for targeted attacks.",
+      },
+      {
+        path: "/app/dsd",
+        title: "Unexpected Bedrock /app file is publicly accessible",
+        severity: "medium",
+        description:
+          "A non-static, extensionless file under the Bedrock app path returned HTTP 200. Direct app file access should be denied unless it is a known public asset.",
+      },
+    ];
+
+    for (const probe of bedrockAppProbes) {
+      const code = await probeStatus(probe.path);
+      if (code !== "200") {
+        continue;
+      }
+
+      findings.push(
+        makeFinding(
+          probe.severity,
+          "VERSION_DISCLOSURE",
+          probe.title,
+          probe.description,
+          {
+            remediation:
+              "Apply the Block sensitive file access hardening action. It writes a Bedrock app path guard that denies unsafe direct files while keeping normal static assets available.",
+            resource: `${cleanUrl}${probe.path}`,
           },
         ),
       );

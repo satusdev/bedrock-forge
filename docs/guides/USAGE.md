@@ -259,6 +259,16 @@ file patterns, suspicious scripts, and related hardening items. Some hardening
 actions can be applied from the UI, but review each action before running it on
 production.
 
+Environment hardening selects only low-risk protections by default. Destructive
+or compatibility-sensitive actions, such as deleting PHP files in uploads,
+forcing a WordPress core reinstall, or updating every plugin, are visible but
+must be selected explicitly and confirmed before Forge queues the job.
+
+For Bedrock installs, the environment scan also probes direct `/app` access for
+logs, `.env`, package metadata, and unexpected extensionless files. The **Block
+sensitive file access** action writes a web-server app-path guard that denies
+unsafe direct files while preserving normal static assets.
+
 Current limits:
 
 - SSH host key verification is not implemented.

@@ -29,11 +29,13 @@ import type {
   ServerSecurityAlertSetting,
 } from "./types";
 import {
+  DEFAULT_ENVIRONMENT_HARDENING_ACTION_IDS,
   SERVER_HARDENING_ACTIONS,
   ENVIRONMENT_HARDENING_ACTIONS,
   SCAN_TYPES_BY_KIND,
   SCAN_TYPE_DESCRIPTIONS,
   SCAN_TYPE_LABELS,
+  isRiskyEnvironmentHardeningAction,
 } from "./constants";
 
 // ─── HardenDialog ─────────────────────────────────────────────────────────────
@@ -57,8 +59,12 @@ export function HardenDialog({
     targetType === "server"
       ? SERVER_HARDENING_ACTIONS
       : ENVIRONMENT_HARDENING_ACTIONS;
+  const defaultActions =
+    targetType === "server"
+      ? allActions.map((a) => a.id)
+      : DEFAULT_ENVIRONMENT_HARDENING_ACTION_IDS;
   const [selected, setSelected] = useState<string[]>(
-    initialActions ?? allActions.map((a) => a.id),
+    initialActions ?? defaultActions,
   );
   const [execId, setExecId] = useState<number | null>(null);
   const [done, setDone] = useState(false);
@@ -115,9 +121,38 @@ export function HardenDialog({
   const handleClose = () => {
     setExecId(null);
     setDone(false);
-    setSelected(initialActions ?? allActions.map((a) => a.id));
+    setSelected(initialActions ?? defaultActions);
     mutation.reset();
     onClose();
+  };
+
+  const confirmRiskyActions = () => {
+    if (targetType !== "environment") {
+      return true;
+    }
+
+    const risky = selected.filter(isRiskyEnvironmentHardeningAction);
+    if (risky.length === 0) {
+      return true;
+    }
+
+    const labels = risky
+      .map(
+        (id) =>
+          ENVIRONMENT_HARDENING_ACTIONS.find((action) => action.id === id)
+            ?.label ?? id,
+      )
+      .join(", ");
+
+    return window.confirm(
+      `The selected action requires an explicit opt-in because it can change files or update code: ${labels}. Continue?`,
+    );
+  };
+
+  const queueHardening = () => {
+    if (confirmRiskyActions()) {
+      mutation.mutate(selected);
+    }
   };
 
   return (
@@ -142,7 +177,17 @@ export function HardenDialog({
                     className="rounded mt-0.5"
                   />
                   <div>
-                    <p className="text-sm font-medium">{a.label}</p>
+                    <p className="text-sm font-medium flex items-center gap-1.5">
+                      <span>{a.label}</span>
+                      {"risky" in a && a.risky ? (
+                        <Badge
+                          variant="outline"
+                          className="h-4 px-1.5 text-[10px] border-warning/50 text-warning"
+                        >
+                          Opt-in
+                        </Badge>
+                      ) : null}
+                    </p>
                     <p className="text-xs text-muted-foreground">
                       {a.description}
                     </p>
@@ -155,7 +200,7 @@ export function HardenDialog({
                 Cancel
               </Button>
               <Button
-                onClick={() => mutation.mutate(selected)}
+                onClick={queueHardening}
                 disabled={selected.length === 0 || mutation.isPending}
               >
                 {mutation.isPending ? (
