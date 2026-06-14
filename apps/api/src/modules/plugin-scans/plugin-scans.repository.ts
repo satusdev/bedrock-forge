@@ -128,7 +128,9 @@ export class PluginScansRepository {
         status: true,
         progress: true,
         execution_log: true,
+        started_at: true,
         completed_at: true,
+        created_at: true,
         last_error: true,
       },
     });

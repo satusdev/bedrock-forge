@@ -67,8 +67,11 @@ export interface JobExecutionLogStatus {
   id: number;
   status: "queued" | "active" | "completed" | "failed" | "dead_letter" | string;
   execution_log: Array<{ step: string; detail?: string }> | null;
+  progress?: number | null;
   last_error?: string | null;
+  started_at?: string | null;
   completed_at?: string | null;
+  created_at?: string | null;
 }
 
 export interface PluginUpdateSchedule {

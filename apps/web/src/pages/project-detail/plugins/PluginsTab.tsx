@@ -23,7 +23,6 @@ import {
   X,
 } from "lucide-react";
 
-import { api } from "@/lib/api-client";
 import { toast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -161,6 +160,9 @@ export function PluginsTab({
     string,
     unknown
   > | null>(null);
+  const [composerReadExecId, setComposerReadExecId] = useState<number | null>(
+    null,
+  );
 
   const scanningEnvIdRef = useRef<number | null>(null);
   const scanJobIdRef = useRef<string | null>(null);
@@ -259,33 +261,8 @@ export function PluginsTab({
     const isComposerRead =
       event.jobId != null && event.jobId === composerReadJobIdRef.current;
     if (isComposerRead) {
-      const execId = composerReadExecIdRef.current;
       composerReadJobIdRef.current = null;
       composerReadExecIdRef.current = null;
-      if (execId) {
-        api
-          .get<{
-            execution_log: Array<{ step: string; detail?: string }> | null;
-          }>(`/plugin-scans/execution/${execId}`)
-          .then((res) => {
-            const entry = res?.execution_log?.find(
-              (e) => e.step === "composer-read-result",
-            );
-            if (entry?.detail) {
-              try {
-                setComposerReadData(
-                  JSON.parse(entry.detail) as Record<string, unknown>,
-                );
-              } catch {
-                setComposerReadData(null);
-              }
-            } else {
-              setComposerReadData(null);
-            }
-            setComposerReadLoading(false);
-          })
-          .catch(() => setComposerReadLoading(false));
-      }
     }
   });
 
@@ -354,6 +331,7 @@ export function PluginsTab({
     if (isComposerRead) {
       composerReadJobIdRef.current = null;
       composerReadExecIdRef.current = null;
+      setComposerReadExecId(null);
       setComposerReadLoading(false);
       toast({
         title: "Failed to read composer.json",
@@ -372,6 +350,10 @@ export function PluginsTab({
   const { data: lastJobLog } = useJobExecutionLog(
     lastJobExecutionId,
     isLogEnabled,
+  );
+  const { data: composerJobLog } = useJobExecutionLog(
+    composerReadExecId,
+    composerReadLoading,
   );
 
   useEffect(() => {
@@ -410,6 +392,53 @@ export function PluginsTab({
       }
     }
   }, [lastJobLog?.status, lastJobLog?.last_error, selectedEnvId, lastJobKind]);
+
+  useEffect(() => {
+    if (!composerJobLog || !composerReadLoading) return;
+    if (composerJobLog.status === "completed") {
+      const entry = composerJobLog.execution_log?.find(
+        (e) => e.step === "composer-read-result",
+      );
+      if (entry?.detail) {
+        try {
+          setComposerReadData(
+            JSON.parse(entry.detail) as Record<string, unknown>,
+          );
+        } catch {
+          setComposerReadData(null);
+          toast({
+            title: "composer.json could not be parsed",
+            description:
+              "The remote file was read but did not contain valid JSON.",
+            variant: "destructive",
+          });
+        }
+      } else {
+        setComposerReadData(null);
+      }
+      setComposerReadLoading(false);
+      composerReadJobIdRef.current = null;
+      composerReadExecIdRef.current = null;
+    } else if (
+      composerJobLog.status === "failed" ||
+      composerJobLog.status === "dead_letter"
+    ) {
+      setComposerReadLoading(false);
+      composerReadJobIdRef.current = null;
+      composerReadExecIdRef.current = null;
+      toast({
+        title: "Failed to read composer.json",
+        description:
+          composerJobLog.last_error ?? "An unexpected error occurred",
+        variant: "destructive",
+      });
+    }
+  }, [
+    composerJobLog?.status,
+    composerJobLog?.last_error,
+    composerJobLog?.execution_log,
+    composerReadLoading,
+  ]);
 
   const { data: customCatalog = [] } = useCustomCatalog();
   const { data: envCustomPlugins = [] } = useEnvCustomPlugins(selectedEnvId);
@@ -545,6 +574,7 @@ export function PluginsTab({
     onSuccess: (data) => {
       composerReadJobIdRef.current = data?.bullJobId ?? null;
       composerReadExecIdRef.current = data?.jobExecutionId ?? null;
+      setComposerReadExecId(data?.jobExecutionId ?? null);
       setComposerReadLoading(true);
       setComposerReadData(null);
       setComposerViewOpen(true);
@@ -1895,6 +1925,7 @@ export function PluginsTab({
           if (!o) {
             setComposerViewOpen(false);
             setComposerReadData(null);
+            setComposerReadExecId(null);
           }
         }}
       >
@@ -1904,11 +1935,15 @@ export function PluginsTab({
           </DialogHeader>
           <div className="flex-1 overflow-auto min-h-0 mt-2">
             {composerReadLoading ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                <span className="ml-2 text-sm text-muted-foreground">
+              <div className="space-y-4 py-4">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
                   Reading composer.json…
-                </span>
+                </div>
+                <ExecutionLogPanel
+                  jobExecutionId={composerReadExecId}
+                  isActive={composerReadLoading}
+                />
               </div>
             ) : composerReadData ? (
               <pre className="text-xs font-mono bg-muted/40 rounded-lg p-4 overflow-auto whitespace-pre-wrap">

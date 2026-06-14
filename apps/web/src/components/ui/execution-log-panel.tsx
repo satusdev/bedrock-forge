@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ChevronDown,
@@ -13,6 +13,8 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 
 export interface ExecutionLogEntry {
   ts: string;
@@ -29,7 +31,40 @@ export interface ExecutionLogEntry {
 interface JobExecutionLog {
   id: number;
   status: string;
+  progress: number | null;
   execution_log: ExecutionLogEntry[] | null;
+  last_error?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  created_at?: string | null;
+}
+
+function formatDuration(ms: number) {
+  if (ms < 1000) return "<1s";
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) return `${seconds}s`;
+  return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
+}
+
+function useElapsedLabel(
+  start?: string | null,
+  end?: string | null,
+  active?: boolean,
+) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    const id = window.setInterval(() => tick((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [active]);
+
+  if (!start) return null;
+  const startedAt = new Date(start).getTime();
+  const endedAt = end ? new Date(end).getTime() : Date.now();
+  if (!Number.isFinite(startedAt) || !Number.isFinite(endedAt)) return null;
+  return formatDuration(Math.max(0, endedAt - startedAt));
 }
 
 function LevelIcon({ level }: { level: ExecutionLogEntry["level"] }) {
@@ -163,6 +198,16 @@ export function ExecutionLogPanel({
     refetchInterval: isActive ? 2_000 : false,
   });
 
+  const entries = data?.execution_log ?? [];
+  const active =
+    isActive || data?.status === "queued" || data?.status === "active";
+  const elapsed = useElapsedLabel(
+    data?.started_at ?? data?.created_at,
+    data?.completed_at,
+    active,
+  );
+  const latest = entries[entries.length - 1];
+
   if (!jobExecutionId) return null;
 
   if (isLoading) {
@@ -172,16 +217,6 @@ export function ExecutionLogPanel({
         <Skeleton className="h-4 w-64" />
         <Skeleton className="h-4 w-56" />
       </div>
-    );
-  }
-
-  const entries = data?.execution_log ?? [];
-
-  if (entries.length === 0) {
-    return (
-      <p className="text-xs text-muted-foreground py-2">
-        No execution log available for this job.
-      </p>
     );
   }
 
@@ -212,8 +247,66 @@ export function ExecutionLogPanel({
     URL.revokeObjectURL(url);
   }
 
+  const summary = (
+    <div className="mb-3 rounded-md border bg-muted/30 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge
+          variant={
+            data?.status === "failed" || data?.status === "dead_letter"
+              ? "destructive"
+              : data?.status === "completed"
+                ? "success"
+                : "secondary"
+          }
+          className="capitalize"
+        >
+          {active && (
+            <span className="mr-1.5 h-2 w-2 animate-pulse rounded-full bg-current" />
+          )}
+          {data?.status?.replace("_", " ") ?? "queued"}
+        </Badge>
+        {elapsed && (
+          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+            <Clock className="h-3 w-3" />
+            {active ? `${elapsed} elapsed` : elapsed}
+          </span>
+        )}
+        {data?.progress != null && (
+          <span className="text-xs font-medium tabular-nums">
+            {data.progress}%
+          </span>
+        )}
+      </div>
+      {data?.progress != null && data.status !== "completed" && (
+        <Progress value={data.progress} className="mt-2 h-1.5" />
+      )}
+      {latest && (
+        <p className="mt-2 truncate text-xs text-muted-foreground">
+          {latest.step}
+        </p>
+      )}
+      {data?.last_error && (
+        <p className="mt-2 break-all text-xs text-destructive">
+          {data.last_error}
+        </p>
+      )}
+    </div>
+  );
+
+  if (entries.length === 0) {
+    return (
+      <div className="pt-2">
+        {summary}
+        <p className="text-xs text-muted-foreground py-2">
+          No execution log available for this job yet.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="pt-2">
+      {summary}
       <div className="flex items-center justify-end gap-2 mb-2">
         <button
           type="button"

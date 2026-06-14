@@ -146,9 +146,12 @@ export class JobExecutionsRepository {
       select: {
         id: true,
         status: true,
+        progress: true,
         execution_log: true,
         last_error: true,
+        started_at: true,
         completed_at: true,
+        created_at: true,
       },
     });
   }
