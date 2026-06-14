@@ -1,29 +1,32 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
+  Activity,
+  AlertTriangle,
+  Bell,
+  Calendar,
+  ClipboardCheck,
+  ClipboardList,
+  FileBarChart,
+  FileText,
+  FolderOpen,
+  Gauge,
+  Globe,
+  HardDrive,
+  LayoutDashboard,
+  Loader2,
+  Package,
   Search,
   Server,
-  FolderOpen,
-  Users,
-  LayoutDashboard,
-  FileBarChart,
-  Globe,
-  Shield,
   Settings,
+  Shield,
+  ShieldAlert,
+  Tag,
+  Users,
   X,
-  HardDrive,
-  ClipboardList,
-  ClipboardCheck,
-  AlertTriangle,
-  Package,
-  FileText,
-  Bell,
-  Activity,
-  Gauge,
 } from "lucide-react";
 import { api } from "@/lib/api-client";
-import { useAuthStore } from "@/store/auth.store";
 import {
   Dialog,
   DialogContent,
@@ -31,113 +34,63 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-interface StaticItem {
-  type: "page";
+type SearchResultType =
+  | "page"
+  | "project"
+  | "environment"
+  | "project_tab"
+  | "client"
+  | "server";
+
+interface SearchResult {
+  type: SearchResultType;
+  id: string;
   label: string;
+  subtitle?: string;
   path: string;
-  icon: React.ElementType;
-  minRole?: "manager" | "admin" | "maintainer";
+  icon?: string;
 }
 
-interface DynamicItem {
-  type: "client" | "server" | "project";
-  id: number;
-  label: string;
-  path: string;
-}
+const ICONS: Record<string, React.ElementType> = {
+  Activity,
+  AlertTriangle,
+  Bell,
+  Calendar,
+  ClipboardCheck,
+  ClipboardList,
+  FileBarChart,
+  FileText,
+  FolderOpen,
+  Gauge,
+  Globe,
+  HardDrive,
+  LayoutDashboard,
+  Package,
+  Search,
+  Server,
+  Settings,
+  Shield,
+  ShieldAlert,
+  Tag,
+  Users,
+};
 
-type PaletteItem = StaticItem | DynamicItem;
+const TYPE_LABELS: Record<SearchResultType, string> = {
+  page: "Pages",
+  project: "Projects",
+  environment: "Environments",
+  project_tab: "Project Tabs",
+  client: "Clients",
+  server: "Servers",
+};
 
-const STATIC_PAGES: StaticItem[] = [
-  {
-    type: "page",
-    label: "Dashboard",
-    path: "/dashboard",
-    icon: LayoutDashboard,
-  },
-  { type: "page", label: "Clients", path: "/clients", icon: Users },
-  { type: "page", label: "Servers", path: "/servers", icon: Server },
-  { type: "page", label: "Projects", path: "/projects", icon: FolderOpen },
-  { type: "page", label: "Backups", path: "/backups", icon: HardDrive },
-  { type: "page", label: "Domains", path: "/domains", icon: Globe },
-  { type: "page", label: "Monitors", path: "/monitors", icon: Activity },
-  { type: "page", label: "Lighthouse", path: "/lighthouse", icon: Gauge },
-  { type: "page", label: "Activity", path: "/activity", icon: ClipboardList },
-  { type: "page", label: "Problems", path: "/problems", icon: AlertTriangle },
-  { type: "page", label: "Settings", path: "/settings", icon: Settings },
-  {
-    type: "page",
-    label: "Packages",
-    path: "/packages",
-    icon: Package,
-    minRole: "manager",
-  },
-  {
-    type: "page",
-    label: "Invoices",
-    path: "/invoices",
-    icon: FileText,
-    minRole: "manager",
-  },
-  {
-    type: "page",
-    label: "Users & Roles",
-    path: "/users",
-    icon: Shield,
-    minRole: "admin",
-  },
-  {
-    type: "page",
-    label: "Audit Logs",
-    path: "/audit-logs",
-    icon: ClipboardCheck,
-    minRole: "admin",
-  },
-  {
-    type: "page",
-    label: "Notifications",
-    path: "/notifications",
-    icon: Bell,
-    minRole: "admin",
-  },
-  {
-    type: "page",
-    label: "Reports",
-    path: "/reports",
-    icon: FileBarChart,
-    minRole: "admin",
-  },
-];
-
-function getItemIcon(item: PaletteItem): React.ReactNode {
-  if (item.type === "page") {
-    const Icon = item.icon;
-    return <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />;
-  }
-  if (item.type === "client")
-    return <Users className="h-4 w-4 shrink-0 text-info" />;
-  if (item.type === "server")
-    return <Server className="h-4 w-4 shrink-0 text-success" />;
-  return <FolderOpen className="h-4 w-4 shrink-0 text-warning" />;
-}
-
-function getItemLabel(item: PaletteItem): string {
-  if (item.type === "page") return item.label;
-  return item.label;
-}
-
-function getItemSubLabel(item: PaletteItem): string {
-  if (item.type === "page") return "Page";
-  if (item.type === "client") return "Client";
-  if (item.type === "server") return "Server";
-  return "Project";
-}
-
-const ROLE_WEIGHT: Record<string, number> = {
-  admin: 4,
-  manager: 3,
-  maintainer: 2,
-  client: 1,
+const TYPE_TONES: Record<SearchResultType, string> = {
+  page: "text-muted-foreground",
+  project: "text-warning",
+  environment: "text-info",
+  project_tab: "text-primary",
+  client: "text-info",
+  server: "text-success",
 };
 
 interface CommandPaletteProps {
@@ -147,92 +100,24 @@ interface CommandPaletteProps {
 
 export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   const navigate = useNavigate();
-  const user = useAuthStore((s) => s.user);
-  const userWeight = Math.max(
-    ...(user?.roles ?? []).map((r) => ROLE_WEIGHT[r] ?? 0),
-    0,
-  );
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const debouncedQuery = useDebounce(query, 180);
 
-  const debouncedQuery = useDebounce(query, 250);
-
-  const { data: clients = [], isFetching: fetchingClients } = useQuery({
-    queryKey: ["cmd-clients", debouncedQuery],
-    queryFn: async () => {
-      if (!debouncedQuery) return [];
-      const res = await api.get<{ items: { id: number; name: string }[] }>(
-        `/clients?limit=5&search=${encodeURIComponent(debouncedQuery)}`,
-      );
-      return res.items ?? [];
-    },
-    enabled: open && debouncedQuery.length > 0,
+  const { data, isFetching } = useQuery({
+    queryKey: ["global-search", debouncedQuery],
+    queryFn: () =>
+      api.get<{ items: SearchResult[] }>(
+        `/search?q=${encodeURIComponent(debouncedQuery)}&limit=8`,
+      ),
+    enabled: open,
+    staleTime: debouncedQuery ? 5_000 : 30_000,
   });
 
-  const { data: servers = [], isFetching: fetchingServers } = useQuery({
-    queryKey: ["cmd-servers", debouncedQuery],
-    queryFn: async () => {
-      if (!debouncedQuery) return [];
-      const res = await api.get<{ items: { id: number; name: string }[] }>(
-        `/servers?limit=5&search=${encodeURIComponent(debouncedQuery)}`,
-      );
-      return res.items ?? [];
-    },
-    enabled: open && debouncedQuery.length > 0,
-  });
+  const allItems = data?.items ?? [];
 
-  const { data: projects = [], isFetching: fetchingProjects } = useQuery({
-    queryKey: ["cmd-projects", debouncedQuery],
-    queryFn: async () => {
-      if (!debouncedQuery) return [];
-      const res = await api.get<{ items: { id: number; name: string }[] }>(
-        `/projects?limit=5&search=${encodeURIComponent(debouncedQuery)}`,
-      );
-      return res.items ?? [];
-    },
-    enabled: open && debouncedQuery.length > 0,
-  });
-
-  const isFetchingDynamic =
-    debouncedQuery.length > 0 &&
-    (fetchingClients || fetchingServers || fetchingProjects);
-
-  const filteredPages = debouncedQuery
-    ? STATIC_PAGES.filter(
-        (p) =>
-          p.label.toLowerCase().includes(debouncedQuery.toLowerCase()) &&
-          (p.minRole ? (ROLE_WEIGHT[p.minRole] ?? 0) <= userWeight : true),
-      )
-    : STATIC_PAGES.filter((p) =>
-        p.minRole ? (ROLE_WEIGHT[p.minRole] ?? 0) <= userWeight : true,
-      );
-
-  const dynamicItems: DynamicItem[] = [
-    ...clients.map((c) => ({
-      type: "client" as const,
-      id: c.id,
-      label: c.name,
-      path: `/clients/${c.id}`,
-    })),
-    ...servers.map((s) => ({
-      type: "server" as const,
-      id: s.id,
-      label: s.name,
-      path: `/servers`,
-    })),
-    ...projects.map((p) => ({
-      type: "project" as const,
-      id: p.id,
-      label: p.name,
-      path: `/projects/${p.id}`,
-    })),
-  ];
-
-  const allItems: PaletteItem[] = [...filteredPages, ...dynamicItems];
-
-  // Reset state on open
   useEffect(() => {
     if (open) {
       setQuery("");
@@ -241,13 +126,16 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
     }
   }, [open]);
 
-  // Scroll active item into view
   useEffect(() => {
     const el = listRef.current?.querySelector(`[data-index="${activeIndex}"]`);
     el?.scrollIntoView({ block: "nearest" });
   }, [activeIndex]);
 
-  const handleSelect = (item: PaletteItem) => {
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [debouncedQuery]);
+
+  const handleSelect = (item: SearchResult) => {
     navigate(item.path);
     onClose();
   };
@@ -268,27 +156,27 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="p-0 max-w-xl gap-0 overflow-hidden">
+      <DialogContent className="p-0 max-w-2xl gap-0 overflow-hidden">
         <DialogHeader className="sr-only">
           <DialogTitle>Search</DialogTitle>
         </DialogHeader>
 
-        {/* Search input */}
         <div className="flex items-center gap-2 border-b px-4 py-3">
           <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
           <input
             ref={inputRef}
             value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setActiveIndex(0);
-            }}
+            onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Search pages, clients, servers, projects…"
+            placeholder="Search pages, projects, environments, tabs…"
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
+          {isFetching && (
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
+          )}
           {query && (
             <button
+              type="button"
               onClick={() => setQuery("")}
               className="text-muted-foreground hover:text-foreground"
               aria-label="Clear search"
@@ -301,11 +189,10 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
           </kbd>
         </div>
 
-        {/* Results */}
-        <div ref={listRef} className="max-h-80 overflow-y-auto py-2">
-          {isFetchingDynamic && allItems.length === 0 ? (
-            <div className="flex items-center justify-center py-8 gap-2 text-sm text-muted-foreground">
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+        <div ref={listRef} className="max-h-[28rem] overflow-y-auto py-2">
+          {isFetching && allItems.length === 0 ? (
+            <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
               Searching…
             </div>
           ) : allItems.length === 0 ? (
@@ -316,26 +203,22 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
 
           {allItems.map((item, i) => {
             const prevItem = allItems[i - 1];
-            const isFirstOfType = !prevItem || prevItem.type !== item.type;
-            const groupLabel = isFirstOfType
-              ? item.type === "page"
-                ? "Pages"
-                : item.type === "client"
-                  ? "Clients"
-                  : item.type === "server"
-                    ? "Servers"
-                    : "Projects"
-              : null;
+            const groupLabel =
+              !prevItem || prevItem.type !== item.type
+                ? TYPE_LABELS[item.type]
+                : null;
+            const Icon =
+              item.icon && ICONS[item.icon] ? ICONS[item.icon] : Search;
+
             return (
-              <div
-                key={`${item.type}-${item.type === "page" ? item.path : item.id}`}
-              >
+              <div key={`${item.type}-${item.id}`}>
                 {groupLabel && (
                   <div className="px-4 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 select-none">
                     {groupLabel}
                   </div>
                 )}
                 <button
+                  type="button"
                   data-index={i}
                   onClick={() => handleSelect(item)}
                   onMouseEnter={() => setActiveIndex(i)}
@@ -345,10 +228,21 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                       : "text-foreground"
                   }`}
                 >
-                  {getItemIcon(item)}
-                  <span className="flex-1 truncate">{getItemLabel(item)}</span>
+                  <Icon
+                    className={`h-4 w-4 shrink-0 ${TYPE_TONES[item.type]}`}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{item.label}</span>
+                    {item.subtitle && (
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {item.subtitle}
+                      </span>
+                    )}
+                  </span>
                   <span className="text-xs text-muted-foreground shrink-0">
-                    {getItemSubLabel(item)}
+                    {item.type === "project_tab"
+                      ? "Tab"
+                      : item.type[0].toUpperCase() + item.type.slice(1)}
                   </span>
                 </button>
               </div>
@@ -356,7 +250,6 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
           })}
         </div>
 
-        {/* Footer hint */}
         <div className="border-t px-4 py-2 flex items-center gap-4 text-xs text-muted-foreground">
           <span>
             <kbd className="font-mono">↑↓</kbd> navigate
@@ -373,7 +266,6 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   );
 }
 
-/** Simple debounce hook */
 function useDebounce<T>(value: T, delay: number): T {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {

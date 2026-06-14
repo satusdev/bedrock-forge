@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Plus, MonitorSmartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -14,6 +15,8 @@ import { AddEnvironmentWizard } from "./components/AddEnvironmentWizard";
 import { EnvironmentFormDialog } from "./components/EnvironmentFormDialog";
 
 export function EnvironmentsTab({ projectId }: { projectId: number }) {
+  const [searchParams] = useSearchParams();
+  const focusedEnvId = Number(searchParams.get("env"));
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Environment | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Environment | null>(null);
@@ -74,13 +77,21 @@ export function EnvironmentsTab({ projectId }: { projectId: number }) {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
           {environments.map((env) => (
-            <EnvironmentCard
+            <div
               key={env.id}
-              env={env}
-              projectId={projectId}
-              onEdit={setEditTarget}
-              onDelete={setDeleteTarget}
-            />
+              className={
+                env.id === focusedEnvId
+                  ? "rounded-lg ring-2 ring-primary ring-offset-2 ring-offset-background"
+                  : undefined
+              }
+            >
+              <EnvironmentCard
+                env={env}
+                projectId={projectId}
+                onEdit={setEditTarget}
+                onDelete={setDeleteTarget}
+              />
+            </div>
           ))}
         </div>
       )}

@@ -43,6 +43,7 @@ import { SecurityModule } from "./modules/security/security.module";
 import { LighthouseModule } from "./modules/lighthouse/lighthouse.module";
 import { RemoteOpsModule } from "./modules/remote-ops/remote-ops.module";
 import { MaintenanceWindowsModule } from "./modules/maintenance-windows/maintenance-windows.module";
+import { SearchModule } from "./modules/search/search.module";
 import { IpAllowlistMiddleware } from "./common/middleware/ip-allowlist.middleware";
 import { SettingsRepository } from "./modules/settings/settings.repository";
 import { AuditInterceptor } from "./common/interceptors/audit.interceptor";
@@ -147,6 +148,7 @@ import appConfig from "./config/app.config";
     LighthouseModule,
     RemoteOpsModule,
     MaintenanceWindowsModule,
+    SearchModule,
   ],
   providers: [
     // Global rate limiting — 100 req/min per IP (ThrottlerModule configured above)
