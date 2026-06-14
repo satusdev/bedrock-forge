@@ -42,6 +42,8 @@ import {
 import { FindingItem, AcknowledgeFindingDialog } from "../security/components";
 import {
   DEFAULT_ENVIRONMENT_HARDENING_ACTION_IDS,
+  HARDENING_ACTION_GROUP_LABELS,
+  HARDENING_PRESETS,
   ENVIRONMENT_HARDENING_ACTIONS,
   SCAN_TYPES_BY_KIND,
   isRiskyEnvironmentHardeningAction,
@@ -309,6 +311,16 @@ export function SecurityTab({
     );
   };
 
+  const groupedHardeningActions = Object.entries(HARDENING_ACTION_GROUP_LABELS)
+    .map(([group, label]) => ({
+      group,
+      label,
+      actions: ENVIRONMENT_HARDENING_ACTIONS.filter(
+        (action) => action.group === group,
+      ),
+    }))
+    .filter((group) => group.actions.length > 0);
+
   const handleFixFinding = (actionId: string) => {
     if (!confirmRiskyHardeningActions([actionId])) {
       return;
@@ -567,43 +579,78 @@ export function SecurityTab({
               cleanup and update actions are opt-in.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3.5 max-h-[460px] overflow-y-auto pr-1">
-            {ENVIRONMENT_HARDENING_ACTIONS.map((action) => (
-              <label
-                key={action.id}
-                className="flex items-start gap-3 p-2.5 rounded-lg border border-border/40 hover:bg-muted/40 transition-colors cursor-pointer"
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedHardening.includes(action.id)}
-                  onChange={() => toggleHardening(action.id)}
+          <CardContent className="max-h-[520px] space-y-4 overflow-y-auto pr-1">
+            <div className="grid grid-cols-1 gap-2">
+              {HARDENING_PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
                   disabled={hardenMutation.isPending}
-                  className="rounded mt-1 h-3.5 w-3.5 accent-primary"
-                />
-                <div className="space-y-0.5">
-                  <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                    <span>{action.label}</span>
-                    {"risky" in action && action.risky ? (
-                      <Badge
-                        variant="outline"
-                        className="h-4 px-1.5 text-[10px] border-warning/50 text-warning"
-                      >
-                        Opt-in
-                      </Badge>
-                    ) : (
-                      <Badge
-                        variant="outline"
-                        className="h-4 px-1.5 text-[10px] border-success/40 text-success"
-                      >
-                        Safe default
-                      </Badge>
-                    )}
-                  </span>
-                  <span className="text-[11px] text-muted-foreground block leading-normal">
-                    {action.description}
-                  </span>
-                </div>
-              </label>
+                  className="rounded-lg border border-border/50 bg-muted/20 p-2.5 text-left transition hover:bg-muted/50 disabled:opacity-60"
+                  onClick={() => setSelectedHardening([...preset.actions])}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold">
+                      {preset.label}
+                    </span>
+                    <Badge variant="outline" className="text-[10px]">
+                      {preset.actions.length} actions
+                    </Badge>
+                  </div>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    {preset.description}
+                  </p>
+                </button>
+              ))}
+            </div>
+
+            {groupedHardeningActions.map((group) => (
+              <div key={group.group} className="space-y-2">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                  {group.label}
+                </p>
+                {group.actions.map((action) => (
+                  <label
+                    key={action.id}
+                    className="flex cursor-pointer items-start gap-3 rounded-lg border border-border/40 p-2.5 transition-colors hover:bg-muted/40"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedHardening.includes(action.id)}
+                      onChange={() => toggleHardening(action.id)}
+                      disabled={hardenMutation.isPending}
+                      className="mt-1 h-3.5 w-3.5 rounded accent-primary"
+                    />
+                    <div className="space-y-0.5">
+                      <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+                        <span>{action.label}</span>
+                        <Badge
+                          variant={
+                            action.risk === "risky"
+                              ? "destructive"
+                              : action.risk === "review"
+                                ? "warning"
+                                : "success"
+                          }
+                          className="h-4 px-1.5 text-[10px]"
+                        >
+                          {action.risk === "risky"
+                            ? "Opt-in"
+                            : action.risk === "review"
+                              ? "Review"
+                              : "Safe"}
+                        </Badge>
+                      </span>
+                      <span className="block text-[11px] leading-normal text-muted-foreground">
+                        {action.description}
+                      </span>
+                      <span className="block text-[11px] leading-normal text-muted-foreground/80">
+                        {action.preview}
+                      </span>
+                    </div>
+                  </label>
+                ))}
+              </div>
             ))}
           </CardContent>
         </Card>
@@ -651,6 +698,36 @@ export function SecurityTab({
                     Job ID: #{hardenExecId}
                   </span>
                 </div>
+
+                {hardenDone && hardenJobLog?.status === "completed" && (
+                  <div className="rounded-lg border border-success/30 bg-success/10 p-3 text-xs">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="font-semibold text-success">
+                          Hardening finished. Verify the result next.
+                        </p>
+                        <p className="mt-0.5 text-muted-foreground">
+                          Run a fresh security scan to confirm exposed paths,
+                          XML-RPC, logs, and sensitive files are now blocked.
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 shrink-0"
+                        onClick={() => scanMutation.mutate()}
+                        disabled={scanMutation.isPending}
+                      >
+                        {scanMutation.isPending ? (
+                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                        )}
+                        Verify with scan
+                      </Button>
+                    </div>
+                  </div>
+                )}
 
                 <div className="flex-1 bg-black text-green-400 font-mono text-xs p-3 rounded-lg overflow-y-auto max-h-[320px] space-y-2.5 border">
                   {hardenJobLog?.execution_log &&

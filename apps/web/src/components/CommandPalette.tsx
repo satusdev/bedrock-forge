@@ -25,6 +25,7 @@ import {
   Tag,
   Users,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import { api } from "@/lib/api-client";
 import {
@@ -40,7 +41,11 @@ type SearchResultType =
   | "environment"
   | "project_tab"
   | "client"
-  | "server";
+  | "server"
+  | "domain"
+  | "monitor"
+  | "job"
+  | "finding";
 
 interface SearchResult {
   type: SearchResultType;
@@ -51,7 +56,7 @@ interface SearchResult {
   icon?: string;
 }
 
-const ICONS: Record<string, React.ElementType> = {
+const ICONS: Record<string, LucideIcon> = {
   Activity,
   AlertTriangle,
   Bell,
@@ -82,6 +87,10 @@ const TYPE_LABELS: Record<SearchResultType, string> = {
   project_tab: "Project Tabs",
   client: "Clients",
   server: "Servers",
+  domain: "Domains",
+  monitor: "Monitors",
+  job: "Jobs",
+  finding: "Findings",
 };
 
 const TYPE_TONES: Record<SearchResultType, string> = {
@@ -91,7 +100,13 @@ const TYPE_TONES: Record<SearchResultType, string> = {
   project_tab: "text-primary",
   client: "text-info",
   server: "text-success",
+  domain: "text-info",
+  monitor: "text-success",
+  job: "text-primary",
+  finding: "text-destructive",
 };
+
+const RECENTS_KEY = "bf-command-palette-recents";
 
 interface CommandPaletteProps {
   open: boolean;
@@ -117,6 +132,15 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   });
 
   const allItems = data?.items ?? [];
+  const recentItems = loadRecentItems();
+  const visibleItems =
+    !debouncedQuery && recentItems.length > 0
+      ? [...recentItems, ...allItems].filter(
+          (item, index, items) =>
+            items.findIndex((candidate) => candidate.path === item.path) ===
+            index,
+        )
+      : allItems;
 
   useEffect(() => {
     if (open) {
@@ -136,6 +160,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   }, [debouncedQuery]);
 
   const handleSelect = (item: SearchResult) => {
+    saveRecentItem(item);
     navigate(item.path);
     onClose();
   };
@@ -143,12 +168,12 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setActiveIndex((i) => Math.min(i + 1, allItems.length - 1));
+      setActiveIndex((i) => Math.min(i + 1, visibleItems.length - 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setActiveIndex((i) => Math.max(i - 1, 0));
     } else if (e.key === "Enter") {
-      if (allItems[activeIndex]) handleSelect(allItems[activeIndex]);
+      if (visibleItems[activeIndex]) handleSelect(visibleItems[activeIndex]);
     } else if (e.key === "Escape") {
       onClose();
     }
@@ -190,19 +215,21 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
         </div>
 
         <div ref={listRef} className="max-h-[28rem] overflow-y-auto py-2">
-          {isFetching && allItems.length === 0 ? (
+          {isFetching && visibleItems.length === 0 ? (
             <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
               Searching…
             </div>
-          ) : allItems.length === 0 ? (
+          ) : visibleItems.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              No results found.
+              {query
+                ? "No results found."
+                : "Start typing to search the system."}
             </p>
           ) : null}
 
-          {allItems.map((item, i) => {
-            const prevItem = allItems[i - 1];
+          {visibleItems.map((item, i) => {
+            const prevItem = visibleItems[i - 1];
             const groupLabel =
               !prevItem || prevItem.type !== item.type
                 ? TYPE_LABELS[item.type]
@@ -242,7 +269,11 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                   <span className="text-xs text-muted-foreground shrink-0">
                     {item.type === "project_tab"
                       ? "Tab"
-                      : item.type[0].toUpperCase() + item.type.slice(1)}
+                      : item.type === "job"
+                        ? "Log"
+                        : item.type === "finding"
+                          ? "Fix"
+                          : item.type[0].toUpperCase() + item.type.slice(1)}
                   </span>
                 </button>
               </div>
@@ -264,6 +295,30 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       </DialogContent>
     </Dialog>
   );
+}
+
+function loadRecentItems(): SearchResult[] {
+  try {
+    const raw = window.localStorage.getItem(RECENTS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as SearchResult[];
+    return Array.isArray(parsed) ? parsed.slice(0, 5) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRecentItem(item: SearchResult) {
+  try {
+    const recents = loadRecentItems();
+    const next = [
+      { ...item, type: item.type },
+      ...recents.filter((recent) => recent.path !== item.path),
+    ].slice(0, 5);
+    window.localStorage.setItem(RECENTS_KEY, JSON.stringify(next));
+  } catch {
+    // localStorage can be disabled; search still works without recents.
+  }
 }
 
 function useDebounce<T>(value: T, delay: number): T {

@@ -30,6 +30,8 @@ import type {
 } from "./types";
 import {
   DEFAULT_ENVIRONMENT_HARDENING_ACTION_IDS,
+  HARDENING_ACTION_GROUP_LABELS,
+  HARDENING_PRESETS,
   SERVER_HARDENING_ACTIONS,
   ENVIRONMENT_HARDENING_ACTIONS,
   SCAN_TYPES_BY_KIND,
@@ -37,6 +39,7 @@ import {
   SCAN_TYPE_LABELS,
   isRiskyEnvironmentHardeningAction,
 } from "./constants";
+import { hardeningRiskLabel } from "./utils";
 
 // ─── HardenDialog ─────────────────────────────────────────────────────────────
 
@@ -73,6 +76,19 @@ export function HardenDialog({
     setSelected((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     );
+
+  const groupedActions =
+    targetType === "environment"
+      ? Object.entries(HARDENING_ACTION_GROUP_LABELS)
+          .map(([group, label]) => ({
+            group,
+            label,
+            actions: ENVIRONMENT_HARDENING_ACTIONS.filter(
+              (action) => action.group === group,
+            ),
+          }))
+          .filter((group) => group.actions.length > 0)
+      : [{ group: "server", label: "Server protections", actions: allActions }];
 
   const mutation = useMutation({
     mutationFn: (actions: string[]) => {
@@ -157,7 +173,7 @@ export function HardenDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && handleClose()}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Harden — {targetName}</DialogTitle>
         </DialogHeader>
@@ -165,34 +181,70 @@ export function HardenDialog({
         {!execId && (
           <>
             <div className="space-y-3 py-2">
-              {allActions.map((a) => (
-                <label
-                  key={a.id}
-                  className="flex items-start gap-3 cursor-pointer"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selected.includes(a.id)}
-                    onChange={() => toggle(a.id)}
-                    className="rounded mt-0.5"
-                  />
-                  <div>
-                    <p className="text-sm font-medium flex items-center gap-1.5">
-                      <span>{a.label}</span>
-                      {"risky" in a && a.risky ? (
-                        <Badge
-                          variant="outline"
-                          className="h-4 px-1.5 text-[10px] border-warning/50 text-warning"
-                        >
-                          Opt-in
-                        </Badge>
-                      ) : null}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {a.description}
-                    </p>
-                  </div>
-                </label>
+              {targetType === "environment" && (
+                <div className="grid grid-cols-1 gap-2">
+                  {HARDENING_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      className="rounded-md border bg-muted/20 p-2 text-left transition hover:bg-muted/50"
+                      onClick={() => setSelected([...preset.actions])}
+                    >
+                      <p className="text-xs font-semibold">{preset.label}</p>
+                      <p className="mt-0.5 text-[11px] text-muted-foreground">
+                        {preset.description}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {groupedActions.map((group) => (
+                <div key={group.group} className="space-y-2">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                    {group.label}
+                  </p>
+                  {group.actions.map((a) => (
+                    <label
+                      key={a.id}
+                      className="flex cursor-pointer items-start gap-3 rounded-md border p-2.5 transition hover:bg-muted/40"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selected.includes(a.id)}
+                        onChange={() => toggle(a.id)}
+                        className="mt-1 rounded"
+                      />
+                      <div className="min-w-0">
+                        <p className="flex items-center gap-1.5 text-sm font-medium">
+                          <span>{a.label}</span>
+                          {"risk" in a ? (
+                            <Badge
+                              variant={
+                                a.risk === "risky"
+                                  ? "destructive"
+                                  : a.risk === "review"
+                                    ? "warning"
+                                    : "success"
+                              }
+                              className="h-4 px-1.5 text-[10px]"
+                            >
+                              {hardeningRiskLabel(a.risk)}
+                            </Badge>
+                          ) : null}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {a.description}
+                        </p>
+                        {"preview" in a && (
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            {a.preview}
+                          </p>
+                        )}
+                      </div>
+                    </label>
+                  ))}
+                </div>
               ))}
             </div>
             <DialogFooter>

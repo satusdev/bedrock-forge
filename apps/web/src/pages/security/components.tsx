@@ -8,12 +8,14 @@ import {
   ChevronRight,
   CheckCircle2,
   X,
-  Wrench,
+  Eye,
+  ShieldCheck,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api-client";
 import { toast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import {
   Dialog,
@@ -28,7 +30,12 @@ import type {
   FindingRow,
   ScanSummary,
 } from "./types";
-import { getFixAction, formatScanType } from "./utils";
+import {
+  getFixAction,
+  formatScanType,
+  getHardeningActionDisplay,
+  hardeningRiskLabel,
+} from "./utils";
 
 // ─── SeverityBadge ────────────────────────────────────────────────────────────
 
@@ -235,6 +242,21 @@ export function FindingItem({
   };
   const hasMetadata =
     finding.metadata && Object.keys(finding.metadata).length > 0;
+  const fixAction =
+    row && onFix
+      ? getFixAction(
+          finding.category,
+          finding.title,
+          targetType ?? (row.server_id ? "server" : "environment"),
+        )
+      : null;
+  const fixDisplay = fixAction ? getHardeningActionDisplay(fixAction) : null;
+  const riskVariant =
+    fixDisplay?.risk === "risky"
+      ? "destructive"
+      : fixDisplay?.risk === "review"
+        ? "warning"
+        : "success";
 
   return (
     <div className="border rounded-md overflow-hidden bg-card">
@@ -301,6 +323,40 @@ export function FindingItem({
               <p className="text-xs">{finding.remediation}</p>
             </div>
           )}
+          {fixAction && fixDisplay && (
+            <div className="rounded-lg border bg-background p-3">
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <Badge variant={riskVariant} className="gap-1">
+                  <ShieldCheck className="h-3 w-3" />
+                  {hardeningRiskLabel(fixDisplay.risk)}
+                </Badge>
+                <span className="text-xs font-semibold">
+                  Guided remediation
+                </span>
+              </div>
+              <div className="grid grid-cols-1 gap-2 text-xs md:grid-cols-4">
+                {[
+                  ["Understand", "Review the impact and affected resource."],
+                  ["Preview", fixDisplay.preview],
+                  ["Apply", fixDisplay.label],
+                  [
+                    "Verify",
+                    "Run a scan again and confirm the finding closes.",
+                  ],
+                ].map(([label, body], index) => (
+                  <div
+                    key={label}
+                    className="rounded-md border bg-muted/20 p-2"
+                  >
+                    <p className="font-semibold">
+                      {index + 1}. {label}
+                    </p>
+                    <p className="mt-1 text-muted-foreground">{body}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {hasMetadata && (
             <div className="bg-muted/30 rounded-lg p-3 border border-muted-foreground/10">
               <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest mb-3">
@@ -328,11 +384,6 @@ export function FindingItem({
             <div className="flex justify-end gap-2 pt-1 flex-wrap">
               {onFix &&
                 (() => {
-                  const fixAction = getFixAction(
-                    finding.category,
-                    finding.title,
-                    targetType ?? (row.server_id ? "server" : "environment"),
-                  );
                   return fixAction ? (
                     <Button
                       variant="outline"
@@ -344,8 +395,8 @@ export function FindingItem({
                       }}
                       aria-label={`Auto-fix: ${finding.title}`}
                     >
-                      <Wrench className="h-3 w-3 mr-1" aria-hidden="true" />
-                      Fix Now
+                      <Eye className="h-3 w-3 mr-1" aria-hidden="true" />
+                      Preview Fix
                     </Button>
                   ) : null;
                 })()}

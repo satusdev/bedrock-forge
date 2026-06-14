@@ -100,26 +100,46 @@ export const ENVIRONMENT_HARDENING_ACTIONS = [
     id: "BLOCK_PHP_UPLOADS",
     label: "Block PHP in uploads",
     description: "Deny PHP execution in wp-content/uploads via .htaccess",
+    group: "recommended",
+    risk: "safe",
+    preview:
+      "Writes an uploads .htaccess rule that denies PHP/PHTML execution while preserving normal media access.",
   },
   {
     id: "BLOCK_XMLRPC",
     label: "Block XML-RPC",
     description: "Deny access to xmlrpc.php via .htaccess",
+    group: "recommended",
+    risk: "safe",
+    preview:
+      "Adds an xmlrpc.php deny rule to reduce brute-force and amplification traffic.",
   },
   {
     id: "BLOCK_VERSION_DISCLOSURE",
     label: "Hide WordPress version",
     description: "Deny readme.html, license.txt, readme.txt via .htaccess",
+    group: "recommended",
+    risk: "safe",
+    preview:
+      "Blocks public WordPress metadata files that reveal version or installation details.",
   },
   {
     id: "ADD_SECURITY_HEADERS",
     label: "Add security headers",
     description: "Add X-Frame-Options, X-Content-Type-Options, CSP headers",
+    group: "recommended",
+    risk: "safe",
+    preview:
+      "Adds baseline browser security headers. Review custom iframe or CSP needs after applying.",
   },
   {
     id: "DISABLE_DIRECTORY_LISTING",
     label: "Disable directory listing",
     description: "Add Options -Indexes to .htaccess",
+    group: "recommended",
+    risk: "safe",
+    preview:
+      "Adds Options -Indexes to prevent visitors browsing directory contents.",
   },
   {
     id: "DELETE_PHP_UPLOAD_FILES",
@@ -128,36 +148,60 @@ export const ENVIRONMENT_HARDENING_ACTIONS = [
       "Opt-in cleanup: remove .php files found inside wp-content/uploads",
     risky: true,
     defaultSelected: false,
+    group: "cleanup",
+    risk: "risky",
+    preview:
+      "Deletes PHP files inside uploads. Use during malware cleanup after confirming those files are not expected.",
   },
   {
     id: "CLEAN_HTACCESS_REDIRECTS",
     label: "Clean suspicious .htaccess redirects",
     description:
       "Remove hardcoded external-domain RewriteRule lines from .htaccess",
+    group: "incident",
+    risk: "review",
+    preview:
+      "Removes suspicious external RewriteRule redirects from .htaccess. Review if the site intentionally proxies external URLs.",
   },
   {
     id: "BLOCK_DEBUG_LOG",
     label: "Block debug log access",
     description:
       "Deny HTTP access to .log files (e.g. wp-content/debug.log) via .htaccess",
+    group: "recommended",
+    risk: "safe",
+    preview:
+      "Blocks public log files and removes common debug.log files from wp-content.",
   },
   {
     id: "BLOCK_SENSITIVE_FILES",
     label: "Block sensitive file access",
     description:
       "Deny access to .env, *.bak, *.sql, composer.json/lock, package.json, etc. via .htaccess",
+    group: "recommended",
+    risk: "safe",
+    preview:
+      "Blocks secrets, backups, package metadata, and unsafe Bedrock app-path files while allowing normal static assets.",
   },
   {
     id: "DISABLE_FILE_EDITOR",
     label: "Disable wp-admin file editor",
     description:
       "Add WP_DISALLOW_FILE_EDIT=true to wp-config.php to block the theme/plugin code editor",
+    group: "recommended",
+    risk: "safe",
+    preview:
+      "Adds WP_DISALLOW_FILE_EDIT to WordPress config so admins cannot edit PHP files from wp-admin.",
   },
   {
     id: "BLOCK_USER_ENUMERATION",
     label: "Block user enumeration",
     description:
       "Redirect ?author=N queries via .htaccess to prevent WordPress username disclosure",
+    group: "recommended",
+    risk: "safe",
+    preview:
+      "Adds a rewrite guard to stop ?author=N username discovery redirects.",
   },
   {
     id: "FORCE_REINSTALL_CORE",
@@ -166,6 +210,10 @@ export const ENVIRONMENT_HARDENING_ACTIONS = [
       "Opt-in repair: overwrites core files with a fresh copy to remove unauthorized changes",
     risky: true,
     defaultSelected: false,
+    group: "repair",
+    risk: "risky",
+    preview:
+      "Runs a WordPress core reinstall. This can overwrite modified core files and should be paired with a backup.",
   },
   {
     id: "UPDATE_ALL_PLUGINS",
@@ -174,14 +222,55 @@ export const ENVIRONMENT_HARDENING_ACTIONS = [
       "Opt-in update: brings all plugins to the latest version to patch vulnerabilities",
     risky: true,
     defaultSelected: false,
+    group: "updates",
+    risk: "risky",
+    preview:
+      "Updates all plugins through WP-CLI. Test compatibility on staging before applying to production.",
   },
 ] as const;
+
+export const HARDENING_ACTION_GROUP_LABELS: Record<string, string> = {
+  recommended: "Recommended safe protections",
+  cleanup: "Cleanup actions",
+  repair: "Repair actions",
+  updates: "Updates",
+  incident: "Incident response",
+};
 
 export const DEFAULT_ENVIRONMENT_HARDENING_ACTION_IDS =
   ENVIRONMENT_HARDENING_ACTIONS.filter(
     (action) =>
       !("defaultSelected" in action) || action.defaultSelected !== false,
   ).map((action) => action.id);
+
+const DEFAULT_SAFE_HARDENING_ACTION_IDS =
+  DEFAULT_ENVIRONMENT_HARDENING_ACTION_IDS;
+
+export const HARDENING_PRESETS = [
+  {
+    id: "safe-hardening",
+    label: "Safe hardening",
+    description: "Apply low-risk web-root and WordPress protection rules.",
+    actions: DEFAULT_SAFE_HARDENING_ACTION_IDS,
+  },
+  {
+    id: "bedrock-app-shield",
+    label: "Bedrock app shield",
+    description: "Focus on direct app-path, secret, log, and upload exposure.",
+    actions: [
+      "BLOCK_PHP_UPLOADS",
+      "BLOCK_DEBUG_LOG",
+      "BLOCK_SENSITIVE_FILES",
+      "DISABLE_DIRECTORY_LISTING",
+    ],
+  },
+  {
+    id: "incident-response",
+    label: "Incident response",
+    description: "Add safe guards and include suspicious redirect cleanup.",
+    actions: [...DEFAULT_SAFE_HARDENING_ACTION_IDS, "CLEAN_HTACCESS_REDIRECTS"],
+  },
+] as const;
 
 export const RISKY_ENVIRONMENT_HARDENING_ACTION_IDS =
   ENVIRONMENT_HARDENING_ACTIONS.filter(

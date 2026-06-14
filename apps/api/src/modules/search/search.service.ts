@@ -7,7 +7,11 @@ export type SearchResultType =
   | "environment"
   | "project_tab"
   | "client"
-  | "server";
+  | "server"
+  | "domain"
+  | "monitor"
+  | "job"
+  | "finding";
 
 export interface SearchResult {
   type: SearchResultType;
@@ -109,6 +113,14 @@ const PROJECT_TABS = [
   { value: "activity", label: "Activity", terms: ["jobs", "log"] },
 ];
 
+const SEVERITY_WEIGHT: Record<string, number> = {
+  critical: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+  info: 4,
+};
+
 function normalize(s: string) {
   return s.trim().toLowerCase();
 }
@@ -142,15 +154,25 @@ export class SearchService {
     results.push(...this.searchPages(q, roles));
 
     if (canSee(roles, "manager")) {
-      const [projects, environments, servers] = await Promise.all([
-        this.searchProjects(q, take),
-        this.searchEnvironments(q, take),
-        this.searchServers(q, take),
-      ]);
+      const [projects, environments, servers, domains, monitors, jobs] =
+        await Promise.all([
+          this.searchProjects(q, take),
+          this.searchEnvironments(q, take),
+          this.searchServers(q, take),
+          this.searchDomains(q, take),
+          this.searchMonitors(q, take),
+          this.searchJobs(q, take),
+        ]);
+      const findings = await this.searchFindings(q, take);
+
       results.push(...projects);
       results.push(...environments);
       results.push(...this.searchProjectTabs(q, projects));
       results.push(...servers);
+      results.push(...domains);
+      results.push(...monitors);
+      results.push(...jobs);
+      results.push(...findings);
     }
 
     results.push(...(await this.searchClients(q, take)));
@@ -250,6 +272,151 @@ export class SearchService {
       path: `/servers/${server.id}`,
       icon: "Server",
     }));
+  }
+
+  private async searchDomains(
+    q: string,
+    take: number,
+  ): Promise<SearchResult[]> {
+    if (!q) return [];
+    const domains = await this.repo.findDomains(q, take);
+
+    return domains.map((domain) => ({
+      type: "domain",
+      id: String(domain.id),
+      label: domain.name,
+      subtitle: domain.expires_at
+        ? `Domain expires ${domain.expires_at.toISOString().slice(0, 10)}`
+        : "Domain",
+      path: `/domains?search=${encodeURIComponent(domain.name)}`,
+      icon: "Globe",
+    }));
+  }
+
+  private async searchMonitors(
+    q: string,
+    take: number,
+  ): Promise<SearchResult[]> {
+    if (!q) return [];
+    const monitors = await this.repo.findMonitors(q, take);
+
+    return monitors.map((monitor) => ({
+      type: "monitor",
+      id: String(monitor.id),
+      label: `${monitor.environment.project.name} · ${monitor.environment.type}`,
+      subtitle: [
+        monitor.environment.url,
+        monitor.enabled ? "enabled" : "disabled",
+        monitor.last_status ? `HTTP ${monitor.last_status}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      path: `/monitors?search=${encodeURIComponent(monitor.environment.url)}`,
+      icon: "Activity",
+      meta: {
+        projectId: Number(monitor.environment.project.id),
+        environmentId: Number(monitor.environment.id),
+      },
+    }));
+  }
+
+  private async searchJobs(q: string, take: number): Promise<SearchResult[]> {
+    const shouldShowRecent =
+      !q ||
+      ["job", "jobs", "activity", "running", "failed"].some((term) =>
+        term.includes(q),
+      );
+    const jobs = await this.repo.findJobs(q, shouldShowRecent ? take : take);
+
+    return jobs.map((job) => ({
+      type: "job",
+      id: String(job.id),
+      label: `${job.job_type ?? job.queue_name} #${job.id}`,
+      subtitle: [
+        job.status,
+        job.environment
+          ? `${job.environment.project.name} / ${job.environment.type}`
+          : job.server
+            ? job.server.name
+            : null,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      path: `/activity?job=${job.id}`,
+      icon: job.status === "failed" ? "AlertTriangle" : "ClipboardList",
+      meta: { status: job.status, queue: job.queue_name },
+    }));
+  }
+
+  private async searchFindings(
+    q: string,
+    take: number,
+  ): Promise<SearchResult[]> {
+    if (!q) return [];
+    const scans = await this.repo.findLatestSecurityScansWithFindings(take * 4);
+    const findings = scans.flatMap((scan) => {
+      const raw = Array.isArray(scan.findings) ? scan.findings : [];
+      return raw.map((finding) => ({
+        scan,
+        finding: finding as {
+          id?: string;
+          severity?: string;
+          category?: string;
+          title?: string;
+          description?: string;
+          resource?: string;
+        },
+      }));
+    });
+
+    return findings
+      .filter(({ finding }) => {
+        const haystack = [
+          finding.title,
+          finding.category,
+          finding.description,
+          finding.resource,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(q);
+      })
+      .sort(
+        (a, b) =>
+          (SEVERITY_WEIGHT[a.finding.severity ?? "info"] ?? 99) -
+          (SEVERITY_WEIGHT[b.finding.severity ?? "info"] ?? 99),
+      )
+      .slice(0, take)
+      .map(({ scan, finding }) => {
+        const target = scan.environment
+          ? `${scan.environment.project.name} / ${scan.environment.type}`
+          : scan.server?.name;
+        const environmentId = scan.environment
+          ? Number(scan.environment.id)
+          : null;
+        return {
+          type: "finding" as const,
+          id: `${scan.id}:${finding.id ?? finding.title}`,
+          label: finding.title ?? "Security finding",
+          subtitle: [
+            finding.severity?.toUpperCase(),
+            finding.category?.replace(/_/g, " "),
+            target,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          path: environmentId
+            ? `/projects/${scan.environment!.project.id}?tab=security&env=${environmentId}`
+            : "/security?tab=findings",
+          icon: "ShieldAlert",
+          meta: {
+            severity: finding.severity ?? null,
+            scanType: scan.scan_type,
+            environmentId,
+          },
+        };
+      });
   }
 
   private searchProjectTabs(

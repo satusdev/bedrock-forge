@@ -3,6 +3,7 @@ import { Outlet } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
 import { CommandPalette } from "@/components/CommandPalette";
+import { ActionCenter } from "@/components/ActionCenter";
 
 export function AppLayout() {
   const [cmdOpen, setCmdOpen] = useState(false);
@@ -39,6 +40,7 @@ export function AppLayout() {
         </main>
       </div>
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
+      <ActionCenter />
     </div>
   );
 }

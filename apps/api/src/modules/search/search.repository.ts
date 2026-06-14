@@ -81,4 +81,108 @@ export class SearchRepository {
       select: { id: true, name: true, ip_address: true, provider: true },
     });
   }
+
+  findDomains(q: string, take: number) {
+    return this.prisma.domain.findMany({
+      where: { name: { contains: q, mode: "insensitive" } },
+      orderBy: { name: "asc" },
+      take,
+      select: { id: true, name: true, expires_at: true },
+    });
+  }
+
+  findMonitors(q: string, take: number) {
+    return this.prisma.monitor.findMany({
+      where: {
+        OR: [
+          { environment: { url: { contains: q, mode: "insensitive" } } },
+          { environment: { type: { contains: q, mode: "insensitive" } } },
+          {
+            environment: {
+              project: { name: { contains: q, mode: "insensitive" } },
+            },
+          },
+        ],
+      },
+      orderBy: { created_at: "desc" },
+      take,
+      select: {
+        id: true,
+        enabled: true,
+        last_status: true,
+        environment: {
+          select: {
+            id: true,
+            type: true,
+            url: true,
+            project: { select: { id: true, name: true } },
+          },
+        },
+      },
+    });
+  }
+
+  findJobs(q: string, take: number) {
+    const numericId = /^\d+$/.test(q) ? BigInt(q) : undefined;
+
+    return this.prisma.jobExecution.findMany({
+      where: q
+        ? {
+            OR: [
+              ...(numericId ? [{ id: numericId }] : []),
+              { queue_name: { contains: q, mode: "insensitive" } },
+              { job_type: { contains: q, mode: "insensitive" } },
+              {
+                environment: {
+                  project: { name: { contains: q, mode: "insensitive" } },
+                },
+              },
+              { environment: { url: { contains: q, mode: "insensitive" } } },
+              { server: { name: { contains: q, mode: "insensitive" } } },
+            ],
+          }
+        : undefined,
+      orderBy: { created_at: "desc" },
+      take,
+      select: {
+        id: true,
+        queue_name: true,
+        job_type: true,
+        status: true,
+        environment: {
+          select: {
+            id: true,
+            type: true,
+            url: true,
+            project: { select: { id: true, name: true } },
+          },
+        },
+        server: { select: { id: true, name: true } },
+      },
+    });
+  }
+
+  findLatestSecurityScansWithFindings(take: number) {
+    return this.prisma.securityScan.findMany({
+      where: {
+        status: "completed",
+        findings: { not: Prisma.JsonNull },
+      },
+      orderBy: { completed_at: "desc" },
+      take,
+      select: {
+        id: true,
+        scan_type: true,
+        findings: true,
+        server: { select: { id: true, name: true } },
+        environment: {
+          select: {
+            id: true,
+            type: true,
+            project: { select: { id: true, name: true } },
+          },
+        },
+      },
+    });
+  }
 }

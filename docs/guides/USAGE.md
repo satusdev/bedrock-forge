@@ -14,6 +14,11 @@ Use the execution log whenever an operation looks stuck or failed. It shows the
 exact remote step, command label, exit code, worker message, elapsed time, and
 progress when the worker reports it.
 
+The floating **Action Center** shows recent queued, running, failed, and
+completed jobs from anywhere in the app. Open it to see live elapsed timers,
+progress, errors, and the inline execution log without leaving the current
+screen.
+
 ## Global Search
 
 Press **Cmd/K** or **Ctrl/K** from anywhere in the app to open global search.
@@ -21,6 +26,10 @@ Search returns pages, clients, servers, projects, environments, and common
 project tabs. Environment results open the owning project and mark the matching
 environment; project tab results open directly to areas such as Plugins, Backups,
 Sync, Files & Config, WP Core, Security, and Activity.
+
+Search also includes operational resources such as domains, monitors, recent
+jobs, and security findings. Empty search shows recent selections so common
+projects, environments, and tabs stay close to hand.
 
 ## First Setup Flow
 
@@ -263,6 +272,18 @@ Environment hardening selects only low-risk protections by default. Destructive
 or compatibility-sensitive actions, such as deleting PHP files in uploads,
 forcing a WordPress core reinstall, or updating every plugin, are visible but
 must be selected explicitly and confirmed before Forge queues the job.
+
+The hardening UI groups actions by intent and provides presets:
+
+- **Safe hardening**: non-destructive server and WordPress protections.
+- **Bedrock app shield**: focused file-access rules for exposed Bedrock app
+  paths.
+- **Incident response**: cleanup or repair actions that require review before
+  use.
+
+Finding cards show the recommended remediation, a preview of what Forge will
+change, and a post-run scan prompt so operators can verify that the issue is
+closed instead of guessing from the job result alone.
 
 For Bedrock installs, the environment scan also probes direct `/app` access for
 logs, `.env`, package metadata, and unexpected extensionless files. The **Block

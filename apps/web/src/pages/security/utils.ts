@@ -1,4 +1,8 @@
 import type { ScanRecord } from "./types";
+import {
+  ENVIRONMENT_HARDENING_ACTIONS,
+  SERVER_HARDENING_ACTIONS,
+} from "./constants";
 
 /** Maps scan_type enum values to human-readable labels. */
 export function formatScanType(scanType: string): string {
@@ -110,4 +114,36 @@ export function getFixAction(
       return "UPDATE_ALL_PLUGINS";
   }
   return null;
+}
+
+export function getHardeningActionDisplay(actionId: string) {
+  const action = [
+    ...ENVIRONMENT_HARDENING_ACTIONS,
+    ...SERVER_HARDENING_ACTIONS,
+  ].find((item) => item.id === actionId) as
+    | {
+        label: string;
+        description: string;
+        preview?: string;
+        risk?: "safe" | "review" | "risky";
+        risky?: boolean;
+      }
+    | undefined;
+
+  return {
+    label: action?.label ?? actionId.replace(/_/g, " "),
+    description:
+      action?.description ?? "Apply the recommended hardening action.",
+    preview:
+      action?.preview ??
+      action?.description ??
+      "Review this action before applying it.",
+    risk: action?.risk ?? (action?.risky ? "risky" : "safe"),
+  };
+}
+
+export function hardeningRiskLabel(risk: string) {
+  if (risk === "risky") return "Opt-in";
+  if (risk === "review") return "Review";
+  return "Safe";
 }
