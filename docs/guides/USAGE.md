@@ -11,7 +11,16 @@ worker, connect to remote servers over SSH, and stream progress into the
 execution log.
 
 Use the execution log whenever an operation looks stuck or failed. It shows the
-exact remote step, command label, exit code, and worker message.
+exact remote step, command label, exit code, worker message, elapsed time, and
+progress when the worker reports it.
+
+## Global Search
+
+Press **Cmd/K** or **Ctrl/K** from anywhere in the app to open global search.
+Search returns pages, clients, servers, projects, environments, and common
+project tabs. Environment results open the owning project and mark the matching
+environment; project tab results open directly to areas such as Plugins, Backups,
+Sync, Files & Config, WP Core, Security, and Activity.
 
 ## First Setup Flow
 
@@ -73,6 +82,10 @@ Plugin management supports three source types:
 | GitHub custom | Plugin comes from the custom plugin catalog.                        | Install, update, remove, version check.                               |
 
 Important notes:
+
+- Viewing `composer.json` is a queued SSH job. The viewer shows elapsed time and
+  the execution log while the file is being read, then renders the JSON when the
+  job completes.
 
 - Composer add/update/remove runs on Bedrock layouts.
 - Manual public plugin update uses WP-CLI.

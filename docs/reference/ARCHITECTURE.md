@@ -261,8 +261,11 @@ Frontend (Socket.IO client in apps/web/src/lib/websocket.ts)
   └─ on job completion → invalidates TanStack Query cache for affected resource
 ```
 
-The `ExecutionLogPanel` component subscribes to a specific job's progress events
-and renders structured log lines with timestamps in real time.
+The `ExecutionLogPanel` component polls a specific job execution log and renders
+status, elapsed time, progress, and structured log lines with timestamps.
+
+`GET /search` powers the global Cmd/K command palette. It returns typed links
+for pages, projects, environments, clients, servers, and project tabs.
 
 ---
 

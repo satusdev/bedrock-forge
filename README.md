@@ -52,7 +52,7 @@ supports standard WordPress layouts for many operations.
 | Billing              | Define hosting/support packages, generate invoices, track invoice status, and configure display currency/locale.                                                                                             |
 | Notifications        | Slack delivery, in-app notification records, notification logs, and weekly reports.                                                                                                                          |
 | Integrations         | Google Drive backup storage, Cloudflare DNS/cache controls, and encrypted integration credentials.                                                                                                           |
-| Platform ops         | Audit logs, job execution logs, system backups, command palette, dark mode, RBAC, and a cross-project problems feed.                                                                                         |
+| Platform ops         | Audit logs, timed job execution logs, system backups, global Cmd/K search across resources and project tabs, dark mode, RBAC, and a cross-project problems feed.                                             |
 
 ## What It Does Not Do Yet
 
@@ -92,7 +92,9 @@ Bedrock Forge runs as a Docker Compose stack:
 
 Long-running operations are queued. The API validates and enqueues jobs; the
 worker executes remote SSH work and writes step-by-step job logs. The frontend
-subscribes to WebSocket updates and polls job execution logs where needed.
+subscribes to WebSocket updates and polls job execution logs where needed. Job
+views show status, elapsed time, progress when available, and the latest worker
+step so remote SSH work does not appear stalled.
 
 Remote server access is SSH-native:
 
@@ -147,7 +149,9 @@ Change the admin password immediately after first login.
 6. Use **Project -> Files & Config** for `.env`, downloads, logs, and notes.
 7. Configure monitoring from **Monitors** and security schedules from
    **Security**.
-8. Use **Activity** or the project execution log panel when a queued job needs
+8. Use **Cmd/K** to jump to projects, environments, clients, servers, pages, or
+   project tabs.
+9. Use **Activity** or the project execution log panel when a queued job needs
    inspection.
 
 See [docs/guides/USAGE.md](docs/guides/USAGE.md) for a fuller operator guide.
