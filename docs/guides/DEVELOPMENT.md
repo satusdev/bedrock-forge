@@ -78,16 +78,18 @@ Open **http://localhost:5173** for the dashboard.
 bedrock-forge/
 ├── apps/
 │   ├── api/src/
-│   │   ├── modules/          # 22 feature modules
+│   │   ├── modules/          # Feature modules: controller/service/repository/DTOs
 │   │   ├── gateways/         # WebSocket gateway
 │   │   ├── common/           # Guards, filters, interceptors, decorators
 │   │   ├── prisma/           # PrismaService + PrismaModule
 │   │   └── main.ts
 │   ├── worker/src/
-│   │   ├── processors/       # 8 BullMQ processor modules
+│   │   ├── processors/       # BullMQ processor modules
+│   │   ├── scripts/          # PHP/WP helper scripts pushed to remotes
+│   │   ├── services/         # rclone, SSH key, step tracking
 │   │   └── utils/            # Shared worker utilities
 │   └── web/src/
-│       ├── features/         # Feature-scoped code
+│       ├── pages/            # Route pages and page feature folders
 │       ├── components/       # Shared components (ui/, layout/)
 │       ├── hooks/            # Shared hooks
 │       ├── lib/              # API client, WebSocket, utilities
@@ -114,6 +116,8 @@ bedrock-forge/
 For a detailed walkthrough of the monorepo structure, folder layout, data flow, and feature modules:
 
 - [System Architecture and Features Guide](ARCHITECTURE.md)
+- [Improvement Roadmap](../reference/IMPROVEMENT_ROADMAP.md) for setup,
+  maintainability, and organization work that should be prioritized next.
 
 ---
 
@@ -259,53 +263,42 @@ needed to enqueue jobs.
 
 ## Adding a New Frontend Page
 
-**1. Create the feature directory:**
+**1. Create the page or page feature directory:**
 
 ```
-apps/web/src/features/<feature>/
-├── components/           # Feature-specific UI components
-├── hooks/                # Feature-specific React hooks
-│   └── use-<feature>.ts  # TanStack Query wrapper
-├── pages/
-│   └── <Feature>Page.tsx
-└── index.ts              # Re-exports
+apps/web/src/pages/<Feature>Page.tsx
 ```
 
-**2. Add the TanStack Query hook:**
+For larger pages, colocate page-specific API/query/type helpers:
 
-```typescript
-// hooks/use-features.ts
-export function useFeatures(params: QueryParams) {
-  return useQuery({
-    queryKey: ["features", params],
-    queryFn: () => apiClient.get("/features", { params }),
-  });
-}
+```
+apps/web/src/pages/<feature>/
+├── <Feature>Page.tsx or <Feature>Tab.tsx
+├── api.ts
+├── hooks.ts
+├── types.ts
+└── utils.ts
 ```
 
-**3. Create the page component** using existing shadcn/ui primitives from
+**2. Add focused API functions and TanStack Query hooks** in colocated
+`api.ts`/`hooks.ts` files when the page needs server state.
+
+**3. Create the page component** using existing primitives from
 `src/components/ui/`.
 
 **4. Register the route** in `apps/web/src/App.tsx` with `React.lazy()`:
 
 ```tsx
-const MyFeaturePage = lazy(
-  () => import("./features/<feature>/pages/<Feature>Page"),
+const MyFeaturePage = lazy(() =>
+  import("@/pages/MyFeaturePage").then((m) => ({ default: m.MyFeaturePage })),
 );
 
 // inside the router:
-<Route
-  path="/my-feature"
-  element={
-    <Suspense fallback={<PageSkeleton />}>
-      <MyFeaturePage />
-    </Suspense>
-  }
-/>;
+<Route path="my-feature" element={<MyFeaturePage />} />;
 ```
 
 **5. Add the nav item** to `apps/web/src/components/layout/Sidebar.tsx` if it
-needs a sidebar entry, with the appropriate `requiredRole` check.
+needs a sidebar entry, with the appropriate role check.
 
 ### State Rules
 
@@ -324,18 +317,16 @@ needs a sidebar entry, with the appropriate `requiredRole` check.
 pnpm test
 
 # Specific app
-pnpm --filter api test
-pnpm --filter worker test
+pnpm --filter @bedrock-forge/api test
+pnpm --filter @bedrock-forge/worker test
 pnpm --filter @bedrock-forge/remote-executor test
 
-# Watch mode
-pnpm --filter api test:watch
-
 # Coverage
-pnpm --filter api test:coverage
+pnpm --filter @bedrock-forge/api test:cov
 ```
 
-Tests use Jest. Test files live in `tests/` subdirectory inside each module.
+Backend and worker tests use Jest. Frontend tests use Vitest. Test files live
+next to the code they cover using `*.spec.ts` or `*.spec.tsx`.
 
 ---
 
@@ -346,15 +337,15 @@ Tests use Jest. Test files live in `tests/` subdirectory inside each module.
 pnpm lint
 
 # Lint specific app
-pnpm --filter api lint
-pnpm --filter web lint
+pnpm --filter @bedrock-forge/api lint
+pnpm --filter @bedrock-forge/web lint
 
 # Type check all
 pnpm build
 ```
 
-ESLint config is inherited from the root. Prettier is enforced via ESLint's
-`prettier` plugin.
+The current `lint` scripts run TypeScript checks with `tsc --noEmit`.
+Formatting is handled by the root Prettier script.
 
 ---
 
@@ -386,9 +377,9 @@ pnpm db:seed
 pnpm build
 
 # Build specific app
-pnpm --filter api build
-pnpm --filter web build
-pnpm --filter worker build
+pnpm --filter @bedrock-forge/api build
+pnpm --filter @bedrock-forge/web build
+pnpm --filter @bedrock-forge/worker build
 ```
 
 Turborepo caches build outputs. Force a clean rebuild:
@@ -406,7 +397,8 @@ pnpm build --force
 - **Explicit return types** on all service and repository methods
 - **`class-validator` DTOs** for all controller inputs — never
   `@Body() body: any`
-- **Module boundaries** — do not import from `features/` in shared components
+- **Page boundaries** — shared components should not import from `pages/`;
+  move reusable code to `components/`, `hooks/`, or `lib/`
 - **No business logic in controllers** — controllers validate input and call
   service methods only
 - **No Prisma in services** — services call repository methods only

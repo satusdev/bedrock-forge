@@ -1,7 +1,7 @@
 # Usage Guide
 
-This guide explains what each part of Bedrock Forge is for, how common
-workflows fit together, and where the current limits are.
+This guide explains what each part of Bedrock Forge is for and how common
+workflows fit together.
 
 ## Operating Model
 
@@ -114,14 +114,9 @@ Backup types:
 Schedules can run daily, weekly, or monthly. Retention can prune old backup
 records by count or age depending on schedule settings.
 
-Current restore boundary:
-
-- Restore targets the same environment that produced the backup.
-- Cross-server restore is not implemented.
-- Incremental backups are not implemented.
-
-Google Drive upload is supported through rclone configuration. Other rclone
-targets are not wired into the UI yet.
+Google Drive upload is supported through rclone configuration. Restore and
+backup-target boundaries are tracked in
+[Current Scope and Boundaries](../reference/LIMITATIONS.md).
 
 ## Sync
 
@@ -290,11 +285,8 @@ logs, `.env`, package metadata, and unexpected extensionless files. The **Block
 sensitive file access** action writes a web-server app-path guard that denies
 unsafe direct files while preserving normal static assets.
 
-Current limits:
-
-- SSH host key verification is not implemented.
-- External vulnerability intelligence feed sync is not production-wired.
-- Security notification delivery is Slack/in-app focused.
+Security boundaries are tracked in
+[Current Scope and Boundaries](../reference/LIMITATIONS.md).
 
 ## Monitoring and Lighthouse
 
@@ -327,11 +319,8 @@ Settings:
 - Use **Settings -> Billing** to configure currency code and locale.
 - Currency affects display formatting in packages and invoices.
 
-Current limits:
-
-- No payment gateway.
-- No invoice PDF export.
-- No tax engine or accounting integration.
+Billing boundaries are tracked in
+[Current Scope and Boundaries](../reference/LIMITATIONS.md).
 
 ## Settings
 
@@ -360,17 +349,7 @@ Use these pages for triage before rerunning failed operations.
 
 ## Current Product Boundaries
 
-Bedrock Forge currently does not provide:
-
-- Multi-tenant workspace isolation.
-- Payment processing.
-- 2FA/MFA or SSO.
-- Email notification delivery.
-- Cross-server backup restore.
-- Incremental backups.
-- S3/B2/Wasabi backup target UI.
-- cPanel/Plesk/DirectAdmin/CloudPanel/RunCloud automation.
-- Tested WordPress Multisite workflows.
-
-Treat it as an operator tool for a trusted internal team, not a hosted SaaS
-platform for multiple unrelated customer workspaces.
+The canonical list of current product boundaries is maintained in
+[Current Scope and Boundaries](../reference/LIMITATIONS.md). Treat Forge as an
+operator tool for a trusted internal team, not a hosted SaaS platform for
+multiple unrelated customer workspaces.

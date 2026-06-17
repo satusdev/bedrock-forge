@@ -54,33 +54,6 @@ supports standard WordPress layouts for many operations.
 | Integrations         | Google Drive backup storage, Cloudflare DNS/cache controls, and encrypted integration credentials.                                                                                                           |
 | Platform ops         | Audit logs, timed job execution logs, system backups, global Cmd/K search across resources and project tabs, dark mode, RBAC, and a cross-project problems feed.                                             |
 
-## What It Does Not Do Yet
-
-These are current boundaries, not bugs:
-
-- No multi-tenant workspace isolation. One Forge install is for one team.
-- No payment processing. Billing tracks invoices only; it does not charge cards
-  or integrate with Stripe/PayPal.
-- No invoice PDF export.
-- No 2FA/MFA or SSO.
-- No email, Discord, Telegram, or generic webhook notification delivery.
-- No incremental backups. Backups are full snapshots by selected scope.
-- No cross-server restore from an existing backup record. Restores target the
-  originating environment.
-- Google Drive is the only remote backup target wired into the backup UI.
-- The remote file browser is intentionally limited to safe roots such as site
-  root, uploads, logs, downloads, and backup paths.
-- Direct file download is intended for small files; large uploads are packaged
-  into a remote Downloads archive.
-- CyberPanel automation is CyberPanel-specific. cPanel, Plesk, DirectAdmin,
-  CloudPanel, and RunCloud are not integrated.
-- WordPress Multisite is not documented or tested.
-- SSH host key trust/known-host verification is not implemented yet.
-- External vulnerability-feed sync such as WPScan/CVE ingestion is not wired
-  as a production feed.
-- Lighthouse runs locally with Chromium in the Docker image by default.
-  Google PageSpeed API fallback is optional and quota-bound.
-
 ## How It Works
 
 Bedrock Forge runs as a Docker Compose stack:
@@ -106,6 +79,35 @@ Remote server access is SSH-native:
 - WP-CLI is used for actions where WordPress itself provides the safest API,
   such as theme management, core updates, cache cleanup, and selected plugin
   operations.
+
+## Codebase Structure
+
+This repository is a pnpm/Turborepo TypeScript monorepo:
+
+| Path                       | Purpose                                                                                                                                  |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/web`                 | React 19 + Vite dashboard, route pages, layout, UI primitives, API client, WebSocket client, and Zustand/TanStack Query state.           |
+| `apps/api`                 | NestJS REST API, JWT/RBAC auth, DTO validation, feature modules, Prisma repositories, job enqueueing, audit logs, and WebSocket gateway. |
+| `apps/worker`              | NestJS standalone BullMQ processors for backups, sync, scans, monitoring, reports, notifications, security, and SSH/WP operations.       |
+| `packages/shared`          | Shared roles, queue names, job types, WebSocket events, Zod payload schemas, and cross-app TypeScript types.                             |
+| `packages/remote-executor` | SSH connection pool, remote command/SFTP execution, and WordPress DB credential parsing.                                                 |
+| `prisma`                   | Database schema, migrations, and seed scripts.                                                                                           |
+| `docs`                     | Getting started, usage, development, deployment, architecture, and runbook documentation.                                                |
+
+Frontend pages are defined in `apps/web/src/App.tsx` and implemented under
+`apps/web/src/pages`. The main workspace pages cover dashboard, clients,
+servers, projects, backups, monitors, Lighthouse, activity, problems, settings,
+users, packages, invoices, tags, notifications, reports, domains, security,
+maintenance windows, and audit logs. Project detail pages include tabs for
+environments, backups, sync, restore, plugins, themes, WP core, tools, remote
+ops/files/config, drift, and security.
+
+Backend feature modules live under `apps/api/src/modules` and follow
+`controller -> service -> repository`. Controllers validate HTTP inputs and
+roles, services coordinate business logic, and repositories are the Prisma
+boundary. Long-running work is queued through BullMQ and processed by
+`apps/worker/src/processors`; shared queue names and payload contracts are kept
+in `packages/shared`.
 
 ## Quick Start
 
@@ -158,15 +160,17 @@ See [docs/guides/USAGE.md](docs/guides/USAGE.md) for a fuller operator guide.
 
 ## Documentation
 
-| Document                                             | Purpose                                                              |
-| ---------------------------------------------------- | -------------------------------------------------------------------- |
-| [Quick Start](docs/getting-started/QUICK_START.md)   | First local install and first site workflow.                         |
-| [Installation](docs/getting-started/INSTALLATION.md) | Docker setup, environment variables, ports, and reverse proxy notes. |
-| [Usage Guide](docs/guides/USAGE.md)                  | How to use the app day to day and what each area is for.             |
-| [Deployment](docs/guides/DEPLOYMENT.md)              | Remote deployment, updates, SSL, backup strategy, and rollback.      |
-| [Development](docs/guides/DEVELOPMENT.md)            | Local development, module patterns, worker patterns, and tests.      |
-| [Architecture](docs/reference/ARCHITECTURE.md)       | System design, services, queues, schema, security model.             |
-| [Project Reference](docs/reference/PROJECT.md)       | Extended engineering reference and implementation notes.             |
+| Document                                                     | Purpose                                                              |
+| ------------------------------------------------------------ | -------------------------------------------------------------------- |
+| [Quick Start](docs/getting-started/QUICK_START.md)           | First local install and first site workflow.                         |
+| [Installation](docs/getting-started/INSTALLATION.md)         | Docker setup, environment variables, ports, and reverse proxy notes. |
+| [Usage Guide](docs/guides/USAGE.md)                          | How to use the app day to day and what each area is for.             |
+| [Deployment](docs/guides/DEPLOYMENT.md)                      | Remote deployment, updates, SSL, backup strategy, and rollback.      |
+| [Development](docs/guides/DEVELOPMENT.md)                    | Local development, module patterns, worker patterns, and tests.      |
+| [Architecture](docs/reference/ARCHITECTURE.md)               | System design, services, queues, schema, security model.             |
+| [Project Reference](docs/reference/PROJECT.md)               | Extended engineering reference and implementation notes.             |
+| [Current Scope](docs/reference/LIMITATIONS.md)               | Current product boundaries and intentionally unsupported areas.      |
+| [Improvement Roadmap](docs/reference/IMPROVEMENT_ROADMAP.md) | Setup, maintainability, and organization improvements to prioritize. |
 
 ## Development
 

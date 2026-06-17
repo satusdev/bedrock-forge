@@ -351,31 +351,32 @@ Hard rules:
 
 ## Frontend Architecture
 
-React 19 SPA with feature-based code organisation:
+React 19 SPA with route-level pages and colocated page helpers:
 
 ```
 apps/web/src/
-├── features/           # Feature-scoped code (components, hooks, queries, mutations, pages)
-│   ├── auth/
-│   ├── dashboard/
-│   ├── clients/
-│   ├── servers/
-│   ├── projects/
-│   ├── backups/
-│   ├── monitors/
-│   ├── domains/
-│   ├── invoices/
-│   ├── notifications/
-│   ├── users/
-│   └── settings/
+├── App.tsx             # Route table, lazy-loaded pages, auth guards
 ├── components/
-│   ├── ui/             # shadcn/ui primitives (Button, Card, Dialog, etc.)
+│   ├── ui/             # Shared UI primitives
+│   ├── crud/           # Data table, page header, pagination, state views
 │   └── layout/         # AppLayout, Sidebar, Header
 ├── hooks/              # Shared custom hooks (useClientsList, useServersList, etc.)
-├── lib/                # api-client.ts, websocket.ts, utils.ts, cn.ts
+├── lib/                # api-client.ts, websocket.ts, utils.ts
+├── pages/              # Route pages and page-specific feature folders
+│   ├── project-detail/ # Project workspace tabs and tab-specific api/hooks/types/utils
+│   ├── security/       # Security page tabs, charts, dialogs, types, utils
+│   └── settings/       # Settings tabs and tab-specific api/hooks/types
 ├── store/              # Zustand stores — auth.store.ts, ui.store.ts (UI state only)
-└── styles/             # Global CSS + Tailwind config
+└── index.css           # Global CSS + Tailwind styles
 ```
+
+Top-level routes are defined in `apps/web/src/App.tsx`. The project detail page
+is the largest workspace and includes tabs for environments, backups, sync,
+restore, plugins, themes, WP core, tools, remote operations/files/config, drift,
+and security.
+
+For a higher-level page and feature map, see
+[`docs/guides/ARCHITECTURE.md`](../guides/ARCHITECTURE.md).
 
 State rules:
 
