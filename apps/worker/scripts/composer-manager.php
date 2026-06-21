@@ -118,6 +118,8 @@ if (!chdir($composerDir)) {
     bail("Cannot chdir to {$composerDir}");
 }
 
+$themeGuard = createThemeGuard($composerDir);
+
 // Verify composer is available
 exec(composerCommand('--version'), $verOutput, $verCode);
 if ($verCode !== 0) {
@@ -128,16 +130,23 @@ if ($action === 'add') {
     $spec = $version
         ? escapeshellarg($package) . ':' . escapeshellarg($version)
         : escapeshellarg($package);
-    runComposer("require {$spec} --no-interaction --no-dev -W");
+    runComposer("require {$spec} --no-interaction --with-dependencies --minimal-changes");
 
 } elseif ($action === 'remove') {
-    runComposer('remove ' . escapeshellarg($package) . ' --no-interaction');
+    runComposer('remove ' . escapeshellarg($package) . ' --no-interaction --minimal-changes');
 
 } elseif ($action === 'update') {
-    runComposer('update ' . escapeshellarg($package) . ' --no-interaction --no-dev -W');
+    runComposer('update ' . escapeshellarg($package) . ' --no-interaction --with-dependencies --minimal-changes');
 
 } elseif ($action === 'update-all') {
-    runComposer('update --no-interaction --no-dev');
+    $content = @json_decode(file_get_contents($composerJson), true) ?: [];
+    $pluginPackages = array_keys(array_filter(
+        $content['require'] ?? [],
+        static fn($constraint, $name): bool => strpos((string) $name, 'wpackagist-plugin/') === 0,
+        ARRAY_FILTER_USE_BOTH
+    ));
+    if ($pluginPackages === []) bail('No Composer-managed plugins found');
+    runComposer('update ' . implode(' ', array_map('escapeshellarg', $pluginPackages)) . ' --no-interaction --with-dependencies --minimal-changes');
 
 } elseif ($action === 'change-constraint') {
     // Read, modify the constraint for the package, write back, then composer update
@@ -157,7 +166,7 @@ if ($action === 'add') {
     );
     file_put_contents($composerJson, $newContent . "\n");
     // Run composer update for the specific package to resolve and install the new constraint
-    runComposer('update ' . escapeshellarg($package) . ' --no-interaction --no-dev -W', $backup);
+    runComposer('update ' . escapeshellarg($package) . ' --no-interaction --with-dependencies --minimal-changes', $backup);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -236,6 +245,7 @@ function runComposer(string $args, ?array $backup = null): void
     $output = implode("\n", $outputLines);
 
     if ($exitCode !== 0) {
+        restoreThemeGuard($GLOBALS['themeGuard'] ?? null);
         if ($backup !== null) {
             restoreComposerState($backup);
         }
@@ -243,10 +253,67 @@ function runComposer(string $args, ?array $backup = null): void
         exit($exitCode);
     }
 
+    if (!themeGuardUnchanged($GLOBALS['themeGuard'] ?? null)) {
+        restoreThemeGuard($GLOBALS['themeGuard'] ?? null);
+        if ($backup !== null) restoreComposerState($backup);
+        fwrite(STDERR, "composer changed the themes directory; themes were restored and the operation was rejected\n");
+        exit(9);
+    }
+
+    cleanupThemeGuard($GLOBALS['themeGuard'] ?? null);
+
     echo json_encode(
         ['success' => true, 'output' => $output],
         JSON_UNESCAPED_SLASHES
     );
+}
+
+function createThemeGuard(string $composerDir): ?array
+{
+    $themeDir = is_dir($composerDir . '/web/app/themes')
+        ? $composerDir . '/web/app/themes'
+        : $composerDir . '/wp-content/themes';
+    if (!is_dir($themeDir)) return null;
+    $archive = tempnam(sys_get_temp_dir(), 'forge-themes-');
+    if ($archive === false) bail('Could not create theme safety archive');
+    @unlink($archive);
+    $archive .= '.tar';
+    $cmd = 'tar -C ' . escapeshellarg(dirname($themeDir)) . ' -cpf ' . escapeshellarg($archive) . ' ' . escapeshellarg(basename($themeDir)) . ' 2>&1';
+    exec($cmd, $out, $code);
+    if ($code !== 0) bail('Could not snapshot themes: ' . implode("\n", $out));
+    return ['dir' => $themeDir, 'archive' => $archive, 'hash' => themeTreeHash($themeDir)];
+}
+
+function themeTreeHash(string $path): string
+{
+    $rows = [];
+    $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::SELF_FIRST);
+    foreach ($it as $file) {
+        $rel = substr($file->getPathname(), strlen($path) + 1);
+        $mode = sprintf('%o', $file->getPerms() & 0777);
+        $rows[] = $mode . ':' . ($file->isLink() ? 'L:' . readlink($file->getPathname()) : ($file->isDir() ? 'D' : 'F:' . hash_file('sha256', $file->getPathname()))) . ':' . $rel;
+    }
+    sort($rows);
+    return hash('sha256', implode("\n", $rows));
+}
+
+function themeGuardUnchanged(?array $guard): bool
+{
+    return $guard === null || (is_dir($guard['dir']) && themeTreeHash($guard['dir']) === $guard['hash']);
+}
+
+function restoreThemeGuard(?array $guard): void
+{
+    if ($guard === null || !is_file($guard['archive'])) return;
+    if (is_dir($guard['dir'])) exec('rm -rf ' . escapeshellarg($guard['dir']));
+    @mkdir(dirname($guard['dir']), 0755, true);
+    exec('tar -C ' . escapeshellarg(dirname($guard['dir'])) . ' -xpf ' . escapeshellarg($guard['archive']) . ' 2>&1');
+    cleanupThemeGuard($guard);
+}
+
+function cleanupThemeGuard(?array $guard): void
+{
+    if ($guard !== null && is_file($guard['archive'])) @unlink($guard['archive']);
 }
 
 function bail(string $msg): void

@@ -47,7 +47,18 @@ export class SecurityHardeningService {
         privateKey,
       });
 
-      const results = await applyServerHardeningActions(executor, actions);
+      const allowlistSetting = await this.prisma.appSetting.findUnique({
+        where: { key: "security_ip_allowlist" },
+      });
+      let trustedCidrs: string[] = [];
+      try {
+        const parsed = JSON.parse(allowlistSetting?.value ?? "[]");
+        if (Array.isArray(parsed)) trustedCidrs = parsed.filter((value): value is string => typeof value === "string");
+      } catch {
+        trustedCidrs = [];
+      }
+
+      const results = await applyServerHardeningActions(executor, actions, trustedCidrs);
 
       const logEntries = results.map((r) => ({
         ts: new Date().toISOString(),

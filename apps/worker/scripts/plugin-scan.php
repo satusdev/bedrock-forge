@@ -56,10 +56,14 @@ if ($composerJsonPath !== null) {
     }
 }
 
-// Build monorepo-fetcher slug map from extra.monorepo-sources
+// Build GitHub-source slug map from both legacy config keys.
 $monorepoSlugs = []; // slug => repo_url
-if ($composerJsonPath !== null && isset($composerData['extra']['monorepo-sources'])) {
-    foreach ((array) $composerData['extra']['monorepo-sources'] as $source) {
+if ($composerJsonPath !== null) {
+    $sourceGroups = [];
+    foreach (['repo-fetcher-sources', 'monorepo-sources'] as $sourceKey) {
+        if (isset($composerData['extra'][$sourceKey])) $sourceGroups = array_merge($sourceGroups, (array) $composerData['extra'][$sourceKey]);
+    }
+    foreach ($sourceGroups as $source) {
         $sourceUrl = $source['url'] ?? '';
         foreach ((array) ($source['require'] ?? []) as $repoSlug) {
             if (is_string($repoSlug) && $repoSlug !== '') {
@@ -174,6 +178,12 @@ foreach (scandir($pluginsDir) as $entry) {
     }
 
     if (empty($headers['name'])) continue;
+
+    $markerPath = $pluginPath . '/.bedrock-forge-source.json';
+    $marker = is_file($markerPath) ? @json_decode(file_get_contents($markerPath), true) : null;
+    if (is_array($marker) && isset($marker['repo_url'])) {
+        $monorepoSlugs[$entry] = (string) $marker['repo_url'];
+    }
 
     $slug            = $entry;
     $currentVersion  = $headers['version'] ?? '0.0.0';

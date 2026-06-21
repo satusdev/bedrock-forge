@@ -103,13 +103,13 @@ export class CustomPluginProcessor extends WorkerHost {
       const remoteScript = `/tmp/custom_plugin_${job.id}.php`;
 
       await tracker.track({
-        step: "Uploading custom-plugin-manager script",
+        step: "Uploading atomic GitHub extension manager",
         level: "info",
       });
 
       await pushRemoteScript(
         executor,
-        join(scriptsPath, "custom-plugin-manager.php"),
+        join(scriptsPath, "github-extension-manager.php"),
         remoteScript,
       );
 
@@ -144,7 +144,7 @@ export class CustomPluginProcessor extends WorkerHost {
         .join(" ");
 
       await tracker.track({
-        step: `Running custom-plugin-manager --action=${action}`,
+        step: `Running atomic extension manager --action=${action}`,
         level: "info",
         detail: `${slug} php=${wpCli.lsphpBin ?? "php"}`,
       });
@@ -169,9 +169,7 @@ export class CustomPluginProcessor extends WorkerHost {
       );
 
       if (manageResult.code !== 0) {
-        throw new Error(
-          `custom-plugin-manager ${action} failed (exit ${manageResult.code}): ${manageResult.stderr}`,
-        );
+        throw new Error(`atomic extension manager ${action} failed (exit ${manageResult.code}): ${manageResult.stderr}`);
       }
 
       // Parse output to confirm success
@@ -183,7 +181,7 @@ export class CustomPluginProcessor extends WorkerHost {
       }
       if (!output.success) {
         throw new Error(
-          output.error ?? `custom-plugin-manager ${action} reported failure`,
+          output.error ?? `atomic extension manager ${action} reported failure`,
         );
       }
 

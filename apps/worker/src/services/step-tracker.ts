@@ -20,12 +20,17 @@ const SECRET_PATTERNS = [
   // MYSQL_PWD='...' or MYSQL_PWD="..."
   /MYSQL_PWD='[^']*'/g,
   /MYSQL_PWD="[^"]*"/g,
+  /--github-token=(?:'[^']*'|"[^"]*"|\S+)/g,
 ];
 
 function maskSecrets(command: string): string {
   let masked = command;
   for (const pattern of SECRET_PATTERNS) {
-    masked = masked.replace(pattern, "MYSQL_PWD='***'");
+    masked = masked.replace(pattern, (match) =>
+      match.startsWith("--github-token=")
+        ? "--github-token='***'"
+        : "MYSQL_PWD='***'",
+    );
   }
   return masked;
 }

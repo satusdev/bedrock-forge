@@ -19,6 +19,9 @@ describe("SecurityHardeningService", () => {
       environment: {
         findUnique: jest.fn(),
       },
+      appSetting: {
+        findUnique: jest.fn().mockResolvedValue(null),
+      },
       jobExecution: {
         update: jest.fn().mockResolvedValue({}),
       },

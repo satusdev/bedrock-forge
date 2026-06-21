@@ -75,6 +75,7 @@ function makeFixture(composerKind: "bash" | "php" = "bash") {
         '  echo "composer failed intentionally\\n";',
         "  exit(4);",
         "}",
+        'if (getenv("MUTATE_THEME") === "1") { @unlink("web/app/themes/divi/style.css"); }',
         'echo "composer ok\\n";',
         "exit(0);",
         "",
@@ -98,6 +99,7 @@ function makeFixture(composerKind: "bash" | "php" = "bash") {
         '  echo "composer failed intentionally"',
         "  exit 4",
         "fi",
+        'if [ "${MUTATE_THEME:-}" = "1" ]; then rm -f web/app/themes/divi/style.css; fi',
         'echo "composer ok"',
         "exit 0",
         "",
@@ -202,14 +204,14 @@ describe("Composer manager PHP scripts", () => {
       expect(composerLog).toContain(`PHP_BINARY=${phpBinary}`);
       expect(composerLog).toContain("ALLOW=1");
       expect(composerLog).toContain(
-        "ARGS:update wpackagist-plugin/sample-plugin --no-interaction --no-dev -W",
+        "ARGS:update wpackagist-plugin/sample-plugin --no-interaction --with-dependencies --minimal-changes",
       );
     } finally {
       fixture.cleanup();
     }
   });
 
-  it("uses no-dev when requiring Composer-managed WordPress plugins", () => {
+  it("uses targeted minimal changes when requiring Composer-managed WordPress plugins", () => {
     const fixture = makeFixture("php");
     try {
       runPhp(
@@ -224,7 +226,7 @@ describe("Composer manager PHP scripts", () => {
 
       const composerLog = readFileSync(fixture.composerLog, "utf8");
       expect(composerLog).toContain(
-        "ARGS:require wpackagist-plugin/new-plugin --no-interaction --no-dev -W",
+        "ARGS:require wpackagist-plugin/new-plugin --no-interaction --with-dependencies --minimal-changes",
       );
       expect(composerLog).not.toContain(
         "ARGS:require wpackagist-plugin/new-plugin --no-interaction --update-no-dev -W",
@@ -460,6 +462,33 @@ describe("Composer manager PHP scripts", () => {
 
       expect(readFileSync(composerPath, "utf8")).toBe(originalComposer);
       expect(readFileSync(lockPath, "utf8")).toBe(originalLock);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("restores all themes and rejects a Composer operation that mutates them", () => {
+    const fixture = makeFixture();
+    try {
+      const themeDir = join(fixture.projectDir, "web", "app", "themes", "divi");
+      mkdirSync(themeDir, { recursive: true });
+      writeFileSync(join(themeDir, "style.css"), "Theme Name: Divi\ncustom=true\n");
+
+      expect(() =>
+        runPhp(
+          composerManager,
+          [
+            `--docroot=${fixture.docroot}`,
+            "--action=update",
+            "--package=wpackagist-plugin/sample-plugin",
+          ],
+          { ...fixture.env, MUTATE_THEME: "1" },
+        ),
+      ).toThrow();
+
+      expect(readFileSync(join(themeDir, "style.css"), "utf8")).toBe(
+        "Theme Name: Divi\ncustom=true\n",
+      );
     } finally {
       fixture.cleanup();
     }

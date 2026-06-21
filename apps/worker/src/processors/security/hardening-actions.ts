@@ -42,6 +42,17 @@ function isValidIPv4(ip: string): boolean {
   });
 }
 
+function ipv4InCidr(ip: string, cidr: string): boolean {
+  const [network, bitsRaw = "32"] = cidr.split("/");
+  if (!isValidIPv4(ip) || !isValidIPv4(network)) return ip === cidr;
+  const bits = Number(bitsRaw);
+  if (!Number.isInteger(bits) || bits < 0 || bits > 32) return false;
+  const value = ip.split(".").reduce((n, part) => (n << 8) + Number(part), 0) >>> 0;
+  const base = network.split(".").reduce((n, part) => (n << 8) + Number(part), 0) >>> 0;
+  const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+  return (value & mask) === (base & mask);
+}
+
 function ok(action: string, detail: string): HardeningActionResult {
   return { action, status: "applied", detail };
 }
@@ -187,14 +198,24 @@ async function disablePasswordAuth(
   return ok(action, "PasswordAuthentication set to no, sshd reloaded");
 }
 
-async function installFail2ban(exec: Executor): Promise<HardeningActionResult> {
+async function installFail2ban(exec: Executor, trustedCidrs: string[]): Promise<HardeningActionResult> {
   const action = "INSTALL_FAIL2BAN";
+  const safeCidrs = trustedCidrs.filter((entry) => /^[0-9a-fA-F:.]+(?:\/\d{1,3})?$/.test(entry));
+  if (safeCidrs.length > 0) {
+    const content = `[DEFAULT]\nignoreip = 127.0.0.0/8 ::1 ${safeCidrs.join(" ")}\n`;
+    const encoded = Buffer.from(content).toString("base64");
+    const configured = await run(exec, `printf %s ${encoded} | base64 -d > /etc/fail2ban/jail.d/bedrock-forge-trusted.conf`);
+    if (configured.code !== 0) return fail(action, "Failed to configure trusted management networks");
+  }
   const statusCheck = await run(
     exec,
     "systemctl is-active fail2ban 2>/dev/null || echo inactive",
   );
   if (statusCheck.stdout.trim().startsWith("active"))
-    return skip(action, "fail2ban is already running");
+    {
+      await run(exec, "fail2ban-client reload 2>&1 || true");
+      return skip(action, "fail2ban is running and trusted networks were synchronized");
+    }
 
   const exists = await run(
     exec,
@@ -250,6 +271,7 @@ async function installAuditd(exec: Executor): Promise<HardeningActionResult> {
 
 async function blockBruteForceIps(
   exec: Executor,
+  trustedCidrs: string[],
 ): Promise<HardeningActionResult> {
   const action = "BLOCK_BRUTE_FORCE_IPS";
 
@@ -285,7 +307,7 @@ async function blockBruteForceIps(
     if (isValidIPv4(ip)) return true;
     // Should never happen given the server-side grep regex, but guard anyway
     return false;
-  });
+  }).filter((ip) => !trustedCidrs.some((cidr) => ipv4InCidr(ip, cidr)));
   if (validIps.length === 0)
     return skip(action, "No valid IPv4 addresses extracted from auth log");
 
@@ -816,6 +838,7 @@ async function updateAllPlugins(
 export async function applyServerHardeningActions(
   exec: Executor,
   actions: ServerHardeningActionType[],
+  trustedCidrs: string[] = [],
 ): Promise<HardeningActionResult[]> {
   const results: HardeningActionResult[] = [];
 
@@ -838,13 +861,13 @@ export async function applyServerHardeningActions(
           results.push(await disablePasswordAuth(exec));
           break;
         case "INSTALL_FAIL2BAN":
-          results.push(await installFail2ban(exec));
+          results.push(await installFail2ban(exec, trustedCidrs));
           break;
         case "INSTALL_AUDITD":
           results.push(await installAuditd(exec));
           break;
         case "BLOCK_BRUTE_FORCE_IPS":
-          results.push(await blockBruteForceIps(exec));
+          results.push(await blockBruteForceIps(exec, trustedCidrs));
           break;
         case "DELETE_PHP_UPLOAD_FILES":
           results.push(await deletePhpUploadFilesServer(exec));
