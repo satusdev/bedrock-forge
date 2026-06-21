@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3](https://github.com/satusdev/bedrock-forge/compare/bedrock-forge-v0.1.2...bedrock-forge-v0.1.3) (2026-06-21)
+
+### Bug Fixes
+
+- deploy GitHub catalog extensions atomically without running site Composer
+- restore themes when Composer-managed plugin operations alter theme files
+- synchronize management networks with fail2ban hardening
+
 ## [0.1.2](https://github.com/satusdev/bedrock-forge/compare/bedrock-forge-v0.1.1...bedrock-forge-v0.1.2) (2026-06-21)
 
 ### Bug Fixes
