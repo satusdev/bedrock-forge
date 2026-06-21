@@ -87,12 +87,14 @@ SSH_OPTS=(-o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=accept-
 run_remote_cleanup() {
   local skip_cleanup="${DEPLOY_SKIP_DOCKER_CLEANUP:-false}"
   local builder_until="${DEPLOY_DOCKER_BUILDER_PRUNE_UNTIL:-168h}"
+  local keep_image_versions="${DEPLOY_KEEP_IMAGE_VERSIONS:-3}"
   # shellcheck disable=SC2029
   ssh "${SSH_OPTS[@]}" "${SERVER_USER}@${SERVER_HOST}" bash <<ENDCLEAN
 set -euo pipefail
 cd "${SERVER_PATH}"
 SKIP_CLEANUP=${skip_cleanup@Q}
 BUILDER_UNTIL=${builder_until@Q}
+KEEP_IMAGE_VERSIONS=${keep_image_versions@Q}
 
 if [[ "\$SKIP_CLEANUP" == "true" ]]; then
   echo "Docker cleanup skipped (DEPLOY_SKIP_DOCKER_CLEANUP=true)."
@@ -104,7 +106,16 @@ command -v docker >/dev/null 2>&1 || { echo "ERROR: Docker not installed on serv
 echo "Docker disk usage before cleanup:"
 docker system df || true
 echo ""
-echo "Removing dangling images (untagged layers from old builds)..."
+if [[ ! "\$KEEP_IMAGE_VERSIONS" =~ ^[1-9][0-9]*\$ ]]; then
+  echo "ERROR: DEPLOY_KEEP_IMAGE_VERSIONS must be a positive integer." >&2
+  exit 1
+fi
+echo "Retaining the newest \$KEEP_IMAGE_VERSIONS image versions per Forge repository..."
+for repository in bedrock-forge/forge bedrock-forge/web; do
+  docker image ls --filter "reference=\${repository}:*" --format '{{.ID}}' \
+    | awk -v keep="\$KEEP_IMAGE_VERSIONS" '!seen[\$0]++ && ++count > keep { print }' \
+    | xargs -r docker image rm || true
+done
 docker image prune -f || true
 echo ""
 echo "Removing builder cache older than \$BUILDER_UNTIL..."
@@ -175,6 +186,18 @@ step "Connecting to server…"
 ssh "${SSH_OPTS[@]}" "${SERVER_USER}@${SERVER_HOST}" "echo connected" \
   >/dev/null 2>&1 || err "Cannot connect to ${SERVER_USER}@${SERVER_HOST}. Check SSH keys / firewall."
 ok "SSH connection OK"
+
+# Free old commit-tagged images before uploading another multi-GB runtime image.
+# Running cleanup only after health succeeds can deadlock deployment when Redis
+# loses write access because the root filesystem is already full.
+step "Pre-deploy disk cleanup and capacity check…"
+run_remote_cleanup
+REMOTE_FREE_KB=$(ssh "${SSH_OPTS[@]}" "${SERVER_USER}@${SERVER_HOST}" "df -Pk '${SERVER_PATH}' | awk 'NR==2 {print \$4}'")
+MIN_FREE_KB=$((3 * 1024 * 1024))
+if [[ ! "$REMOTE_FREE_KB" =~ ^[0-9]+$ ]] || (( REMOTE_FREE_KB < MIN_FREE_KB )); then
+  err "Server has less than 3 GiB free after cleanup; refusing to upload deployment images."
+fi
+ok "Remote disk has sufficient free space"
 
 # ── Step 3: Sync config / compose files (NOT source code) ────────────────────
 step "Syncing compose files and config to server…"
