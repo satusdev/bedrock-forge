@@ -89,6 +89,9 @@ function makeFixture(composerKind: "bash" | "php" = "bash") {
         'printf "NOINT=%s\\n" "${COMPOSER_NO_INTERACTION:-}" >> "$COMPOSER_LOG"',
         'printf "TOKEN=%s\\n" "${REPO_FETCHER_TOKEN:-}" >> "$COMPOSER_LOG"',
         'printf "ARGS:%s\\n" "$*" >> "$COMPOSER_LOG"',
+        'if [[ " $* " == *" -W "* || " $* " == *" --no-dev "* ]]; then',
+        '  rm -rf web/app/themes/active-custom-theme',
+        "fi",
         'if [ "$1" = "--version" ]; then echo "Composer version fake"; exit 0; fi',
         'if [ "${FAIL_COMPOSER:-}" = "1" ]; then',
         '  printf "%s\\n" \'{"lock":"modified"}\' > composer.lock',
@@ -254,7 +257,7 @@ describe("Composer manager PHP scripts", () => {
       const composerLog = readFileSync(fixture.composerLog, "utf8");
       expect(composerLog).toContain(`PHP_BINARY=${phpBinary}`);
       expect(composerLog).toContain(
-        "ARGS:update satusdev/repo-fetcher --no-interaction --no-dev -W",
+        "ARGS:update satusdev/repo-fetcher --with-dependencies --minimal-changes --no-install --no-interaction",
       );
     } finally {
       fixture.cleanup();
@@ -264,6 +267,16 @@ describe("Composer manager PHP scripts", () => {
   it("adds a custom plugin by refreshing monorepo-fetcher with superuser Composer enabled", () => {
     const fixture = makeFixture();
     try {
+      const activeThemeDir = join(
+        fixture.projectDir,
+        "web",
+        "app",
+        "themes",
+        "active-custom-theme",
+      );
+      mkdirSync(activeThemeDir, { recursive: true });
+      writeFileSync(join(activeThemeDir, "style.css"), "Theme Name: Active\n");
+
       runPhp(
         customPluginManager,
         [
@@ -306,9 +319,12 @@ describe("Composer manager PHP scripts", () => {
       expect(composerLog).toContain("ALLOW=1");
       expect(composerLog).toContain("NOINT=1");
       expect(composerLog).toContain(
-        "ARGS:update satusdev/repo-fetcher --no-interaction --no-dev -W",
+        "ARGS:update satusdev/repo-fetcher --with-dependencies --minimal-changes --no-install --no-interaction",
       );
-      expect(composerLog).toContain("ARGS:install --no-dev --no-interaction");
+      expect(composerLog).toContain("ARGS:install --no-interaction");
+      expect(composerLog).not.toContain(" -W");
+      expect(composerLog).not.toContain("--no-dev");
+      expect(existsSync(join(activeThemeDir, "style.css"))).toBe(true);
     } finally {
       fixture.cleanup();
     }

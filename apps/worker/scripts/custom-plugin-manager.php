@@ -248,10 +248,12 @@ if ($action === 'add' || $action === 'update') {
     $backup = backupComposerState($composerJsonPath);
     writeComposer($composerJsonPath, $composer);
     
-    $out1 = runComposer('update satusdev/repo-fetcher --no-interaction --no-dev -W', $backup, true);
+    // Refresh only repo-fetcher in the lock file. Broad -W updates and --no-dev
+    // installs can change or remove unrelated site packages, including themes.
+    $out1 = runComposer('update satusdev/repo-fetcher --with-dependencies --minimal-changes --no-install --no-interaction', $backup, true);
     
     // Always trigger a follow-up install to guarantee that any new/updated plugins are fetched and copied by repo-fetcher
-    $out2 = runComposer('install --no-dev --no-interaction', $backup, true);
+    $out2 = runComposer('install --no-interaction', $backup, true);
     
     restoreOwnership($composerJsonPath, $targetDir, $composerDir);
     echo json_encode(['success' => true, 'output' => $out1 . "\n" . $out2], JSON_UNESCAPED_SLASHES);

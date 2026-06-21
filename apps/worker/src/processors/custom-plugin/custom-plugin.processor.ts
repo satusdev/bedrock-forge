@@ -187,6 +187,13 @@ export class CustomPluginProcessor extends WorkerHost {
         );
       }
 
+      if (
+        (action === "add" || action === "update") &&
+        slug === "wp-secure-guard"
+      ) {
+        await this.syncWpSecureTrustedIps(executor, wpCli, tracker);
+      }
+
       await job.updateProgress(70);
 
       // Update EnvironmentCustomPlugin junction table
@@ -289,6 +296,81 @@ export class CustomPluginProcessor extends WorkerHost {
       );
       await tracker.fail(err, `custom plugin ${action}`);
       throw err;
+    }
+  }
+
+  private async syncWpSecureTrustedIps(
+    executor: ReturnType<typeof createRemoteExecutor>,
+    wpCli: WpCliBuilder,
+    tracker: StepTracker,
+  ): Promise<void> {
+    const setting = await this.prisma.appSetting.findUnique({
+      where: { key: "security_ip_allowlist" },
+    });
+    const trustedCidrs = this.parseTrustedCidrs(setting?.value);
+    if (trustedCidrs.length === 0) return;
+
+    await tracker.track({
+      step: "Syncing Forge trusted IPs to WP Secure",
+      level: "info",
+      detail: `${trustedCidrs.length} trusted IP/CIDR entries`,
+    });
+
+    const getCommand = wpCli.buildCommand(
+      "option get secure_guard_settings --format=json --skip-themes",
+    );
+    const current = await executor.execute(getCommand, { timeout: 30_000 });
+    let settings: Record<string, unknown> = {};
+    if (current.code === 0 && current.stdout.trim() !== "") {
+      try {
+        const parsed = JSON.parse(current.stdout.trim()) as unknown;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          settings = parsed as Record<string, unknown>;
+        }
+      } catch {
+        await tracker.track({
+          step: "WP Secure settings were not valid JSON; rebuilding safely",
+          level: "warn",
+        });
+      }
+    }
+
+    const existing = String(settings.ip_whitelist ?? "")
+      .split(/\r?\n/)
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    settings.ip_whitelist = [...new Set([...existing, ...trustedCidrs])].join(
+      "\n",
+    );
+
+    const updateCommand = wpCli.buildCommand(
+      `option update secure_guard_settings ${shellQuote(JSON.stringify(settings))} --format=json --skip-themes`,
+    );
+    const updated = await executor.execute(updateCommand, { timeout: 30_000 });
+    if (updated.code !== 0) {
+      throw new Error(
+        `Failed to sync WP Secure trusted IPs: ${updated.stderr || updated.stdout}`,
+      );
+    }
+    await tracker.track({
+      step: "WP Secure trusted IPs synchronized",
+      level: "info",
+      detail: `${trustedCidrs.length} Forge entries merged`,
+    });
+  }
+
+  private parseTrustedCidrs(value: string | undefined): string[] {
+    if (!value) return [];
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter(
+        (entry): entry is string =>
+          typeof entry === "string" &&
+          /^[0-9a-fA-F:.]+(?:\/\d{1,3})?$/.test(entry),
+      );
+    } catch {
+      return [];
     }
   }
 

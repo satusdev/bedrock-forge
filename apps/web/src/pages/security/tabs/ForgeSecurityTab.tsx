@@ -92,7 +92,8 @@ export function ForgeSecurityTab() {
           </CardTitle>
           <p className="text-xs text-muted-foreground">
             Restrict API access to specific IP ranges. Leave empty to allow all
-            IPs. Docker/localhost ranges are always allowed.
+            IPs. Docker/localhost ranges are always allowed. These entries are
+            also merged into WP Secure Guard during install and update jobs.
           </p>
         </CardHeader>
         <CardContent className="space-y-3">
