@@ -1,9 +1,14 @@
 import React, { useState, useEffect } from "react";
-import { Settings } from "lucide-react";
+import { Settings, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   useBackupSchedule,
   useSaveBackupScheduleMutation,
@@ -91,7 +96,19 @@ export function BackupScheduleConfig() {
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1">
-          <Label>Frequency</Label>
+          <div className="flex items-center gap-1.5">
+            <Label>Frequency</Label>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="cursor-help text-muted-foreground hover:text-foreground">
+                  <Info className="h-3 w-3" />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                How often the automatic background scheduler runs a database snapshot.
+              </TooltipContent>
+            </Tooltip>
+          </div>
           <select
             className="w-full border rounded-md px-3 py-1.5 text-sm bg-background"
             value={scheduleFreq}
@@ -109,7 +126,19 @@ export function BackupScheduleConfig() {
 
         {scheduleFreq !== "hourly" && (
           <div className="space-y-1">
-            <Label>Time (UTC)</Label>
+            <div className="flex items-center gap-1.5">
+              <Label>Time (UTC)</Label>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="cursor-help text-muted-foreground hover:text-foreground">
+                    <Info className="h-3 w-3" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  The hour and minute in UTC time zone when the schedule should execute.
+                </TooltipContent>
+              </Tooltip>
+            </div>
             <div className="flex gap-1 items-center">
               <Input
                 type="number"
@@ -136,7 +165,19 @@ export function BackupScheduleConfig() {
 
         {scheduleFreq === "hourly" && (
           <div className="space-y-1">
-            <Label>Minute</Label>
+            <div className="flex items-center gap-1.5">
+              <Label>Minute</Label>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="cursor-help text-muted-foreground hover:text-foreground">
+                    <Info className="h-3 w-3" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  The minute mark of the hour when the job should run.
+                </TooltipContent>
+              </Tooltip>
+            </div>
             <Input
               type="number"
               min={0}
@@ -187,7 +228,19 @@ export function BackupScheduleConfig() {
 
       <div className="grid grid-cols-2 gap-3 pt-2 border-t">
         <div className="space-y-1">
-          <Label>Keep last N backups</Label>
+          <div className="flex items-center gap-1.5">
+            <Label>Keep last N backups</Label>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="cursor-help text-muted-foreground hover:text-foreground">
+                  <Info className="h-3 w-3" />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                Maximum number of historical scheduled backup archives to retain before deleting old ones.
+              </TooltipContent>
+            </Tooltip>
+          </div>
           <Input
             type="number"
             min={1}
@@ -199,7 +252,19 @@ export function BackupScheduleConfig() {
           />
         </div>
         <div className="space-y-1">
-          <Label>Delete after N days</Label>
+          <div className="flex items-center gap-1.5">
+            <Label>Delete after N days</Label>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="cursor-help text-muted-foreground hover:text-foreground">
+                  <Info className="h-3 w-3" />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                Automated retention threshold in days after which scheduled backups are pruned.
+              </TooltipContent>
+            </Tooltip>
+          </div>
           <Input
             type="number"
             min={1}

@@ -2,11 +2,16 @@ import React from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus } from "lucide-react";
+import { Plus, Info } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   Card,
   CardContent,
@@ -74,12 +79,24 @@ export function QuickRegisterForm() {
           className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end"
         >
           <div className="md:col-span-2 space-y-1.5">
-            <Label
-              htmlFor="new-key"
-              className="font-bold text-[10px] uppercase tracking-wider text-muted-foreground"
-            >
-              Key Name
-            </Label>
+            <div className="flex items-center gap-1.5">
+              <Label
+                htmlFor="new-key"
+                className="font-bold text-[10px] uppercase tracking-wider text-muted-foreground"
+              >
+                Key Name
+              </Label>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="cursor-help text-muted-foreground hover:text-foreground">
+                    <Info className="h-3 w-3" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  A dot-separated identifier for the settings key, e.g. &apos;app.maintenance_mode&apos;.
+                </TooltipContent>
+              </Tooltip>
+            </div>
             <Input
               id="new-key"
               {...regNew("key")}
@@ -93,12 +110,24 @@ export function QuickRegisterForm() {
             )}
           </div>
           <div className="md:col-span-2 space-y-1.5">
-            <Label
-              htmlFor="new-val"
-              className="font-bold text-[10px] uppercase tracking-wider text-muted-foreground"
-            >
-              Value
-            </Label>
+            <div className="flex items-center gap-1.5">
+              <Label
+                htmlFor="new-val"
+                className="font-bold text-[10px] uppercase tracking-wider text-muted-foreground"
+              >
+                Value
+              </Label>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="cursor-help text-muted-foreground hover:text-foreground">
+                    <Info className="h-3 w-3" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  The setting value. Can be a string, serialized JSON, number, or boolean representation (&apos;true&apos; / &apos;false&apos;).
+                </TooltipContent>
+              </Tooltip>
+            </div>
             <Input
               id="new-val"
               {...regNew("value")}

@@ -1,9 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Save } from "lucide-react";
+import { Save, Info } from "lucide-react";
 import { useBillingSettings } from "@/hooks/useBillingSettings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   Select,
   SelectContent,
@@ -66,7 +71,19 @@ export function BillingCurrencyForm() {
       <CardContent className="space-y-4">
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
-            <Label htmlFor="billing-currency">Currency</Label>
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="billing-currency">Currency</Label>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="cursor-help text-muted-foreground hover:text-foreground">
+                    <Info className="h-3.5 w-3.5" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  Select the base currency code used for packaging prices and invoicing.
+                </TooltipContent>
+              </Tooltip>
+            </div>
             <Select
               value={currencyCode}
               onValueChange={(value) => {
@@ -90,7 +107,19 @@ export function BillingCurrencyForm() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="billing-locale">Locale</Label>
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="billing-locale">Locale</Label>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="cursor-help text-muted-foreground hover:text-foreground">
+                    <Info className="h-3.5 w-3.5" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  The IETF BCP 47 language tag (e.g., en-US, ar-LY) used for localizing currency formatting.
+                </TooltipContent>
+              </Tooltip>
+            </div>
             <Input
               id="billing-locale"
               value={currencyLocale}

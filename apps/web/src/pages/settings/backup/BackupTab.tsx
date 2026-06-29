@@ -5,7 +5,7 @@ import { BackupHistoryList } from "./components/BackupHistoryList";
 
 export function BackupTab() {
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 max-w-5xl">
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 w-full">
       <div className="space-y-6">
         <ManualBackupConfig />
         <BackupScheduleConfig />

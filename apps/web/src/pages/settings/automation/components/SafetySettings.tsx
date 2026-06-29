@@ -1,7 +1,12 @@
 import React from "react";
-import { Shield } from "lucide-react";
+import { Shield, Info } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   Card,
   CardContent,
@@ -41,9 +46,21 @@ export function SafetySettings({
       <CardContent className="pt-6 space-y-4">
         <div className="flex items-center justify-between gap-6 border rounded-xl p-5 bg-muted/20">
           <div className="space-y-1">
-            <Label htmlFor="safety-backup-toggle" className="text-sm font-bold">
-              Snapshot before sync
-            </Label>
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="safety-backup-toggle" className="text-sm font-bold">
+                Snapshot before sync
+              </Label>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="cursor-help text-muted-foreground hover:text-foreground">
+                    <Info className="h-3.5 w-3.5" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  Ensures fallback capability by backing up target WordPress databases and files prior to mutations.
+                </TooltipContent>
+              </Tooltip>
+            </div>
             <p className="text-xs text-muted-foreground leading-relaxed max-w-md">
               Recommended. Automatically create a full backup of the target
               environment immediately before every sync operation.

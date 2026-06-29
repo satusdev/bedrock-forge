@@ -1,8 +1,13 @@
 import React from "react";
-import { Clock } from "lucide-react";
+import { Clock, Info } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   Card,
   CardContent,
@@ -43,7 +48,19 @@ export function RetentionSettings({
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-6 border rounded-xl p-5 bg-muted/20">
             <div className="space-y-1">
-              <Label className="text-sm font-bold">Monitor Log Retention</Label>
+              <div className="flex items-center gap-1.5">
+                <Label className="text-sm font-bold">Monitor Log Retention</Label>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="cursor-help text-muted-foreground hover:text-foreground">
+                      <Info className="h-3.5 w-3.5" />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    Determines how long status history and logs for monitors are preserved before automated rotation deletes them.
+                  </TooltipContent>
+                </Tooltip>
+              </div>
               <p className="text-xs text-muted-foreground leading-relaxed max-w-md">
                 How long to keep historical uptime check results, incident logs,
                 and status change history.
@@ -74,9 +91,21 @@ export function RetentionSettings({
 
         <div className="flex items-center justify-between gap-6 border rounded-xl p-5 bg-muted/20">
           <div className="space-y-1">
-            <Label className="text-sm font-bold">
-              Auto-cleanup temporary files
-            </Label>
+            <div className="flex items-center gap-1.5">
+              <Label className="text-sm font-bold">
+                Auto-cleanup temporary files
+              </Label>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="cursor-help text-muted-foreground hover:text-foreground">
+                    <Info className="h-3.5 w-3.5" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  Enables cron-based background cleanup of stale database dumps and build assets.
+                </TooltipContent>
+              </Tooltip>
+            </div>
             <p className="text-xs text-muted-foreground leading-relaxed max-w-md">
               Automatically delete temporary sync files and intermediate
               database dumps older than 24 hours to save disk space.

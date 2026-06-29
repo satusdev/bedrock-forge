@@ -16,6 +16,7 @@ export interface Backup {
   completed_at: string | null;
   jobExecution: {
     id: number;
+    bull_job_id: string;
     status: string;
     progress: number;
     last_error: string | null;

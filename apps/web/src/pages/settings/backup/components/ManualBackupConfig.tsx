@@ -1,7 +1,12 @@
 import React, { useState, useEffect } from "react";
-import { Database, HardDrive, Loader2 } from "lucide-react";
+import { Database, HardDrive, Loader2, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   useGdriveStatus,
   useSystemBackupFolder,
@@ -45,7 +50,19 @@ export function ManualBackupConfig() {
       )}
 
       <div className="space-y-2">
-        <Label htmlFor="backup-folder-id">Google Drive Folder ID</Label>
+        <div className="flex items-center gap-1.5">
+          <Label htmlFor="backup-folder-id">Google Drive Folder ID</Label>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="cursor-help text-muted-foreground hover:text-foreground">
+                <Info className="h-3.5 w-3.5" />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              Copy the last segment of your destination folder URL in Google Drive.
+            </TooltipContent>
+          </Tooltip>
+        </div>
         <p className="text-xs text-muted-foreground">
           Open the destination folder in Google Drive. The folder ID is the last
           part of the URL:{" "}

@@ -81,6 +81,40 @@ export function BackupsTab({
 
   const { data, isLoading } = useBackupsQuery(selectedEnvId);
 
+  // Sync running jobs from database query on mount or data load
+  useEffect(() => {
+    if (!data?.items) return;
+    const running = data.items.filter(
+      (b) =>
+        (b.status === "running" || b.status === "pending") &&
+        b.jobExecution?.bull_job_id,
+    );
+    if (running.length > 0) {
+      setRunningJobs((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        for (const b of running) {
+          const bullId = b.jobExecution!.bull_job_id;
+          const current = next[bullId];
+          const newProgress = b.jobExecution!.progress ?? 0;
+          if (!current || current.progress !== newProgress) {
+            next[bullId] = {
+              progress: newProgress,
+              step: b.status === "pending" ? "Queued" : "Running…",
+            };
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+      const firstRunning = running[0];
+      if (firstRunning && !activeJobExecutionId) {
+        setActiveJobExecutionId(firstRunning.jobExecution!.id);
+        backupJobIdRef.current = firstRunning.jobExecution!.bull_job_id;
+      }
+    }
+  }, [data?.items, activeJobExecutionId]);
+
   useWebSocketEvent("job:progress", (raw: unknown) => {
     const event = raw as {
       queueName: string;

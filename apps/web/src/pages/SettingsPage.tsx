@@ -23,7 +23,7 @@ export function SettingsPage() {
 
   if (role !== "admin") {
     return (
-      <div className="space-y-6 max-w-2xl">
+      <div className="space-y-6 w-full">
         <h1 className="text-2xl font-bold">Settings</h1>
         <AccountTab />
       </div>
@@ -31,7 +31,7 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="space-y-6 max-w-3xl">
+    <div className="space-y-6 w-full">
       <h1 className="text-2xl font-bold">Settings</h1>
 
       <Tabs defaultValue="account">

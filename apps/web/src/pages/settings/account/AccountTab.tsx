@@ -6,7 +6,7 @@ import { ActiveSessionsPanel } from "./components/ActiveSessionsPanel";
 
 export function AccountTab() {
   return (
-    <div className="space-y-6 max-w-4xl">
+    <div className="space-y-6 w-full">
       <SecurityCredentialsForm />
       <TwoFactorAuthForm />
       <ActiveSessionsPanel />

@@ -27,6 +27,7 @@ import { ExecutionLogPanel } from "@/components/ui/execution-log-panel";
 interface JobExecutionRow {
   id: number;
   queue_name: string;
+  bull_job_id: string;
   job_type: string | null;
   status: string;
   progress: number | null;
@@ -196,11 +197,72 @@ export function ActionCenter() {
     refetchInterval: open ? 5_000 : 15_000,
   });
 
-  useWebSocketEvent("job:completed", () => {
-    queryClient.invalidateQueries({ queryKey: ["action-center"] });
+  useWebSocketEvent("job:progress", (raw: unknown) => {
+    const event = raw as { jobId: string; progress: number; step?: string };
+    queryClient.setQueryData<PageResult>(["action-center", "jobs"], (old) => {
+      if (!old) return old;
+      return {
+        ...old,
+        data: old.data.map((job) => {
+          if (job.bull_job_id === event.jobId) {
+            return {
+              ...job,
+              status: "active",
+              progress: event.progress,
+            };
+          }
+          return job;
+        }),
+      };
+    });
   });
-  useWebSocketEvent("job:failed", () => {
-    queryClient.invalidateQueries({ queryKey: ["action-center"] });
+
+  useWebSocketEvent("job:completed", (raw: unknown) => {
+    const event = raw as { jobId: string };
+    queryClient.setQueryData<PageResult>(["action-center", "jobs"], (old) => {
+      if (!old) return old;
+      return {
+        ...old,
+        data: old.data.map((job) => {
+          if (job.bull_job_id === event.jobId) {
+            return {
+              ...job,
+              status: "completed",
+              progress: 100,
+              completed_at: new Date().toISOString(),
+            };
+          }
+          return job;
+        }),
+      };
+    });
+    setTimeout(() => {
+      void queryClient.invalidateQueries({ queryKey: ["action-center"] });
+    }, 1000);
+  });
+
+  useWebSocketEvent("job:failed", (raw: unknown) => {
+    const event = raw as { jobId: string; error: string };
+    queryClient.setQueryData<PageResult>(["action-center", "jobs"], (old) => {
+      if (!old) return old;
+      return {
+        ...old,
+        data: old.data.map((job) => {
+          if (job.bull_job_id === event.jobId) {
+            return {
+              ...job,
+              status: "failed",
+              last_error: event.error,
+              completed_at: new Date().toISOString(),
+            };
+          }
+          return job;
+        }),
+      };
+    });
+    setTimeout(() => {
+      void queryClient.invalidateQueries({ queryKey: ["action-center"] });
+    }, 1000);
   });
 
   const jobs = data?.data ?? [];

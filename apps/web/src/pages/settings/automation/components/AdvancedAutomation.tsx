@@ -1,7 +1,12 @@
 import React from "react";
-import { Zap, AlertCircle } from "lucide-react";
+import { Zap, AlertCircle, Info } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   Card,
   CardContent,
@@ -41,9 +46,21 @@ export function AdvancedAutomation({
       <CardContent className="pt-6 space-y-4">
         <div className="flex items-center justify-between gap-6 border rounded-xl p-5 bg-muted/20">
           <div className="space-y-1">
-            <Label className="text-sm font-bold">
-              Auto-update security plugins
-            </Label>
+            <div className="flex items-center gap-1.5">
+              <Label className="text-sm font-bold">
+                Auto-update security plugins
+              </Label>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="cursor-help text-muted-foreground hover:text-foreground">
+                    <Info className="h-3.5 w-3.5" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  Automatically pulls and deploys plugin updates from official repositories for core components like Secure Guard.
+                </TooltipContent>
+              </Tooltip>
+            </div>
             <p className="text-xs text-muted-foreground leading-relaxed max-w-md">
               Attempt to automatically update core Bedrock Forge security
               plugins (WP Secure Guard, etc.) on managed servers.

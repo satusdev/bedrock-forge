@@ -19,6 +19,8 @@ import {
   ChevronUp,
   Activity,
   RefreshCw,
+  Play,
+  Pause,
 } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { toast } from "@/hooks/use-toast";
@@ -577,6 +579,34 @@ export function MonitorsPage() {
     },
   });
 
+  const bulkActivateMutation = useMutation({
+    mutationFn: async (ids: number[]) => {
+      for (const id of ids) {
+        await api.put(`/monitors/${id}/activate`, {});
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["monitors"] });
+      clearSelection();
+      toast({ title: "Monitors activated" });
+    },
+    onError: () => toast({ title: "Activation failed", variant: "destructive" }),
+  });
+
+  const bulkDeactivateMutation = useMutation({
+    mutationFn: async (ids: number[]) => {
+      for (const id of ids) {
+        await api.put(`/monitors/${id}/deactivate`, {});
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["monitors"] });
+      clearSelection();
+      toast({ title: "Monitors deactivated" });
+    },
+    onError: () => toast({ title: "Deactivation failed", variant: "destructive" }),
+  });
+
   const editMutation = useMutation({
     mutationFn: ({ id, ...rest }: { id: number } & Partial<MonitorForm>) =>
       api.put(`/monitors/${id}`, rest),
@@ -847,6 +877,20 @@ export function MonitorsPage() {
         selectedCount={selectedIds.size}
         onClear={clearSelection}
         actions={[
+          {
+            label: "Activate",
+            icon: Play,
+            onClick: () => {
+              bulkActivateMutation.mutate(Array.from(selectedIds));
+            },
+          },
+          {
+            label: "Deactivate",
+            icon: Pause,
+            onClick: () => {
+              bulkDeactivateMutation.mutate(Array.from(selectedIds));
+            },
+          },
           {
             label: "Delete",
             icon: Trash2,

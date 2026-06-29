@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ChevronUp,
   Server as ServerIcon,
+  Activity,
 } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { toast } from "@/hooks/use-toast";
@@ -470,6 +471,39 @@ export function ServersPage() {
       toast({ title: "Connection test failed", variant: "destructive" }),
   });
 
+  const bulkTestConnection = useMutation({
+    mutationFn: async (ids: number[]) => {
+      const results = [];
+      for (const id of ids) {
+        try {
+          const res = await api.post<{
+            success: boolean;
+            message: string;
+            cyberpanelVersion?: string;
+          }>(`/servers/${id}/test-connection`, {});
+          results.push({ id, success: true, version: res.cyberpanelVersion });
+        } catch {
+          results.push({ id, success: false });
+        }
+      }
+      return results;
+    },
+    onSuccess: (results) => {
+      qc.invalidateQueries({ queryKey: ["servers"] });
+      clearSelection();
+      const failedCount = results.filter((r) => !r.success).length;
+      if (failedCount === 0) {
+        toast({ title: `Tested ${results.length} servers: All reachable` });
+      } else {
+        toast({
+          title: `Tested ${results.length} servers`,
+          description: `${results.length - failedCount} reachable, ${failedCount} unreachable`,
+          variant: failedCount === results.length ? "destructive" : "default",
+        });
+      }
+    },
+  });
+
   function invalidate() {
     qc.invalidateQueries({ queryKey: ["servers"] });
   }
@@ -726,6 +760,13 @@ export function ServersPage() {
         selectedCount={selectedIds.size}
         onClear={clearSelection}
         actions={[
+          {
+            label: "Test Connection",
+            icon: Activity,
+            onClick: () => {
+              bulkTestConnection.mutate(Array.from(selectedIds));
+            },
+          },
           {
             label: "Delete",
             icon: Trash2,

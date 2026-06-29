@@ -252,6 +252,56 @@ export function DomainsPage() {
     },
   });
 
+  const bulkWhoisRefresh = useMutation({
+    mutationFn: async (ids: (string | number)[]) => {
+      const results = [];
+      for (const id of ids) {
+        try {
+          await api.post(`/domains/${id}/whois-refresh`, {});
+          results.push({ id, success: true });
+        } catch {
+          results.push({ id, success: false });
+        }
+      }
+      return results;
+    },
+    onSuccess: (results) => {
+      invalidate();
+      setSelectedIds([]);
+      const failed = results.filter((r) => !r.success).length;
+      toast({
+        title: `WHOIS Refresh queued for ${results.length} domains`,
+        description: failed > 0 ? `Failed for ${failed} domains.` : "All successfully queued.",
+        variant: failed === results.length ? "destructive" : "default",
+      });
+    },
+  });
+
+  const bulkSslRefresh = useMutation({
+    mutationFn: async (ids: (string | number)[]) => {
+      const results = [];
+      for (const id of ids) {
+        try {
+          await api.post(`/domains/${id}/ssl-refresh`, {});
+          results.push({ id, success: true });
+        } catch {
+          results.push({ id, success: false });
+        }
+      }
+      return results;
+    },
+    onSuccess: (results) => {
+      invalidate();
+      setSelectedIds([]);
+      const failed = results.filter((r) => !r.success).length;
+      toast({
+        title: `SSL Refresh queued for ${results.length} domains`,
+        description: failed > 0 ? `Failed for ${failed} domains.` : "All successfully queued.",
+        variant: failed === results.length ? "destructive" : "default",
+      });
+    },
+  });
+
   async function handleWhoisRefresh(domain: Domain) {
     setRefreshingId(domain.id);
     try {
@@ -455,6 +505,20 @@ export function DomainsPage() {
       <BulkActionsBar
         selectedCount={selectedIds.length}
         actions={[
+          {
+            label: "Refresh WHOIS",
+            icon: Globe,
+            onClick: () => {
+              bulkWhoisRefresh.mutate(selectedIds);
+            },
+          },
+          {
+            label: "Refresh SSL",
+            icon: ShieldCheck,
+            onClick: () => {
+              bulkSslRefresh.mutate(selectedIds);
+            },
+          },
           {
             label: "Delete Selected",
             icon: Trash2,

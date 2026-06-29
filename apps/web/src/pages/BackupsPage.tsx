@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, Fragment } from "react";
+import { useState, Fragment, useEffect } from "react";
 import {
   Trash2,
   Download,
@@ -59,6 +59,7 @@ interface Backup {
   created_at: string;
   jobExecution: {
     id: number;
+    bull_job_id: string;
     status: string;
     progress: number;
     last_error: string | null;
@@ -172,6 +173,32 @@ export function BackupsPage() {
       toast({ title: "Bulk delete failed", variant: "destructive" });
     },
   });
+
+  // Sync running jobs from database query on mount or data load
+  useEffect(() => {
+    if (!backupsData?.items) return;
+    const running = backupsData.items.filter(
+      (b) =>
+        (b.status === "running" || b.status === "pending") &&
+        b.jobExecution?.bull_job_id,
+    );
+    if (running.length > 0) {
+      setJobProgress((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        for (const b of running) {
+          const bullId = b.jobExecution!.bull_job_id;
+          const current = next[bullId];
+          const newProgress = b.jobExecution!.progress ?? 0;
+          if (current !== newProgress) {
+            next[bullId] = newProgress;
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }
+  }, [backupsData?.items]);
 
   // Subscribe to environment WS room
   useSubscribeEnvironment(envId);
