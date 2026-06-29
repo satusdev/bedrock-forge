@@ -188,13 +188,9 @@ export class PluginUpdateProcessor extends WorkerHost {
         detail: server.ip_address,
       });
 
-      const privateKey = await this.sshKey.resolvePrivateKey(server);
-      const executor = createRemoteExecutor({
-        host: server.ip_address,
-        port: server.ssh_port,
-        username: server.ssh_user,
-        privateKey,
-      });
+      const executor = createRemoteExecutor(
+        await this.sshKey.getSshConfig(server),
+      );
 
       await job.updateProgress(10);
 

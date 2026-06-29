@@ -594,9 +594,10 @@ export class WpActionsProcessor extends WorkerHost {
       if (wpResult.code !== 0) {
         source = "file";
         const maintenancePath = `${wpPath}/.maintenance`;
+        const sanitizedMsg = message ? sanitizeMaintenanceMessage(message) : "Maintenance enabled by Bedrock Forge";
         const fallbackCmd = enabled
           ? `printf '%s\\n' ${shellQuote(
-              `<?php $upgrading = time(); /* ${message ?? "Maintenance enabled by Bedrock Forge"} */`,
+              `<?php $upgrading = time(); /* ${sanitizedMsg} */`,
             )} > ${shellQuote(maintenancePath)}`
           : `rm -f ${shellQuote(maintenancePath)}`;
         const fallback = await executor.execute(fallbackCmd, {
@@ -688,13 +689,9 @@ export class WpActionsProcessor extends WorkerHost {
       level: "info",
       detail: env.server.ip_address,
     });
-    const privateKey = await this.sshKey.resolvePrivateKey(env.server);
-    const executor = createRemoteExecutor({
-      host: env.server.ip_address,
-      port: env.server.ssh_port,
-      username: env.server.ssh_user,
-      privateKey,
-    });
+    const executor = createRemoteExecutor(
+      await this.sshKey.getSshConfig(env.server),
+    );
     return { executor, env };
   }
 }
@@ -705,4 +702,14 @@ function safeJsonParse(str: string): unknown {
   } catch {
     return null;
   }
+}
+
+export function sanitizeMaintenanceMessage(msg: string): string {
+  return msg
+    .replace(/<\?(php|=)?/gi, "")
+    .replace(/\?>/g, "")
+    .replace(/<\/?script>/gi, "")
+    .replace(/\/\*/g, "")
+    .replace(/\*\//g, "")
+    .replace(/<[^>]*>/g, ""); // Strip HTML tags
 }

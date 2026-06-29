@@ -39,6 +39,55 @@ function parseEnvValue(string $line, string $key): ?string {
     return '';
 }
 
+// ── Helper: extract table prefix from docroot ─────────────────────────────────
+function getTablePrefixFromDocroot(string $docroot): string {
+    if ($docroot === '') {
+        return 'wp_';
+    }
+    $envFile  = '';
+    $wpConfig = '';
+
+    // Search docroot + up to 2 parent levels for .env and wp-config.php.
+    $searchDirs = [$docroot, $docroot . '/..', $docroot . '/../..'];
+    foreach ($searchDirs as $dir) {
+        $real = realpath($dir);
+        if ($real === false) continue;
+        if ($envFile === '' && file_exists($real . '/.env')) {
+            $preview = (string)@file_get_contents($real . '/.env', false, null, 0, 512);
+            if (str_contains($preview, 'DB_HOST') || str_contains($preview, 'DATABASE_URL')) {
+                $envFile = $real . '/.env';
+            }
+        }
+        if ($wpConfig === '' && file_exists($real . '/wp-config.php')) {
+            $wpConfig = $real . '/wp-config.php';
+        }
+    }
+
+    $tablePrefix = 'wp_';
+
+    if ($envFile !== '') {
+        $lines = @file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        if ($lines !== false) {
+            foreach ($lines as $line) {
+                $line = trim($line);
+                if ($line === '' || $line[0] === '#') continue;
+                if (($v = parseEnvValue($line, 'table_prefix')) !== null) {
+                    $tablePrefix = $v;
+                }
+            }
+        }
+    }
+
+    if ($wpConfig !== '') {
+        $content = (string)@file_get_contents($wpConfig);
+        if (preg_match('/\$table_prefix\s*=\s*[\'"]([^\'"]+)[\'"]/', $content, $m)) {
+            $tablePrefix = $m[1];
+        }
+    }
+
+    return $tablePrefix;
+}
+
 $opts      = getopt('', ['docroot:', 'creds-file:']);
 $credsFile = (string)($opts['creds-file'] ?? '');
 $docroot   = rtrim((string)($opts['docroot'] ?? ''), '/');
@@ -70,6 +119,11 @@ if ($credsFile !== '') {
     $dbUser = (string)($c['dbUser'] ?? '');
     $dbPass = (string)($c['dbPassword'] ?? '');
     $dbName = (string)($c['dbName'] ?? '');
+    
+    // Resolve table prefix from docroot if provided
+    if ($docroot !== '') {
+        $tablePrefix = getTablePrefixFromDocroot($docroot);
+    }
 } else {
     // ── Fallback: find and parse .env / wp-config.php ────────────────────────
     if ($docroot === '') {
@@ -156,6 +210,19 @@ try {
 } catch (PDOException $e) {
     echo json_encode(['error' => 'DB connection failed: ' . $e->getMessage()]);
     exit(1);
+}
+
+// Auto-detect table prefix from the database itself
+try {
+    $prefixQuery = "SELECT REPLACE(table_name, 'options', '') as prefix FROM information_schema.tables WHERE table_schema = :dbName AND table_name LIKE '%options' LIMIT 1";
+    $prefixStmt = $pdo->prepare($prefixQuery);
+    $prefixStmt->execute(['dbName' => $dbName]);
+    $prefixRow = $prefixStmt->fetch();
+    if ($prefixRow && !empty($prefixRow['prefix'])) {
+        $tablePrefix = $prefixRow['prefix'];
+    }
+} catch (Exception $e) {
+    // Fallback to the parsed/default table prefix
 }
 
 $usersTable = $tablePrefix . 'users';

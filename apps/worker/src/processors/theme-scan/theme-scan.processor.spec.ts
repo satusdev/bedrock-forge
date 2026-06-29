@@ -127,6 +127,12 @@ describe("ThemeScanProcessor", () => {
       {} as ConfigService,
       {
         resolvePrivateKey: jest.fn().mockResolvedValue("private-key"),
+        getSshConfig: jest.fn().mockResolvedValue({
+          host: "203.0.113.10",
+          port: 22,
+          username: "root",
+          privateKey: "private-key",
+        }),
       } as unknown as SshKeyService,
     );
   });
@@ -197,6 +203,12 @@ describe("ThemeScanProcessor", () => {
       {} as ConfigService,
       {
         resolvePrivateKey: jest.fn().mockResolvedValue("private-key"),
+        getSshConfig: jest.fn().mockResolvedValue({
+          host: "203.0.113.10",
+          port: 22,
+          username: "root",
+          privateKey: "private-key",
+        }),
       } as unknown as SshKeyService,
     );
 

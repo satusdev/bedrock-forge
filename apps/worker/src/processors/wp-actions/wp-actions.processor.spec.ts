@@ -141,7 +141,15 @@ describe("WpActionsProcessor - processCoreCheck & processCoreUpdate", () => {
         { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue("/tmp/scripts") } },
         {
           provide: SshKeyService,
-          useValue: { resolvePrivateKey: jest.fn().mockResolvedValue("fake-key") },
+          useValue: {
+            resolvePrivateKey: jest.fn().mockResolvedValue("fake-key"),
+            getSshConfig: jest.fn().mockImplementation(async (server: any) => ({
+              host: server.ip_address,
+              port: server.ssh_port,
+              username: server.ssh_user,
+              privateKey: "fake-key",
+            })),
+          },
         },
       ],
     }).compile();
