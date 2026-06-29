@@ -54,6 +54,8 @@ export const JOB_TYPES = {
 
   // Projects
   PROJECT_CREATE_BEDROCK: "project:create-bedrock",
+  PROJECT_ARCHIVE: "project:archive",
+  PROJECT_RESTORE: "project:restore",
 
   // Notifications
   NOTIFICATION_SEND: "notification:send",

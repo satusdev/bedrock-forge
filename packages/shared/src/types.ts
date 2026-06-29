@@ -187,6 +187,21 @@ export const CreateBedrockPayloadSchema = z.object({
 });
 export type CreateBedrockPayload = z.infer<typeof CreateBedrockPayloadSchema>;
 
+export const ProjectArchivePayloadSchema = z.object({
+  projectId: z.number().int().positive(),
+  jobExecutionId: z.number().int().positive(),
+  createBackup: z.boolean().default(true),
+  deleteFromCyberpanel: z.boolean().default(true),
+});
+export type ProjectArchivePayload = z.infer<typeof ProjectArchivePayloadSchema>;
+
+export const ProjectRestorePayloadSchema = z.object({
+  projectId: z.number().int().positive(),
+  jobExecutionId: z.number().int().positive(),
+  environmentBackups: z.record(z.string(), z.number()),
+});
+export type ProjectRestorePayload = z.infer<typeof ProjectRestorePayloadSchema>;
+
 // ─── WS Payload Types ─────────────────────────────────────────────────────────
 
 export interface JobProgressEvent {
