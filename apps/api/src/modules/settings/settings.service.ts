@@ -1,4 +1,6 @@
 import { BadRequestException, Injectable, Logger } from "@nestjs/common";
+import { promises as dns } from "dns";
+import * as ipaddr from "ipaddr.js";
 import { SettingsRepository } from "./settings.repository";
 import { EncryptionService } from "../../common/encryption/encryption.service";
 
@@ -80,6 +82,10 @@ export class SettingsService {
   async testWebhook(type: "slack" | "discord" | "google_chat", url: string) {
     if (!url) throw new BadRequestException("Webhook URL is required");
 
+    if (!(await this.isSafeUrl(url))) {
+      throw new BadRequestException("Invalid or unsafe webhook URL");
+    }
+
     const payload =
       type === "slack" || type === "google_chat"
         ? { text: "✅ Bedrock Forge — Test Notification" }
@@ -101,6 +107,52 @@ export class SettingsService {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new BadRequestException(`Failed to send test notification: ${msg}`);
+    }
+  }
+
+  private isPrivateIp(ip: string): boolean {
+    try {
+      if (!ipaddr.isValid(ip)) return true;
+      const addr = ipaddr.parse(ip);
+      const range = addr.range();
+      const privateRanges = [
+        "unspecified",
+        "broadcast",
+        "multicast",
+        "linkLocal",
+        "loopback",
+        "private",
+        "reserved",
+        "uniqueLocal",
+      ];
+      return privateRanges.includes(range);
+    } catch {
+      return true;
+    }
+  }
+
+  private async isSafeUrl(urlString: string): Promise<boolean> {
+    try {
+      const parsed = new URL(urlString);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        return false;
+      }
+      const hostname = parsed.hostname;
+      if (!hostname) return false;
+
+      if (ipaddr.isValid(hostname)) {
+        return !this.isPrivateIp(hostname);
+      }
+
+      const addresses = await dns.lookup(hostname, { all: true });
+      for (const addr of addresses) {
+        if (this.isPrivateIp(addr.address)) {
+          return false;
+        }
+      }
+      return true;
+    } catch {
+      return false;
     }
   }
 }

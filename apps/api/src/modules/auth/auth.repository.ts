@@ -130,7 +130,36 @@ export class AuthRepository {
       data: {
         mfa_enabled: mfaEnabled,
         totp_secret_encrypted: totpSecretEncrypted,
+        last_totp_step: null, // Reset step when MFA is modified
       },
+    });
+  }
+
+  async updateLastTotpStep(userId: bigint, step: bigint) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { last_totp_step: step },
+    });
+  }
+
+  async recordLoginFailure(
+    userId: bigint,
+    failures: number,
+    lockedUntil: Date | null,
+  ) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        login_failures: failures,
+        ...(lockedUntil !== null ? { locked_until: lockedUntil } : {}),
+      },
+    });
+  }
+
+  async resetLoginFailures(userId: bigint) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { login_failures: 0, locked_until: null },
     });
   }
 

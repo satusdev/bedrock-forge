@@ -181,19 +181,6 @@ export class AuthController {
   }
 
   private getRefreshCookie(req: ExpressRequest): string | null {
-    const cookieHeader = req.headers.cookie;
-    if (!cookieHeader) return null;
-    const cookies = cookieHeader.split(";");
-    for (const cookie of cookies) {
-      const [rawName, ...rawValue] = cookie.trim().split("=");
-      if (rawName === "bf_refresh") {
-        try {
-          return decodeURIComponent(rawValue.join("="));
-        } catch {
-          return null;
-        }
-      }
-    }
-    return null;
+    return req.cookies?.["bf_refresh"] ?? null;
   }
 }

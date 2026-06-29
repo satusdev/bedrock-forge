@@ -90,4 +90,71 @@ describe("SettingsService", () => {
     repo.findByKey.mockResolvedValue({ key: "k", value: "enc:x" });
     expect(await service.hasEncrypted("k")).toBe(true);
   });
+
+  describe("testWebhook", () => {
+    let originalFetch: typeof fetch;
+
+    beforeAll(() => {
+      originalFetch = global.fetch;
+    });
+
+    afterAll(() => {
+      global.fetch = originalFetch;
+    });
+
+    it("throws BadRequestException if url is empty", async () => {
+      const { BadRequestException } = await import("@nestjs/common");
+      await expect(service.testWebhook("slack", "")).rejects.toThrow(BadRequestException);
+    });
+
+    it("throws BadRequestException for unsafe private IP URL", async () => {
+      const { BadRequestException } = await import("@nestjs/common");
+      await expect(service.testWebhook("slack", "http://127.0.0.1/webhook")).rejects.toThrow(
+        "Invalid or unsafe webhook URL",
+      );
+      await expect(service.testWebhook("slack", "http://10.0.0.1/webhook")).rejects.toThrow(
+        "Invalid or unsafe webhook URL",
+      );
+      await expect(service.testWebhook("slack", "http://localhost/webhook")).rejects.toThrow(
+        "Invalid or unsafe webhook URL",
+      );
+    });
+
+    it("throws BadRequestException for non-HTTP/HTTPS protocols", async () => {
+      const { BadRequestException } = await import("@nestjs/common");
+      await expect(service.testWebhook("slack", "ftp://example.com/webhook")).rejects.toThrow(
+        "Invalid or unsafe webhook URL",
+      );
+    });
+
+    it("calls fetch and returns success for safe public URL", async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+      });
+
+      const result = await service.testWebhook("slack", "https://hooks.slack.com/services/mock-webhook-id");
+      expect(result).toEqual({ success: true });
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining("hooks.slack.com"),
+        expect.objectContaining({
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "✅ Bedrock Forge — Test Notification" }),
+        }),
+      );
+    });
+
+    it("throws BadRequestException if fetch fails", async () => {
+      const { BadRequestException } = await import("@nestjs/common");
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        text: () => Promise.resolve("Internal Server Error"),
+      });
+
+      await expect(
+        service.testWebhook("slack", "https://hooks.slack.com/services/mock-webhook-id"),
+      ).rejects.toThrow("Failed to send test notification: Status 500: Internal Server Error");
+    });
+  });
 });

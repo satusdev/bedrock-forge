@@ -14,6 +14,8 @@ const mockUser = {
   password_hash: "$2a$12$placeholder",
   user_roles: [{ role: { name: "admin" } }],
   mfa_enabled: false,
+  login_failures: 0,
+  locked_until: null,
 };
 
 const makeRepo = () => ({
@@ -25,6 +27,10 @@ const makeRepo = () => ({
   revokeRefreshToken: jest.fn(),
   revokeAllUserRefreshTokens: jest.fn(),
   updatePassword: jest.fn(),
+  updateMfa: jest.fn(),
+  updateLastTotpStep: jest.fn(),
+  recordLoginFailure: jest.fn(),
+  resetLoginFailures: jest.fn(),
 });
 
 const makeJwt = () => ({
@@ -189,6 +195,122 @@ describe("AuthService", () => {
       expect(repo.revokeAllUserRefreshTokens).toHaveBeenCalledWith(
         BigInt(userId),
       );
+    });
+  });
+
+  describe("login with MFA", () => {
+    let encryptionService: EncryptionService;
+    beforeEach(() => {
+      encryptionService = service['encryption'];
+    });
+
+    it("requires MFA code if mfa_enabled is true", async () => {
+      const hash = await bcrypt.hash("secret", 12);
+      repo.findUserByEmail.mockResolvedValue({
+        ...mockUser,
+        password_hash: hash,
+        mfa_enabled: true,
+      });
+
+      const result = await service.login("test@forge.local", "secret");
+      expect(result).toEqual({ mfaRequired: true });
+    });
+
+    it("rejects invalid MFA code", async () => {
+      const hash = await bcrypt.hash("secret", 12);
+      repo.findUserByEmail.mockResolvedValue({
+        ...mockUser,
+        password_hash: hash,
+        mfa_enabled: true,
+        totp_secret_encrypted: "encrypted-secret",
+      });
+      jest.spyOn(encryptionService, "decrypt").mockReturnValue("SECRET32");
+      jest.spyOn(service as any, "verifyTOTP").mockReturnValue(null);
+
+      await expect(
+        service.login("test@forge.local", "secret", "123456"),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it("rejects replayed/used MFA code", async () => {
+      const hash = await bcrypt.hash("secret", 12);
+      repo.findUserByEmail.mockResolvedValue({
+        ...mockUser,
+        password_hash: hash,
+        mfa_enabled: true,
+        totp_secret_encrypted: "encrypted-secret",
+        last_totp_step: BigInt(1000),
+      });
+      jest.spyOn(encryptionService, "decrypt").mockReturnValue("SECRET32");
+      jest.spyOn(service as any, "verifyTOTP").mockReturnValue(1000); // matches last_totp_step
+
+      await expect(
+        service.login("test@forge.local", "secret", "123456"),
+      ).rejects.toThrow("MFA code has already been used");
+    });
+
+    it("accepts valid and non-replayed MFA code and updates last_totp_step", async () => {
+      const hash = await bcrypt.hash("secret", 12);
+      repo.findUserByEmail.mockResolvedValue({
+        ...mockUser,
+        password_hash: hash,
+        mfa_enabled: true,
+        totp_secret_encrypted: "encrypted-secret",
+        last_totp_step: BigInt(999),
+      });
+      repo.storeRefreshToken.mockResolvedValue(undefined);
+      repo.updateLastTotpStep.mockResolvedValue(undefined);
+      jest.spyOn(encryptionService, "decrypt").mockReturnValue("SECRET32");
+      jest.spyOn(service as any, "verifyTOTP").mockReturnValue(1000); // 1000 > 999
+
+      const result = (await service.login("test@forge.local", "secret", "123456")) as any;
+      expect(result.accessToken).toBe("signed-access-token");
+      expect(repo.updateLastTotpStep).toHaveBeenCalledWith(BigInt(1), BigInt(1000));
+    });
+  });
+
+  describe("enableMfa", () => {
+    let encryptionService: EncryptionService;
+    beforeEach(() => {
+      encryptionService = service['encryption'];
+      repo.updateMfa.mockResolvedValue(undefined);
+      repo.updateLastTotpStep.mockResolvedValue(undefined);
+    });
+
+    it("throws BadRequestException if MFA setup is not generated", async () => {
+      const { BadRequestException } = await import("@nestjs/common");
+      repo.findUserById.mockResolvedValue({
+        ...mockUser,
+        totp_secret_encrypted: null,
+      });
+
+      await expect(service.enableMfa(1, "123456")).rejects.toThrow(BadRequestException);
+    });
+
+    it("throws BadRequestException if verification code is invalid", async () => {
+      const { BadRequestException } = await import("@nestjs/common");
+      repo.findUserById.mockResolvedValue({
+        ...mockUser,
+        totp_secret_encrypted: "encrypted-secret",
+      });
+      jest.spyOn(encryptionService, "decrypt").mockReturnValue("SECRET32");
+      jest.spyOn(service as any, "verifyTOTP").mockReturnValue(null);
+
+      await expect(service.enableMfa(1, "123456")).rejects.toThrow(BadRequestException);
+    });
+
+    it("enables MFA and sets last_totp_step on valid verification code", async () => {
+      repo.findUserById.mockResolvedValue({
+        ...mockUser,
+        totp_secret_encrypted: "encrypted-secret",
+      });
+      jest.spyOn(encryptionService, "decrypt").mockReturnValue("SECRET32");
+      jest.spyOn(service as any, "verifyTOTP").mockReturnValue(1000);
+
+      await service.enableMfa(1, "123456");
+
+      expect(repo.updateMfa).toHaveBeenCalledWith(BigInt(1), true, "encrypted-secret");
+      expect(repo.updateLastTotpStep).toHaveBeenCalledWith(BigInt(1), BigInt(1000));
     });
   });
 });

@@ -101,6 +101,32 @@ export class AuditInterceptor implements NestInterceptor {
     return `${resource}.${verb}`;
   }
 
+  /** Explicit plural → singular map for paths where strip-s is wrong. */
+  private static readonly SINGULAR_MAP: Record<string, string> = {
+    "audit-logs": "audit-log",
+    backups: "backup",
+    clients: "client",
+    domains: "domain",
+    environments: "environment",
+    invoices: "invoice",
+    jobs: "job",
+    "job-executions": "job-execution",
+    lighthouse: "lighthouse", // not pluralised — keep as-is
+    "maintenance-windows": "maintenance-window",
+    monitors: "monitor",
+    notifications: "notification",
+    plugins: "plugin",
+    projects: "project",
+    reports: "report",
+    schedules: "schedule",
+    security: "security",
+    servers: "server",
+    sessions: "session",
+    settings: "setting",
+    themes: "theme",
+    users: "user",
+  };
+
   /** Parse /api/backups/42 → { resourceType: 'backup', resourceId: 42 } */
   private parseResource(path: string): {
     resourceType: string | null;
@@ -110,8 +136,9 @@ export class AuditInterceptor implements NestInterceptor {
     const seg = path.replace(/^\/api\//, "").split("/");
     if (!seg[0]) return { resourceType: null, resourceId: null };
 
-    // Singularize the first segment (e.g. backups → backup)
-    const resourceType = seg[0].replace(/s$/, "");
+    // Use the explicit map first; fall back to strip-trailing-s heuristic.
+    const resourceType =
+      AuditInterceptor.SINGULAR_MAP[seg[0]] ?? seg[0].replace(/s$/, "");
 
     // The second segment is the ID if it's numeric
     const maybeId = seg[1] ? parseInt(seg[1], 10) : NaN;

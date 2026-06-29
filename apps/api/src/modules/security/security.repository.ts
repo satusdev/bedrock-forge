@@ -129,7 +129,7 @@ export class SecurityRepository {
         security_scans: {
           where: { status: "completed" },
           orderBy: { completed_at: "desc" },
-          take: 10,
+          take: 100,
           select: {
             id: true,
             scan_type: true,
@@ -155,7 +155,7 @@ export class SecurityRepository {
         security_scans: {
           where: { status: "completed" },
           orderBy: { completed_at: "desc" },
-          take: 10,
+          take: 100,
           select: {
             id: true,
             scan_type: true,

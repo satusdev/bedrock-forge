@@ -58,7 +58,8 @@ describe("AuthController", () => {
 
   it("refreshes from the cookie and rotates the cookie", async () => {
     const req = {
-      headers: { cookie: "other=value; bf_refresh=old-refresh-token" },
+      cookies: { bf_refresh: "old-refresh-token" },
+      headers: {},
       ip: "127.0.0.1",
     } as any;
     const res = makeResponse();
@@ -82,7 +83,7 @@ describe("AuthController", () => {
   });
 
   it("rejects refresh without a cookie", async () => {
-    const req = { headers: {}, ip: "127.0.0.1" } as any;
+    const req = { cookies: {}, headers: {}, ip: "127.0.0.1" } as any;
     const res = makeResponse();
 
     await expect(controller.refresh(req, res)).rejects.toThrow(
@@ -92,7 +93,7 @@ describe("AuthController", () => {
   });
 
   it("revokes the cookie token and clears the cookie on logout", async () => {
-    const req = { headers: { cookie: "bf_refresh=old-refresh-token" } } as any;
+    const req = { cookies: { bf_refresh: "old-refresh-token" } } as any;
     const res = makeResponse();
 
     await controller.logout(req, res);

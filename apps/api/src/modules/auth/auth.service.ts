@@ -27,6 +27,11 @@ export class AuthService {
     private readonly encryption: EncryptionService,
   ) {}
 
+  /** Maximum consecutive login failures before locking the account. */
+  private readonly MAX_LOGIN_FAILURES = 10;
+  /** Lock duration in milliseconds (30 minutes). */
+  private readonly LOCKOUT_DURATION_MS = 30 * 60_000;
+
   async login(
     email: string,
     password: string,
@@ -39,9 +44,31 @@ export class AuthService {
       throw new UnauthorizedException("Invalid credentials");
     }
 
+    // ── Account lockout check ──────────────────────────────────────────────
+    if (user.locked_until && user.locked_until > new Date()) {
+      const minutesLeft = Math.ceil(
+        (user.locked_until.getTime() - Date.now()) / 60_000,
+      );
+      throw new UnauthorizedException(
+        `Account locked due to too many failed attempts. Try again in ${minutesLeft} minute(s).`,
+      );
+    }
+
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) {
+      // Increment failure counter; lock if threshold reached
+      const failures = user.login_failures + 1;
+      const lockedUntil =
+        failures >= this.MAX_LOGIN_FAILURES
+          ? new Date(Date.now() + this.LOCKOUT_DURATION_MS)
+          : null;
+      await this.repo.recordLoginFailure(user.id, failures, lockedUntil);
       throw new UnauthorizedException("Invalid credentials");
+    }
+
+    // ── Reset failure counter on successful password check ─────────────────
+    if (user.login_failures > 0 || user.locked_until) {
+      await this.repo.resetLoginFailures(user.id);
     }
 
     if (user.mfa_enabled) {
@@ -52,10 +79,14 @@ export class AuthService {
         throw new UnauthorizedException("MFA configuration error");
       }
       const secret = this.encryption.decrypt(user.totp_secret_encrypted);
-      const isMfaValid = this.verifyTOTP(secret, code);
-      if (!isMfaValid) {
+      const matchedStep = this.verifyTOTP(secret, code);
+      if (matchedStep === null) {
         throw new UnauthorizedException("Invalid MFA code");
       }
+      if (user.last_totp_step !== null && BigInt(matchedStep) <= user.last_totp_step) {
+        throw new UnauthorizedException("MFA code has already been used");
+      }
+      await this.repo.updateLastTotpStep(user.id, BigInt(matchedStep));
     }
 
     const roles = user.user_roles.map((ur: any) => ur.role.name);
@@ -90,7 +121,7 @@ export class AuthService {
       throw new NotFoundException("User not found");
     }
 
-    const roles = user.user_roles.map((ur: any) => ur.role.name);
+    const roles = user.user_roles.map((ur) => ur.role.name);
     return this.issueTokens(
       Number(user.id),
       user.email,
@@ -181,12 +212,13 @@ export class AuthService {
     }
 
     const secret = this.encryption.decrypt(user.totp_secret_encrypted);
-    const isMfaValid = this.verifyTOTP(secret, code);
-    if (!isMfaValid) {
+    const matchedStep = this.verifyTOTP(secret, code);
+    if (matchedStep === null) {
       throw new BadRequestException("Invalid MFA verification code");
     }
 
     await this.repo.updateMfa(BigInt(userId), true, user.totp_secret_encrypted);
+    await this.repo.updateLastTotpStep(BigInt(userId), BigInt(matchedStep));
   }
 
   async disableMfa(userId: number): Promise<void> {
@@ -223,7 +255,7 @@ export class AuthService {
 
     const accessToken = this.jwtService.sign(payload, {
       secret: this.config.get<string>("jwt.secret"),
-      expiresIn: this.config.get<string>("jwt.accessExpiresIn") as any,
+      expiresIn: (this.config.get<string>("jwt.accessExpiresIn") ?? "15m") as `${number}${'s'|'m'|'h'|'d'}` | number,
     });
 
     const rawRefreshToken = crypto.randomBytes(64).toString("hex");
@@ -293,15 +325,16 @@ export class AuthService {
     return otp.toString().padStart(6, "0");
   }
 
-  private verifyTOTP(secretBase32: string, token: string): boolean {
-    if (!/^\d{6}$/.test(token)) return false;
+  private verifyTOTP(secretBase32: string, token: string): number | null {
+    if (!/^\d{6}$/.test(token)) return null;
     const now = Math.floor(Date.now() / 1000 / 30);
     for (let i = -1; i <= 1; i++) {
-      if (this.generateTOTP(secretBase32, now + i) === token) {
-        return true;
+      const step = now + i;
+      if (this.generateTOTP(secretBase32, step) === token) {
+        return step;
       }
     }
-    return false;
+    return null;
   }
 
   private generateBase32Secret(length = 16): string {
