@@ -1,5 +1,10 @@
 #!/bin/bash
+# Bedrock Forge — Update
 set -euo pipefail
+
+# Source helper routines
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/tools/setup-helpers.sh"
 
 echo "╔════════════════════════════════════════╗"
 echo "║      Bedrock Forge — Update            ║"
@@ -26,7 +31,7 @@ cleanup_docker_disk() {
 }
 
 # ── Prerequisites ────────────────────────────────────────────────────────────
-command -v docker >/dev/null 2>&1 || { echo "ERROR: Docker is not installed."; exit 1; }
+verify_prereq "docker" "Docker is not installed."
 
 if [ ! -f .env ]; then
   echo "ERROR: .env not found. Run ./install.sh for first-time setup."
@@ -42,17 +47,7 @@ echo "Restarting forge and web services…"
 docker compose up -d --no-deps forge web
 
 # ── Wait for API to be healthy ───────────────────────────────────────────────
-echo "Waiting for Forge to be ready…"
-RETRIES=30
-until curl -sf http://localhost:3001/health > /dev/null 2>&1; do
-  RETRIES=$((RETRIES - 1))
-  if [ "$RETRIES" -le 0 ]; then
-    echo "ERROR: Forge did not become healthy in time."
-    echo "Check logs: docker compose logs forge"
-    exit 1
-  fi
-  sleep 3
-done
+wait_for_api_healthy 3001 30
 
 echo ""
 echo "Update complete."

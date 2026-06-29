@@ -1,72 +1,33 @@
 #!/bin/bash
+# Bedrock Forge — First-Time Setup
 set -euo pipefail
+
+# Source helper routines
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/tools/setup-helpers.sh"
+
+# Run Setup Doctor to validate environment prerequisites
+"$SCRIPT_DIR/doctor.sh"
 
 echo "╔════════════════════════════════════════╗"
 echo "║    Bedrock Forge — First-Time Setup    ║"
 echo "╚════════════════════════════════════════╝"
 
-# ── Prerequisites ────────────────────────────────────────────────────────────
-command -v docker  >/dev/null 2>&1 || { echo "ERROR: Docker is not installed."; exit 1; }
-command -v openssl >/dev/null 2>&1 || { echo "ERROR: openssl is required."; exit 1; }
+# Generate environment configuration file (.env) with secure tokens
+generate_env_file
 
-set_env_value() {
-  local key="$1"
-  local value="$2"
-  local file="${3:-.env}"
-  local escaped
-  escaped=$(printf '%s' "$value" | sed -e 's/[\/&|\\]/\\&/g')
-  if grep -q "^${key}=" "$file"; then
-    sed -i "s|^${key}=.*|${key}=${escaped}|" "$file"
-  else
-    printf '%s=%s\n' "$key" "$value" >> "$file"
-  fi
-}
-
-# ── Generate .env ────────────────────────────────────────────────────────────
-if [ ! -f .env ]; then
-  echo "Generating .env from .env.example…"
-  cp .env.example .env
-
-  ENCRYPTION_KEY=$(openssl rand -hex 32)
-  JWT_SECRET=$(openssl rand -hex 32)
-  JWT_REFRESH_SECRET=$(openssl rand -hex 32)
-  POSTGRES_PASSWORD=$(openssl rand -hex 16)
-  REDIS_PASSWORD=$(openssl rand -hex 16)
-
-  set_env_value ENCRYPTION_KEY "$ENCRYPTION_KEY"
-  set_env_value JWT_SECRET "$JWT_SECRET"
-  set_env_value JWT_REFRESH_SECRET "$JWT_REFRESH_SECRET"
-  set_env_value POSTGRES_PASSWORD "$POSTGRES_PASSWORD"
-  set_env_value REDIS_PASSWORD "$REDIS_PASSWORD"
-
-  echo "Secrets written to .env"
-else
-  echo ".env already exists — skipping generation."
-fi
-
-# ── Build & start ────────────────────────────────────────────────────────────
-echo "Building image…"
+# ── Build & start services ────────────────────────────────────────────────────
+echo "Building Docker images…"
 docker compose build
 
-echo "Starting services…"
+echo "Starting all Docker containers…"
 docker compose up -d
 
-# ── Wait for API to be healthy ───────────────────────────────────────────────
-echo "Waiting for Forge to be ready…"
-RETRIES=30
-until curl -sf http://localhost:3001/health > /dev/null 2>&1; do
-  RETRIES=$((RETRIES - 1))
-  if [ "$RETRIES" -le 0 ]; then
-    echo "ERROR: Forge did not become healthy in time."
-    echo "Check logs: docker compose logs forge"
-    exit 1
-  fi
-  sleep 3
-done
-echo "Forge is healthy."
+# ── Wait for backend API to become ready ──────────────────────────────────────
+wait_for_api_healthy 3001 30
 
-# ── Seed ─────────────────────────────────────────────────────────────────────
-echo "Seeding database…"
+# ── Run database seed ─────────────────────────────────────────────────────────
+echo "Seeding database with default configuration and admin user…"
 docker compose exec forge node prisma/seed.js
 
 echo ""

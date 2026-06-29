@@ -33,6 +33,12 @@ import workerConfig from "./config/worker.config";
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         connection: { url: config.get<string>("redis.url") },
+        defaultJobOptions: {
+          attempts: 3,
+          backoff: { type: "exponential", delay: 5_000 },
+          removeOnComplete: { count: 1000, age: 7 * 24 * 3600 },
+          removeOnFail: { count: 500, age: 30 * 24 * 3600 },
+        },
       }),
     }),
 

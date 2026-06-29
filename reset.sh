@@ -1,5 +1,10 @@
 #!/bin/bash
+# Bedrock Forge — Reset
 set -euo pipefail
+
+# Source helper routines
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/tools/setup-helpers.sh"
 
 echo "╔════════════════════════════════════════╗"
 echo "║      Bedrock Forge — Reset             ║"
@@ -16,22 +21,8 @@ if [ "$CONFIRM" != "yes" ]; then
   exit 0
 fi
 
-# ── Prerequisites ─────────────────────────────────────────────────────────────
-command -v docker  >/dev/null 2>&1 || { echo "ERROR: Docker is not installed."; exit 1; }
-command -v openssl >/dev/null 2>&1 || { echo "ERROR: openssl is required."; exit 1; }
-
-set_env_value() {
-  local key="$1"
-  local value="$2"
-  local file="${3:-.env}"
-  local escaped
-  escaped=$(printf '%s' "$value" | sed -e 's/[\/&|\\]/\\&/g')
-  if grep -q "^${key}=" "$file"; then
-    sed -i "s|^${key}=.*|${key}=${escaped}|" "$file"
-  else
-    printf '%s=%s\n' "$key" "$value" >> "$file"
-  fi
-}
+# Run Setup Doctor to validate environment prerequisites
+"$SCRIPT_DIR/doctor.sh"
 
 # ── Stop all services and remove volumes ─────────────────────────────────────
 echo "Stopping services and removing volumes…"
@@ -39,26 +30,10 @@ docker compose down -v --remove-orphans
 
 # ── Regenerate secrets (fresh install) ───────────────────────────────────────
 echo "Regenerating secrets in .env…"
-if [ ! -f .env.example ]; then
-  echo "ERROR: .env.example not found."
-  exit 1
+if [ -f .env ]; then
+  rm -f .env
 fi
-
-cp .env.example .env
-
-ENCRYPTION_KEY=$(openssl rand -hex 32)
-JWT_SECRET=$(openssl rand -hex 32)
-JWT_REFRESH_SECRET=$(openssl rand -hex 32)
-POSTGRES_PASSWORD=$(openssl rand -hex 16)
-REDIS_PASSWORD=$(openssl rand -hex 16)
-
-set_env_value ENCRYPTION_KEY "$ENCRYPTION_KEY"
-set_env_value JWT_SECRET "$JWT_SECRET"
-set_env_value JWT_REFRESH_SECRET "$JWT_REFRESH_SECRET"
-set_env_value POSTGRES_PASSWORD "$POSTGRES_PASSWORD"
-set_env_value REDIS_PASSWORD "$REDIS_PASSWORD"
-
-echo "New secrets written to .env"
+generate_env_file
 
 # ── Build & start ─────────────────────────────────────────────────────────────
 echo "Building image…"
@@ -68,18 +43,7 @@ echo "Starting services…"
 docker compose up -d
 
 # ── Wait for API to be healthy ────────────────────────────────────────────────
-echo "Waiting for Forge to be ready…"
-RETRIES=40
-until curl -sf http://localhost:3001/health > /dev/null 2>&1; do
-  RETRIES=$((RETRIES - 1))
-  if [ "$RETRIES" -le 0 ]; then
-    echo "ERROR: Forge did not become healthy in time."
-    echo "Check logs: docker compose logs forge"
-    exit 1
-  fi
-  sleep 3
-done
-echo "Forge is healthy."
+wait_for_api_healthy 3001 40
 
 # ── Seed ──────────────────────────────────────────────────────────────────────
 echo "Seeding database…"

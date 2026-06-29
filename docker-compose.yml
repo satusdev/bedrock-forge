@@ -146,12 +146,12 @@ services:
           cpus: '0.05'
           memory: 32M
     ports:
-      - '3002:80'
+      - '3002:8080'
     depends_on:
       forge:
         condition: service_healthy
     healthcheck:
-      test: ['CMD-SHELL', 'wget -qO /dev/null http://127.0.0.1/ || exit 1']
+      test: ['CMD-SHELL', 'wget -qO /dev/null http://127.0.0.1:8080/ || exit 1']
       interval: 15s
       timeout: 5s
       retries: 3

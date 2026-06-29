@@ -216,7 +216,7 @@ Per-environment overrides are available in the environment settings page.
 | Service                   | Internal Port | External Port (default) |
 | ------------------------- | ------------- | ----------------------- |
 | API                       | 3000          | 3001                    |
-| Web (nginx reverse proxy) | 80            | 3002                    |
+| Web (nginx reverse proxy) | 8080          | 3002                    |
 | PostgreSQL                | 5432          | not exposed             |
 | Redis                     | 6379          | not exposed             |
 

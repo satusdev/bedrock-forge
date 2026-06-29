@@ -117,9 +117,15 @@ CMD ["./entrypoint.sh"]
 # ─── Stage 4: web (nginx serving React SPA) ──────────────────────────────────
 FROM nginx:1.27-alpine AS web
 
-COPY --from=builder /app/apps/web/dist /usr/share/nginx/html
-COPY nginx/default.conf /etc/nginx/conf.d/default.conf
+RUN chown -R nginx:nginx /var/cache/nginx /var/log/nginx /etc/nginx/conf.d && \
+    touch /var/run/nginx.pid && \
+    chown nginx:nginx /var/run/nginx.pid
 
-EXPOSE 80
+USER nginx
+
+COPY --chown=nginx:nginx --from=builder /app/apps/web/dist /usr/share/nginx/html
+COPY --chown=nginx:nginx nginx/default.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 8080
 
 CMD ["nginx", "-g", "daemon off;"]

@@ -15,6 +15,7 @@
   "homepage": "https://github.com/satusdev/bedrock-forge#readme",
   "scripts": {
     "dev": "turbo run dev",
+    "doctor": "./doctor.sh",
     "build": "turbo run build",
     "test": "turbo run test",
     "lint": "turbo run lint",

@@ -81,7 +81,7 @@ command -v docker >/dev/null 2>&1 || err "docker is not installed locally."
 command -v rsync  >/dev/null 2>&1 || err "rsync is not installed locally."
 command -v ssh    >/dev/null 2>&1 || err "ssh is not installed locally."
 
-SSH_OPTS=(-o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=accept-new)
+SSH_OPTS=(-o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 -o ServerAliveCountMax=6)
 
 # ── Remote Docker cleanup helper ─────────────────────────────────────────────
 run_remote_cleanup() {
@@ -213,24 +213,58 @@ rsync -az --delete \
 ok "Config synced"
 
 # ── Step 4: Stream images to server via SSH pipe ──────────────────────────────
-# docker save | gzip | ssh | docker load
+# docker save | pigz/gzip | ssh | docker load
 # Gzip reduces ~40-60% of image data over the wire. No registry needed.
+# pigz uses all CPU cores; pv shows transfer progress so the step never looks frozen.
+# We skip the upload entirely when the image tag already exists on the server.
 step "Shipping images to server (streaming via SSH)…"
 echo ""
 
-info "Uploading forge image (${FORGE_IMAGE})…"
-docker save "${FORGE_IMAGE}" \
-  | gzip -1 \
-  | ssh "${SSH_OPTS[@]}" "${SERVER_USER}@${SERVER_HOST}" \
-      "gzip -d | docker load"
-ok "forge image loaded on server"
+# Pick the fastest available compressor (pigz >> gzip)
+if command -v pigz &>/dev/null; then
+  COMPRESS_CMD="pigz -1"
+  DECOMPRESS_CMD="pigz -d"
+else
+  COMPRESS_CMD="gzip -1"
+  DECOMPRESS_CMD="gzip -d"
+fi
 
-info "Uploading web image   (${WEB_IMAGE})…"
-docker save "${WEB_IMAGE}" \
-  | gzip -1 \
-  | ssh "${SSH_OPTS[@]}" "${SERVER_USER}@${SERVER_HOST}" \
-      "gzip -d | docker load"
-ok "web image loaded on server"
+# Pick a progress tool if available
+if command -v pv &>/dev/null; then
+  PROGRESS_PIPE="pv -pterb"
+else
+  PROGRESS_PIPE="cat"
+fi
+
+# Helper: upload one image; skips if the tag is already present on the server.
+ship_image() {
+  local image="$1"
+  local label="$2"
+
+  # Check if this exact tag is already loaded on the remote host.
+  if ssh "${SSH_OPTS[@]}" "${SERVER_USER}@${SERVER_HOST}" \
+       "docker image inspect '${image}' > /dev/null 2>&1"; then
+    ok "${label} already on server — skipping upload"
+    return 0
+  fi
+
+  info "Uploading ${label} (${image})…"
+  docker save "${image}" \
+    | ${COMPRESS_CMD} \
+    | ${PROGRESS_PIPE} \
+    | ssh "${SSH_OPTS[@]}" "${SERVER_USER}@${SERVER_HOST}" \
+        "${DECOMPRESS_CMD} | docker load"
+  ok "${label} loaded on server"
+}
+
+# Upload forge (large) and web (small) in parallel so we don't wait twice.
+ship_image "${FORGE_IMAGE}" "forge image" &
+FORGE_PID=$!
+ship_image "${WEB_IMAGE}"   "web image"   &
+WEB_PID=$!
+
+wait "${FORGE_PID}" || err "forge image upload failed."
+wait "${WEB_PID}"   || err "web image upload failed."
 echo ""
 
 # ── Step 5: Remote deploy (compose up only — no build) ───────────────────────
