@@ -9,6 +9,7 @@ import {
   ClipboardList,
   ChevronDown,
   ChevronUp,
+  AlertTriangle,
 } from "lucide-react";
 import { api } from "@/lib/api-client";
 import {
@@ -61,7 +62,15 @@ const QUEUE_LABELS: Record<string, string> = {
   projects: "Projects",
 };
 
-const STATUS_ORDER = ["active", "pending", "completed", "failed"];
+const STATUS_ORDER = ["active", "pending", "completed", "failed", "dead_letter"];
+
+const STATUS_LABELS: Record<string, string> = {
+  active: "Running",
+  pending: "Pending",
+  completed: "Completed",
+  failed: "Failed",
+  dead_letter: "Dead Letter",
+};
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
@@ -78,6 +87,13 @@ function StatusBadge({ status }: { status: string }) {
       <Badge variant="destructive" className="gap-1">
         <XCircle className="h-3 w-3" />
         Failed
+      </Badge>
+    );
+  if (status === "dead_letter")
+    return (
+      <Badge variant="destructive" className="gap-1 bg-red-950/70 text-red-300 border-red-800 hover:bg-red-950/70">
+        <AlertTriangle className="h-3 w-3" />
+        Dead Letter
       </Badge>
     );
   if (status === "active")
@@ -307,8 +323,8 @@ export function ActivityPage() {
             <SelectContent>
               <SelectItem value="all">All statuses</SelectItem>
               {STATUS_ORDER.map((s) => (
-                <SelectItem key={s} value={s} className="capitalize">
-                  {s}
+                <SelectItem key={s} value={s}>
+                  {STATUS_LABELS[s] ?? s}
                 </SelectItem>
               ))}
             </SelectContent>

@@ -57,7 +57,7 @@ export function getFixAction(
     )
       return "BLOCK_BRUTE_FORCE_IPS";
     if (category === "SSH_CONFIG" && t.includes("password authentication"))
-      return "DISABLE_PASSWORD_AUTH";
+      return null; // DISABLE_PASSWORD_AUTH has been disabled for safety
     if (category === "SSH_CONFIG" && t.includes("maxauthtries"))
       return "SET_MAX_AUTH_TRIES";
     if (category === "SSH_CONFIG" && t.includes("x11forwarding"))

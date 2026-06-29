@@ -215,23 +215,23 @@ export function ActionCenter() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="fixed bottom-4 right-4 z-40 flex items-center gap-2 rounded-full border bg-card px-3 py-2 text-sm font-medium shadow-lg shadow-foreground/10 transition hover:bg-accent"
+        className="relative flex items-center gap-1.5 rounded-lg border h-8 px-2.5 text-xs font-medium bg-card hover:bg-accent transition-colors shrink-0"
       >
         {activeJobs.length > 0 ? (
-          <Loader2 className="h-4 w-4 animate-spin text-primary" />
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
         ) : failedJobs.length > 0 ? (
-          <AlertTriangle className="h-4 w-4 text-destructive" />
+          <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
         ) : (
-          <Activity className="h-4 w-4 text-muted-foreground" />
+          <Activity className="h-3.5 w-3.5 text-muted-foreground" />
         )}
-        <span>Action Center</span>
+        <span className="hidden md:inline">Action Center</span>
         {activeJobs.length > 0 && (
-          <Badge variant="info" className="h-5 px-1.5">
+          <Badge variant="info" className="h-4 px-1 text-[9px] min-w-4 flex items-center justify-center">
             {activeJobs.length}
           </Badge>
         )}
         {activeJobs.length === 0 && failedJobs.length > 0 && (
-          <Badge variant="destructive" className="h-5 px-1.5">
+          <Badge variant="destructive" className="h-4 px-1 text-[9px] min-w-4 flex items-center justify-center">
             {failedJobs.length}
           </Badge>
         )}

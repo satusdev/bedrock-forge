@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDown,
   ChevronUp,
@@ -10,11 +10,14 @@ import {
   AlertTriangle,
   Copy,
   Download,
+  RefreshCw,
+  Trash2,
 } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Button } from "@/components/ui/button";
 
 export interface ExecutionLogEntry {
   ts: string;
@@ -188,6 +191,36 @@ export function ExecutionLogPanel({
   isActive?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
+  const queryClient = useQueryClient();
+  const [isActionPending, setIsActionPending] = useState(false);
+
+  async function handleRetry() {
+    if (!jobExecutionId) return;
+    setIsActionPending(true);
+    try {
+      await api.post(`/job-executions/${jobExecutionId}/retry`, {});
+      queryClient.invalidateQueries({ queryKey: ["job-executions"] });
+      queryClient.invalidateQueries({ queryKey: ["execution-log", jobExecutionId] });
+    } catch (err) {
+      console.error("Failed to retry job:", err);
+    } finally {
+      setIsActionPending(false);
+    }
+  }
+
+  async function handleDiscard() {
+    if (!jobExecutionId) return;
+    setIsActionPending(true);
+    try {
+      await api.post(`/job-executions/${jobExecutionId}/discard`, {});
+      queryClient.invalidateQueries({ queryKey: ["job-executions"] });
+      queryClient.invalidateQueries({ queryKey: ["execution-log", jobExecutionId] });
+    } catch (err) {
+      console.error("Failed to discard job:", err);
+    } finally {
+      setIsActionPending(false);
+    }
+  }
 
   const { data, isLoading } = useQuery({
     queryKey: ["execution-log", jobExecutionId],
@@ -289,6 +322,30 @@ export function ExecutionLogPanel({
         <p className="mt-2 break-all text-xs text-destructive">
           {data.last_error}
         </p>
+      )}
+      {(data?.status === "failed" || data?.status === "dead_letter") && (
+        <div className="mt-3 flex items-center gap-2 border-t border-border/40 pt-3">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleRetry}
+            disabled={isActionPending}
+            className="h-7 px-2.5 text-xs gap-1 border-emerald-800 text-emerald-400 hover:bg-emerald-950/20 hover:text-emerald-300"
+          >
+            <RefreshCw className="h-3 w-3" />
+            Retry Job
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleDiscard}
+            disabled={isActionPending}
+            className="h-7 px-2.5 text-xs gap-1 border-rose-800 text-rose-400 hover:bg-rose-950/20 hover:text-rose-300"
+          >
+            <Trash2 className="h-3 w-3" />
+            Discard Job
+          </Button>
+        </div>
       )}
     </div>
   );

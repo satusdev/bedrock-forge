@@ -14,10 +14,13 @@ import {
   History,
   HardDrive,
   FolderPlus,
+  Archive,
+  RotateCcw,
 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api-client";
 import { toast } from "@/hooks/use-toast";
+import { ArchiveDialog, RestoreDialog } from "@/components/ProjectArchiveDialogs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -308,6 +311,8 @@ function ProjectCard({
   project,
   onEdit,
   onDelete,
+  onArchive,
+  onRestore,
   onClick,
   onBackupNow,
   selected,
@@ -316,6 +321,8 @@ function ProjectCard({
   project: Project;
   onEdit: () => void;
   onDelete: () => void;
+  onArchive: () => void;
+  onRestore: () => void;
   onClick: () => void;
   onBackupNow: (envId: number) => void;
   selected: boolean;
@@ -421,6 +428,31 @@ function ProjectCard({
                   <Pencil className="h-4 w-4 mr-2" />
                   Edit
                 </DropdownMenuItem>
+
+                {project.status === "archived" ? (
+                  <DropdownMenuItem
+                    className="text-emerald-600 dark:text-emerald-400 focus:text-emerald-600 dark:focus:text-emerald-400 font-medium"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRestore();
+                    }}
+                  >
+                    <RotateCcw className="h-4 w-4 mr-2" />
+                    Restore Archive
+                  </DropdownMenuItem>
+                ) : (
+                  <DropdownMenuItem
+                    className="text-amber-600 dark:text-amber-400 focus:text-amber-600 dark:focus:text-amber-400 font-medium"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onArchive();
+                    }}
+                  >
+                    <Archive className="h-4 w-4 mr-2" />
+                    Archive Project
+                  </DropdownMenuItem>
+                )}
+
                 <DropdownMenuItem
                   className="text-destructive focus:text-destructive"
                   onClick={(e) => {
@@ -722,6 +754,8 @@ export function ProjectsPage() {
   const [bedrockJobsOpen, setBedrockJobsOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Project | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
+  const [archiveTarget, setArchiveTarget] = useState<Project | null>(null);
+  const [restoreTarget, setRestoreTarget] = useState<Project | null>(null);
 
   // ── Selection State ──────────────────────────────────────────────────────
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -763,6 +797,40 @@ export function ProjectsPage() {
       toast({ title: "Project deleted" });
     },
     onError: () => toast({ title: "Delete failed", variant: "destructive" }),
+  });
+
+  const archiveMutation = useMutation({
+    mutationFn: (options: { createBackup: boolean; deleteFromCyberpanel: boolean }) =>
+      api.post(`/projects/${archiveTarget?.id}/archive`, options),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["projects"] });
+      setArchiveTarget(null);
+      toast({ title: "Project archival queued successfully" });
+    },
+    onError: (err: any) =>
+      toast({
+        title: "Archival failed",
+        description: err.message || "An error occurred",
+        variant: "destructive",
+      }),
+  });
+
+  const restoreMutation = useMutation({
+    mutationFn: (selections: Record<string, number>) =>
+      api.post(`/projects/${restoreTarget?.id}/restore-archive`, {
+        environmentBackups: selections,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["projects"] });
+      setRestoreTarget(null);
+      toast({ title: "Project restoration queued successfully" });
+    },
+    onError: (err: any) =>
+      toast({
+        title: "Restoration failed",
+        description: err.message || "An error occurred",
+        variant: "destructive",
+      }),
   });
 
   const backupNowMutation = useMutation({
@@ -967,6 +1035,8 @@ export function ProjectsPage() {
               onSelect={() => toggleSelect(project.id)}
               onEdit={() => setEditTarget(project)}
               onDelete={() => setDeleteTarget(project)}
+              onArchive={() => setArchiveTarget(project)}
+              onRestore={() => setRestoreTarget(project)}
               onClick={() => navigate(`/projects/${project.id}`)}
               onBackupNow={(envId) => backupNowMutation.mutate(envId)}
             />
@@ -1040,6 +1110,21 @@ export function ProjectsPage() {
             },
           },
         ]}
+      />
+      <ArchiveDialog
+        open={!!archiveTarget}
+        onOpenChange={(open) => !open && setArchiveTarget(null)}
+        projectName={archiveTarget?.name ?? ""}
+        onConfirm={(options) => archiveMutation.mutate(options)}
+        isPending={archiveMutation.isPending}
+      />
+
+      <RestoreDialog
+        open={!!restoreTarget}
+        onOpenChange={(open) => !open && setRestoreTarget(null)}
+        environments={restoreTarget?.environments ?? []}
+        onConfirm={(selections) => restoreMutation.mutate(selections)}
+        isPending={restoreMutation.isPending}
       />
     </div>
   );

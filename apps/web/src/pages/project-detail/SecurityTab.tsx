@@ -33,6 +33,14 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -332,29 +340,41 @@ export function SecurityTab({
     hardenMutation.mutate([actionId]);
   };
 
-  const confirmRiskyHardeningActions = (actions: string[]) => {
+  const [riskyLabels, setRiskyLabels] = useState<string[]>([]);
+  const [confirmRiskyOpen, setConfirmRiskyOpen] = useState(false);
+
+  const confirmRiskyHardeningActions = (actions: string[]): boolean => {
     const risky = actions.filter(isRiskyEnvironmentHardeningAction);
     if (risky.length === 0) {
       return true;
     }
 
-    const labels = risky
-      .map(
-        (id) =>
-          ENVIRONMENT_HARDENING_ACTIONS.find((action) => action.id === id)
-            ?.label ?? id,
-      )
-      .join(", ");
-
-    return window.confirm(
-      `The selected action requires an explicit opt-in because it can change files or update code: ${labels}. Continue?`,
+    const labels = risky.map(
+      (id) =>
+        ENVIRONMENT_HARDENING_ACTIONS.find((action) => action.id === id)
+          ?.label ?? id,
     );
+
+    setRiskyLabels(labels);
+    setConfirmRiskyOpen(true);
+    return false; // will complete via dialog callback
   };
 
   const applySelectedHardening = () => {
     if (confirmRiskyHardeningActions(selectedHardening)) {
       hardenMutation.mutate(selectedHardening);
     }
+  };
+
+  const handleRiskyConfirmed = () => {
+    setConfirmRiskyOpen(false);
+    setRiskyLabels([]);
+    hardenMutation.mutate(selectedHardening);
+  };
+
+  const handleRiskyCancelled = () => {
+    setConfirmRiskyOpen(false);
+    setRiskyLabels([]);
   };
 
   if (environments.length === 0) {
@@ -379,7 +399,43 @@ export function SecurityTab({
           : "text-destructive border-destructive/40";
 
   return (
-    <div className="space-y-6">
+    <>
+      <Dialog open={confirmRiskyOpen} onOpenChange={(v) => !v && handleRiskyCancelled()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-warning" />
+              Confirm destructive actions
+            </DialogTitle>
+            <DialogDescription className="space-y-2">
+              <p>
+                The following actions can modify files or update code on the
+                server. Apply them only if you understand the consequences.
+              </p>
+              <ul className="list-disc pl-4 space-y-1">
+                {riskyLabels.map((label) => (
+                  <li key={label} className="font-medium text-foreground">
+                    {label}
+                  </li>
+                ))}
+              </ul>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={handleRiskyCancelled}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleRiskyConfirmed}
+              className="bg-warning text-warning-foreground hover:bg-warning/90"
+            >
+              Apply anyway
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <div className="space-y-6">
       {/* 1. Header controls */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-muted/30 border p-4 rounded-xl">
         <div className="space-y-1">
@@ -1054,5 +1110,6 @@ export function SecurityTab({
         />
       )}
     </div>
+    </>
   );
 }

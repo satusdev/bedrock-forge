@@ -24,6 +24,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { SidebarInner } from "./Sidebar";
+import { ActionCenter } from "@/components/ActionCenter";
 
 const ROUTE_LABELS: Record<string, string> = {
   dashboard: "Dashboard",
@@ -305,7 +306,7 @@ export function Header({ onOpenSearch }: { onOpenSearch?: () => void }) {
       </div>
 
       <div className="flex items-center gap-3">
-        <WsStatusDot />
+        <ActionCenter />
         <NotificationBell />
         {onOpenSearch && (
           <Button

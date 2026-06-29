@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useWebSocketEvent } from "@/lib/websocket";
 import { Progress } from "@/components/ui/progress";
 import { Card, CardContent } from "@/components/ui/card";
@@ -6,6 +7,7 @@ import { Shield, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { WS_EVENTS } from "@bedrock-forge/shared";
 
 export function SecurityScanProgress() {
+  const queryClient = useQueryClient();
   const [activeJobs, setActiveJobs] = useState<
     Record<string, { progress: number; step?: string }>
   >({});
@@ -26,6 +28,7 @@ export function SecurityScanProgress() {
         delete next[data.jobId];
         return next;
       });
+      void queryClient.invalidateQueries({ queryKey: ["security"] });
     }
   });
 
@@ -36,6 +39,7 @@ export function SecurityScanProgress() {
         delete next[data.jobId];
         return next;
       });
+      void queryClient.invalidateQueries({ queryKey: ["security"] });
     }
   });
 

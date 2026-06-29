@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, RefreshCw, Loader2, Trash2, Plus } from "lucide-react";
+import { AlertCircle, RefreshCw, Loader2, Trash2, Plus, AlertTriangle } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { ApiError, api } from "@/lib/api-client";
 import { toast } from "@/hooks/use-toast";
@@ -21,6 +21,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
 import type {
@@ -142,7 +143,10 @@ export function HardenDialog({
     onClose();
   };
 
-  const confirmRiskyActions = () => {
+  const [riskyActionLabels, setRiskyActionLabels] = useState<string[]>([]);
+  const [pendingConfirm, setPendingConfirm] = useState(false);
+
+  const confirmRiskyActions = (): boolean => {
     if (targetType !== "environment") {
       return true;
     }
@@ -152,17 +156,15 @@ export function HardenDialog({
       return true;
     }
 
-    const labels = risky
-      .map(
-        (id) =>
-          ENVIRONMENT_HARDENING_ACTIONS.find((action) => action.id === id)
-            ?.label ?? id,
-      )
-      .join(", ");
-
-    return window.confirm(
-      `The selected action requires an explicit opt-in because it can change files or update code: ${labels}. Continue?`,
+    const labels = risky.map(
+      (id) =>
+        ENVIRONMENT_HARDENING_ACTIONS.find((action) => action.id === id)
+          ?.label ?? id,
     );
+
+    setRiskyActionLabels(labels);
+    setPendingConfirm(true);
+    return false; // will be triggered via dialog callback
   };
 
   const queueHardening = () => {
@@ -171,8 +173,54 @@ export function HardenDialog({
     }
   };
 
+  const handleRiskyConfirmed = () => {
+    setPendingConfirm(false);
+    setRiskyActionLabels([]);
+    mutation.mutate(selected);
+  };
+
+  const handleRiskyCancelled = () => {
+    setPendingConfirm(false);
+    setRiskyActionLabels([]);
+  };
+
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && handleClose()}>
+    <>
+      <Dialog open={pendingConfirm} onOpenChange={(v) => !v && handleRiskyCancelled()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-warning" />
+              Confirm destructive actions
+            </DialogTitle>
+            <DialogDescription className="space-y-2">
+              <p>
+                The following actions can modify files or update code on the
+                server. Apply them only if you understand the consequences.
+              </p>
+              <ul className="list-disc pl-4 space-y-1">
+                {riskyActionLabels.map((label) => (
+                  <li key={label} className="font-medium text-foreground">
+                    {label}
+                  </li>
+                ))}
+              </ul>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={handleRiskyCancelled}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleRiskyConfirmed}
+              className="bg-warning text-warning-foreground hover:bg-warning/90"
+            >
+              Apply anyway
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={open} onOpenChange={(v) => !v && handleClose()}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Harden — {targetName}</DialogTitle>
@@ -347,6 +395,7 @@ export function HardenDialog({
         )}
       </DialogContent>
     </Dialog>
+    </>
   );
 }
 

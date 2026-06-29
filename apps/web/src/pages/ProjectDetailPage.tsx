@@ -1,6 +1,6 @@
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
-import { useState, useEffect } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState, useEffect, useRef } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   Globe,
@@ -19,6 +19,12 @@ import {
   Cpu,
   FileCog,
   ListChecks,
+  Archive,
+  RotateCcw,
+  Loader2,
+  Clock,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
@@ -38,6 +44,28 @@ import { RemoteOpsTab } from "./project-detail/RemoteOpsTab";
 import { SecurityTab } from "./project-detail/SecurityTab";
 import { ProjectFormDialog } from "./ProjectsPage";
 import { ResourceActivityFeed } from "@/components/ResourceActivityFeed";
+import { ArchiveDialog, RestoreDialog } from "@/components/ProjectArchiveDialogs";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useWebSocketEvent, useSubscribeEnvironment } from "@/lib/websocket";
+import { toast } from "@/hooks/use-toast";
+import { ExecutionLogPanel } from "@/components/ui/execution-log-panel";
 
 
 interface Server {
@@ -71,9 +99,13 @@ interface Project {
 function ProjectHeader({
   project,
   onEdit,
+  onArchive,
+  onRestore,
 }: {
   project: Project;
   onEdit: () => void;
+  onArchive: () => void;
+  onRestore: () => void;
 }) {
   const navigate = useNavigate();
 
@@ -136,15 +168,39 @@ function ProjectHeader({
             <span className="font-medium">{project.client.name}</span>
           </div>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          className="shadow-sm hover:bg-accent/50 transition-colors"
-          onClick={onEdit}
-        >
-          <Pencil className="h-4 w-4 mr-1.5" />
-          Edit Project Details
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="shadow-sm hover:bg-accent/50 transition-colors"
+            onClick={onEdit}
+          >
+            <Pencil className="h-4 w-4 mr-1.5" />
+            Edit Project Details
+          </Button>
+
+          {project.status === "archived" ? (
+            <Button
+              variant="default"
+              size="sm"
+              className="shadow-sm bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white border-0 transition-all duration-200 hover:shadow-md"
+              onClick={onRestore}
+            >
+              <RotateCcw className="h-4 w-4 mr-1.5" />
+              Restore Archive
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              className="shadow-sm text-destructive hover:text-destructive border-destructive/20 hover:border-destructive/40 hover:bg-destructive/5 transition-colors"
+              onClick={onArchive}
+            >
+              <Archive className="h-4 w-4 mr-1.5" />
+              Archive Project
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 mt-2">
@@ -229,6 +285,129 @@ export function ProjectDetailPage() {
   const projectId = Number(id);
   const qc = useQueryClient();
   const [editOpen, setEditOpen] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [restoreOpen, setRestoreOpen] = useState(false);
+
+  const [activeJobExecutionId, setActiveJobExecutionId] = useState<number | null>(null);
+  const [activeBullJobId, setActiveBullJobId] = useState<string | null>(null);
+  const [activeJobType, setActiveJobType] = useState<string | null>(null);
+  const [jobProgress, setJobProgress] = useState<number | null>(null);
+  const [jobStatus, setJobStatus] = useState<string | null>(null);
+  const [jobStep, setJobStep] = useState<string | null>(null);
+
+  const archiveMutation = useMutation({
+    mutationFn: (options: { createBackup: boolean; deleteFromCyberpanel: boolean }) =>
+      api.post<{ projectId: number; jobExecutionId: number; jobId: string }>(
+        `/projects/${projectId}/archive`,
+        options,
+      ),
+    onSuccess: (result) => {
+      setArchiveOpen(false);
+      if (result) {
+        setActiveJobExecutionId(result.jobExecutionId);
+        setActiveBullJobId(result.jobId);
+        setActiveJobType("project:archive");
+        setJobProgress(0);
+        setJobStatus("active");
+        setJobStep("Queueing archival task...");
+        toast({
+          title: "Archival process initiated",
+          description: "Project status changed to archived and deprovisioning task started.",
+        });
+      }
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Archival failed to start",
+        description: err.response?.data?.message || err.message || "An unexpected error occurred",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const restoreMutation = useMutation({
+    mutationFn: (environmentBackups: Record<string, number>) =>
+      api.post<{ projectId: number; jobExecutionId: number; jobId: string }>(
+        `/projects/${projectId}/restore-archive`,
+        { environmentBackups },
+      ),
+    onSuccess: (result) => {
+      setRestoreOpen(false);
+      if (result) {
+        setActiveJobExecutionId(result.jobExecutionId);
+        setActiveBullJobId(result.jobId);
+        setActiveJobType("project:restore");
+        setJobProgress(0);
+        setJobStatus("active");
+        setJobStep("Queueing restoration task...");
+        toast({
+          title: "Restoration process initiated",
+          description: "Project status changed to active and reprovisioning task started.",
+        });
+      }
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Restoration failed to start",
+        description: err.response?.data?.message || err.message || "An unexpected error occurred",
+        variant: "destructive",
+      });
+    },
+  });
+
+  useWebSocketEvent("job:progress", (raw: unknown) => {
+    const event = raw as {
+      queueName: string;
+      jobId: string;
+      progress: number;
+      step?: string;
+    };
+    if (event.queueName === "projects" && event.jobId === activeBullJobId) {
+      setJobProgress(event.progress);
+      if (event.step) setJobStep(event.step);
+    }
+  });
+
+  useWebSocketEvent("job:completed", (raw: unknown) => {
+    const event = raw as {
+      queueName: string;
+      jobId: string;
+    };
+    if (event.queueName === "projects" && event.jobId === activeBullJobId) {
+      setJobProgress(100);
+      setJobStatus("completed");
+      setJobStep("Task completed successfully.");
+      toast({ title: "Project action succeeded" });
+      qc.invalidateQueries({ queryKey: ["project", projectId] });
+      qc.invalidateQueries({ queryKey: ["projects"] });
+      setTimeout(() => {
+        setActiveJobExecutionId(null);
+        setActiveBullJobId(null);
+        setJobProgress(null);
+        setJobStep(null);
+        setJobStatus(null);
+      }, 4000);
+    }
+  });
+
+  useWebSocketEvent("job:failed", (raw: unknown) => {
+    const event = raw as {
+      queueName: string;
+      jobId: string;
+      error?: string;
+    };
+    if (event.queueName === "projects" && event.jobId === activeBullJobId) {
+      setJobStatus("failed");
+      setJobProgress(null);
+      setJobStep(event.error || "An error occurred during execution.");
+      toast({
+        title: "Project action failed",
+        description: event.error ?? "An unexpected error occurred",
+        variant: "destructive",
+      });
+    }
+  });
+
   const [searchParams, setSearchParams] = useSearchParams();
   const currentTab = searchParams.get("tab") || "environments";
   const [activatedTabs, setActivatedTabs] = useState<Set<string>>(
@@ -304,7 +483,75 @@ export function ProjectDetailPage() {
 
   return (
     <div className="container mx-auto py-8 px-4 max-w-6xl space-y-6">
-      <ProjectHeader project={project} onEdit={() => setEditOpen(true)} />
+      <ProjectHeader
+        project={project}
+        onEdit={() => setEditOpen(true)}
+        onArchive={() => setArchiveOpen(true)}
+        onRestore={() => setRestoreOpen(true)}
+      />
+
+      {activeJobExecutionId && (
+        <div className="border rounded-xl p-5 space-y-3 bg-card shadow-sm backdrop-blur-sm border-primary/20">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5 text-sm font-semibold">
+              {jobStatus === "failed" ? (
+                <XCircle className="h-5 w-5 text-destructive animate-pulse" />
+              ) : jobStatus === "completed" ? (
+                <CheckCircle2 className="h-5 w-5 text-green-500 animate-bounce" />
+              ) : (
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              )}
+              <span className="capitalize">
+                {activeJobType === "project:archive" ? "Archiving Project" : "Restoring Project"}
+              </span>
+            </div>
+            {jobStatus === "failed" && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 text-xs text-muted-foreground hover:text-foreground"
+                onClick={() => {
+                  setActiveJobExecutionId(null);
+                  setActiveBullJobId(null);
+                  setJobProgress(null);
+                  setJobStep(null);
+                  setJobStatus(null);
+                }}
+              >
+                Dismiss
+              </Button>
+            )}
+          </div>
+
+          <div className="space-y-1">
+            <div className="h-2 rounded-full bg-muted overflow-hidden">
+              <div
+                className={`h-2 rounded-full transition-all duration-300 ${
+                  jobStatus === "failed"
+                    ? "bg-destructive"
+                    : jobStatus === "completed"
+                    ? "bg-green-500"
+                    : "bg-primary"
+                }`}
+                style={{ width: `${jobProgress ?? 0}%` }}
+              />
+            </div>
+            <div className="flex items-center justify-between text-xs text-muted-foreground mt-1">
+              <span>{jobStep || "Initializing..."}</span>
+              <span className="font-semibold">{jobProgress ?? 0}%</span>
+            </div>
+          </div>
+
+          {activeJobExecutionId && (
+            <div className="mt-4 border-t pt-4">
+              <ExecutionLogPanel
+                jobExecutionId={activeJobExecutionId}
+                isActive={jobStatus !== "completed" && jobStatus !== "failed"}
+              />
+            </div>
+          )}
+        </div>
+      )}
 
       <Tabs
         value={currentTab}
@@ -506,6 +753,24 @@ export function ProjectDetailPage() {
           setEditOpen(false);
         }}
       />
+
+      <ArchiveDialog
+        open={archiveOpen}
+        onOpenChange={setArchiveOpen}
+        projectName={project.name}
+        onConfirm={(options) => archiveMutation.mutate(options)}
+        isPending={archiveMutation.isPending}
+      />
+
+      <RestoreDialog
+        open={restoreOpen}
+        onOpenChange={setRestoreOpen}
+        environments={environments}
+        onConfirm={(selections) => restoreMutation.mutate(selections)}
+        isPending={restoreMutation.isPending}
+      />
     </div>
   );
 }
+
+

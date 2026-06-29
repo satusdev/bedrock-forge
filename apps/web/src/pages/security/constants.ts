@@ -62,11 +62,6 @@ export const SERVER_HARDENING_ACTIONS = [
     description: "Set chmod 700 on /root/.ssh and all /home/*/.ssh",
   },
   {
-    id: "DISABLE_PASSWORD_AUTH",
-    label: "Disable password authentication",
-    description: "Set PasswordAuthentication no — require key-based auth only",
-  },
-  {
     id: "INSTALL_FAIL2BAN",
     label: "Install / start fail2ban",
     description: "Install fail2ban and enable it to auto-ban brute-force IPs",
