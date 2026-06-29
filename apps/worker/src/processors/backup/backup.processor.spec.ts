@@ -43,7 +43,15 @@ function makeConfig() {
 }
 
 function makeSshKey() {
-  return { resolvePrivateKey: jest.fn() };
+  return {
+    resolvePrivateKey: jest.fn(),
+    getSshConfig: jest.fn().mockImplementation(async (server: any) => ({
+      host: server.ip_address,
+      port: server.ssh_port,
+      username: server.ssh_user,
+      privateKey: "fake-key",
+    })),
+  };
 }
 
 function makeEncryption() {

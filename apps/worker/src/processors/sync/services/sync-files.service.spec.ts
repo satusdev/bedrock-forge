@@ -12,6 +12,12 @@ describe("SyncFilesService", () => {
       resolvePrivateKey: jest
         .fn()
         .mockResolvedValue("-----BEGIN PRIVATE KEY-----"),
+      getSshConfig: jest.fn().mockImplementation(async (server: any) => ({
+        host: server.ip_address,
+        port: server.ssh_port,
+        username: server.ssh_user,
+        privateKey: "-----BEGIN PRIVATE KEY-----",
+      })),
     } as any;
     service = new SyncFilesService(sshKey);
   });

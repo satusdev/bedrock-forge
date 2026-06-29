@@ -104,24 +104,18 @@ export class SyncProcessor extends WorkerHost {
       level: "info",
       detail: sourceEnv.server.ip_address,
     });
-    const sourceExecutor = createRemoteExecutor({
-      host: sourceEnv.server.ip_address,
-      port: sourceEnv.server.ssh_port,
-      username: sourceEnv.server.ssh_user,
-      privateKey: await this.sshKey.resolvePrivateKey(sourceEnv.server),
-    });
+    const sourceExecutor = createRemoteExecutor(
+      await this.sshKey.getSshConfig(sourceEnv.server),
+    );
 
     await tracker.track({
       step: "Connecting to target server",
       level: "info",
       detail: targetEnv.server.ip_address,
     });
-    const targetExecutor = createRemoteExecutor({
-      host: targetEnv.server.ip_address,
-      port: targetEnv.server.ssh_port,
-      username: targetEnv.server.ssh_user,
-      privateKey: await this.sshKey.resolvePrivateKey(targetEnv.server),
-    });
+    const targetExecutor = createRemoteExecutor(
+      await this.sshKey.getSshConfig(targetEnv.server),
+    );
 
     await job.updateProgress({ value: 5, step: "Connected to servers" });
 
@@ -568,24 +562,18 @@ export class SyncProcessor extends WorkerHost {
       level: "info",
       detail: sourceEnv.server.ip_address,
     });
-    const sourceExecutor = createRemoteExecutor({
-      host: sourceEnv.server.ip_address,
-      port: sourceEnv.server.ssh_port,
-      username: sourceEnv.server.ssh_user,
-      privateKey: await this.sshKey.resolvePrivateKey(sourceEnv.server),
-    });
+    const sourceExecutor = createRemoteExecutor(
+      await this.sshKey.getSshConfig(sourceEnv.server),
+    );
 
     await tracker.track({
       step: "Connecting to target server",
       level: "info",
       detail: targetEnv.server.ip_address,
     });
-    const targetExecutor = createRemoteExecutor({
-      host: targetEnv.server.ip_address,
-      port: targetEnv.server.ssh_port,
-      username: targetEnv.server.ssh_user,
-      privateKey: await this.sshKey.resolvePrivateKey(targetEnv.server),
-    });
+    const targetExecutor = createRemoteExecutor(
+      await this.sshKey.getSshConfig(targetEnv.server),
+    );
 
     await job.updateProgress({ value: 5, step: "Connected to servers" });
 

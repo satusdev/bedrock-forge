@@ -581,7 +581,7 @@ describe("SyncDbService", () => {
       let pushedSql = "";
       const executor = {
         pushFile: jest.fn().mockImplementation(({ remotePath, content }) => {
-          if (remotePath.includes("fallback")) {
+          if (remotePath.endsWith(".sql")) {
             pushedSql = Buffer.isBuffer(content)
               ? content.toString("utf8")
               : String(content);

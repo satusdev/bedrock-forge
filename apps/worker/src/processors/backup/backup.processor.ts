@@ -9,6 +9,7 @@ import { RcloneService } from "../../services/rclone.service";
 import { SshKeyService } from "../../services/ssh-key.service";
 import { EncryptionService } from "../../encryption/encryption.service";
 import { createRemoteExecutor } from "@bedrock-forge/remote-executor";
+import { escapeMysql } from "../../utils/cyberpanel-http";
 import {
   QUEUES,
   JOB_TYPES,
@@ -165,13 +166,9 @@ export class BackupProcessor extends WorkerHost {
       );
     }
 
-    const privateKey = await this.sshKey.resolvePrivateKey(env.server);
-    const executor = createRemoteExecutor({
-      host: env.server.ip_address,
-      port: env.server.ssh_port,
-      username: env.server.ssh_user,
-      privateKey,
-    });
+    const executor = createRemoteExecutor(
+      await this.sshKey.getSshConfig(env.server),
+    );
 
     const scriptsPath = this.config.get<string>("scriptsPath")!;
     const remoteScript = `/tmp/forge_backup_${job.id}.php`;
@@ -471,13 +468,9 @@ export class BackupProcessor extends WorkerHost {
       include: { server: true },
     });
 
-    const privateKey = await this.sshKey.resolvePrivateKey(env.server);
-    const executor = createRemoteExecutor({
-      host: env.server.ip_address,
-      port: env.server.ssh_port,
-      username: env.server.ssh_user,
-      privateKey,
-    });
+    const executor = createRemoteExecutor(
+      await this.sshKey.getSshConfig(env.server),
+    );
 
     const scriptsPath = this.config.get<string>("scriptsPath")!;
     const remoteScript = `/tmp/forge_restore_${job.id}.php`;
@@ -732,18 +725,19 @@ export class BackupProcessor extends WorkerHost {
               job.id ?? "default",
               "forge_sr_restore",
             );
-            const srSqlFile = `/tmp/forge_sr_restore_${job.id}.sql`;
+            const srScript = `/tmp/forge_sr_restore_${job.id}.php`;
 
             try {
-              const pairs: Array<[string, string]> = [[srcUrl, tgtUrl]];
-              const alt = flipProtocol(srcUrl);
-              const altTgt = flipProtocol(tgtUrl);
-              if (alt && altTgt && alt !== tgtUrl) pairs.push([alt, altTgt]);
+              await pushRemoteScript(
+                executor,
+                join(scriptsPath, "search-replace.php"),
+                srScript,
+              );
 
               // Auto-detect WP table prefix; fallback 'wp_'
               const prefixRes = await executor.execute(
                 `mysql --defaults-extra-file=${srMycnf} ${shellQuote(dbName)} -sN -e ${shellQuote(
-                  `SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${dbName}' AND table_name LIKE '%options' LIMIT 1`,
+                  `SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${escapeMysql(dbName)}' AND table_name LIKE '%options' LIMIT 1`,
                 )}`,
               );
               const p =
@@ -751,47 +745,85 @@ export class BackupProcessor extends WorkerHost {
                   ? prefixRes.stdout.trim()
                   : "wp_";
 
-              const statements: string[] = [];
-              for (const [oldRaw, newRaw] of pairs) {
-                const o = oldRaw.replace(/'/g, "\\'");
-                const n = newRaw.replace(/'/g, "\\'");
-                statements.push(
-                  `UPDATE \`${p}options\` SET option_value = REPLACE(option_value, '${o}', '${n}')`,
-                  `UPDATE \`${p}posts\` SET post_content = REPLACE(post_content, '${o}', '${n}')`,
-                  `UPDATE \`${p}posts\` SET post_excerpt = REPLACE(post_excerpt, '${o}', '${n}')`,
-                  `UPDATE \`${p}postmeta\` SET meta_value = REPLACE(CAST(meta_value AS CHAR), '${o}', '${n}')`,
-                  `UPDATE \`${p}usermeta\` SET meta_value = REPLACE(meta_value, '${o}', '${n}')`,
-                  `UPDATE \`${p}comments\` SET comment_content = REPLACE(comment_content, '${o}', '${n}')`,
-                  `UPDATE \`${p}comments\` SET comment_author_url = REPLACE(comment_author_url, '${o}', '${n}')`,
-                  `UPDATE \`${p}commentmeta\` SET meta_value = REPLACE(meta_value, '${o}', '${n}')`,
-                  `UPDATE \`${p}termmeta\` SET meta_value = REPLACE(meta_value, '${o}', '${n}')`,
-                  `UPDATE \`${p}links\` SET link_url = REPLACE(link_url, '${o}', '${n}')`,
-                  `UPDATE \`${p}links\` SET link_image = REPLACE(link_image, '${o}', '${n}')`,
-                  `UPDATE \`${p}links\` SET link_rss = REPLACE(link_rss, '${o}', '${n}')`,
+              const pairs: Array<[string, string]> = [[srcUrl, tgtUrl]];
+              const alt = flipProtocol(srcUrl);
+              const altTgt = flipProtocol(tgtUrl);
+              if (alt && altTgt && alt !== tgtUrl) pairs.push([alt, altTgt]);
+
+              let allPairsOk = true;
+              for (const [oldUrl, newUrl] of pairs) {
+                const phpResult = await executor.execute(
+                  `php ${srScript}` +
+                    ` --mycnf=${srMycnf}` +
+                    ` --db-name=${shellQuote(dbName)}` +
+                    ` --prefix=${shellQuote(p)}` +
+                    ` --search=${shellQuote(oldUrl)}` +
+                    ` --replace=${shellQuote(newUrl)}`,
+                  { timeout: 5 * 60_000 },
                 );
+                if (phpResult.code !== 0) {
+                  allPairsOk = false;
+                  await tracker.track({
+                    step: "PHP search-replace failed for pair, falling back to SQL",
+                    level: "warn",
+                    detail: `${oldUrl} → ${newUrl}: ${phpResult.stderr || phpResult.stdout}`,
+                  });
+                  break;
+                }
               }
-              await executor.pushFile({
-                remotePath: srSqlFile,
-                content: Buffer.from(statements.join(";\n") + ";"),
-              });
-              const srResult = await executor.execute(
-                `mysql --defaults-extra-file=${srMycnf} ${shellQuote(dbName)} < ${srSqlFile}`,
-              );
-              if (srResult.code !== 0) {
+
+              if (allPairsOk) {
                 await tracker.track({
-                  step: "URL search-replace SQL failed",
-                  level: "warn",
-                  detail: srResult.stderr,
+                  step: "URL search-replace complete (PHP, serialization-aware)",
+                  level: "info",
+                  detail: `${pairs.length} pair(s) — serialized data handled correctly`,
                 });
               } else {
-                await tracker.track({
-                  step: "URL search-replace SQL completed",
-                  level: "info",
+                const srSqlFile = `/tmp/forge_sr_restore_${job.id}.sql`;
+                const statements: string[] = [];
+                for (const [oldRaw, newRaw] of pairs) {
+                  const o = escapeMysql(oldRaw);
+                  const n = escapeMysql(newRaw);
+                  statements.push(
+                    `UPDATE \`${p}options\` SET option_value = REPLACE(option_value, '${o}', '${n}')`,
+                    `UPDATE \`${p}posts\` SET post_content = REPLACE(post_content, '${o}', '${n}')`,
+                    `UPDATE \`${p}posts\` SET post_excerpt = REPLACE(post_excerpt, '${o}', '${n}')`,
+                    `UPDATE \`${p}postmeta\` SET meta_value = REPLACE(CAST(meta_value AS CHAR), '${o}', '${n}')`,
+                    `UPDATE \`${p}usermeta\` SET meta_value = REPLACE(meta_value, '${o}', '${n}')`,
+                    `UPDATE \`${p}comments\` SET comment_content = REPLACE(comment_content, '${o}', '${n}')`,
+                    `UPDATE \`${p}comments\` SET comment_author_url = REPLACE(comment_author_url, '${o}', '${n}')`,
+                    `UPDATE \`${p}commentmeta\` SET meta_value = REPLACE(meta_value, '${o}', '${n}')`,
+                    `UPDATE \`${p}termmeta\` SET meta_value = REPLACE(meta_value, '${o}', '${n}')`,
+                    `UPDATE \`${p}links\` SET link_url = REPLACE(link_url, '${o}', '${n}')`,
+                    `UPDATE \`${p}links\` SET link_image = REPLACE(link_image, '${o}', '${n}')`,
+                    `UPDATE \`${p}links\` SET link_rss = REPLACE(link_rss, '${o}', '${n}')`,
+                  );
+                }
+                await executor.pushFile({
+                  remotePath: srSqlFile,
+                  content: Buffer.from(statements.join(";\n") + ";"),
                 });
+                const srResult = await executor.execute(
+                  `mysql --defaults-extra-file=${srMycnf} ${shellQuote(dbName)} < ${srSqlFile}`,
+                );
+                await executor.execute(`rm -f ${srSqlFile}`).catch(() => {});
+
+                if (srResult.code !== 0) {
+                  await tracker.track({
+                    step: "URL search-replace SQL failed",
+                    level: "warn",
+                    detail: srResult.stderr,
+                  });
+                } else {
+                  await tracker.track({
+                    step: "URL search-replace SQL completed",
+                    level: "info",
+                  });
+                }
               }
             } finally {
               await cleanupRemoteMyCnf(executor, srMycnf);
-              await executor.execute(`rm -f ${srSqlFile}`).catch(() => {});
+              await executor.execute(`rm -f ${srScript}`).catch(() => {});
             }
 
             // Replace hardcoded URLs in wp-content files (CSS, JS, PHP, etc.)

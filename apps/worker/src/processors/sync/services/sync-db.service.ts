@@ -760,12 +760,24 @@ export class SyncDbService {
       content: Buffer.from(statements.join(";\n") + ";\n"),
     });
 
-    const sqlStart = Date.now();
-    const sqlResult = await executor.execute(
-      `mysql --defaults-extra-file=${srMycnf} ${creds.dbName} < ${sqlFile}`,
-      { timeout: 10 * 60_000 },
+    const fallbackMycnf = await createRemoteMyCnf(
+      executor,
+      creds,
+      job.id!,
+      `forge_sr_fallback_${suffix}`,
     );
-    await executor.execute(`rm -f ${sqlFile} ${srMycnf}`).catch(() => {});
+
+    const sqlStart = Date.now();
+    let sqlResult;
+    try {
+      sqlResult = await executor.execute(
+        `mysql --defaults-extra-file=${fallbackMycnf} ${creds.dbName} < ${sqlFile}`,
+        { timeout: 10 * 60_000 },
+      );
+    } finally {
+      await cleanupRemoteMyCnf(executor, fallbackMycnf);
+      await executor.execute(`rm -f ${sqlFile}`).catch(() => {});
+    }
 
     await tracker.trackCommand(
       "URL search-replace raw SQL fallback",

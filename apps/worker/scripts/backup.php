@@ -149,6 +149,7 @@ if ($restore) {
                 $envContent = preg_replace("/^DB_HOST\s*=.*/m", "DB_HOST='{$cliDbHost}'", $envContent);
                 if ($cliSiteUrl) {
                     $envContent = preg_replace("/^WP_HOME\s*=.*/m", "WP_HOME='{$cliSiteUrl}'", $envContent);
+                    $envContent = preg_replace("/^WP_SITEURL\s*=.*/m", "WP_SITEURL='{$cliSiteUrl}/wp'", $envContent);
                 }
                 file_put_contents($envFile, $envContent);
             } else {
@@ -201,8 +202,9 @@ if ($restore) {
             @unlink($mycnfFile);
 
             if ($importCode !== 0) {
-                // Files are already restored — log warning but don't abort
-                fwrite(STDERR, "WARNING: DB import failed (exit {$importCode}): " . implode("\n", $importOut) . "\n");
+                fwrite(STDERR, "ERROR: DB import failed (exit {$importCode}): " . implode("\n", $importOut) . "\n");
+                @unlink($sqlFile);
+                exit($importCode);
             } else {
                 $dbImported = true;
                 fwrite(STDERR, "DB imported: {$creds['DB_NAME']} from " . basename($sqlFile) . "\n");
