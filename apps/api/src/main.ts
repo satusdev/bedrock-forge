@@ -3,6 +3,7 @@ import { NestFactory } from "@nestjs/core";
 import { ValidationPipe, Logger } from "@nestjs/common";
 import helmet from "helmet";
 import { json } from "express";
+import cookieParser from "cookie-parser";
 import { AppModule } from "./app.module";
 
 // Express JSON.stringify cannot handle BigInt (Prisma autoincrement IDs).
@@ -86,6 +87,7 @@ async function bootstrap() {
   );
 
   // Request body size limit
+  app.use(cookieParser());
   app.use(json({ limit: "10mb" }));
 
   // CORS — in production, CORS_ORIGIN must be set (validated above)

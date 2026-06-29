@@ -22,6 +22,8 @@ import {
   CreateProjectDto,
   UpdateProjectDto,
   QueryProjectsDto,
+  ArchiveProjectDto,
+  RestoreProjectArchiveDto,
 } from "./dto/project.dto";
 import { ImportProjectDto } from "./dto/import-project.dto";
 import { BulkImportProjectsDto } from "./dto/bulk-import-projects.dto";
@@ -69,5 +71,23 @@ export class ProjectsController {
   @HttpCode(HttpStatus.ACCEPTED)
   createFull(@Body() dto: CreateProjectFullDto) {
     return this.svc.createFull(dto);
+  }
+
+  @Post(":id/archive")
+  @HttpCode(HttpStatus.ACCEPTED)
+  archive(
+    @Param("id", ParseIntPipe) id: number,
+    @Body() dto: ArchiveProjectDto,
+  ) {
+    return this.svc.archive(id, dto);
+  }
+
+  @Post(":id/restore-archive")
+  @HttpCode(HttpStatus.ACCEPTED)
+  restoreArchive(
+    @Param("id", ParseIntPipe) id: number,
+    @Body() dto: RestoreProjectArchiveDto,
+  ) {
+    return this.svc.restoreArchive(id, dto);
   }
 }

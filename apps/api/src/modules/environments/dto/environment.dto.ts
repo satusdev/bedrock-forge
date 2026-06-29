@@ -27,10 +27,31 @@ const TABLE_NAME_REGEX = /^[A-Za-z0-9_$]+$/;
 const POST_TYPE_REGEX = /^[A-Za-z0-9_-]+$/;
 
 export class UpsertDbCredentialsDto {
-  @IsString() @IsNotEmpty() @MaxLength(100) dbName!: string;
-  @IsString() @IsNotEmpty() @MaxLength(100) dbUser!: string;
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  @Matches(/^[a-zA-Z0-9_]+$/, {
+    message: "dbName may only contain alphanumeric characters and underscores",
+  })
+  dbName!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  @Matches(/^[a-zA-Z0-9_]+$/, {
+    message: "dbUser may only contain alphanumeric characters and underscores",
+  })
+  dbUser!: string;
+
   @IsString() @IsNotEmpty() @MaxLength(255) dbPassword!: string;
-  @IsString() @IsNotEmpty() @MaxLength(100) dbHost!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  @Matches(/^[a-zA-Z0-9_.-]+$/, {
+    message: "dbHost may only contain alphanumeric characters, underscores, dots, and hyphens",
+  })
+  dbHost!: string;
 }
 
 export class CreateEnvironmentDto {

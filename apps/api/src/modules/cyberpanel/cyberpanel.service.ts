@@ -28,13 +28,21 @@ export class CyberpanelService {
   async getCredentials(serverId: number) {
     const server = await this.repo.findServerById(BigInt(serverId));
     if (!server) throw new NotFoundException(`Server ${serverId} not found`);
-    if (!server.cyberpanel_login)
-      throw new BadRequestException(
-        "No CyberPanel credentials stored for this server",
-      );
+    if (!server.cyberpanel_login) {
+      return {
+        url: "",
+        username: "",
+        has_credentials: false,
+      };
+    }
 
     const raw = this.enc.decrypt(server.cyberpanel_login as string);
-    return JSON.parse(raw) as Record<string, unknown>;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return {
+      url: (parsed["url"] as string) ?? "",
+      username: (parsed["username"] as string) ?? "",
+      has_credentials: true,
+    };
   }
 
   async saveCredentials(serverId: number, dto: UpsertCyberpanelDto) {

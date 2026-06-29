@@ -5,6 +5,8 @@ import {
   IsPositive,
   MaxLength,
   IsIn,
+  IsBoolean,
+  IsObject,
 } from "class-validator";
 import { PartialType } from "@nestjs/mapped-types";
 import { Type } from "class-transformer";
@@ -33,3 +35,20 @@ export class QueryProjectsDto extends PaginationQueryDto {
   @IsPositive()
   server_id?: number;
 }
+
+export class ArchiveProjectDto {
+  @IsOptional()
+  @IsBoolean()
+  createBackup?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  deleteFromCyberpanel?: boolean;
+}
+
+export class RestoreProjectArchiveDto {
+  @IsOptional()
+  @IsObject()
+  environmentBackups?: Record<string, number>;
+}
+

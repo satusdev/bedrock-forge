@@ -307,7 +307,7 @@ export class EnvironmentsService {
         await executor.execute(
           `echo ${shellEscape(credsB64)} | base64 -d > ${shellEscape(remoteCredsFile)} && chmod 600 ${shellEscape(remoteCredsFile)}`,
         );
-        phpCmd = `${phpCmdPrefix} ${shellEscape(remoteScript)} --creds-file=${shellEscape(remoteCredsFile)}`;
+        phpCmd = `${phpCmdPrefix} ${shellEscape(remoteScript)} --creds-file=${shellEscape(remoteCredsFile)}${env.root_path ? ` --docroot=${shellEscape(env.root_path)}` : ""}`;
       } else {
         // Credentials not pre-resolved — let the PHP script search for
         // .env / wp-config.php on the remote filesystem as a last resort.

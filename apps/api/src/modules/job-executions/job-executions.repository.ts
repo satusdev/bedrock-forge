@@ -165,6 +165,16 @@ export class JobExecutionsRepository {
     queueName?: string,
   ): Promise<number | undefined> {
     try {
+      const match = bullJobId.match(/(?:manual-)?monitor-(\d+)/);
+      if (match) {
+        const monitorId = BigInt(match[1]);
+        const monitor = await this.prisma.monitor.findUnique({
+          where: { id: monitorId },
+          select: { environment_id: true },
+        });
+        return monitor?.environment_id ? Number(monitor.environment_id) : undefined;
+      }
+
       const exec = await this.prisma.jobExecution.findFirst({
         where: {
           bull_job_id: bullJobId,
@@ -197,6 +207,26 @@ export class JobExecutionsRepository {
       data: {
         status,
         last_error: error,
+      },
+    });
+  }
+
+  async updateStatusByBullJobId(
+    bullJobId: string,
+    queueName: string,
+    status: JobExecutionStatus,
+    error?: string,
+  ) {
+    const isFinished = status === "completed" || status === "failed";
+    await this.prisma.jobExecution.updateMany({
+      where: {
+        bull_job_id: bullJobId,
+        queue_name: queueName,
+      },
+      data: {
+        status,
+        last_error: error || null,
+        ...(isFinished ? { completed_at: new Date() } : {}),
       },
     });
   }

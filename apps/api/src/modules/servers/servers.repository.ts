@@ -49,6 +49,7 @@ export class ServersRepository {
           provider: true,
           status: true,
           cyberpanel_version: true,
+          host_key_fingerprint: true,
           created_at: true,
           updated_at: true,
         },
@@ -71,6 +72,7 @@ export class ServersRepository {
         provider: true,
         status: true,
         cyberpanel_version: true,
+        host_key_fingerprint: true,
         created_at: true,
         updated_at: true,
       },
@@ -124,6 +126,13 @@ export class ServersRepository {
         root_path: { in: paths },
       },
       select: { root_path: true, project_id: true },
+    });
+  }
+
+  updateHostKeyFingerprint(id: bigint, fingerprint: string) {
+    return this.prisma.server.update({
+      where: { id },
+      data: { host_key_fingerprint: fingerprint },
     });
   }
 }

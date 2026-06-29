@@ -1,4 +1,4 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable, Logger, NotFoundException, BadRequestException } from "@nestjs/common";
 import { InjectQueue } from "@nestjs/bullmq";
 import { Queue } from "bullmq";
 import { randomBytes } from "crypto";
@@ -13,12 +13,15 @@ import {
   CreateProjectDto,
   UpdateProjectDto,
   QueryProjectsDto,
+  ArchiveProjectDto,
+  RestoreProjectArchiveDto,
 } from "./dto/project.dto";
 import { ImportProjectDto } from "./dto/import-project.dto";
 import { BulkImportProjectsDto } from "./dto/bulk-import-projects.dto";
 import { CreateProjectFullDto } from "./dto/create-project-full.dto";
 import { DomainsService } from "../domains/domains.service";
 import { MonitorsService } from "../monitors/monitors.service";
+import { PrismaService } from "../../prisma/prisma.service";
 
 @Injectable()
 export class ProjectsService {
@@ -29,6 +32,7 @@ export class ProjectsService {
     @InjectQueue(QUEUES.PROJECTS) private readonly projectsQueue: Queue,
     private readonly domainsService: DomainsService,
     private readonly monitorsService: MonitorsService,
+    private readonly prisma: PrismaService,
   ) {}
 
   findAll(query: QueryProjectsDto) {
@@ -265,6 +269,144 @@ export class ProjectsService {
     return {
       project: { id: Number(project.id), name: project.name },
       environment: { id: Number(environment.id), url: siteUrl },
+      jobExecutionId: Number(jobExecution.id),
+      jobId: String(job.id),
+    };
+  }
+
+  async archive(id: number, dto: ArchiveProjectDto) {
+    const project = await this.repo.findById(BigInt(id));
+    if (!project) throw new NotFoundException(`Project ${id} not found`);
+    if (project.status === "archived") {
+      throw new BadRequestException(`Project ${id} is already archived`);
+    }
+
+    const envs = project.environments ?? [];
+    const firstEnv = envs[0];
+
+    // 1. Update project status to archived
+    await this.repo.update(BigInt(id), { status: "archived" });
+
+    // 2. Disable monitors and cron schedules for all environments in this project
+    const envIds = envs.map((e) => e.id);
+    if (envIds.length > 0) {
+      await this.prisma.$transaction([
+        this.prisma.monitor.updateMany({
+          where: { environment_id: { in: envIds } },
+          data: { enabled: false },
+        }),
+        this.prisma.backupSchedule.updateMany({
+          where: { environment_id: { in: envIds } },
+          data: { enabled: false },
+        }),
+        this.prisma.pluginUpdateSchedule.updateMany({
+          where: { environment_id: { in: envIds } },
+          data: { enabled: false },
+        }),
+        this.prisma.cleanupSchedule.updateMany({
+          where: { environment_id: { in: envIds } },
+          data: { enabled: false },
+        }),
+        this.prisma.securityScanSchedule.updateMany({
+          where: { environment_id: { in: envIds } },
+          data: { enabled: false },
+        }),
+      ]);
+    }
+
+    // 3. Create job execution for tracking
+    const jobExecution = await this.prisma.jobExecution.create({
+      data: {
+        queue_name: QUEUES.PROJECTS,
+        bull_job_id: "0",
+        job_type: JOB_TYPES.PROJECT_ARCHIVE,
+        environment_id: firstEnv ? firstEnv.id : undefined,
+        server_id: firstEnv ? firstEnv.server.id : undefined,
+        status: "queued",
+        payload: {
+          projectId: id,
+          createBackup: dto.createBackup ?? true,
+          deleteFromCyberpanel: dto.deleteFromCyberpanel ?? true,
+        },
+      },
+    });
+
+    // 4. Enqueue the BullMQ job
+    const job = await this.projectsQueue.add(
+      JOB_TYPES.PROJECT_ARCHIVE,
+      {
+        projectId: id,
+        jobExecutionId: Number(jobExecution.id),
+        createBackup: dto.createBackup ?? true,
+        deleteFromCyberpanel: dto.deleteFromCyberpanel ?? true,
+      },
+      DEFAULT_JOB_OPTIONS,
+    );
+
+    // Update job execution with bull job id
+    await this.repo.updateBullJobId(jobExecution.id, String(job.id));
+
+    return {
+      projectId: id,
+      jobExecutionId: Number(jobExecution.id),
+      jobId: String(job.id),
+    };
+  }
+
+  async restoreArchive(id: number, dto: RestoreProjectArchiveDto) {
+    const project = await this.repo.findById(BigInt(id));
+    if (!project) throw new NotFoundException(`Project ${id} not found`);
+    if (project.status !== "archived") {
+      throw new BadRequestException(`Project ${id} is not archived`);
+    }
+
+    const envs = project.environments ?? [];
+    const firstEnv = envs[0];
+
+    // 1. Update project status to active
+    await this.repo.update(BigInt(id), { status: "active" });
+
+    // 2. Enable monitors back
+    const envIds = envs.map((e) => e.id);
+    if (envIds.length > 0) {
+      await this.prisma.monitor.updateMany({
+        where: { environment_id: { in: envIds } },
+        data: { enabled: true },
+      });
+    }
+
+    // 3. Create job execution for tracking
+    const jobExecution = await this.prisma.jobExecution.create({
+      data: {
+        queue_name: QUEUES.PROJECTS,
+        bull_job_id: "0",
+        job_type: JOB_TYPES.PROJECT_RESTORE,
+        environment_id: firstEnv ? firstEnv.id : undefined,
+        server_id: firstEnv ? firstEnv.server.id : undefined,
+        status: "queued",
+        payload: {
+          projectId: id,
+          environmentBackups: dto.environmentBackups ?? {},
+        },
+      },
+    });
+
+    // 4. Enqueue the BullMQ job
+    const job = await this.projectsQueue.add(
+      JOB_TYPES.PROJECT_RESTORE,
+      {
+        projectId: id,
+        jobExecutionId: Number(jobExecution.id),
+        environmentBackups: dto.environmentBackups ?? {},
+      },
+      DEFAULT_JOB_OPTIONS,
+    );
+
+    // Update job execution with bull job id
+    await this.repo.updateBullJobId(jobExecution.id, String(job.id));
+
+    return {
+      projectId: id,
       jobExecutionId: Number(jobExecution.id),
       jobId: String(job.id),
     };

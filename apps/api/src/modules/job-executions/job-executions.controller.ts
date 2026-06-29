@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Post,
   Param,
   ParseIntPipe,
   Query,
@@ -50,5 +51,17 @@ export class JobExecutionsController {
   @Get(":id/log")
   findLog(@Param("id", ParseIntPipe) id: number) {
     return this.svc.findLog(id);
+  }
+
+  /** POST /job-executions/:id/retry — Retry failed or dead letter job */
+  @Post(":id/retry")
+  retry(@Param("id", ParseIntPipe) id: number) {
+    return this.svc.retry(id);
+  }
+
+  /** POST /job-executions/:id/discard — Mark job as discarded */
+  @Post(":id/discard")
+  discard(@Param("id", ParseIntPipe) id: number) {
+    return this.svc.discard(id);
   }
 }

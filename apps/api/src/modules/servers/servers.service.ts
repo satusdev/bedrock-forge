@@ -10,6 +10,7 @@ import { SettingsService } from "../settings/settings.service";
 import {
   createRemoteExecutor,
   credentialParser,
+  SshServerConfig,
 } from "@bedrock-forge/remote-executor";
 import { CreateServerDto, UpdateServerDto } from "./dto/server.dto";
 import {
@@ -94,12 +95,7 @@ export class ServersService {
    * Resolves the appropriate private key (per-server or global fallback).
    * Used by other services that need to open SSH connections.
    */
-  async getServerSshConfig(serverId: number): Promise<{
-    host: string;
-    port: number;
-    username: string;
-    privateKey: string;
-  }> {
+  async getServerSshConfig(serverId: number): Promise<SshServerConfig> {
     const server = await this.repo.findByIdWithKey(BigInt(serverId));
     if (!server) throw new NotFoundException(`Server ${serverId} not found`);
     const privateKey = await this.resolvePrivateKey(server);
@@ -108,6 +104,10 @@ export class ServersService {
       port: server.ssh_port,
       username: server.ssh_user,
       privateKey,
+      expectedHostKeyFingerprint: server.host_key_fingerprint ?? undefined,
+      onHostKeyFingerprint: async (fingerprint) => {
+        await this.repo.updateHostKeyFingerprint(BigInt(serverId), fingerprint);
+      },
     };
   }
 
@@ -127,6 +127,10 @@ export class ServersService {
       port: server.ssh_port,
       username: server.ssh_user,
       privateKey,
+      expectedHostKeyFingerprint: server.host_key_fingerprint ?? undefined,
+      onHostKeyFingerprint: async (fingerprint) => {
+        await this.repo.updateHostKeyFingerprint(server.id, fingerprint);
+      },
     });
 
     try {
@@ -178,14 +182,9 @@ export class ServersService {
     const server = await this.repo.findByIdWithKey(BigInt(id));
     if (!server) throw new NotFoundException(`Server ${id} not found`);
 
-    const privateKey = await this.resolvePrivateKey(server);
-
-    const executor = createRemoteExecutor({
-      host: server.ip_address,
-      port: server.ssh_port,
-      username: server.ssh_user,
-      privateKey,
-    });
+    const executor = createRemoteExecutor(
+      await this.getServerSshConfig(id),
+    );
 
     const rootPath = path.endsWith("/") ? path.slice(0, -1) : path;
 
@@ -297,14 +296,9 @@ export class ServersService {
     const server = await this.repo.findByIdWithKey(BigInt(id));
     if (!server) throw new NotFoundException(`Server ${id} not found`);
 
-    const privateKey = await this.resolvePrivateKey(server);
-
-    const executor = createRemoteExecutor({
-      host: server.ip_address,
-      port: server.ssh_port,
-      username: server.ssh_user,
-      privateKey,
-    });
+    const executor = createRemoteExecutor(
+      await this.getServerSshConfig(id),
+    );
 
     // Single SSH command: iterate /home/*/public_html, emit delimited blocks
     const scanCmd = [
