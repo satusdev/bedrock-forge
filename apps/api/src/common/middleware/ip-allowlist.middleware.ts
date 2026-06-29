@@ -1,6 +1,7 @@
-import { Injectable, NestMiddleware, Logger } from "@nestjs/common";
+import { Injectable, NestMiddleware, Logger, UnauthorizedException } from "@nestjs/common";
 import type { Request, Response, NextFunction } from "express";
 import * as ipaddr from "ipaddr.js";
+import { JwtService } from "@nestjs/jwt";
 import { SettingsRepository } from "../../modules/settings/settings.repository";
 
 // Docker/localhost CIDRs that are always allowed regardless of user config
@@ -16,12 +17,36 @@ const ALWAYS_ALLOWED_CIDRS = [
 export class IpAllowlistMiddleware implements NestMiddleware {
   private readonly logger = new Logger(IpAllowlistMiddleware.name);
 
-  // 60-second in-memory cache so we don't hit the DB on every request
-  private cache: { cidrs: string[]; expiresAt: number } | null = null;
+  // 60-second in-memory cache so we don't hit the DB on every request.
+  // Stored as a Promise to prevent cache stampedes under concurrent load:
+  // all requests that arrive while a DB fetch is in-flight share the same
+  // Promise rather than each firing their own query.
+  private cachePromise: Promise<string[]> | null = null;
+  private cacheExpiresAt = 0;
 
-  constructor(private readonly settingsRepo: SettingsRepository) {}
+  constructor(
+    private readonly settingsRepo: SettingsRepository,
+    private readonly jwtService: JwtService,
+  ) {}
 
   async use(req: Request, res: Response, next: NextFunction) {
+    // Check if request is authenticated with a valid JWT token
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.substring(7);
+      try {
+        const payload = this.jwtService.verify(token);
+        if (payload) {
+          return next();
+        }
+      } catch (err) {
+        // Token verification failed or expired.
+        // Throw 401 Unauthorized so the API client can intercept it, refresh the token
+        // using the refresh cookie (which is allowed by the IP allowlist), and retry.
+        throw new UnauthorizedException("Session expired or invalid token");
+      }
+    }
+
     let userCidrs: string[];
     try {
       userCidrs = await this.getUserCidrs();
@@ -52,12 +77,24 @@ export class IpAllowlistMiddleware implements NestMiddleware {
 
   private async getUserCidrs(): Promise<string[]> {
     const now = Date.now();
-    if (this.cache && this.cache.expiresAt > now) return this.cache.cidrs;
-
-    const setting = await this.settingsRepo.findByKey("security_ip_allowlist");
-    const cidrs = setting ? (JSON.parse(setting.value) as string[]) : [];
-    this.cache = { cidrs, expiresAt: now + 60_000 };
-    return cidrs;
+    if (this.cachePromise && this.cacheExpiresAt > now) {
+      return this.cachePromise;
+    }
+    // Start a new fetch and cache the promise immediately so concurrent
+    // requests wait on the same in-flight DB call.
+    this.cacheExpiresAt = now + 60_000;
+    this.cachePromise = this.settingsRepo
+      .findByKey("security_ip_allowlist")
+      .then((setting) =>
+        setting ? (JSON.parse(setting.value) as string[]) : [],
+      )
+      .catch(() => {
+        // On error, expire the cache immediately so the next request retries.
+        this.cacheExpiresAt = 0;
+        this.cachePromise = null;
+        return [];
+      });
+    return this.cachePromise;
   }
 
   private extractIp(req: Request): string | null {

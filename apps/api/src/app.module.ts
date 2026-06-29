@@ -5,7 +5,7 @@ import { BullModule } from "@nestjs/bullmq";
 import { ThrottlerModule, ThrottlerGuard } from "@nestjs/throttler";
 import { ThrottlerStorageRedisService } from "@nest-lab/throttler-storage-redis";
 import { ScheduleModule } from "@nestjs/schedule";
-import { MiddlewareConsumer, NestModule } from "@nestjs/common";
+import { MiddlewareConsumer, NestModule, RequestMethod } from "@nestjs/common";
 import { PrismaModule } from "./prisma/prisma.module";
 import { AuthModule } from "./modules/auth/auth.module";
 import { HealthModule } from "./modules/health/health.module";
@@ -164,7 +164,35 @@ import appConfig from "./config/app.config";
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
     // Health endpoint sits outside the /api prefix (excluded in main.ts via setGlobalPrefix).
-    // The exclusion pattern must match the actual path — NOT the prefixed path.
-    consumer.apply(IpAllowlistMiddleware).exclude("/health").forRoutes("*");
+    // Auth endpoints are always reachable regardless of IP allowlist so
+    // operators can log in from any location. The allowlist only applies
+    // to authenticated API routes after the user has a valid session.
+    // We specify detailed RouteInfo configurations to ensure consistent matching
+    // regardless of global prefix inclusion or leading slashes.
+    consumer
+      .apply(IpAllowlistMiddleware)
+      .exclude(
+        // Health check (unprefixed and prefixed)
+        { path: "health", method: RequestMethod.GET },
+        { path: "/health", method: RequestMethod.GET },
+        { path: "api/health", method: RequestMethod.GET },
+        { path: "/api/health", method: RequestMethod.GET },
+        // Login
+        { path: "auth/login", method: RequestMethod.POST },
+        { path: "/auth/login", method: RequestMethod.POST },
+        { path: "api/auth/login", method: RequestMethod.POST },
+        { path: "/api/auth/login", method: RequestMethod.POST },
+        // Refresh
+        { path: "auth/refresh", method: RequestMethod.POST },
+        { path: "/auth/refresh", method: RequestMethod.POST },
+        { path: "api/auth/refresh", method: RequestMethod.POST },
+        { path: "/api/auth/refresh", method: RequestMethod.POST },
+        // Logout
+        { path: "auth/logout", method: RequestMethod.POST },
+        { path: "/auth/logout", method: RequestMethod.POST },
+        { path: "api/auth/logout", method: RequestMethod.POST },
+        { path: "/api/auth/logout", method: RequestMethod.POST },
+      )
+      .forRoutes("*");
   }
 }
