@@ -1,6 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { EncryptionService } from "../encryption/encryption.service";
+import { SshServerConfig } from "@bedrock-forge/remote-executor";
 
 /**
  * SshKeyService
@@ -68,5 +69,30 @@ export class SshKeyService {
         "Set a PEM-formatted private key on the server edit page, " +
         "or configure a global SSH key in Settings → SSH Key.",
     );
+  }
+
+  async getSshConfig(server: {
+    id: bigint;
+    name: string;
+    ip_address: string;
+    ssh_port: number;
+    ssh_user: string;
+    ssh_private_key_encrypted: string | null;
+    host_key_fingerprint: string | null;
+  }): Promise<SshServerConfig> {
+    const privateKey = await this.resolvePrivateKey(server);
+    return {
+      host: server.ip_address,
+      port: server.ssh_port,
+      username: server.ssh_user,
+      privateKey,
+      expectedHostKeyFingerprint: server.host_key_fingerprint ?? undefined,
+      onHostKeyFingerprint: async (fingerprint) => {
+        await this.prisma.server.update({
+          where: { id: server.id },
+          data: { host_key_fingerprint: fingerprint },
+        });
+      },
+    };
   }
 }

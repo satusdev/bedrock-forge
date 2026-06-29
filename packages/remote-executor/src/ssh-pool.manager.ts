@@ -1,11 +1,14 @@
 import { Client, ConnectConfig } from "ssh2";
 import { EventEmitter } from "events";
+import { createHash } from "crypto";
 
 export interface SshServerConfig {
   host: string;
   port: number;
   username: string;
   privateKey: string; // decrypted PEM key
+  expectedHostKeyFingerprint?: string;
+  onHostKeyFingerprint?: (fingerprint: string) => Promise<void> | void;
 }
 
 interface PooledConnection {
@@ -170,9 +173,21 @@ export class SshPoolManager extends EventEmitter {
         // silently drop the TCP connection during long SFTP transfers.
         keepaliveInterval: 10_000,
         keepaliveCountMax: 3,
-        // Never trust host keys automatically in prod — in real usage, store
-        // and verify the host's fingerprint. Left as hostVerifier:undefined
-        // here to defer to ssh2's default (accepts all) — document this risk.
+        hostVerifier: (key: Buffer, verify: (valid: boolean) => void) => {
+          const fingerprint = createHash("sha256").update(key).digest("base64");
+          if (config.expectedHostKeyFingerprint) {
+            if (config.expectedHostKeyFingerprint === fingerprint) {
+              verify(true);
+            } else {
+              verify(false);
+            }
+          } else {
+            if (config.onHostKeyFingerprint) {
+              Promise.resolve(config.onHostKeyFingerprint(fingerprint)).catch(() => {});
+            }
+            verify(true);
+          }
+        },
       };
 
       client.on("ready", () => {
