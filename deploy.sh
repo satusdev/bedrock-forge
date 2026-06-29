@@ -76,6 +76,22 @@ info "Domain    : ${DOMAIN}"
 info "Image tag : ${IMAGE_TAG}"
 echo ""
 
+# ── Local git state check ─────────────────────────────────────────────────────
+if [[ "$BUILD_ONLY" == "false" && "$CLEANUP_ONLY" == "false" ]]; then
+  if ! git diff-index --quiet HEAD --; then
+    warn "You have uncommitted changes in your git repository. Deploying tag: ${IMAGE_TAG}"
+    if [ -t 0 ]; then
+      read -p "Do you want to continue? (y/N) " -n 1 -r
+      echo ""
+      if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        err "Deployment aborted by user."
+      fi
+    else
+      warn "Stdin is not a TTY. Proceeding anyway..."
+    fi
+  fi
+fi
+
 # ── Local prerequisites ───────────────────────────────────────────────────────
 command -v docker >/dev/null 2>&1 || err "docker is not installed locally."
 command -v rsync  >/dev/null 2>&1 || err "rsync is not installed locally."
@@ -342,6 +358,26 @@ if [[ ! -f .env ]] || [[ "${FORCE_INSTALL}" == "true" ]]; then
 else
   echo ">>> Incremental update"
 
+  # Back up existing config
+  cp .env .env.bak
+
+  PREV_TAG=""
+  if [[ -f .env ]]; then
+    PREV_TAG=$(grep "^IMAGE_TAG=" .env | cut -d= -f2 || echo "")
+  fi
+
+  # Auto backup database before migration
+  if docker compose ps postgres 2>/dev/null | grep -q "Up"; then
+    echo ">>> Creating pre-deployment database snapshot..."
+    mkdir -p backups/pre-deploy
+    BACKUP_FILE="backups/pre-deploy/db_pre_deploy_\${IMAGE_TAG}_\$(date +%Y%m%d_%H%M%S).sql"
+    if docker compose exec -T postgres pg_dump -U postgres postgres > "\$BACKUP_FILE" 2>/dev/null; then
+      echo "Pre-deployment database snapshot written to \$BACKUP_FILE"
+    else
+      echo "WARNING: Pre-deployment database snapshot failed. Proceeding with deployment..."
+    fi
+  fi
+
   # Update dynamic env vars
   set_env_value CORS_ORIGIN "\$CORS_ORIGIN"
   set_env_value IMAGE_TAG "\$IMAGE_TAG"
@@ -353,11 +389,15 @@ else
   if ! docker compose up -d --force-recreate --no-deps forge; then
     echo "ERROR: forge failed to start. Logs:"
     docker compose logs --tail=100 forge
+    echo "Restoring previous configuration..."
+    mv .env.bak .env
     exit 1
   fi
   if ! docker compose up -d --remove-orphans; then
     echo "ERROR: docker compose up (all services) failed. Forge logs:"
     docker compose logs --tail=100 forge
+    echo "Restoring previous configuration..."
+    mv .env.bak .env
     exit 1
   fi
 fi
@@ -365,18 +405,45 @@ fi
 # ── Wait for the API to report healthy ────────────────────────────────────────
 echo "Waiting for Forge API to become healthy (up to 3 min)…"
 RETRIES=60
+HEALTHY=false
 until curl -sf http://localhost:3001/health > /dev/null 2>&1; do
   RETRIES=\$((RETRIES - 1))
   if [ "\${RETRIES}" -le 0 ]; then
-    echo "ERROR: Forge API did not become healthy in time."
-    echo "=== forge container logs (last 80 lines) ==="
-    docker compose logs --tail=80 forge
-    echo "=== forge container status ==="
-    docker compose ps forge
-    exit 1
+    break
   fi
   sleep 3
 done
+
+if curl -sf http://localhost:3001/health > /dev/null 2>&1; then
+  HEALTHY=true
+fi
+
+if [ "\$HEALTHY" = false ]; then
+  echo "ERROR: Forge API did not become healthy in time."
+  echo "=== forge container logs (last 80 lines) ==="
+  docker compose logs --tail=80 forge
+  echo "=== forge container status ==="
+  docker compose ps forge
+
+  if [[ -f .env.bak && -n "\${PREV_TAG:-}" && "\$PREV_TAG" != "\$IMAGE_TAG" ]]; then
+    echo ">>> ROLLING BACK to last known healthy tag: \$PREV_TAG"
+    mv .env.bak .env
+    docker compose up -d --force-recreate --no-deps forge
+    docker compose up -d --remove-orphans
+    echo "Rollback complete. Verifying health of rolled-back container..."
+    RETRIES=60
+    until curl -sf http://localhost:3001/health > /dev/null 2>&1; do
+      RETRIES=\$((RETRIES - 1))
+      if [ "\${RETRIES}" -le 0 ]; then
+        echo "CRITICAL ERROR: Rolled back container also failed health checks!"
+        exit 1
+      fi
+      sleep 3
+    done
+    echo "Rollback successful. System is healthy under tag: \$PREV_TAG."
+  fi
+  exit 1
+fi
 
 echo ""
 echo "Deployment complete."
