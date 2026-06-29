@@ -44,6 +44,7 @@ export class BackupsRepository {
           jobExecution: {
             select: {
               id: true,
+              bull_job_id: true,
               status: true,
               progress: true,
               last_error: true,

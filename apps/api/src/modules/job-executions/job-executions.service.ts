@@ -42,6 +42,14 @@ export class JobExecutionsService {
     return this.repo.updateStatusByBullJobId(bullJobId, queueName, status, error);
   }
 
+  updateProgressByBullJobId(
+    bullJobId: string,
+    queueName: string,
+    progress: number,
+  ) {
+    return this.repo.updateProgressByBullJobId(bullJobId, queueName, progress);
+  }
+
   async retry(id: number) {
     const jobExec = await this.repo.findById(id);
     if (!jobExec) {

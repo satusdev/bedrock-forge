@@ -78,6 +78,7 @@ export class JobExecutionsRepository {
         select: {
           id: true,
           queue_name: true,
+          bull_job_id: true,
           status: true,
           progress: true,
           last_error: true,
@@ -226,7 +227,24 @@ export class JobExecutionsRepository {
       data: {
         status,
         last_error: error || null,
+        ...(status === "completed" ? { progress: 100 } : {}),
         ...(isFinished ? { completed_at: new Date() } : {}),
+      },
+    });
+  }
+
+  async updateProgressByBullJobId(
+    bullJobId: string,
+    queueName: string,
+    progress: number,
+  ) {
+    await this.prisma.jobExecution.updateMany({
+      where: {
+        bull_job_id: bullJobId,
+        queue_name: queueName,
+      },
+      data: {
+        progress,
       },
     });
   }

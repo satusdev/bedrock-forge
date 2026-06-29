@@ -83,6 +83,16 @@ export class JobsGateway
             : ((data as { value?: number })?.value ?? 0);
         const step = isObj ? (data as { step?: string })?.step : undefined;
         const envId = await this.resolveEnvId(jobId);
+
+        // Update database with latest progress
+        await this.jobExecutions
+          .updateProgressByBullJobId(jobId, queueName, progress)
+          .catch((err) => {
+            this.logger.error(
+              `Failed to update progress for ${jobId} in queue ${queueName}: ${err.message}`,
+            );
+          });
+
         this.emitJobProgress({
           jobId,
           queueName,
@@ -112,6 +122,16 @@ export class JobsGateway
         }
 
         const envId = await this.resolveEnvId(jobId);
+
+        // Fallback status update in case worker missed it
+        await this.jobExecutions
+          .updateStatusByBullJobId(jobId, queueName, "completed")
+          .catch((err) => {
+            this.logger.error(
+              `Failed to update completed status for ${jobId} in queue ${queueName}: ${err.message}`,
+            );
+          });
+
         this.emitJobCompleted({
           jobId,
           queueName,
@@ -261,24 +281,30 @@ export class JobsGateway
   // ── Emit methods ──────────────────────────────────────────────────────────
 
   emitJobProgress(event: JobProgressEvent) {
-    const room = event.environmentId
-      ? `env:${event.environmentId}`
-      : "global:jobs";
-    this.server.to(room).emit(WS_EVENTS.JOB_PROGRESS, event);
+    this.server.to("global:jobs").emit(WS_EVENTS.JOB_PROGRESS, event);
+    if (event.environmentId) {
+      this.server
+        .to(`env:${event.environmentId}`)
+        .emit(WS_EVENTS.JOB_PROGRESS, event);
+    }
   }
 
   emitJobCompleted(event: JobCompletedEvent) {
-    const room = event.environmentId
-      ? `env:${event.environmentId}`
-      : "global:jobs";
-    this.server.to(room).emit(WS_EVENTS.JOB_COMPLETED, event);
+    this.server.to("global:jobs").emit(WS_EVENTS.JOB_COMPLETED, event);
+    if (event.environmentId) {
+      this.server
+        .to(`env:${event.environmentId}`)
+        .emit(WS_EVENTS.JOB_COMPLETED, event);
+    }
   }
 
   emitJobFailed(event: JobFailedEvent) {
-    const room = event.environmentId
-      ? `env:${event.environmentId}`
-      : "global:jobs";
-    this.server.to(room).emit(WS_EVENTS.JOB_FAILED, event);
+    this.server.to("global:jobs").emit(WS_EVENTS.JOB_FAILED, event);
+    if (event.environmentId) {
+      this.server
+        .to(`env:${event.environmentId}`)
+        .emit(WS_EVENTS.JOB_FAILED, event);
+    }
   }
 
   emitMonitorResult(event: Pick<MonitorResultEvent, "environmentId">) {
