@@ -50,9 +50,11 @@ export class SecurityScanRunnerService {
         throw new Error(`Server ${serverId} not found`);
       }
 
-      let privateKey: string;
+      let remoteExecutor: ReturnType<typeof createRemoteExecutor>;
       try {
-        privateKey = await this.sshKey.resolvePrivateKey(server);
+        remoteExecutor = createRemoteExecutor(
+          await this.sshKey.getSshConfig(server),
+        );
       } catch (err) {
         for (const scanId of scanIds) {
           await this.prisma.securityScan.update({
@@ -64,13 +66,6 @@ export class SecurityScanRunnerService {
           `SSH key resolution failed: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
-
-      const remoteExecutor = createRemoteExecutor({
-        host: server.ip_address,
-        port: server.ssh_port,
-        username: server.ssh_user,
-        privateKey,
-      });
 
       for (let i = 0; i < scanTypes.length; i++) {
         const scanType = scanTypes[i] as SecurityScanType;
@@ -148,9 +143,11 @@ export class SecurityScanRunnerService {
         throw new Error(`Environment ${environmentId} not found`);
       }
 
-      let privateKey: string;
+      let remoteExecutor: ReturnType<typeof createRemoteExecutor>;
       try {
-        privateKey = await this.sshKey.resolvePrivateKey(environment.server);
+        remoteExecutor = createRemoteExecutor(
+          await this.sshKey.getSshConfig(environment.server),
+        );
       } catch (err) {
         for (const scanId of scanIds) {
           await this.prisma.securityScan.update({
@@ -162,13 +159,6 @@ export class SecurityScanRunnerService {
           `SSH key resolution failed: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
-
-      const remoteExecutor = createRemoteExecutor({
-        host: environment.server.ip_address,
-        port: environment.server.ssh_port,
-        username: environment.server.ssh_user,
-        privateKey,
-      });
 
       for (let i = 0; i < scanTypes.length; i++) {
         const scanType = scanTypes[i] as SecurityScanType;

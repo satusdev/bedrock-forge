@@ -82,13 +82,9 @@ export class SecurityAlertPollerService {
       }
 
       try {
-        const privateKey = await this.sshKey.resolvePrivateKey(setting.server);
-        const executor = createRemoteExecutor({
-          host: setting.server.ip_address,
-          port: setting.server.ssh_port,
-          username: setting.server.ssh_user,
-          privateKey,
-        });
+        const executor = createRemoteExecutor(
+          await this.sshKey.getSshConfig(setting.server),
+        );
 
         const windowStart =
           setting.last_checked_at ??
@@ -362,6 +358,7 @@ done
 
   private parseFileSnapshot(output: string): FileSnapshot {
     const snapshot: FileSnapshot = {};
+    let count = 0;
     for (const line of output.split("\n")) {
       if (!line.trim()) continue;
       const [hash, sizeRaw, mtimeRaw, ...pathParts] = line.split("\t");
@@ -369,7 +366,14 @@ done
       const size = Number(sizeRaw);
       const mtime = Number(mtimeRaw);
       if (!hash || !path || Number.isNaN(size) || Number.isNaN(mtime)) continue;
+      if (count >= 10000) {
+        this.logger.warn(
+          "File snapshot exceeded MAX_FILES limit (10,000 files). Truncating snapshot to avoid database size blowup.",
+        );
+        break;
+      }
       snapshot[path] = { hash, size, mtime };
+      count++;
     }
     return snapshot;
   }

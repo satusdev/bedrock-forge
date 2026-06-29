@@ -6,7 +6,10 @@ import { EncryptionModule } from "../../encryption/encryption.module";
 
 @Module({
   imports: [
-    BullModule.registerQueue({ name: QUEUES.PROJECTS }),
+    BullModule.registerQueue(
+      { name: QUEUES.PROJECTS },
+      { name: QUEUES.BACKUPS },
+    ),
     EncryptionModule,
   ],
   providers: [CreateBedrockProcessor],

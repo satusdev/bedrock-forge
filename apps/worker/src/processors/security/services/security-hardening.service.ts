@@ -39,13 +39,9 @@ export class SecurityHardeningService {
       });
       if (!server) throw new Error(`Server ${serverId} not found`);
 
-      const privateKey = await this.sshKey.resolvePrivateKey(server);
-      const executor = createRemoteExecutor({
-        host: server.ip_address,
-        port: server.ssh_port,
-        username: server.ssh_user,
-        privateKey,
-      });
+      const executor = createRemoteExecutor(
+        await this.sshKey.getSshConfig(server),
+      );
 
       const allowlistSetting = await this.prisma.appSetting.findUnique({
         where: { key: "security_ip_allowlist" },
@@ -106,13 +102,9 @@ export class SecurityHardeningService {
       });
       if (!env) throw new Error(`Environment ${environmentId} not found`);
 
-      const privateKey = await this.sshKey.resolvePrivateKey(env.server);
-      const executor = createRemoteExecutor({
-        host: env.server.ip_address,
-        port: env.server.ssh_port,
-        username: env.server.ssh_user,
-        privateKey,
-      });
+      const executor = createRemoteExecutor(
+        await this.sshKey.getSshConfig(env.server),
+      );
 
       const rootPath = env.root_path;
       const results = await applyEnvironmentHardeningActions(

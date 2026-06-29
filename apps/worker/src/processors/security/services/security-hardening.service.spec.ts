@@ -28,6 +28,12 @@ describe("SecurityHardeningService", () => {
     };
     sshKeyMock = {
       resolvePrivateKey: jest.fn(),
+      getSshConfig: jest.fn().mockImplementation(async (server: any) => ({
+        host: server.ip_address,
+        port: server.ssh_port,
+        username: server.ssh_user,
+        privateKey: "fake-key",
+      })),
     };
     service = new SecurityHardeningService(prismaMock, sshKeyMock);
     jest.clearAllMocks();

@@ -858,7 +858,7 @@ export async function applyServerHardeningActions(
           results.push(await fixSshDirPerms(exec));
           break;
         case "DISABLE_PASSWORD_AUTH":
-          results.push(await disablePasswordAuth(exec));
+          results.push(skip("DISABLE_PASSWORD_AUTH", "Password authentication disabling has been disabled for safety"));
           break;
         case "INSTALL_FAIL2BAN":
           results.push(await installFail2ban(exec, trustedCidrs));

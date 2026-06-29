@@ -1,7 +1,7 @@
-import { Processor, WorkerHost } from "@nestjs/bullmq";
+import { Processor, WorkerHost, InjectQueue } from "@nestjs/bullmq";
 import { Logger } from "@nestjs/common";
-import { Job } from "bullmq";
-import { randomBytes } from "node:crypto";
+import { Job, Queue } from "bullmq";
+import { randomBytes, randomUUID } from "node:crypto";
 import { PrismaService } from "../../prisma/prisma.service";
 import { SshKeyService } from "../../services/ssh-key.service";
 import { EncryptionService } from "../../encryption/encryption.service";
@@ -10,6 +10,9 @@ import {
   QUEUES,
   JOB_TYPES,
   CreateBedrockPayloadSchema,
+  ProjectArchivePayloadSchema,
+  ProjectRestorePayloadSchema,
+  BACKUP_JOB_OPTIONS,
 } from "@bedrock-forge/shared";
 import { callCpApi, CpCreds, escapeMysql } from "../../utils/cyberpanel-http";
 import {
@@ -30,13 +33,24 @@ export class CreateBedrockProcessor extends WorkerHost {
     private readonly prisma: PrismaService,
     private readonly sshKey: SshKeyService,
     private readonly encryption: EncryptionService,
+    @InjectQueue(QUEUES.BACKUPS) private readonly backupsQueue: Queue,
   ) {
     super();
   }
 
   async process(job: Job) {
-    if (job.name !== JOB_TYPES.PROJECT_CREATE_BEDROCK) return;
+    if (job.name === JOB_TYPES.PROJECT_CREATE_BEDROCK) {
+      return this.handleCreateBedrock(job);
+    }
+    if (job.name === JOB_TYPES.PROJECT_ARCHIVE) {
+      return this.handleProjectArchive(job);
+    }
+    if (job.name === JOB_TYPES.PROJECT_RESTORE) {
+      return this.handleProjectRestore(job);
+    }
+  }
 
+  private async handleCreateBedrock(job: Job) {
     const data = CreateBedrockPayloadSchema.parse(job.data);
     const { environmentId, jobExecutionId, cyberpanel, sourceEnvironmentId } =
       data;
@@ -57,12 +71,9 @@ export class CreateBedrockProcessor extends WorkerHost {
       });
       const server = env.server;
 
-      const executor = createRemoteExecutor({
-        host: server.ip_address,
-        port: server.ssh_port,
-        username: server.ssh_user,
-        privateKey: await this.sshKey.resolvePrivateKey(server),
-      });
+      const executor = createRemoteExecutor(
+        await this.sshKey.getSshConfig(server),
+      );
       await job.updateProgress({ value: 5, step: "Connected to server" });
 
       // ── 1. CyberPanel provisioning ───────────────────────────────────
@@ -183,12 +194,9 @@ export class CreateBedrockProcessor extends WorkerHost {
           dbHost: this.encryption.decrypt(sc.db_host_encrypted),
         };
 
-        const srcExecutor = createRemoteExecutor({
-          host: srcEnv.server.ip_address,
-          port: srcEnv.server.ssh_port,
-          username: srcEnv.server.ssh_user,
-          privateKey: await this.sshKey.resolvePrivateKey(srcEnv.server),
-        });
+        const srcExecutor = createRemoteExecutor(
+          await this.sshKey.getSshConfig(srcEnv.server),
+        );
 
         await job.updateProgress({
           value: 35,
@@ -264,9 +272,13 @@ export class CreateBedrockProcessor extends WorkerHost {
           await executor.pushFile({ remotePath: keyTmp, content: srcKey });
           await executor.execute(`chmod 600 ${keyTmp}`);
           try {
-            await srcExecutor.execute(
-              `tar -cz -C ${shellQuote(srcPath)} . | ssh -o StrictHostKeyChecking=no -i ${keyTmp} ${srcEnv.server.ssh_user}@${server.ip_address} "mkdir -p ${shellQuote(tgtPath)} && tar -xz -C ${shellQuote(tgtPath)}"`,
+            await executor.execute(`mkdir -p ${shellQuote(tgtPath)}`);
+            const pullResult = await executor.execute(
+              `ssh -o StrictHostKeyChecking=no -i ${keyTmp} ${srcEnv.server.ssh_user}@${srcEnv.server.ip_address} "tar -cz -C ${shellQuote(srcPath)} ." | tar -xz -C ${shellQuote(tgtPath)}`,
             );
+            if (pullResult.code !== 0) {
+              throw new Error(`Failed to transfer files from source server: ${pullResult.stderr}`);
+            }
           } finally {
             await executor.execute(`rm -f ${keyTmp}`).catch(() => {});
           }
@@ -590,5 +602,387 @@ export class CreateBedrockProcessor extends WorkerHost {
         db_host_encrypted: data.db_host_encrypted,
       },
     });
+  }
+
+  private getDomainFromUrl(urlStr: string): string {
+    try {
+      const url = new URL(urlStr);
+      return url.hostname;
+    } catch {
+      return urlStr
+        .replace(/^https?:\/\//i, "")
+        .replace(/:\d+/, "")
+        .split("/")[0];
+    }
+  }
+
+  private async handleProjectArchive(job: Job) {
+    const data = ProjectArchivePayloadSchema.parse(job.data);
+    const { projectId, jobExecutionId, createBackup, deleteFromCyberpanel } = data;
+
+    await this.prisma.jobExecution.update({
+      where: { id: BigInt(jobExecutionId) },
+      data: { status: "active", started_at: new Date() },
+    });
+
+    try {
+      const project = await this.prisma.project.findUniqueOrThrow({
+        where: { id: BigInt(projectId) },
+        include: {
+          environments: {
+            include: {
+              server: true,
+              wp_db_credentials: true,
+            },
+          },
+        },
+      });
+
+      const envs = project.environments ?? [];
+      const totalSteps = envs.length * ( (createBackup ? 1 : 0) + (deleteFromCyberpanel ? 1 : 0) );
+      let currentStep = 0;
+
+      for (const env of envs) {
+        // Step 1: Create Backup
+        if (createBackup) {
+          await job.updateProgress({
+            value: Math.round((currentStep / totalSteps) * 100),
+            step: `Backing up environment: ${env.type}`,
+          });
+
+          if (!env.google_drive_folder_id) {
+            throw new Error(`Environment ${env.id} (${env.type}) has no Google Drive folder ID configured`);
+          }
+
+          const bullJobId = randomUUID();
+          const backupExec = await this.prisma.jobExecution.create({
+            data: {
+              queue_name: QUEUES.BACKUPS,
+              job_type: JOB_TYPES.BACKUP_CREATE,
+              bull_job_id: bullJobId,
+              environment_id: env.id,
+              status: "queued",
+              payload: { environmentId: Number(env.id), type: "full" },
+            },
+          });
+
+          const backup = await this.prisma.backup.create({
+            data: {
+              environment_id: env.id,
+              type: "full",
+              status: "pending",
+            },
+          });
+
+          await this.backupsQueue.add(
+            JOB_TYPES.BACKUP_CREATE,
+            {
+              environmentId: Number(env.id),
+              type: "full",
+              jobExecutionId: Number(backupExec.id),
+              backupId: Number(backup.id),
+            },
+            { ...BACKUP_JOB_OPTIONS, jobId: bullJobId },
+          );
+
+          // Poll for backup completion
+          let isDone = false;
+          const startTime = Date.now();
+          while (!isDone && (Date.now() - startTime < 15 * 60 * 1000)) {
+            const exec = await this.prisma.jobExecution.findUnique({
+              where: { id: backupExec.id },
+            });
+            if (!exec) throw new Error("Backup execution trace deleted");
+            if (exec.status === "completed") {
+              isDone = true;
+            } else if (exec.status === "failed") {
+              throw new Error(`Backup failed: ${exec.last_error}`);
+            } else {
+              await new Promise((resolve) => setTimeout(resolve, 5000));
+            }
+          }
+          if (!isDone) {
+            throw new Error(`Backup timed out after 15 minutes`);
+          }
+
+          currentStep++;
+        }
+
+        // Step 2: Delete from CyberPanel
+        if (deleteFromCyberpanel) {
+          await job.updateProgress({
+            value: Math.round((currentStep / totalSteps) * 100),
+            step: `Deleting website from CyberPanel: ${env.type}`,
+          });
+
+          const server = env.server;
+          if (server.cyberpanel_login) {
+            const raw = this.encryption.decrypt(server.cyberpanel_login as string);
+            const cpCreds = JSON.parse(raw) as CpCreds;
+            const domain = this.getDomainFromUrl(env.url);
+
+            this.logger.log(`Deleting CyberPanel website ${domain} for env ${env.id}`);
+            try {
+              await callCpApi(cpCreds, "/api/deleteWebsite", {
+                domainName: domain,
+              });
+            } catch (apiErr) {
+              this.logger.error(`CyberPanel deleteWebsite API call failed for domain ${domain}: ${apiErr instanceof Error ? apiErr.message : String(apiErr)}`);
+            }
+          } else {
+            this.logger.warn(`Server ${server.id} has no CyberPanel credentials — website deletion skipped`);
+          }
+
+          // Clean up database & database user if credentials exist
+          if (env.wp_db_credentials) {
+            try {
+              const dbName = this.encryption.decrypt(env.wp_db_credentials.db_name_encrypted);
+              const dbUser = this.encryption.decrypt(env.wp_db_credentials.db_user_encrypted);
+
+              const safeIdentifier = /^[a-zA-Z0-9_-]{1,64}$/;
+              if (!safeIdentifier.test(dbName)) {
+                throw new Error(`Database name '${dbName}' contains unsafe characters`);
+              }
+              if (!safeIdentifier.test(dbUser)) {
+                throw new Error(`Database user '${dbUser}' contains unsafe characters`);
+              }
+
+              this.logger.log(`Dropping database ${dbName} and user ${dbUser} on server ${server.id}`);
+              const sshConfig = await this.sshKey.getSshConfig(server);
+              const executor = createRemoteExecutor(sshConfig);
+
+              // 1. Drop the actual database
+              await executor.execute(`mysql -e "DROP DATABASE IF EXISTS \`${dbName}\`;"`).catch((err) => {
+                this.logger.warn(`Failed to drop database \`${dbName}\`: ${err instanceof Error ? err.message : String(err)}`);
+              });
+
+              // 2. Drop the local MySQL user
+              await executor.execute(`mysql -e "DROP USER IF EXISTS '${dbUser}'@'localhost';"`).catch((err) => {
+                this.logger.warn(`Failed to drop MySQL user '${dbUser}': ${err instanceof Error ? err.message : String(err)}`);
+              });
+
+              // 3. Delete metadata from CyberPanel's internal MySQL system database
+              await executor.execute(`mysql -e "DELETE FROM cyberpanel.databases_databases WHERE dbname='${dbName}';"`).catch((err) => {
+                this.logger.warn(`Failed to delete record from cyberpanel.databases_databases for '${dbName}': ${err instanceof Error ? err.message : String(err)}`);
+              });
+
+              // 4. Flush privileges to ensure changes take effect
+              await executor.execute(`mysql -e "FLUSH PRIVILEGES;"`).catch((err) => {
+                this.logger.warn(`Failed to flush MySQL privileges: ${err instanceof Error ? err.message : String(err)}`);
+              });
+
+              this.logger.log(`Successfully completed MySQL cleanup for database ${dbName} and user ${dbUser} on server ${server.id}`);
+            } catch (dbErr) {
+              this.logger.error(`Database/user deletion failed for env ${env.id}: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`);
+            }
+          }
+
+          currentStep++;
+        }
+      }
+
+      await job.updateProgress({
+        value: 100,
+        step: "Archival completed successfully",
+      });
+
+      await this.prisma.jobExecution.update({
+        where: { id: BigInt(jobExecutionId) },
+        data: {
+          status: "completed",
+          completed_at: new Date(),
+          progress: 100,
+        },
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`ProjectArchive job failed: ${msg}`);
+
+      await this.prisma.jobExecution.update({
+        where: { id: BigInt(jobExecutionId) },
+        data: {
+          status: "failed",
+          last_error: msg,
+          completed_at: new Date(),
+        },
+      });
+
+      throw err;
+    }
+  }
+
+  private async handleProjectRestore(job: Job) {
+    const data = ProjectRestorePayloadSchema.parse(job.data);
+    const { projectId, jobExecutionId, environmentBackups } = data;
+
+    await this.prisma.jobExecution.update({
+      where: { id: BigInt(jobExecutionId) },
+      data: { status: "active", started_at: new Date() },
+    });
+
+    try {
+      const project = await this.prisma.project.findUniqueOrThrow({
+        where: { id: BigInt(projectId) },
+        include: {
+          environments: {
+            include: {
+              server: true,
+              wp_db_credentials: true,
+            },
+          },
+        },
+      });
+
+      const envs = project.environments ?? [];
+      const totalSteps = envs.length * 3; // Recreate web, Recreate DB, Restore backup
+      let currentStep = 0;
+
+      for (const env of envs) {
+        // Identify backup to restore
+        let backupId = environmentBackups[String(env.id)];
+        if (!backupId) {
+          const latestBackup = await this.prisma.backup.findFirst({
+            where: { environment_id: env.id, status: "completed" },
+            orderBy: { created_at: "desc" },
+          });
+          if (!latestBackup) {
+            throw new Error(`No completed backup found for environment ${env.id} (${env.type}) to restore`);
+          }
+          backupId = Number(latestBackup.id);
+        }
+
+        const server = env.server;
+        const domain = this.getDomainFromUrl(env.url);
+
+        // 1. Recreate website in CyberPanel
+        await job.updateProgress({
+          value: Math.round((currentStep / totalSteps) * 100),
+          step: `Recreating CyberPanel website for environment: ${env.type}`,
+        });
+
+        if (server.cyberpanel_login) {
+          const raw = this.encryption.decrypt(server.cyberpanel_login as string);
+          const cpCreds = JSON.parse(raw) as CpCreds;
+
+          await callCpApi(cpCreds, "/api/createWebsite", {
+            domainName: domain,
+            phpSelection: "8.3",
+            email: "admin@example.com",
+            websiteOwner: cpCreds.username,
+            package: "Default",
+            websiteOwnerEmail: "admin@example.com",
+            ssl: 0,
+            dkim: 0,
+            openbasedir: 0,
+          });
+
+          currentStep++;
+
+          // 2. Recreate Database in CyberPanel
+          await job.updateProgress({
+            value: Math.round((currentStep / totalSteps) * 100),
+            step: `Recreating CyberPanel database for environment: ${env.type}`,
+          });
+
+          if (env.wp_db_credentials) {
+            const dbName = this.encryption.decrypt(env.wp_db_credentials.db_name_encrypted);
+            const dbUser = this.encryption.decrypt(env.wp_db_credentials.db_user_encrypted);
+            const dbPassword = this.encryption.decrypt(env.wp_db_credentials.db_password_encrypted);
+
+            await callCpApi(cpCreds, "/api/submitDBCreation", {
+              databaseWebsite: domain,
+              dbName,
+              dbUsername: dbUser,
+              dbPassword,
+            });
+          } else {
+            this.logger.warn(`No database credentials configured for environment ${env.id} — database creation skipped`);
+          }
+
+          currentStep++;
+        } else {
+          this.logger.warn(`Server ${server.id} has no CyberPanel credentials — website/db creation skipped`);
+          currentStep += 2;
+        }
+
+        // 3. Restore backup
+        await job.updateProgress({
+          value: Math.round((currentStep / totalSteps) * 100),
+          step: `Restoring backup for environment: ${env.type}`,
+        });
+
+        const bullJobId = randomUUID();
+        const restoreExec = await this.prisma.jobExecution.create({
+          data: {
+            queue_name: QUEUES.BACKUPS,
+            job_type: JOB_TYPES.BACKUP_RESTORE,
+            bull_job_id: bullJobId,
+            environment_id: env.id,
+            status: "queued",
+            payload: { backupId, environmentId: Number(env.id) },
+          },
+        });
+
+        await this.backupsQueue.add(
+          JOB_TYPES.BACKUP_RESTORE,
+          {
+            backupId,
+            environmentId: Number(env.id),
+            jobExecutionId: Number(restoreExec.id),
+          },
+          { ...BACKUP_JOB_OPTIONS, jobId: bullJobId },
+        );
+
+        // Poll for restore completion
+        let isDone = false;
+        const startTime = Date.now();
+        while (!isDone && (Date.now() - startTime < 15 * 60 * 1000)) {
+          const exec = await this.prisma.jobExecution.findUnique({
+            where: { id: restoreExec.id },
+          });
+          if (!exec) throw new Error("Restore execution trace deleted");
+          if (exec.status === "completed") {
+            isDone = true;
+          } else if (exec.status === "failed") {
+            throw new Error(`Backup restore failed: ${exec.last_error}`);
+          } else {
+            await new Promise((resolve) => setTimeout(resolve, 5000));
+          }
+        }
+        if (!isDone) {
+          throw new Error(`Backup restore timed out after 15 minutes`);
+        }
+
+        currentStep++;
+      }
+
+      await job.updateProgress({
+        value: 100,
+        step: "Restoration completed successfully",
+      });
+
+      await this.prisma.jobExecution.update({
+        where: { id: BigInt(jobExecutionId) },
+        data: {
+          status: "completed",
+          completed_at: new Date(),
+          progress: 100,
+        },
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`ProjectRestore job failed: ${msg}`);
+
+      await this.prisma.jobExecution.update({
+        where: { id: BigInt(jobExecutionId) },
+        data: {
+          status: "failed",
+          last_error: msg,
+          completed_at: new Date(),
+        },
+      });
+
+      throw err;
+    }
   }
 }
