@@ -5,19 +5,14 @@ workflows fit together.
 
 ## Operating Model
 
-Bedrock Forge is an operations dashboard, not a WordPress plugin. You add
-servers and site environments, then trigger jobs from the UI. Jobs run in the
-worker, connect to remote servers over SSH, and stream progress into the
-execution log.
+Bedrock Forge is an operations dashboard, not a WordPress plugin. You add servers and site environments, then trigger jobs from the UI. Jobs run in the worker, connect to remote servers over SSH, and stream progress into the execution log.
 
-Use the execution log whenever an operation looks stuck or failed. It shows the
-exact remote step, command label, exit code, worker message, elapsed time, and
-progress when the worker reports it.
+### Dashboard Overview
+![Dashboard Overview](../assets/dashboard.png)
 
-The floating **Action Center** shows recent queued, running, failed, and
-completed jobs from anywhere in the app. Open it to see live elapsed timers,
-progress, errors, and the inline execution log without leaving the current
-screen.
+Use the execution log whenever an operation looks stuck or failed. It shows the exact remote step, command label, exit code, worker message, elapsed time, and progress when the worker reports it.
+
+The floating **Action Center** shows recent queued, running, failed, and completed jobs from anywhere in the app. Open it to see live elapsed timers, progress, errors, and the inline execution log without leaving the current screen.
 
 ## Global Search
 
@@ -61,9 +56,10 @@ projects, environments, and tabs stay close to hand.
 
 ## Projects
 
-Projects group one or more WordPress environments for the same site. Typical
-environment names are `production`, `staging`, and `development`, but the label
-is free text.
+Projects group one or more WordPress environments for the same site. Typical environment names are `production`, `staging`, and `development`, but the label is free text.
+
+### Projects Dashboard
+![Projects Page](../assets/projects.png)
 
 Project tabs:
 
@@ -258,6 +254,9 @@ The Security page keeps the main operational security views:
 | Findings  | Flat list of current findings with acknowledgement workflow.    |
 | Schedules | Automated server/environment scan schedules and alert settings. |
 
+### Security Overview Dashboard
+![Security Page](../assets/security.png)
+
 Security scans can check server posture, SSH activity, WordPress configuration,
 file patterns, suspicious scripts, and related hardening items. Some hardening
 actions can be applied from the UI, but review each action before running it on
@@ -299,6 +298,9 @@ Monitoring supports:
 - Keyword/content checks.
 - Incident logs and notifications.
 
+### Uptime Monitoring Dashboard
+![Monitors Page](../assets/monitors.png)
+
 Lighthouse audits are separate from uptime monitors. Use **Lighthouse** to run
 performance audits for environments and review historical mobile/desktop scores
 and trends.
@@ -336,6 +338,9 @@ Key settings areas:
 | Backup       | Forge system backup settings.                                          |
 | Advanced     | Low-level app settings.                                                |
 
+### Settings Panel
+![Settings Page](../assets/settings.png)
+
 Only admins can change global settings.
 
 ## Activity, Problems, and Audit Logs
@@ -344,6 +349,9 @@ Only admins can change global settings.
 - **Problems** aggregates attention items such as down monitors, expiring
   domains, outdated plugins, drift, and other issues.
 - **Audit Logs** show user actions and operational changes.
+
+### Job Activity Log
+![Activity Page](../assets/activity.png)
 
 Use these pages for triage before rerunning failed operations.
 

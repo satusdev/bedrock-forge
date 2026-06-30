@@ -43,19 +43,20 @@
     "seed": "ts-node --compiler-options '{\"module\":\"commonjs\"}' prisma/seed.ts"
   },
   "dependencies": {
-    "dotenv": "^16.4.7",
-    "bcryptjs": "^2.4.3",
     "@prisma/adapter-pg": "^7.5.0",
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.4.7",
     "pg": "^8.13.0",
     "prisma": "^7.5.0"
   },
   "devDependencies": {
-    "turbo": "^2.3.3",
-    "prettier": "^3.4.2",
-    "typescript": "^5.7.2",
+    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.10.7",
+    "prettier": "^3.4.2",
+    "puppeteer": "^25.2.1",
     "ts-node": "^10.9.2",
-    "@types/bcryptjs": "^2.4.6"
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2"
   },
   "engines": {
     "node": ">=22.0.0",

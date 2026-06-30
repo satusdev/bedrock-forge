@@ -64,7 +64,13 @@ Email:    admin@bedrockforge.local
 Password: admin123
 ```
 
-**Change the admin password immediately after first login.**
+Navigate to **http://localhost:3002** in your browser to view the login screen:
+
+### Login Screen
+![Login Page](../assets/login.png)
+
+> [!WARNING]
+> **Change the admin password immediately after first login** via Settings -> Users to secure your installation.
 
 ---
 

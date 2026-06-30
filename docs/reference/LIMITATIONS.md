@@ -63,7 +63,7 @@ SSH.
 
 ## Security Model
 
-- SSH host key trust/known-host verification is not implemented yet.
+- SSH host key trust/known-host verification is fully enforced in SshPoolManager using fingerprints.
 - External vulnerability-feed sync such as WPScan/CVE ingestion is not wired as
   a production feed.
 - Treat hardening actions as operator-assisted workflows. Review each action

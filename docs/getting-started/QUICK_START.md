@@ -37,7 +37,10 @@ cd bedrock-forge
 
 ## Step 2 — Open the Dashboard
 
-Navigate to **http://localhost:3002**
+Navigate to **http://localhost:3002** in your browser.
+
+### Login Screen
+![Login Page](../assets/login.png)
 
 Log in with the default admin credentials:
 
@@ -46,8 +49,13 @@ Log in with the default admin credentials:
 | Email    | `admin@bedrockforge.local` |
 | Password | `admin123`                 |
 
-> **Change this password immediately** via Settings -> Users after your first
-> login.
+> [!WARNING]
+> **Change this password immediately** via Settings -> Users after your first login to secure your installation.
+
+Once authenticated, you will arrive at the main system dashboard, which displays a high-level summary of your servers, projects, monitoring alerts, and recent job activities.
+
+### Dashboard Overview
+![Dashboard Page](../assets/dashboard.png)
 
 ---
 
@@ -64,8 +72,10 @@ Log in with the default admin credentials:
    - **Passphrase** — if your key is passphrase-protected
 4. Click **Save**
 
-Bedrock Forge tests the SSH connection immediately. If it fails, check the IP,
-port, and key.
+Bedrock Forge tests the SSH connection immediately. If it fails, check the IP, port, and key.
+
+### Servers Page
+![Servers Page](../assets/servers.png)
 
 ---
 
@@ -84,8 +94,10 @@ port, and key.
      `/home/example.com/backups`)
 5. Click **Save**
 
-Bedrock Forge will attempt to read WordPress DB credentials from `wp-config.php`
-or Bedrock `.env` in the root path.
+Bedrock Forge will attempt to read WordPress DB credentials from `wp-config.php` or Bedrock `.env` in the root path.
+
+### Projects Page
+![Projects Page](../assets/projects.png)
 
 ---
 
@@ -126,8 +138,10 @@ remote environment.
 3. Set the **interval** (default: 10 minutes)
 4. Click **Enable**
 
-The monitor will start checking immediately. You can view response time history
-and uptime percentage on the Monitor detail page.
+The monitor will start checking immediately. You can view response time history and uptime percentage on the Monitor detail page.
+
+### Uptime Monitors Page
+![Monitors Page](../assets/monitors.png)
 
 ---
 
