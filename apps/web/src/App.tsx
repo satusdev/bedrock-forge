@@ -6,7 +6,7 @@ import {
   Navigate,
   useNavigate,
 } from "react-router-dom";
-import { useAuthStore } from "@/store/auth.store";
+import { useAuthStore, isTokenExpired } from "@/store/auth.store";
 import { api } from "@/lib/api-client";
 import { destroySocket } from "@/lib/websocket";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -178,12 +178,18 @@ class ErrorBoundary extends Component<
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.accessToken);
-  return token ? <>{children}</> : <Navigate to="/login" replace />;
+  const isExpired = isTokenExpired(token);
+  return token && !isExpired ? (
+    <>{children}</>
+  ) : (
+    <Navigate to="/login" replace />
+  );
 }
 
 function AdminRoute({ children }: { children: React.ReactNode }) {
   const user = useAuthStore((s) => s.user);
-  if (!user) return <Navigate to="/login" replace />;
+  const token = useAuthStore((s) => s.accessToken);
+  if (!user || isTokenExpired(token)) return <Navigate to="/login" replace />;
   return user.roles.includes("admin") ? (
     <>{children}</>
   ) : (
@@ -193,7 +199,8 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 
 function ManagerRoute({ children }: { children: React.ReactNode }) {
   const user = useAuthStore((s) => s.user);
-  if (!user) return <Navigate to="/login" replace />;
+  const token = useAuthStore((s) => s.accessToken);
+  if (!user || isTokenExpired(token)) return <Navigate to="/login" replace />;
   return user.roles.includes("admin") || user.roles.includes("manager") ? (
     <>{children}</>
   ) : (
@@ -203,7 +210,8 @@ function ManagerRoute({ children }: { children: React.ReactNode }) {
 
 function MaintainerRoute({ children }: { children: React.ReactNode }) {
   const user = useAuthStore((s) => s.user);
-  if (!user) return <Navigate to="/login" replace />;
+  const token = useAuthStore((s) => s.accessToken);
+  if (!user || isTokenExpired(token)) return <Navigate to="/login" replace />;
   return user.roles.includes("admin") ||
     user.roles.includes("manager") ||
     user.roles.includes("maintainer") ? (
