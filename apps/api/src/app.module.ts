@@ -45,6 +45,8 @@ import { RemoteOpsModule } from "./modules/remote-ops/remote-ops.module";
 import { MaintenanceWindowsModule } from "./modules/maintenance-windows/maintenance-windows.module";
 import { SearchModule } from "./modules/search/search.module";
 import { IpAllowlistMiddleware } from "./common/middleware/ip-allowlist.middleware";
+import { CorrelationIdMiddleware } from "./common/middleware/correlation-id.middleware";
+import { LoggingInterceptor } from "./common/interceptors/logging.interceptor";
 import { SettingsRepository } from "./modules/settings/settings.repository";
 import { AuditInterceptor } from "./common/interceptors/audit.interceptor";
 import { HttpExceptionFilter } from "./common/filters/http-exception.filter";
@@ -155,6 +157,8 @@ import appConfig from "./config/app.config";
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     // Global exception handler — normalises all errors to { statusCode, timestamp, path, message }
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
+    // Global request/response trace logger
+    { provide: APP_INTERCEPTOR, useClass: LoggingInterceptor },
     // Global audit trail — logs all non-GET requests to audit_logs
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
     IpAllowlistMiddleware,
@@ -163,6 +167,11 @@ import appConfig from "./config/app.config";
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
+    // Request Correlation ID Middleware runs first on all routes
+    consumer
+      .apply(CorrelationIdMiddleware)
+      .forRoutes("*");
+
     // Health endpoint sits outside the /api prefix (excluded in main.ts via setGlobalPrefix).
     // Auth endpoints are always reachable regardless of IP allowlist so
     // operators can log in from any location. The allowlist only applies

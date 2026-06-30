@@ -1,10 +1,14 @@
 import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 import { ValidationPipe, Logger } from "@nestjs/common";
+import { WinstonModule } from "nest-winston";
+import { winstonLoggerOptions } from "./common/logging/winston.config";
 import helmet from "helmet";
 import { json } from "express";
 import cookieParser from "cookie-parser";
+import { ConfigService } from "@nestjs/config";
 import { AppModule } from "./app.module";
+import { SocketIoAdapter } from "./gateways/socket-io.adapter";
 
 // Express JSON.stringify cannot handle BigInt (Prisma autoincrement IDs).
 // Convert BigInt → Number; IDs never exceed Number.MAX_SAFE_INTEGER here.
@@ -61,7 +65,7 @@ if (isProd) {
 async function bootstrap() {
   const logger = new Logger("Bootstrap");
   const app = await NestFactory.create(AppModule, {
-    logger: ["error", "warn", "log", "debug"],
+    logger: WinstonModule.createLogger(winstonLoggerOptions),
   });
 
   // Global validation pipe — whitelist + forbid unknown + auto-transform
@@ -98,6 +102,11 @@ async function bootstrap() {
 
   // Graceful shutdown — lets Prisma/BullMQ finish in-flight work on SIGTERM
   app.enableShutdownHooks();
+
+  // WebSocket CORS — must use adapter so origin is read from validated
+  // ConfigService, not from process.env at module-load time.
+  const config = app.get(ConfigService);
+  app.useWebSocketAdapter(new SocketIoAdapter(app, config));
 
   const port = parseInt(process.env.API_PORT ?? "3000", 10);
   await app.listen(port);
