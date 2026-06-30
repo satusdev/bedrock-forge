@@ -88,6 +88,12 @@ export const SERVER_HARDENING_ACTIONS = [
     description:
       "Remove hardcoded external-domain RewriteRule lines from .htaccess files",
   },
+  {
+    id: "QUARANTINE_MALWARE",
+    label: "Quarantine malware files",
+    description:
+      "Move detected malware and suspicious files to a secure quarantine directory (/var/lib/bedrock-forge/quarantine)",
+  },
 ] as const;
 
 export const ENVIRONMENT_HARDENING_ACTIONS = [
@@ -221,6 +227,18 @@ export const ENVIRONMENT_HARDENING_ACTIONS = [
     risk: "risky",
     preview:
       "Updates all plugins through WP-CLI. Test compatibility on staging before applying to production.",
+  },
+  {
+    id: "QUARANTINE_MALWARE",
+    label: "Quarantine malware files",
+    description:
+      "Move detected malware and suspicious files to a secure quarantine directory (/var/lib/bedrock-forge/quarantine)",
+    group: "cleanup",
+    risk: "risky",
+    risky: true,
+    defaultSelected: false,
+    preview:
+      "Moves detected malware and suspicious files from this environment to /var/lib/bedrock-forge/quarantine/.",
   },
 ] as const;
 

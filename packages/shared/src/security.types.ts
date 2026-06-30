@@ -122,7 +122,8 @@ export type ServerHardeningActionType =
   | "INSTALL_AUDITD" // apt install (if missing) + systemctl enable/start
   | "BLOCK_BRUTE_FORCE_IPS" // detect IPs ≥50 failed logins → ufw deny each
   | "DELETE_PHP_UPLOAD_FILES" // rm PHP files in /home/*/public_html/*/uploads/
-  | "CLEAN_HTACCESS_REDIRECTS"; // remove hardcoded external-domain RewriteRule lines
+  | "CLEAN_HTACCESS_REDIRECTS" // remove hardcoded external-domain RewriteRule lines
+  | "QUARANTINE_MALWARE"; // move detected malware files to a quarantine directory
 
 /**
  * Environment-scoped (WordPress) hardening actions.
@@ -141,7 +142,8 @@ export type EnvironmentHardeningActionType =
   | "DISABLE_FILE_EDITOR" // add WP_DISALLOW_FILE_EDIT=true to wp-config.php
   | "BLOCK_USER_ENUMERATION" // redirect ?author=N queries to block username enumeration
   | "FORCE_REINSTALL_CORE" // wp core download --force
-  | "UPDATE_ALL_PLUGINS"; // wp plugin update --all
+  | "UPDATE_ALL_PLUGINS" // wp plugin update --all
+  | "QUARANTINE_MALWARE"; // move detected malware files to a quarantine directory
 
 export const SERVER_HARDENING_ACTION_TYPES: ServerHardeningActionType[] = [
   "FIX_WORLD_WRITABLE",
@@ -153,6 +155,7 @@ export const SERVER_HARDENING_ACTION_TYPES: ServerHardeningActionType[] = [
   "BLOCK_BRUTE_FORCE_IPS",
   "DELETE_PHP_UPLOAD_FILES",
   "CLEAN_HTACCESS_REDIRECTS",
+  "QUARANTINE_MALWARE",
 ];
 
 export const ENVIRONMENT_HARDENING_ACTION_TYPES: EnvironmentHardeningActionType[] =
@@ -170,6 +173,7 @@ export const ENVIRONMENT_HARDENING_ACTION_TYPES: EnvironmentHardeningActionType[
     "BLOCK_USER_ENUMERATION",
     "FORCE_REINSTALL_CORE",
     "UPDATE_ALL_PLUGINS",
+    "QUARANTINE_MALWARE",
   ];
 
 export interface HardeningActionResult {

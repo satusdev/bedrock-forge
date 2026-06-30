@@ -21,6 +21,6 @@ import { EnvironmentsModule } from "../environments/environments.module";
     BackupSchedulesService,
     BackupSchedulesRepository,
   ],
-  exports: [BackupsService],
+  exports: [BackupsService, BackupSchedulesService],
 })
 export class BackupsModule {}

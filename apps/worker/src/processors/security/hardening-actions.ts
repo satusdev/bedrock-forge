@@ -833,12 +833,119 @@ async function updateAllPlugins(
   return ok(action, "All plugins updated to their latest versions");
 }
 
+// ─── Malware Quarantine ──────────────────────────────────────────────────────
+
+async function quarantineMalwareServer(
+  exec: Executor,
+  malwareFiles: string[],
+): Promise<HardeningActionResult> {
+  const action = "QUARANTINE_MALWARE";
+
+  if (!malwareFiles || malwareFiles.length === 0) {
+    return skip(action, "No malware or suspicious files identified in previous scans to quarantine");
+  }
+
+  // Ensure quarantine directory exists
+  await run(exec, "mkdir -p /var/lib/bedrock-forge/quarantine");
+
+  let quarantined = 0;
+  const failedFiles: string[] = [];
+
+  for (const file of malwareFiles) {
+    const qFile = `'${file.replace(/'/g, "'\\''")}'`;
+    // Check if file exists
+    const check = await run(exec, `test -f ${qFile}`);
+    if (check.code !== 0) {
+      continue; // Already removed or doesn't exist anymore
+    }
+
+    // Move it to quarantine
+    const base = file.split('/').pop() || 'malware';
+    const timestamp = Math.floor(Date.now() / 1000);
+    const quarantinePath = `/var/lib/bedrock-forge/quarantine/${base}.${timestamp}.bak`;
+    const qQuarantinePath = `'${quarantinePath.replace(/'/g, "'\\''")}'`;
+
+    const mv = await run(exec, `mv ${qFile} ${qQuarantinePath} 2>&1`);
+    if (mv.code !== 0) {
+      failedFiles.push(file);
+    } else {
+      quarantined++;
+    }
+  }
+
+  if (quarantined === 0 && failedFiles.length > 0) {
+    return fail(action, `Failed to quarantine malware files: ${failedFiles.join(", ")}`);
+  }
+
+  if (failedFiles.length > 0) {
+    return ok(action, `Quarantined ${quarantined} file(s) to /var/lib/bedrock-forge/quarantine. Failed for: ${failedFiles.join(", ")}`);
+  }
+
+  return ok(action, `Successfully quarantined ${quarantined} file(s) to /var/lib/bedrock-forge/quarantine`);
+}
+
+async function quarantineMalwareEnv(
+  exec: Executor,
+  webRoot: string,
+  malwareFiles: string[],
+): Promise<HardeningActionResult> {
+  const action = "QUARANTINE_MALWARE";
+  const normalizedRoot = webRoot.endsWith('/') ? webRoot : webRoot + '/';
+
+  const envMalwareFiles = malwareFiles.filter(
+    (file) => file.startsWith(normalizedRoot) || file.startsWith(webRoot)
+  );
+
+  if (envMalwareFiles.length === 0) {
+    return skip(action, "No malware or suspicious files identified in previous scans within this environment to quarantine");
+  }
+
+  // Ensure quarantine directory exists
+  await run(exec, "mkdir -p /var/lib/bedrock-forge/quarantine");
+
+  let quarantined = 0;
+  const failedFiles: string[] = [];
+
+  for (const file of envMalwareFiles) {
+    const qFile = `'${file.replace(/'/g, "'\\''")}'`;
+    // Check if file exists
+    const check = await run(exec, `test -f ${qFile}`);
+    if (check.code !== 0) {
+      continue; // Already removed or doesn't exist anymore
+    }
+
+    // Move it to quarantine
+    const base = file.split('/').pop() || 'malware';
+    const timestamp = Math.floor(Date.now() / 1000);
+    const quarantinePath = `/var/lib/bedrock-forge/quarantine/${base}.${timestamp}.bak`;
+    const qQuarantinePath = `'${quarantinePath.replace(/'/g, "'\\''")}'`;
+
+    const mv = await run(exec, `mv ${qFile} ${qQuarantinePath} 2>&1`);
+    if (mv.code !== 0) {
+      failedFiles.push(file);
+    } else {
+      quarantined++;
+    }
+  }
+
+  if (quarantined === 0 && failedFiles.length > 0) {
+    return fail(action, `Failed to quarantine malware files: ${failedFiles.join(", ")}`);
+  }
+
+  if (failedFiles.length > 0) {
+    return ok(action, `Quarantined ${quarantined} file(s) to /var/lib/bedrock-forge/quarantine. Failed for: ${failedFiles.join(", ")}`);
+  }
+
+  return ok(action, `Successfully quarantined ${quarantined} file(s) to /var/lib/bedrock-forge/quarantine`);
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export async function applyServerHardeningActions(
   exec: Executor,
   actions: ServerHardeningActionType[],
   trustedCidrs: string[] = [],
+  malwareFiles: string[] = [],
 ): Promise<HardeningActionResult[]> {
   const results: HardeningActionResult[] = [];
 
@@ -875,6 +982,9 @@ export async function applyServerHardeningActions(
         case "CLEAN_HTACCESS_REDIRECTS":
           results.push(await cleanHtaccessRedirectsServer(exec));
           break;
+        case "QUARANTINE_MALWARE":
+          results.push(await quarantineMalwareServer(exec, malwareFiles));
+          break;
         default: {
           const _exhaustive: never = action;
           results.push(fail(_exhaustive as string, "Unknown action"));
@@ -894,6 +1004,7 @@ export async function applyEnvironmentHardeningActions(
   exec: Executor,
   rootPath: string,
   actions: EnvironmentHardeningActionType[],
+  malwareFiles: string[] = [],
 ): Promise<HardeningActionResult[]> {
   const results: HardeningActionResult[] = [];
   let webRoot: string | null = null;
@@ -944,6 +1055,9 @@ export async function applyEnvironmentHardeningActions(
           break;
         case "UPDATE_ALL_PLUGINS":
           results.push(await updateAllPlugins(exec, webRoot));
+          break;
+        case "QUARANTINE_MALWARE":
+          results.push(await quarantineMalwareEnv(exec, webRoot, malwareFiles));
           break;
         default: {
           const _exhaustive: never = action;

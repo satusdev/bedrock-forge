@@ -1,10 +1,14 @@
 import { Injectable, Logger, OnApplicationBootstrap } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
+import { InjectQueue } from "@nestjs/bullmq";
+import { Queue } from "bullmq";
 import { readdir, rm, stat } from "fs/promises";
 import { join } from "path";
 import { MaintenanceRepository } from "./maintenance.repository";
 import { CleanupSchedulesRepository } from "../cleanup-schedules/cleanup-schedules.repository";
 import { WpActionsService } from "../wp-actions/wp-actions.service";
+import { PrismaService } from "../../prisma/prisma.service";
+import { QUEUES } from "@bedrock-forge/shared";
 
 const STAGING_DIR = "/tmp/forge-backups";
 const ORPHAN_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -30,11 +34,16 @@ export class MaintenanceService implements OnApplicationBootstrap {
     private readonly repo: MaintenanceRepository,
     private readonly cleanupRepo: CleanupSchedulesRepository,
     private readonly wpActions: WpActionsService,
+    private readonly prisma: PrismaService,
+    @InjectQueue(QUEUES.MONITORS) private readonly monitorsQueue: Queue,
+    @InjectQueue(QUEUES.BACKUPS) private readonly backupsQueue: Queue,
+    @InjectQueue(QUEUES.PLUGIN_UPDATES) private readonly pluginUpdatesQueue: Queue,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
     await this.recoverInterruptedJobs();
     await this.sweepOrphanedStagingDirs();
+    await this.syncOrphanedRepeatableJobs();
   }
 
   private async recoverInterruptedJobs(): Promise<void> {
@@ -119,6 +128,8 @@ export class MaintenanceService implements OnApplicationBootstrap {
         );
       }
     });
+
+    await this.syncOrphanedRepeatableJobs();
   }
 
   /**
@@ -152,6 +163,94 @@ export class MaintenanceService implements OnApplicationBootstrap {
         );
       }
     }
+  }
+
+  /**
+   * Audit/cleanup utility that identifies and removes repeatable jobs in BullMQ
+   * that do not exist or are marked as disabled in the database.
+   */
+  async syncOrphanedRepeatableJobs(): Promise<void> {
+    this.logger.log("Starting audit/cleanup of repeatable jobs");
+
+    // 1. Monitors Queue
+    try {
+      const repeatableMonitors = await this.monitorsQueue.getRepeatableJobs();
+      for (const rj of repeatableMonitors) {
+        if (!rj.id) continue;
+        const match = rj.id.match(/^monitor-(\d+)$/);
+        if (!match) continue;
+        const monitorId = BigInt(match[1]);
+
+        const dbMonitor = await this.prisma.monitor.findUnique({
+          where: { id: monitorId },
+        });
+
+        if (!dbMonitor || !dbMonitor.enabled) {
+          this.logger.warn(
+            `Orphaned repeatable job found for monitor ${monitorId} (db: ${
+              dbMonitor ? "disabled" : "missing"
+            }). Removing repeatable job key: ${rj.key}`,
+          );
+          await this.monitorsQueue.removeRepeatableByKey(rj.key);
+        }
+      }
+    } catch (err) {
+      this.logger.error("Failed to audit repeatable monitors", err);
+    }
+
+    // 2. Backups Queue
+    try {
+      const repeatableBackups = await this.backupsQueue.getRepeatableJobs();
+      for (const rj of repeatableBackups) {
+        if (!rj.id) continue;
+        const match = rj.id.match(/^backup-schedule-(\d+)$/);
+        if (!match) continue;
+        const scheduleId = BigInt(match[1]);
+
+        const dbSchedule = await this.prisma.backupSchedule.findUnique({
+          where: { id: scheduleId },
+        });
+
+        if (!dbSchedule || !dbSchedule.enabled) {
+          this.logger.warn(
+            `Orphaned repeatable job found for backup schedule ${scheduleId} (db: ${
+              dbSchedule ? "disabled" : "missing"
+            }). Removing repeatable job key: ${rj.key}`,
+          );
+          await this.backupsQueue.removeRepeatableByKey(rj.key);
+        }
+      }
+    } catch (err) {
+      this.logger.error("Failed to audit repeatable backups", err);
+    }
+
+    // 3. Plugin Updates Queue
+    try {
+      const repeatablePlugins = await this.pluginUpdatesQueue.getRepeatableJobs();
+      for (const rj of repeatablePlugins) {
+        if (!rj.id) continue;
+        const match = rj.id.match(/^plugin-update-schedule-(\d+)$/);
+        if (!match) continue;
+        const scheduleId = BigInt(match[1]);
+
+        const dbSchedule = await this.prisma.pluginUpdateSchedule.findUnique({
+          where: { id: scheduleId },
+        });
+
+        if (!dbSchedule || !dbSchedule.enabled) {
+          this.logger.warn(
+            `Orphaned repeatable job found for plugin update schedule ${scheduleId} (db: ${
+              dbSchedule ? "disabled" : "missing"
+            }). Removing repeatable job key: ${rj.key}`,
+          );
+          await this.pluginUpdatesQueue.removeRepeatableByKey(rj.key);
+        }
+      }
+    } catch (err) {
+      this.logger.error("Failed to audit repeatable plugin updates", err);
+    }
+
+    this.logger.log("Completed audit/cleanup of repeatable jobs");
   }
 
   private shouldFire(

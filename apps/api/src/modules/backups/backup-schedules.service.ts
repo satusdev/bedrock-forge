@@ -113,7 +113,7 @@ export class BackupSchedulesService {
     );
   }
 
-  private async removeRepeatableJob(scheduleId: number) {
+  async removeRepeatableJob(scheduleId: number) {
     const jobId = this.repeatableJobId(scheduleId);
     try {
       // BullMQ v5: the custom jobId is in rj.id, NOT embedded in rj.key

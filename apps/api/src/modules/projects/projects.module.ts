@@ -6,6 +6,8 @@ import { PrismaModule } from "../../prisma/prisma.module";
 import { DomainsModule } from "../domains/domains.module";
 import { MonitorsModule } from "../monitors/monitors.module";
 import { CyberpanelModule } from "../cyberpanel/cyberpanel.module";
+import { BackupsModule } from "../backups/backups.module";
+import { PluginUpdateSchedulesModule } from "../plugin-update-schedules/plugin-update-schedules.module";
 import { ProjectsController } from "./projects.controller";
 import { ProjectsService } from "./projects.service";
 import { ProjectsRepository } from "./projects.repository";
@@ -18,6 +20,8 @@ import { ProjectsRepository } from "./projects.repository";
     DomainsModule,
     MonitorsModule,
     CyberpanelModule,
+    BackupsModule,
+    PluginUpdateSchedulesModule,
   ],
   controllers: [ProjectsController],
   providers: [ProjectsRepository, ProjectsService],

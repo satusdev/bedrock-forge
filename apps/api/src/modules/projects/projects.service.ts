@@ -21,6 +21,8 @@ import { BulkImportProjectsDto } from "./dto/bulk-import-projects.dto";
 import { CreateProjectFullDto } from "./dto/create-project-full.dto";
 import { DomainsService } from "../domains/domains.service";
 import { MonitorsService } from "../monitors/monitors.service";
+import { BackupSchedulesService } from "../backups/backup-schedules.service";
+import { PluginUpdateSchedulesService } from "../plugin-update-schedules/plugin-update-schedules.service";
 import { PrismaService } from "../../prisma/prisma.service";
 
 @Injectable()
@@ -32,6 +34,8 @@ export class ProjectsService {
     @InjectQueue(QUEUES.PROJECTS) private readonly projectsQueue: Queue,
     private readonly domainsService: DomainsService,
     private readonly monitorsService: MonitorsService,
+    private readonly backupSchedulesService: BackupSchedulesService,
+    private readonly pluginUpdateSchedulesService: PluginUpdateSchedulesService,
     private readonly prisma: PrismaService,
   ) {}
 
@@ -290,6 +294,14 @@ export class ProjectsService {
     // 2. Disable monitors and cron schedules for all environments in this project
     const envIds = envs.map((e) => e.id);
     if (envIds.length > 0) {
+      // Fetch schedules first to get their IDs
+      const backupSchedules = await this.prisma.backupSchedule.findMany({
+        where: { environment_id: { in: envIds } },
+      });
+      const pluginUpdateSchedules = await this.prisma.pluginUpdateSchedule.findMany({
+        where: { environment_id: { in: envIds } },
+      });
+
       await this.prisma.$transaction([
         this.prisma.monitor.updateMany({
           where: { environment_id: { in: envIds } },
@@ -312,6 +324,20 @@ export class ProjectsService {
           data: { enabled: false },
         }),
       ]);
+
+      // Unregister repeatable jobs from BullMQ
+      const monitors = await this.prisma.monitor.findMany({
+        where: { environment_id: { in: envIds } },
+      });
+      for (const monitor of monitors) {
+        await this.monitorsService.unregisterRepeatable(monitor);
+      }
+      for (const bs of backupSchedules) {
+        await this.backupSchedulesService.removeRepeatableJob(Number(bs.id));
+      }
+      for (const pus of pluginUpdateSchedules) {
+        await this.pluginUpdateSchedulesService.removeRepeatableJob(Number(pus.id));
+      }
     }
 
     // 3. Create job execution for tracking
@@ -373,6 +399,16 @@ export class ProjectsService {
         where: { environment_id: { in: envIds } },
         data: { enabled: true },
       });
+
+      // Register repeatable jobs back
+      const monitors = await this.prisma.monitor.findMany({
+        where: { environment_id: { in: envIds } },
+      });
+      for (const m of monitors) {
+        if (m.enabled) {
+          await this.monitorsService.registerRepeatable(m);
+        }
+      }
     }
 
     // 3. Create job execution for tracking

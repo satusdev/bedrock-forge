@@ -911,13 +911,13 @@ export class BackupProcessor extends WorkerHost {
       `[${job.id}] Scheduled backup triggered: scheduleId=${scheduleId} env=${environmentId} type=${type}`,
     );
 
-    // Guard: if the schedule was deleted from the DB, self-clean the orphaned repeatable job
+    // Guard: if the schedule was deleted from the DB or disabled, self-clean the orphaned repeatable job
     const scheduleRecord = await this.prisma.backupSchedule.findUnique({
       where: { id: BigInt(scheduleId) },
     });
-    if (!scheduleRecord) {
+    if (!scheduleRecord || !scheduleRecord.enabled) {
       this.logger.warn(
-        `[${job.id}] Schedule ${scheduleId} no longer exists in DB — removing orphaned repeatable job and skipping`,
+        `[${job.id}] Schedule ${scheduleId} is disabled or no longer exists in DB — removing orphaned repeatable job and skipping`,
       );
       try {
         const repeatableJobs = await this.backupsQueue.getRepeatableJobs();

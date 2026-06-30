@@ -54,7 +54,12 @@ export class SecurityHardeningService {
         trustedCidrs = [];
       }
 
-      const results = await applyServerHardeningActions(executor, actions, trustedCidrs);
+      let malwareFiles: string[] = [];
+      if (actions.includes("QUARANTINE_MALWARE")) {
+        malwareFiles = await this.getMalwareFilesForServer(serverId);
+      }
+
+      const results = await applyServerHardeningActions(executor, actions, trustedCidrs, malwareFiles);
 
       const logEntries = results.map((r) => ({
         ts: new Date().toISOString(),
@@ -107,10 +112,17 @@ export class SecurityHardeningService {
       );
 
       const rootPath = env.root_path;
+
+      let malwareFiles: string[] = [];
+      if (actions.includes("QUARANTINE_MALWARE")) {
+        malwareFiles = await this.getMalwareFilesForEnvironment(environmentId);
+      }
+
       const results = await applyEnvironmentHardeningActions(
         executor,
         rootPath,
         actions,
+        malwareFiles,
       );
 
       const logEntries = results.map((r) => ({
@@ -139,5 +151,57 @@ export class SecurityHardeningService {
       await tracker.fail(err, "Environment hardening");
       throw err;
     }
+  }
+
+  private async getMalwareFilesForServer(serverId: number): Promise<string[]> {
+    const latestScan = await this.prisma.securityScan.findFirst({
+      where: {
+        server_id: BigInt(serverId),
+        scan_type: "MALWARE_SCAN",
+        status: "completed",
+      },
+      orderBy: { completed_at: "desc" },
+    });
+    if (!latestScan || !latestScan.findings) return [];
+    const findings = latestScan.findings as any[];
+    const files = new Set<string>();
+    for (const f of findings) {
+      if (f.category === "MALWARE" || f.category === "SUSPICIOUS_FILES") {
+        const meta = f.metadata || {};
+        const matched = meta.matched_files || meta.files || meta.infected_files || [];
+        if (Array.isArray(matched)) {
+          for (const file of matched) {
+            if (typeof file === "string") files.add(file);
+          }
+        }
+      }
+    }
+    return Array.from(files);
+  }
+
+  private async getMalwareFilesForEnvironment(environmentId: number): Promise<string[]> {
+    const latestScan = await this.prisma.securityScan.findFirst({
+      where: {
+        environment_id: BigInt(environmentId),
+        scan_type: "PROJECT_MALWARE",
+        status: "completed",
+      },
+      orderBy: { completed_at: "desc" },
+    });
+    if (!latestScan || !latestScan.findings) return [];
+    const findings = latestScan.findings as any[];
+    const files = new Set<string>();
+    for (const f of findings) {
+      if (f.category === "MALWARE" || f.category === "SUSPICIOUS_FILES") {
+        const meta = f.metadata || {};
+        const matched = meta.matched_files || meta.files || meta.infected_files || [];
+        if (Array.isArray(matched)) {
+          for (const file of matched) {
+            if (typeof file === "string") files.add(file);
+          }
+        }
+      }
+    }
+    return Array.from(files);
   }
 }

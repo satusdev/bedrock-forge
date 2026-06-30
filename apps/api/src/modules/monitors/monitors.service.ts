@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { Injectable, NotFoundException, Logger } from "@nestjs/common";
 import { InjectQueue } from "@nestjs/bullmq";
 import { Queue } from "bullmq";
 import { MonitorsRepository } from "./monitors.repository";
@@ -13,6 +13,8 @@ export interface PaginationQuery {
 
 @Injectable()
 export class MonitorsService {
+  private readonly logger = new Logger(MonitorsService.name);
+
   constructor(
     private readonly repo: MonitorsRepository,
     @InjectQueue(QUEUES.MONITORS) private readonly queue: Queue,
@@ -45,7 +47,9 @@ export class MonitorsService {
       }),
       ...(dto.keyword !== undefined && { keyword: dto.keyword }),
     });
-    await this.registerRepeatable(monitor);
+    if (monitor.enabled) {
+      await this.registerRepeatable(monitor);
+    }
     return monitor;
   }
 
@@ -122,8 +126,7 @@ export class MonitorsService {
     return { success: true, message: `Check triggered for monitor ${id}` };
   }
 
-
-  private async registerRepeatable(monitor: {
+  async registerRepeatable(monitor: {
     id: bigint;
     interval_seconds: number;
   }) {
@@ -138,13 +141,20 @@ export class MonitorsService {
     );
   }
 
-  private async unregisterRepeatable(monitor: {
+  async unregisterRepeatable(monitor: {
     id: bigint;
-    interval_seconds: number;
   }) {
-    await this.queue.removeRepeatable(JOB_TYPES.MONITOR_CHECK, {
-      every: monitor.interval_seconds * 1000,
-      jobId: `monitor-${monitor.id}`,
-    });
+    const jobId = `monitor-${monitor.id}`;
+    try {
+      const repeatableJobs = await this.queue.getRepeatableJobs();
+      for (const rj of repeatableJobs) {
+        if (rj.id === jobId) {
+          await this.queue.removeRepeatableByKey(rj.key);
+          this.logger.log(`Removed repeatable job key: ${rj.key} for monitor ${monitor.id}`);
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`Could not remove repeatable job for monitor ${monitor.id}: ${err}`);
+    }
   }
 }

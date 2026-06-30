@@ -70,6 +70,7 @@ export function getFixAction(
       (t.includes("redirect") || t.includes("suspicious"))
     )
       return "CLEAN_HTACCESS_REDIRECTS";
+    if (category === "MALWARE") return "QUARANTINE_MALWARE";
   } else {
     if (category === "SUSPICIOUS_FILES" && t.includes("upload"))
       return "DELETE_PHP_UPLOAD_FILES";
@@ -110,8 +111,10 @@ export function getFixAction(
     )
       return "BLOCK_USER_ENUMERATION";
     if (category === "WP_CORE_INTEGRITY") return "FORCE_REINSTALL_CORE";
-    if (category === "MALWARE" && t.includes("vulnerability"))
-      return "UPDATE_ALL_PLUGINS";
+    if (category === "MALWARE") {
+      if (t.includes("vulnerability")) return "UPDATE_ALL_PLUGINS";
+      return "QUARANTINE_MALWARE";
+    }
   }
   return null;
 }

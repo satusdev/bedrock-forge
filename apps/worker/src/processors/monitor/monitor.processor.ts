@@ -41,6 +41,8 @@ export class MonitorProcessor extends WorkerHost {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    @InjectQueue(QUEUES.MONITORS)
+    private readonly monitorsQueue: Queue,
     @InjectQueue(QUEUES.NOTIFICATIONS)
     private readonly notificationsQueue: Queue,
   ) {
@@ -66,6 +68,23 @@ export class MonitorProcessor extends WorkerHost {
       include: { environment: { select: { id: true, url: true } } },
     });
     if (!monitor) return;
+
+    if (!monitor.enabled) {
+      this.logger.log(`Monitor ${monitorId} is disabled — skipping check and removing repeatable job`);
+      const jobId = `monitor-${monitor.id}`;
+      try {
+        const repeatableJobs = await this.monitorsQueue.getRepeatableJobs();
+        for (const rj of repeatableJobs) {
+          if (rj.id === jobId) {
+            await this.monitorsQueue.removeRepeatableByKey(rj.key);
+            this.logger.log(`Self-healed: removed repeatable job key ${rj.key} for disabled monitor ${monitor.id}`);
+          }
+        }
+      } catch (err) {
+        this.logger.warn(`Failed to remove repeatable job for disabled monitor ${monitor.id}: ${err}`);
+      }
+      return;
+    }
 
     // Capture previous state before running the check
     const prevIsUp =

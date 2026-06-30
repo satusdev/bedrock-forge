@@ -5,6 +5,8 @@ import { ProjectsRepository } from "./projects.repository";
 import { PrismaService } from "../../prisma/prisma.service";
 import { DomainsService } from "../domains/domains.service";
 import { MonitorsService } from "../monitors/monitors.service";
+import { BackupSchedulesService } from "../backups/backup-schedules.service";
+import { PluginUpdateSchedulesService } from "../plugin-update-schedules/plugin-update-schedules.service";
 import { QUEUES } from "@bedrock-forge/shared";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -34,7 +36,19 @@ function makeDomainsService() {
 }
 
 function makeMonitorsService() {
-  return { create: jest.fn().mockResolvedValue({}) };
+  return {
+    create: jest.fn().mockResolvedValue({}),
+    registerRepeatable: jest.fn().mockResolvedValue({}),
+    unregisterRepeatable: jest.fn().mockResolvedValue({}),
+  };
+}
+
+function makeBackupSchedulesService() {
+  return { removeRepeatableJob: jest.fn().mockResolvedValue({}) };
+}
+
+function makePluginUpdateSchedulesService() {
+  return { removeRepeatableJob: jest.fn().mockResolvedValue({}) };
 }
 
 function makeProject(id: bigint = BigInt(1)) {
@@ -59,12 +73,16 @@ describe("ProjectsService", () => {
   let repo: ReturnType<typeof makeRepo>;
   let domainsService: ReturnType<typeof makeDomainsService>;
   let monitorsService: ReturnType<typeof makeMonitorsService>;
+  let backupSchedulesService: ReturnType<typeof makeBackupSchedulesService>;
+  let pluginUpdateSchedulesService: ReturnType<typeof makePluginUpdateSchedulesService>;
   let queue: ReturnType<typeof makeQueue>;
 
   beforeEach(async () => {
     repo = makeRepo();
     domainsService = makeDomainsService();
     monitorsService = makeMonitorsService();
+    backupSchedulesService = makeBackupSchedulesService();
+    pluginUpdateSchedulesService = makePluginUpdateSchedulesService();
     queue = makeQueue();
 
     const module = await Test.createTestingModule({
@@ -75,6 +93,8 @@ describe("ProjectsService", () => {
         { provide: getQueueToken(QUEUES.PROJECTS), useValue: queue },
         { provide: DomainsService, useValue: domainsService },
         { provide: MonitorsService, useValue: monitorsService },
+        { provide: BackupSchedulesService, useValue: backupSchedulesService },
+        { provide: PluginUpdateSchedulesService, useValue: pluginUpdateSchedulesService },
       ],
     }).compile();
 

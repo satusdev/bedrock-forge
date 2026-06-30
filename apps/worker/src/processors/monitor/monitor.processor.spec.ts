@@ -92,17 +92,23 @@ function baseMonitor(
 describe("MonitorProcessor", () => {
   let processor: MonitorProcessor;
   let prisma: MockPrisma;
+  let monitorsQueue: any;
   let notifQueue: ReturnType<typeof makeNotifQueue>;
 
   beforeEach(async () => {
     prisma = makePrisma();
     notifQueue = makeNotifQueue();
+    monitorsQueue = {
+      getRepeatableJobs: jest.fn().mockResolvedValue([]),
+      removeRepeatableByKey: jest.fn().mockResolvedValue({}),
+    };
 
     const module = await Test.createTestingModule({
       providers: [
         MonitorProcessor,
         { provide: PrismaService, useValue: prisma },
         { provide: ConfigService, useValue: { get: jest.fn() } },
+        { provide: getQueueToken(QUEUES.MONITORS), useValue: monitorsQueue },
         { provide: getQueueToken(QUEUES.NOTIFICATIONS), useValue: notifQueue },
       ],
     }).compile();

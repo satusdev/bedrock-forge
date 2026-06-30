@@ -23,6 +23,8 @@ export class PluginUpdateProcessor extends WorkerHost {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly sshKey: SshKeyService,
+    @InjectQueue(QUEUES.PLUGIN_UPDATES)
+    private readonly pluginUpdatesQueue: Queue,
     @InjectQueue(QUEUES.PLUGIN_SCANS)
     private readonly pluginScansQueue: Queue,
     @InjectQueue(QUEUES.NOTIFICATIONS)
@@ -34,6 +36,33 @@ export class PluginUpdateProcessor extends WorkerHost {
   async process(job: Job) {
     const payload = job.data as PluginScheduledUpdatePayload;
     const { scheduleId, environmentId } = payload;
+
+    // Guard: if schedule no longer exists or is disabled, self-clean and skip
+    const scheduleRecord = await this.prisma.pluginUpdateSchedule.findUnique({
+      where: { id: BigInt(scheduleId) },
+    });
+    if (!scheduleRecord || !scheduleRecord.enabled) {
+      this.logger.warn(
+        `[${job.id}] Plugin update schedule ${scheduleId} is disabled or no longer exists in DB — removing orphaned repeatable job and skipping`,
+      );
+      try {
+        const repeatableJobs = await this.pluginUpdatesQueue.getRepeatableJobs();
+        const orphanKey = `plugin-update-schedule-${scheduleId}`;
+        for (const rj of repeatableJobs) {
+          if (rj.id === orphanKey) {
+            await this.pluginUpdatesQueue.removeRepeatableByKey(rj.key);
+            this.logger.log(
+              `[${job.id}] Removed orphaned repeatable job: ${rj.key}`,
+            );
+          }
+        }
+      } catch (cleanupErr) {
+        this.logger.warn(
+          `[${job.id}] Could not remove orphaned repeatable job: ${cleanupErr}`,
+        );
+      }
+      return;
+    }
 
     const execution = await this.prisma.jobExecution.create({
       data: {

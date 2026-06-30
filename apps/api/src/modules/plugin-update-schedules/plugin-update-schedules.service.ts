@@ -102,7 +102,7 @@ export class PluginUpdateSchedulesService {
     );
   }
 
-  private async removeRepeatableJob(scheduleId: number) {
+  async removeRepeatableJob(scheduleId: number) {
     const jobId = this.repeatableJobId(scheduleId);
     const jobs = await this.pluginUpdatesQueue.getRepeatableJobs();
     for (const rj of jobs) {
