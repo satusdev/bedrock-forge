@@ -83,7 +83,9 @@ services:
     # The IMAGE_TAG env var is set by deploy.sh (default: latest).
     image: bedrock-forge/forge:${IMAGE_TAG:-latest}
     restart: unless-stopped
-    stop_grace_period: 30s
+    # stop_grace_period must exceed FORGE_DRAIN_TIMEOUT (default 60 s) so
+    # Docker does not SIGKILL PID 1 before the drain window completes.
+    stop_grace_period: 90s
     env_file: .env
     volumes:
       - forge-backups:/tmp/forge-backups

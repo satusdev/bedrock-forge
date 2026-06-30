@@ -7,6 +7,7 @@
 #   ./deploy.sh --cleanup-only # only run safe Docker disk cleanup on server
 #   ./deploy.sh --build-only   # build images locally without deploying
 #   ./deploy.sh --no-cache     # force a clean Docker build (ignore layer cache)
+#   ./deploy.sh --skip-backup  # skip pre-deploy DB snapshot (use on first install)
 #
 # Deployment config is read from .env.deploy (copy from .env.deploy.example).
 #
@@ -56,12 +57,14 @@ FORCE_INSTALL=false
 CLEANUP_ONLY=false
 BUILD_ONLY=false
 NO_CACHE=""
+SKIP_BACKUP=false
 for arg in "$@"; do
   case "$arg" in
     --install)      FORCE_INSTALL=true ;;
     --cleanup-only) CLEANUP_ONLY=true ;;
     --build-only)   BUILD_ONLY=true ;;
     --no-cache)     NO_CACHE="--no-cache" ;;
+    --skip-backup)  SKIP_BACKUP=true ;;
     *) err "Unknown argument: $arg" ;;
   esac
 done
@@ -368,13 +371,26 @@ else
 
   # Auto backup database before migration
   if docker compose ps postgres 2>/dev/null | grep -q "Up"; then
-    echo ">>> Creating pre-deployment database snapshot..."
-    mkdir -p backups/pre-deploy
-    BACKUP_FILE="backups/pre-deploy/db_pre_deploy_\${IMAGE_TAG}_\$(date +%Y%m%d_%H%M%S).sql"
-    if docker compose exec -T postgres pg_dump -U postgres postgres > "\$BACKUP_FILE" 2>/dev/null; then
-      echo "Pre-deployment database snapshot written to \$BACKUP_FILE"
+    if [[ "${SKIP_BACKUP}" == "true" ]]; then
+      echo ">>> Pre-deployment database snapshot SKIPPED (--skip-backup)."
     else
-      echo "WARNING: Pre-deployment database snapshot failed. Proceeding with deployment..."
+      echo ">>> Creating pre-deployment database snapshot..."
+      mkdir -p backups/pre-deploy
+      BACKUP_FILE="backups/pre-deploy/db_pre_deploy_\${IMAGE_TAG}_\$(date +%Y%m%d_%H%M%S).sql"
+
+      # Read the actual configured user and database — never assume defaults.
+      _PG_USER=\$(grep "^POSTGRES_USER=" .env | cut -d= -f2- | tr -d '"' || echo "forge")
+      _PG_DB=\$(grep  "^POSTGRES_DB="   .env | cut -d= -f2- | tr -d '"' || echo "bedrock_forge")
+
+      if docker compose exec -T postgres pg_dump -U "\${_PG_USER:-forge}" "\${_PG_DB:-bedrock_forge}" > "\$BACKUP_FILE" 2>/dev/null; then
+        echo "Pre-deployment database snapshot written to \$BACKUP_FILE"
+      else
+        # Non-zero exit on backup failure. If you intentionally want to skip the
+        # backup (e.g. first deploy to an empty DB), pass --skip-backup.
+        echo "ERROR: Pre-deployment database snapshot failed. Use --skip-backup to bypass." >&2
+        rm -f "\$BACKUP_FILE"
+        exit 1
+      fi
     fi
   fi
 
