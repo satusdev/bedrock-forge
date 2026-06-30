@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
 
 interface User {
   id: number;
@@ -35,35 +34,19 @@ export function isTokenExpired(token: string | null): boolean {
   return exp * 1000 <= Date.now();
 }
 
-export const useAuthStore = create<AuthState>()(
-  persist(
-    (set) => ({
-      user: null,
-      accessToken: null,
-      setAccessToken: (accessToken) => set({ accessToken }),
-      setUser: (user) => set({ user }),
-      logout: () => {
-        set({ user: null, accessToken: null });
-      },
-    }),
-    {
-      name: "auth-storage",
-      // Only persist the short-lived access token and user profile. Refresh
-      // sessions are restored from an httpOnly cookie, never from JS storage.
-      partialize: (s) => ({
-        accessToken: s.accessToken,
-        user: s.user,
-      }),
-      // On rehydration from localStorage, drop expired access tokens immediately.
-      // Refresh tokens are intentionally memory-only, so an expired persisted
-      // access token cannot be refreshed after a full browser reload.
-      onRehydrateStorage: () => (state) => {
-        if (!state) return;
-        if (isTokenExpired(state.accessToken)) {
-          state.accessToken = null;
-          state.user = null;
-        }
-      },
-    },
-  ),
-);
+// Clean up any legacy persisted tokens from localStorage to be secure.
+try {
+  window.localStorage.removeItem("auth-storage");
+} catch {
+  // Ignored in non-browser environments
+}
+
+export const useAuthStore = create<AuthState>()((set) => ({
+  user: null,
+  accessToken: null,
+  setAccessToken: (accessToken) => set({ accessToken }),
+  setUser: (user) => set({ user }),
+  logout: () => {
+    set({ user: null, accessToken: null });
+  },
+}));
