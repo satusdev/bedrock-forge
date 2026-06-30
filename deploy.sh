@@ -100,7 +100,8 @@ command -v docker >/dev/null 2>&1 || err "docker is not installed locally."
 command -v rsync  >/dev/null 2>&1 || err "rsync is not installed locally."
 command -v ssh    >/dev/null 2>&1 || err "ssh is not installed locally."
 
-SSH_OPTS=(-o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 -o ServerAliveCountMax=6)
+STRICT_HOST_KEY_CHECKING="${STRICT_HOST_KEY_CHECKING:-accept-new}"
+SSH_OPTS=(-o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking="${STRICT_HOST_KEY_CHECKING}" -o ServerAliveInterval=30 -o ServerAliveCountMax=6)
 
 # ── Remote Docker cleanup helper ─────────────────────────────────────────────
 run_remote_cleanup() {
@@ -227,7 +228,7 @@ rsync -az --delete \
   --include='.env.example' \
   --include='entrypoint.sh' \
   --exclude='*' \
-  -e "ssh -o StrictHostKeyChecking=accept-new" \
+  -e "ssh -o StrictHostKeyChecking=${STRICT_HOST_KEY_CHECKING}" \
   ./ "${SERVER_USER}@${SERVER_HOST}:${SERVER_PATH}/"
 ok "Config synced"
 
