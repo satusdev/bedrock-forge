@@ -12,7 +12,7 @@ if (PHP_VERSION_ID < 70000) {
     exit(1);
 }
 
-$opts = getopt('', ['docroot:', 'type:', 'output:', 'restore', 'file:', 'db-name:', 'db-user:', 'db-pass:', 'db-host:', 'site-url:']);
+$opts = getopt('', ['docroot:', 'type:', 'output:', 'restore', 'file:', 'db-name:', 'db-user:', 'db-pass:', 'db-host:', 'site-url:', 'mycnf:']);
 
 $docroot = $opts['docroot'] ?? null;
 $type    = $opts['type'] ?? 'full';
@@ -28,6 +28,17 @@ $cliDbUser = $opts['db-user'] ?? null;
 $cliDbPass = (getenv('FORGE_DB_PASS') !== false ? getenv('FORGE_DB_PASS') : null) ?? ($opts['db-pass'] ?? null);
 $cliDbHost = $opts['db-host'] ?? null;
 $cliSiteUrl = $opts['site-url'] ?? null;
+
+// Parse mycnf override if supplied to avoid command-line argument exposure
+$mycnf = $opts['mycnf'] ?? null;
+if ($mycnf && file_exists($mycnf)) {
+    $ini = parse_ini_file($mycnf, true);
+    $section = isset($ini['client']) ? $ini['client'] : (isset($ini['mysql']) ? $ini['mysql'] : $ini);
+    if (!empty($section['user'])) $cliDbUser = $section['user'];
+    if (!empty($section['password'])) $cliDbPass = $section['password'];
+    if (!empty($section['host'])) $cliDbHost = $section['host'];
+    if (!empty($section['database'])) $cliDbName = $section['database'];
+}
 
 if (!$docroot || !is_dir($docroot)) {
     fwrite(STDERR, "ERROR: Invalid or missing --docroot\n");

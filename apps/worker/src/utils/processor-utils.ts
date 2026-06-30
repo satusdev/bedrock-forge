@@ -1,6 +1,7 @@
 import { RemoteExecutorService } from "@bedrock-forge/remote-executor";
 import { StepTracker } from "../services/step-tracker";
 import { readFile } from "fs/promises";
+import { randomBytes } from "crypto";
 
 /**
  * Wrap a string in single quotes for safe shell embedding.
@@ -263,12 +264,19 @@ export async function buildWpCliPrefix(
  */
 export async function createRemoteMyCnf(
   executor: RemoteExecutorService,
-  creds: { dbUser: string; dbPassword?: string; dbHost: string },
+  creds: { dbUser: string; dbPassword?: string; dbHost: string; dbName?: string },
   jobId: string | number,
   prefix = "forge",
 ): Promise<string> {
-  const remotePath = `/tmp/${prefix}_mycnf_${jobId}_${Date.now()}.cnf`;
-  const content = `[client]\nuser=${creds.dbUser}\npassword=${creds.dbPassword ?? ""}\nhost=${creds.dbHost}\n`;
+  // Housekeeping: clean any orphaned cnf files older than 60 minutes
+  await executor.execute(`find /tmp -name "${prefix}_mycnf_*.cnf" -mmin +60 -delete 2>/dev/null || true`).catch(() => {});
+
+  const rand = randomBytes(16).toString("hex");
+  const remotePath = `/tmp/${prefix}_mycnf_${jobId}_${rand}.cnf`;
+  let content = `[client]\nuser=${creds.dbUser}\npassword=${creds.dbPassword ?? ""}\nhost=${creds.dbHost}\n`;
+  if (creds.dbName) {
+    content += `database=${creds.dbName}\n`;
+  }
   await executor.pushFile({
     remotePath,
     content: Buffer.from(content),

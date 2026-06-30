@@ -208,9 +208,7 @@ export class BackupProcessor extends WorkerHost {
       // Attempt to retrieve stored DB credentials to pass as fallback CLI args.
       // backup.php will prefer on-disk credentials (wp-config.php / .env) and
       // only use these when filesystem parsing is incomplete.
-      // DB password is passed via FORGE_DB_PASS env var (not argv) to prevent
-      // exposure in `ps aux` output on the managed server.
-      let storedCredsEnv = "";
+      let myCnfPath: string | null = null;
       let storedCredsArgs = "";
       try {
         const storedCreds = await this.prisma.wpDbCredentials.findUnique({
@@ -223,13 +221,14 @@ export class BackupProcessor extends WorkerHost {
             storedCreds.db_password_encrypted,
           );
           const dbHost = this.encryption.decrypt(storedCreds.db_host_encrypted);
-          // Pass password via env var — not visible in ps aux argv.
-          storedCredsEnv = `FORGE_DB_PASS=${shellQuote(dbPass)} `;
-          storedCredsArgs = [
-            `--db-name=${shellQuote(dbName)}`,
-            `--db-user=${shellQuote(dbUser)}`,
-            `--db-host=${shellQuote(dbHost)}`,
-          ].join(" ");
+
+          myCnfPath = await createRemoteMyCnf(
+            executor,
+            { dbUser, dbPassword: dbPass, dbHost, dbName },
+            job.id ?? "default",
+            "forge_backup",
+          );
+          storedCredsArgs = ` --mycnf=${shellQuote(myCnfPath)}`;
         }
       } catch (err) {
         this.logger.warn(
@@ -237,35 +236,40 @@ export class BackupProcessor extends WorkerHost {
         );
       }
 
-      const phpCmd = `${storedCredsEnv}php ${remoteScript} --docroot=${env.root_path} --type=${type} --output=${remoteOutput}${storedCredsArgs ? " " + storedCredsArgs : ""}`;
-      // Mask the env var value in logs — never expose credentials in execution log
-      const maskedCmd = phpCmd.replace(
-        /FORGE_DB_PASS='[^']*'/,
-        "FORGE_DB_PASS='***'",
-      );
-      await tracker.track({
-        step: "Executing backup script",
-        level: "info",
-        command: maskedCmd,
-      });
-      const execStart = Date.now();
-      const result = await executor.execute(phpCmd, {
-        timeout: 20 * 60 * 1000,
-      });
-      await tracker.trackCommand(
-        "backup.php execution",
-        maskedCmd,
-        result,
-        Date.now() - execStart,
-      );
-
-      if (result.code !== 0) {
-        throw new Error(
-          `backup.php failed (exit ${result.code}): ${result.stderr}`,
+      try {
+        const phpCmd = `php ${remoteScript} --docroot=${env.root_path} --type=${type} --output=${remoteOutput}${storedCredsArgs}`;
+        const maskedCmd = myCnfPath
+          ? phpCmd.replace(myCnfPath, "/tmp/forge_backup_mycnf_***.cnf")
+          : phpCmd;
+        await tracker.track({
+          step: "Executing backup script",
+          level: "info",
+          command: maskedCmd,
+        });
+        const execStart = Date.now();
+        const result = await executor.execute(phpCmd, {
+          timeout: 20 * 60 * 1000,
+        });
+        await tracker.trackCommand(
+          "backup.php execution",
+          maskedCmd,
+          result,
+          Date.now() - execStart,
         );
+
+        if (result.code !== 0) {
+          throw new Error(
+            `backup.php failed (exit ${result.code}): ${result.stderr}`,
+          );
+        }
+
+        output = JSON.parse(result.stdout) as { size: number; filename: string };
+      } finally {
+        if (myCnfPath) {
+          await cleanupRemoteMyCnf(executor, myCnfPath);
+        }
       }
 
-      output = JSON.parse(result.stdout) as { size: number; filename: string };
       await job.updateProgress({
         value: 30,
         step: "Backup script executed on server",
@@ -483,9 +487,7 @@ export class BackupProcessor extends WorkerHost {
     });
 
     // ── Retrieve stored DB credentials (fallback for backup.php --restore) ──
-    // DB password is passed via FORGE_DB_PASS env var (not argv) to prevent
-    // exposure in `ps aux` output on the managed server.
-    let storedCredsEnv = "";
+    let myCnfPath: string | null = null;
     let storedCredsArgs = "";
     try {
       const storedCreds = await this.prisma.wpDbCredentials.findUnique({
@@ -498,12 +500,14 @@ export class BackupProcessor extends WorkerHost {
           storedCreds.db_password_encrypted,
         );
         const dbHost = this.encryption.decrypt(storedCreds.db_host_encrypted);
-        storedCredsEnv = `FORGE_DB_PASS=${shellQuote(dbPass)} `;
-        storedCredsArgs = [
-          `--db-name=${shellQuote(dbName)}`,
-          `--db-user=${shellQuote(dbUser)}`,
-          `--db-host=${shellQuote(dbHost)}`,
-        ].join(" ");
+
+        myCnfPath = await createRemoteMyCnf(
+          executor,
+          { dbUser, dbPassword: dbPass, dbHost, dbName },
+          job.id ?? "default",
+          "forge_restore",
+        );
+        storedCredsArgs = ` --mycnf=${shellQuote(myCnfPath)}`;
       }
     } catch (err) {
       this.logger.warn(
@@ -644,13 +648,12 @@ export class BackupProcessor extends WorkerHost {
         throw new Error("Cancelled by user");
       }
 
-      const isCrossRestore = backup.environment_id !== BigInt(environmentId);
+       const isCrossRestore = backup.environment_id !== BigInt(environmentId);
       const siteUrlArg = isCrossRestore ? ` --site-url=${shellQuote(env.url)}` : "";
-      const restoreCmd = `${storedCredsEnv}php ${remoteScript} --restore --file=${remoteBackupPath} --docroot=${env.root_path}${storedCredsArgs ? " " + storedCredsArgs : ""}${siteUrlArg}`;
-      const maskedCmd = restoreCmd.replace(
-        /FORGE_DB_PASS='[^']*'/,
-        "FORGE_DB_PASS='***'",
-      );
+      const restoreCmd = `php ${remoteScript} --restore --file=${remoteBackupPath} --docroot=${env.root_path}${storedCredsArgs}${siteUrlArg}`;
+      const maskedCmd = myCnfPath
+        ? restoreCmd.replace(myCnfPath, "/tmp/forge_restore_mycnf_***.cnf")
+        : restoreCmd;
 
       await tracker.track({
         step: "Executing restore script",
@@ -886,7 +889,12 @@ export class BackupProcessor extends WorkerHost {
       await tracker.complete();
       await job.updateProgress({ value: 100, step: "Restore complete" });
     } catch (err) {
-      // Best-effort remote cleanup — do not suppress original error
+      await tracker.fail(err, "Backup restore");
+      throw err;
+    } finally {
+      if (myCnfPath) {
+        await cleanupRemoteMyCnf(executor, myCnfPath).catch(() => {});
+      }
       await executor
         .execute(`rm -f ${remoteScript} ${remoteBackupPath}`)
         .catch((e) =>
@@ -894,8 +902,6 @@ export class BackupProcessor extends WorkerHost {
             `[${job.id}] Remote cleanup on failure failed: ${e}`,
           ),
         );
-      await tracker.fail(err, "Backup restore");
-      throw err;
     }
   }
 
