@@ -23,20 +23,57 @@ export class PrismaService
     super({
       adapter,
       log: [
-        { emit: "event", level: "query" },
         { emit: "stdout", level: "error" },
         { emit: "stdout", level: "warn" },
       ],
     });
+
+    const maxRetries = 3;
+    const transientErrorCodes = ["P1001", "P1017", "P2025"];
+
+    const client = this.$extends({
+      query: {
+        $allOperations({ operation, args, query }) {
+          let delay = 100;
+          const execute = async (attempt: number): Promise<any> => {
+            try {
+              return await query(args);
+            } catch (err: any) {
+              const isTransient =
+                transientErrorCodes.includes(err.code) ||
+                err.message?.includes("ECONNRESET") ||
+                err.message?.includes("ETIMEDOUT") ||
+                err.message?.includes("connection pool") ||
+                err.message?.includes("Pool timeout") ||
+                err.message?.includes("too many connections");
+
+              if (isTransient && attempt < maxRetries) {
+                await new Promise((res) => setTimeout(res, delay));
+                delay *= 2;
+                return execute(attempt + 1);
+              }
+              throw err;
+            }
+          };
+          return execute(1);
+        },
+      },
+    });
+
+    (client as any).onModuleInit = async () => {
+      await (client as any).$connect();
+      this.logger.log("Database connected");
+    };
+
+    (client as any).onModuleDestroy = async () => {
+      await (client as any).$disconnect();
+      this.logger.log("Database disconnected");
+    };
+
+    return client as any;
   }
 
-  async onModuleInit() {
-    await this.$connect();
-    this.logger.log("Database connected");
-  }
-
-  async onModuleDestroy() {
-    await this.$disconnect();
-    this.logger.log("Database disconnected");
-  }
+  // Dummy methods to satisfy TypeScript implements clause
+  async onModuleInit() {}
+  async onModuleDestroy() {}
 }
