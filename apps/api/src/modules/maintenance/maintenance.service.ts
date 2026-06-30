@@ -109,6 +109,10 @@ export class MaintenanceService implements OnApplicationBootstrap {
       this.repo.deleteOldJobExecutions(days90),
       // In-app user notifications — unbounded without a TTL
       this.repo.deleteOldUserNotifications(days90),
+      // Security scans older than 90 days
+      this.repo.deleteOldSecurityScans(days90),
+      // Lighthouse audits older than 90 days
+      this.repo.deleteOldLighthouseAudits(days90),
     ]);
 
     const labels = [
@@ -117,6 +121,8 @@ export class MaintenanceService implements OnApplicationBootstrap {
       "audit logs",
       "job executions",
       "user notifications",
+      "security scans",
+      "lighthouse audits",
     ];
     results.forEach((r, i) => {
       if (r.status === "fulfilled") {

@@ -50,4 +50,22 @@ export class MaintenanceRepository {
       where: { created_at: { lt: cutoff } },
     });
   }
+
+  async deleteOldSecurityScans(cutoff: Date): Promise<{ count: number }> {
+    return this.prisma.securityScan.deleteMany({
+      where: {
+        created_at: { lt: cutoff },
+        status: { in: ["completed", "failed", "pending"] },
+      },
+    });
+  }
+
+  async deleteOldLighthouseAudits(cutoff: Date): Promise<{ count: number }> {
+    return this.prisma.lighthouseAudit.deleteMany({
+      where: {
+        created_at: { lt: cutoff },
+        status: { in: ["completed", "failed", "queued"] },
+      },
+    });
+  }
 }
