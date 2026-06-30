@@ -48,6 +48,14 @@ export class EnvironmentsService {
     return this.repo.existsById(id);
   }
 
+  existsByIdForUser(
+    id: bigint,
+    userId: bigint,
+    roles: string[],
+  ): Promise<boolean> {
+    return this.repo.existsByIdForUser(id, userId, roles);
+  }
+
   findAll() {
     return this.repo.findAll();
   }

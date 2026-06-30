@@ -12,6 +12,7 @@ import { Logger, OnModuleInit, OnModuleDestroy } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import { ConfigService } from "@nestjs/config";
 import { QueueEvents } from "bullmq";
+import { LRUCache } from "lru-cache";
 import { JobExecutionsService } from "../modules/job-executions/job-executions.service";
 import { EnvironmentsService } from "../modules/environments/environments.service";
 import {
@@ -32,13 +33,11 @@ import {
  * BullMQ QueueEvents listeners bridge Worker progress events (Redis) to
  * WebSocket clients — no direct coupling between Worker and API processes.
  */
-@WebSocketGateway({
-  cors: {
-    origin: process.env.CORS_ORIGIN ?? "http://localhost:8080",
-    credentials: true,
-  },
-  namespace: "/ws",
-})
+// CORS for the WebSocket namespace is configured via the custom SocketIoAdapter
+// in main.ts — not here. The @WebSocketGateway decorator is evaluated at module
+// load time before ConfigService is available, so inline cors options would
+// bypass the validated config system and could silently use stale env values.
+@WebSocketGateway({ namespace: "/ws" })
 export class JobsGateway
   implements
     OnGatewayConnection,
@@ -51,7 +50,15 @@ export class JobsGateway
 
   private readonly logger = new Logger(JobsGateway.name);
   private readonly queueEventsInstances: QueueEvents[] = [];
-  private readonly envIdCache = new Map<string, number | undefined>();
+  /**
+   * LRU cache: BullMQ job ID → environment DB ID.
+   * Avoids a DB round-trip on every progress/completed/failed event.
+   * TTL of 2 h covers the longest possible job (backup lockDuration = 90 min).
+   */
+  private readonly envIdCache = new LRUCache<string, number>({
+    max: 2000,
+    ttl: 2 * 60 * 60 * 1000, // 2 hours in ms
+  });
 
   constructor(
     private readonly jwtService: JwtService,
@@ -215,16 +222,11 @@ export class JobsGateway
   }
 
   private async resolveEnvId(bullJobId: string): Promise<number | undefined> {
-    if (this.envIdCache.has(bullJobId)) {
-      return this.envIdCache.get(bullJobId);
+    const cached = this.envIdCache.get(bullJobId);
+    if (cached !== undefined || this.envIdCache.has(bullJobId)) {
+      return cached;
     }
     const envId = await this.jobExecutions.findEnvIdByBullJobId(bullJobId);
-    if (this.envIdCache.size >= 1000) {
-      const firstKey = this.envIdCache.keys().next().value;
-      if (firstKey !== undefined) {
-        this.envIdCache.delete(firstKey);
-      }
-    }
     this.envIdCache.set(bullJobId, envId);
     return envId;
   }
@@ -247,9 +249,21 @@ export class JobsGateway
       });
 
       socket.data.userId = payload.sub;
-      socket.data.roles = payload.roles;
-      socket.join("global:jobs");
-      this.logger.debug(`Client connected: ${socket.id} (user ${payload.sub})`);
+      socket.data.roles = payload.roles ?? [];
+
+      // Only staff roles receive all-jobs broadcast events.
+      // Client-role users subscribe to specific environments only.
+      const isStaff =
+        (socket.data.roles as string[]).some((r) =>
+          ["admin", "manager", "maintainer"].includes(r),
+        );
+      if (isStaff) {
+        socket.join("global:jobs");
+      }
+
+      this.logger.debug(
+        `Client connected: ${socket.id} (user ${payload.sub}, roles: ${(socket.data.roles as string[]).join(",") || "none"})`,
+      );
     } catch (err) {
       this.logger.warn(`Unauthorized WebSocket connection from ${socket.id}`);
       socket.disconnect(true);
@@ -265,8 +279,17 @@ export class JobsGateway
     @MessageBody() data: { environmentId: number },
     @ConnectedSocket() socket: Socket,
   ) {
-    const exists = await this.envService.existsById(BigInt(data.environmentId));
-    if (!exists) return;
+    // Verify that the connecting user is allowed to observe this environment.
+    // Staff roles (admin/manager/maintainer) see all; client role is restricted
+    // to environments belonging to their own client account's projects.
+    const userId = BigInt(socket.data.userId as string | number);
+    const roles = (socket.data.roles ?? []) as string[];
+    const allowed = await this.envService.existsByIdForUser(
+      BigInt(data.environmentId),
+      userId,
+      roles,
+    );
+    if (!allowed) return;
     socket.join(`env:${data.environmentId}`);
   }
 

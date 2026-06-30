@@ -21,6 +21,29 @@ export class EnvironmentsRepository {
       .then((r) => r !== null);
   }
 
+  /**
+   * Check whether an environment is visible to a specific user.
+   *
+   * Staff roles (admin, manager, maintainer) can see environments.
+   * Client-role users cannot access environments, projects, or servers.
+   */
+  async existsByIdForUser(
+    envId: bigint,
+    userId: bigint,
+    roles: string[],
+  ): Promise<boolean> {
+    const isStaff =
+      roles.includes("admin") ||
+      roles.includes("manager") ||
+      roles.includes("maintainer");
+
+    if (!isStaff) {
+      return false;
+    }
+
+    return this.existsById(envId);
+  }
+
   findAll() {
     return this.prisma.environment.findMany({
       include: {
