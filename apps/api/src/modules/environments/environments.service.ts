@@ -80,6 +80,17 @@ export class EnvironmentsService {
   }
 
   async create(projectId: number, dto: CreateEnvironmentDto) {
+    const project = await this.repo.findProjectWithHostingPackage(BigInt(projectId));
+    if (project && project.hosting_package) {
+      const maxSites = project.hosting_package.max_sites;
+      const currentEnvsCount = await this.repo.countEnvironmentsForProject(BigInt(projectId));
+      if (currentEnvsCount >= maxSites) {
+        throw new BadRequestException(
+          `Environment quota reached. Your hosting package allows a maximum of ${maxSites} sites/environments for this project.`,
+        );
+      }
+    }
+
     const env = await this.repo.create(BigInt(projectId), dto);
     // Store DB credentials extracted during server scan (if provided)
     if (dto.db_credentials) {

@@ -216,4 +216,17 @@ export class EnvironmentsRepository {
       include: { tag: true },
     });
   }
+
+  async findProjectWithHostingPackage(projectId: bigint) {
+    return this.prisma.project.findUnique({
+      where: { id: projectId },
+      include: { hosting_package: true },
+    });
+  }
+
+  async countEnvironmentsForProject(projectId: bigint): Promise<number> {
+    return this.prisma.environment.count({
+      where: { project_id: projectId },
+    });
+  }
 }

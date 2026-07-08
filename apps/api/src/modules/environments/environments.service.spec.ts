@@ -27,6 +27,8 @@ function makeRepo() {
     delete: jest.fn(),
     getDbCredentials: jest.fn(),
     upsertDbCredentials: jest.fn(),
+    findProjectWithHostingPackage: jest.fn().mockResolvedValue(null),
+    countEnvironmentsForProject: jest.fn().mockResolvedValue(0),
   };
 }
 
@@ -195,6 +197,33 @@ describe("EnvironmentsService", () => {
       await svc.create(10, baseDto);
 
       expect(repo.upsertDbCredentials).not.toHaveBeenCalled();
+    });
+
+    it("enforces hosting package limit by throwing BadRequestException if max_sites limit is reached", async () => {
+      repo.findProjectWithHostingPackage.mockResolvedValue({
+        id: BigInt(10),
+        hosting_package: { max_sites: 2 },
+      });
+      repo.countEnvironmentsForProject.mockResolvedValue(2);
+
+      await expect(svc.create(10, baseDto)).rejects.toThrow(
+        "Environment quota reached. Your hosting package allows a maximum of 2 sites/environments for this project."
+      );
+      expect(repo.create).not.toHaveBeenCalled();
+    });
+
+    it("allows environment creation if max_sites limit is not reached", async () => {
+      const env = makeEnv({ id: BigInt(7) });
+      repo.create.mockResolvedValue(env);
+      repo.findProjectWithHostingPackage.mockResolvedValue({
+        id: BigInt(10),
+        hosting_package: { max_sites: 2 },
+      });
+      repo.countEnvironmentsForProject.mockResolvedValue(1);
+
+      const result = await svc.create(10, baseDto);
+      expect(result).toBe(env);
+      expect(repo.create).toHaveBeenCalled();
     });
   });
 
