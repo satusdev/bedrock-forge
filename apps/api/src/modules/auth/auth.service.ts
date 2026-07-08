@@ -221,10 +221,27 @@ export class AuthService {
     await this.repo.updateLastTotpStep(BigInt(userId), BigInt(matchedStep));
   }
 
-  async disableMfa(userId: number): Promise<void> {
+  async disableMfa(userId: number, code: string): Promise<void> {
     const user = await this.repo.findUserById(userId);
     if (!user) throw new NotFoundException("User not found");
+    if (!user.mfa_enabled) {
+      throw new BadRequestException("MFA is not currently enabled");
+    }
+    if (!user.totp_secret_encrypted) {
+      throw new BadRequestException("MFA configuration error: no secret found");
+    }
+    const secret = this.encryption.decrypt(user.totp_secret_encrypted);
+    const matchedStep = this.verifyTOTP(secret, code);
+    if (matchedStep === null) {
+      throw new UnauthorizedException("Invalid MFA code — please provide your current authenticator code to disable MFA");
+    }
+    // Prevent replay of the same TOTP window used to disable MFA
+    if (user.last_totp_step !== null && BigInt(matchedStep) <= user.last_totp_step) {
+      throw new UnauthorizedException("MFA code has already been used");
+    }
     await this.repo.updateMfa(BigInt(userId), false, null);
+    // Revoke all sessions so other devices must re-authenticate without MFA
+    await this.repo.revokeAllUserRefreshTokens(BigInt(userId));
   }
 
   refreshExpiresMs(): number {

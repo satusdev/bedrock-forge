@@ -1,14 +1,17 @@
 import { Controller, Get, Query, UseGuards } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { RolesGuard } from "../../common/guards/roles.guard";
+import { Roles } from "../../common/decorators/roles.decorator";
 import {
   AuthenticatedUser,
   CurrentUser,
 } from "../../common/decorators/current-user.decorator";
+import { ROLES } from "@bedrock-forge/shared";
 import { SearchService } from "./search.service";
 
 @Controller("search")
 @UseGuards(AuthGuard("jwt"), RolesGuard)
+@Roles(ROLES.CLIENT)
 export class SearchController {
   constructor(private readonly svc: SearchService) {}
 

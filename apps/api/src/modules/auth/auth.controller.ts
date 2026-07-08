@@ -157,8 +157,12 @@ export class AuthController {
   @Post("mfa/disable")
   @UseGuards(AuthGuard("jwt"))
   @HttpCode(HttpStatus.NO_CONTENT)
-  async disableMfa(@CurrentUser() user: AuthenticatedUser) {
-    await this.authService.disableMfa(user.id);
+  async disableMfa(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body("code") code: string,
+  ) {
+    if (!code) throw new BadRequestException("MFA code is required to disable 2FA");
+    await this.authService.disableMfa(user.id, code);
   }
 
   private setRefreshCookie(res: ExpressResponse, refreshToken: string): void {

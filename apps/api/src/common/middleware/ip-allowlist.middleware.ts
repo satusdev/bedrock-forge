@@ -4,7 +4,18 @@ import * as ipaddr from "ipaddr.js";
 import { JwtService } from "@nestjs/jwt";
 import { SettingsRepository } from "../../modules/settings/settings.repository";
 
-// Docker/localhost CIDRs that are always allowed regardless of user config
+// CIDRs that are always allowed, regardless of the user-configured allowlist.
+// These cover Docker bridge/overlay networks and localhost so the application
+// can operate in a containerised environment without requiring the allowlist
+// to be pre-configured.
+//
+// ⚠️  CLOUD DEPLOYMENT WARNING: 10.0.0.0/8 covers the entire class-A private
+// range. In cloud environments (AWS/GCP/Azure), all VMs on the same VPC share
+// this subnet. If a managed customer server is compromised, it can reach the
+// API from 10.x.x.x and bypass the allowlist entirely.
+// For cloud deployments, restrict this to your specific management CIDR in the
+// Settings → Security page after first login, and consult the
+// docs/guides/IP_ALLOWLIST.md guide.
 const ALWAYS_ALLOWED_CIDRS = [
   "127.0.0.0/8",
   "::1/128",
@@ -30,7 +41,37 @@ export class IpAllowlistMiddleware implements NestMiddleware {
   ) {}
 
   async use(req: Request, res: Response, next: NextFunction) {
-    // Check if request is authenticated with a valid JWT token
+    let userCidrs: string[];
+    try {
+      userCidrs = await this.getUserCidrs();
+    } catch (err) {
+      this.logger.error(
+        `IP allowlist check failed — fail closed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      const remoteIp = this.extractIp(req);
+      if (remoteIp && this.isAllowed(remoteIp, ALWAYS_ALLOWED_CIDRS)) {
+        return next();
+      }
+      return this.deny(res, "Access denied: Security verification database is offline");
+    }
+
+    // Empty allowlist = feature disabled, allow all
+    if (userCidrs.length > 0) {
+      const remoteIp = this.extractIp(req);
+      if (!remoteIp) {
+        this.logger.warn("Could not determine remote IP, blocking request");
+        return this.deny(res, "Could not determine client IP");
+      }
+      if (!this.isAllowed(remoteIp, [...ALWAYS_ALLOWED_CIDRS, ...userCidrs])) {
+        this.logger.warn(`IP allowlist: blocked ${remoteIp}`);
+        return this.deny(res, "Access denied by IP allowlist");
+      }
+    }
+
+    // IP is allowed (or allowlist is disabled). Now allow authenticated sessions
+    // to bypass any remaining checks — the token is only verified here so that
+    // expired tokens return 401 (triggering a client refresh) rather than being
+    // silently permitted or blocked without context.
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith("Bearer ")) {
       const token = authHeader.substring(7);
@@ -47,35 +88,7 @@ export class IpAllowlistMiddleware implements NestMiddleware {
       }
     }
 
-    let userCidrs: string[];
-    try {
-      userCidrs = await this.getUserCidrs();
-    } catch (err) {
-      this.logger.error(
-        `IP allowlist check failed — fail closed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      const remoteIp = this.extractIp(req);
-      if (remoteIp && this.isAllowed(remoteIp, ALWAYS_ALLOWED_CIDRS)) {
-        return next();
-      }
-      return this.deny(res, "Access denied: Security verification database is offline");
-    }
-
-    // Empty allowlist = feature disabled, allow all
-    if (userCidrs.length === 0) return next();
-
-    const remoteIp = this.extractIp(req);
-    if (!remoteIp) {
-      this.logger.warn("Could not determine remote IP, blocking request");
-      return this.deny(res, "Could not determine client IP");
-    }
-
-    if (this.isAllowed(remoteIp, [...ALWAYS_ALLOWED_CIDRS, ...userCidrs])) {
-      return next();
-    }
-
-    this.logger.warn(`IP allowlist: blocked ${remoteIp}`);
-    return this.deny(res, "Access denied by IP allowlist");
+    return next();
   }
 
   private async getUserCidrs(): Promise<string[]> {

@@ -56,6 +56,13 @@ export class RemoteOpsRepository {
     return this.prisma.resourceNote.create({ data });
   }
 
+  async findNoteById(noteId: number) {
+    return this.prisma.resourceNote.findUnique({
+      where: { id: BigInt(noteId) },
+      select: { id: true, created_by_id: true },
+    });
+  }
+
   async updateNote(
     noteId: number,
     data: {

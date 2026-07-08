@@ -52,8 +52,9 @@ export class RemoteOpsController {
   updateEnvFile(
     @Param("id", ParseIntPipe) id: number,
     @Body() dto: WriteEnvFileDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.svc.writeEnvFile(id, dto);
+    return this.svc.writeEnvFile(id, dto, user?.id);
   }
 
   @Get("projects/:id/env-file/compare")
@@ -129,14 +130,18 @@ export class RemoteOpsController {
   updateNote(
     @Param("id", ParseIntPipe) id: number,
     @Body() dto: UpdateResourceNoteDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.svc.updateNote(id, dto);
+    return this.svc.updateNote(id, dto, user?.id, user?.roles);
   }
 
   @Delete("resource-notes/:id")
   @HttpCode(HttpStatus.NO_CONTENT)
-  async deleteNote(@Param("id", ParseIntPipe) id: number) {
-    await this.svc.deleteNote(id);
+  async deleteNote(
+    @Param("id", ParseIntPipe) id: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.svc.deleteNote(id, user?.id, user?.roles);
   }
 
   @Get("env-variable-templates")

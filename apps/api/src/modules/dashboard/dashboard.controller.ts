@@ -1,9 +1,13 @@
 import { Controller, Get, UseGuards } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
+import { RolesGuard } from "../../common/guards/roles.guard";
+import { Roles } from "../../common/decorators/roles.decorator";
+import { ROLES } from "@bedrock-forge/shared";
 import { DashboardService } from "./dashboard.service";
 
 @Controller("dashboard")
-@UseGuards(AuthGuard("jwt"))
+@UseGuards(AuthGuard("jwt"), RolesGuard)
+@Roles(ROLES.CLIENT)
 export class DashboardController {
   constructor(private readonly svc: DashboardService) {}
 

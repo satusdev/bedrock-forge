@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
@@ -71,7 +72,11 @@ export class RemoteOpsService {
     };
   }
 
-  async writeEnvFile(envId: number, dto: WriteEnvFileDto) {
+  async writeEnvFile(
+    envId: number,
+    dto: WriteEnvFileDto,
+    userId?: number,
+  ) {
     const env = await this.requireEnvironment(envId);
     this.assertConfirmation(dto.confirmation, env.type);
     const current = await this.readSafeTextFile(envId, ".env", MAX_EDIT_BYTES);
@@ -89,12 +94,23 @@ export class RemoteOpsService {
         missing_required: validation.missing_required,
       });
     }
-    return this.writeSafeTextFile(envId, {
+    const result = await this.writeSafeTextFile(envId, {
       path: ".env",
       content: mergedContent,
       checksum: dto.checksum,
       confirmation: dto.confirmation,
     });
+    // Specific audit event for .env writes (more granular than the generic
+    // AuditInterceptor environment.update that fires on every PUT)
+    const changedKeys = detectChangedEnvKeys(current.content, mergedContent);
+    await this.repo.createAuditLog({
+      user_id: userId ? BigInt(userId) : undefined,
+      action: "env_file.write",
+      resource_type: "environment",
+      resource_id: BigInt(envId),
+      metadata: { changed_keys: changedKeys, path: ".env" },
+    });
+    return result;
   }
 
   async compareEnvFiles(
@@ -261,14 +277,21 @@ export class RemoteOpsService {
     });
   }
 
-  async updateNote(noteId: number, dto: UpdateResourceNoteDto) {
+  async updateNote(
+    noteId: number,
+    dto: UpdateResourceNoteDto,
+    userId?: number,
+    roles?: string[],
+  ) {
+    await this.assertNoteOwnership(noteId, userId, roles);
     return this.repo.updateNote(noteId, {
       ...(dto.body !== undefined ? { body: dto.body.trim() } : {}),
       ...(dto.pinned !== undefined ? { pinned: dto.pinned } : {}),
     });
   }
 
-  async deleteNote(noteId: number) {
+  async deleteNote(noteId: number, userId?: number, roles?: string[]) {
+    await this.assertNoteOwnership(noteId, userId, roles);
     await this.repo.deleteNote(noteId);
     return { success: true };
   }
@@ -479,6 +502,25 @@ export class RemoteOpsService {
       throw new NotFoundException(`${resourceType} ${resourceId} not found`);
     }
   }
+
+  /**
+   * Owners (created_by_id) and ADMINs may mutate notes.
+   * Any other authenticated MANAGER is forbidden.
+   */
+  private async assertNoteOwnership(
+    noteId: number,
+    userId?: number,
+    roles?: string[],
+  ) {
+    const note = await this.repo.findNoteById(noteId);
+    if (!note) throw new NotFoundException(`Note ${noteId} not found`);
+    const isAdmin = roles?.includes("ADMIN") ?? false;
+    if (isAdmin) return; // admins can manage all notes
+    if (!userId) throw new ForbiddenException("Authentication required");
+    if (note.created_by_id === null || Number(note.created_by_id) !== userId) {
+      throw new ForbiddenException("You do not have permission to modify this note");
+    }
+  }
 }
 
 function parseEnv(content: string): EnvPair[] {
@@ -554,4 +596,21 @@ function checksum(content: string): string {
 
 function q(value: string): string {
   return "'" + value.replace(/'/g, "'\\''") + "'";
+}
+
+/**
+ * Returns the list of .env variable keys whose values changed between two
+ * content strings. Values are never logged — only key names are reported.
+ */
+function detectChangedEnvKeys(before: string, after: string): string[] {
+  const beforeMap = new Map(parseEnv(before).map((p) => [p.key, p.value]));
+  const afterMap = new Map(parseEnv(after).map((p) => [p.key, p.value]));
+  const changed: string[] = [];
+  for (const [key, value] of afterMap) {
+    if (beforeMap.get(key) !== value) changed.push(key);
+  }
+  for (const key of beforeMap.keys()) {
+    if (!afterMap.has(key)) changed.push(key);
+  }
+  return [...new Set(changed)].sort();
 }
