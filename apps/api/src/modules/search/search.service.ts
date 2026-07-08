@@ -154,7 +154,7 @@ export class SearchService {
     results.push(...this.searchPages(q, roles));
 
     if (canSee(roles, "manager")) {
-      const [projects, environments, servers, domains, monitors, jobs] =
+      const [projects, environments, servers, domains, monitors, jobs, clients] =
         await Promise.all([
           this.searchProjects(q, take),
           this.searchEnvironments(q, take),
@@ -162,6 +162,7 @@ export class SearchService {
           this.searchDomains(q, take),
           this.searchMonitors(q, take),
           this.searchJobs(q, take),
+          this.searchClients(q, take),
         ]);
       const findings = await this.searchFindings(q, take);
 
@@ -173,9 +174,8 @@ export class SearchService {
       results.push(...monitors);
       results.push(...jobs);
       results.push(...findings);
+      results.push(...clients);
     }
-
-    results.push(...(await this.searchClients(q, take)));
 
     return {
       items: results.slice(0, Math.max(take * 6, take)),

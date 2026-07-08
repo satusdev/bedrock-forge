@@ -22,6 +22,7 @@ import { CreateClientDto, UpdateClientDto } from "./dto/client.dto";
 
 @Controller("clients")
 @UseGuards(AuthGuard("jwt"), RolesGuard)
+@Roles(ROLES.MANAGER)
 export class ClientsController {
   constructor(private readonly svc: ClientsService) {}
 

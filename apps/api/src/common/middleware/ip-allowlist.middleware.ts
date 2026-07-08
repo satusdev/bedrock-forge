@@ -51,11 +51,14 @@ export class IpAllowlistMiddleware implements NestMiddleware {
     try {
       userCidrs = await this.getUserCidrs();
     } catch (err) {
-      // If we can't read settings, fail open (don't block legitimate traffic)
       this.logger.error(
-        `IP allowlist check failed — fail open: ${err instanceof Error ? err.message : String(err)}`,
+        `IP allowlist check failed — fail closed: ${err instanceof Error ? err.message : String(err)}`,
       );
-      return next();
+      const remoteIp = this.extractIp(req);
+      if (remoteIp && this.isAllowed(remoteIp, ALWAYS_ALLOWED_CIDRS)) {
+        return next();
+      }
+      return this.deny(res, "Access denied: Security verification database is offline");
     }
 
     // Empty allowlist = feature disabled, allow all
@@ -88,11 +91,11 @@ export class IpAllowlistMiddleware implements NestMiddleware {
       .then((setting) =>
         setting ? (JSON.parse(setting.value) as string[]) : [],
       )
-      .catch(() => {
+      .catch((err) => {
         // On error, expire the cache immediately so the next request retries.
         this.cacheExpiresAt = 0;
         this.cachePromise = null;
-        return [];
+        throw err;
       });
     return this.cachePromise;
   }
