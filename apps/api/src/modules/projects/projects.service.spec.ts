@@ -24,7 +24,30 @@ function makeRepo() {
 }
 
 function makePrisma() {
-  return {};
+  return {
+    backupSchedule: {
+      findMany: jest.fn().mockResolvedValue([]),
+      updateMany: jest.fn().mockResolvedValue({}),
+    },
+    pluginUpdateSchedule: {
+      findMany: jest.fn().mockResolvedValue([]),
+      updateMany: jest.fn().mockResolvedValue({}),
+    },
+    monitor: {
+      findMany: jest.fn().mockResolvedValue([]),
+      updateMany: jest.fn().mockResolvedValue({}),
+    },
+    cleanupSchedule: {
+      updateMany: jest.fn().mockResolvedValue({}),
+    },
+    securityScanSchedule: {
+      updateMany: jest.fn().mockResolvedValue({}),
+    },
+    jobExecution: {
+      create: jest.fn().mockResolvedValue({ id: BigInt(99) }),
+    },
+    $transaction: jest.fn().mockImplementation((promises) => Promise.all(promises)),
+  };
 }
 
 function makeQueue() {
@@ -77,6 +100,8 @@ describe("ProjectsService", () => {
   let pluginUpdateSchedulesService: ReturnType<typeof makePluginUpdateSchedulesService>;
   let queue: ReturnType<typeof makeQueue>;
 
+  let prisma: ReturnType<typeof makePrisma>;
+
   beforeEach(async () => {
     repo = makeRepo();
     domainsService = makeDomainsService();
@@ -84,12 +109,13 @@ describe("ProjectsService", () => {
     backupSchedulesService = makeBackupSchedulesService();
     pluginUpdateSchedulesService = makePluginUpdateSchedulesService();
     queue = makeQueue();
+    prisma = makePrisma();
 
     const module = await Test.createTestingModule({
       providers: [
         ProjectsService,
         { provide: ProjectsRepository, useValue: repo },
-        { provide: PrismaService, useValue: makePrisma() },
+        { provide: PrismaService, useValue: prisma },
         { provide: getQueueToken(QUEUES.PROJECTS), useValue: queue },
         { provide: DomainsService, useValue: domainsService },
         { provide: MonitorsService, useValue: monitorsService },
@@ -276,6 +302,46 @@ describe("ProjectsService", () => {
           ],
         } as any),
       ).resolves.toBeDefined();
+    });
+  });
+
+  // ── remove ──────────────────────────────────────────────────────────────
+  describe("remove", () => {
+    it("deletes project directly from repository when it has no environments", async () => {
+      const project = { ...makeProject(), environments: [] };
+      repo.findById.mockResolvedValue(project);
+      repo.remove.mockResolvedValue(project);
+
+      await svc.remove(1);
+
+      expect(repo.findById).toHaveBeenCalledWith(BigInt(1));
+      expect(repo.remove).toHaveBeenCalledWith(BigInt(1));
+      expect(queue.add).not.toHaveBeenCalled();
+    });
+
+    it("queues a decommissioning job when it has environments", async () => {
+      const env = { ...makeEnvironment(), server: { id: BigInt(5), name: "Server 1", ip_address: "1.1.1.1", status: "active" } };
+      const project = { ...makeProject(), environments: [env] };
+      repo.findById.mockResolvedValue(project);
+      repo.update.mockResolvedValue(project);
+
+      const result = await svc.remove(1) as any;
+
+      expect(repo.findById).toHaveBeenCalledWith(BigInt(1));
+      expect(repo.update).toHaveBeenCalledWith(BigInt(1), { status: "archived" });
+      expect(queue.add).toHaveBeenCalledWith(
+        "project:archive",
+        expect.objectContaining({
+          projectId: 1,
+          createBackup: false,
+          deleteFromCyberpanel: true,
+          deleteProject: true,
+          jobExecutionId: 99,
+        }),
+        expect.any(Object),
+      );
+      expect(result).toHaveProperty("message");
+      expect(result.message).toContain("Decommissioning job queued");
     });
   });
 });

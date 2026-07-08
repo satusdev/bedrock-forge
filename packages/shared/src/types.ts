@@ -192,6 +192,7 @@ export const ProjectArchivePayloadSchema = z.object({
   jobExecutionId: z.number().int().positive(),
   createBackup: z.boolean().default(true),
   deleteFromCyberpanel: z.boolean().default(true),
+  deleteProject: z.boolean().default(false).optional(),
 });
 export type ProjectArchivePayload = z.infer<typeof ProjectArchivePayloadSchema>;
 

@@ -618,7 +618,7 @@ export class CreateBedrockProcessor extends WorkerHost {
 
   private async handleProjectArchive(job: Job) {
     const data = ProjectArchivePayloadSchema.parse(job.data);
-    const { projectId, jobExecutionId, createBackup, deleteFromCyberpanel } = data;
+    const { projectId, jobExecutionId, createBackup, deleteFromCyberpanel, deleteProject } = data;
 
     await this.prisma.jobExecution.update({
       where: { id: BigInt(jobExecutionId) },
@@ -794,6 +794,13 @@ export class CreateBedrockProcessor extends WorkerHost {
           progress: 100,
         },
       });
+
+      if (deleteProject) {
+        this.logger.log(`ProjectArchive job: Purging project ${projectId} from DB`);
+        await this.prisma.project.delete({
+          where: { id: BigInt(projectId) },
+        });
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.error(`ProjectArchive job failed: ${msg}`);

@@ -79,8 +79,94 @@ export class ProjectsService {
   }
 
   async remove(id: number) {
-    await this.findOne(id);
-    return this.repo.remove(BigInt(id));
+    const project = await this.findOne(id);
+    const envs = project.environments ?? [];
+    if (envs.length > 0) {
+      // 1. Update project status to archived/inactive to show it is decommissioned/deleting
+      await this.repo.update(BigInt(id), { status: "archived" });
+
+      // 2. Disable monitors and cron schedules for all environments in this project
+      const envIds = envs.map((e) => e.id);
+      const backupSchedules = await this.prisma.backupSchedule.findMany({
+        where: { environment_id: { in: envIds } },
+      });
+      const pluginUpdateSchedules = await this.prisma.pluginUpdateSchedule.findMany({
+        where: { environment_id: { in: envIds } },
+      });
+
+      await this.prisma.$transaction([
+        this.prisma.monitor.updateMany({
+          where: { environment_id: { in: envIds } },
+          data: { enabled: false },
+        }),
+        this.prisma.backupSchedule.updateMany({
+          where: { environment_id: { in: envIds } },
+          data: { enabled: false },
+        }),
+        this.prisma.pluginUpdateSchedule.updateMany({
+          where: { environment_id: { in: envIds } },
+          data: { enabled: false },
+        }),
+        this.prisma.cleanupSchedule.updateMany({
+          where: { environment_id: { in: envIds } },
+          data: { enabled: false },
+        }),
+        this.prisma.securityScanSchedule.updateMany({
+          where: { environment_id: { in: envIds } },
+          data: { enabled: false },
+        }),
+      ]);
+
+      // Unregister repeatable jobs from BullMQ
+      const monitors = await this.prisma.monitor.findMany({
+        where: { environment_id: { in: envIds } },
+      });
+      for (const monitor of monitors) {
+        await this.monitorsService.unregisterRepeatable(monitor);
+      }
+      for (const bs of backupSchedules) {
+        await this.backupSchedulesService.removeRepeatableJob(Number(bs.id));
+      }
+      for (const pus of pluginUpdateSchedules) {
+        await this.pluginUpdateSchedulesService.removeRepeatableJob(Number(pus.id));
+      }
+
+      // 3. Create job execution for tracking decommissioning
+      const firstEnv = envs[0];
+      const jobExecution = await this.prisma.jobExecution.create({
+        data: {
+          queue_name: QUEUES.PROJECTS,
+          bull_job_id: "0",
+          job_type: JOB_TYPES.PROJECT_ARCHIVE,
+          environment_id: firstEnv ? firstEnv.id : undefined,
+          server_id: firstEnv ? firstEnv.server.id : undefined,
+          status: "queued",
+          payload: {
+            projectId: id,
+            createBackup: false,
+            deleteFromCyberpanel: true,
+            deleteProject: true,
+          },
+        },
+      });
+
+      // 4. Enqueue the BullMQ job
+      await this.projectsQueue.add(
+        JOB_TYPES.PROJECT_ARCHIVE,
+        {
+          projectId: id,
+          jobExecutionId: Number(jobExecution.id),
+          createBackup: false,
+          deleteFromCyberpanel: true,
+          deleteProject: true,
+        },
+        DEFAULT_JOB_OPTIONS,
+      );
+
+      return { message: "Decommissioning job queued. The project will be fully deleted once remote server resources are cleaned up." };
+    } else {
+      return this.repo.remove(BigInt(id));
+    }
   }
 
   /**
