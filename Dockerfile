@@ -112,6 +112,9 @@ RUN chmod +x entrypoint.sh
 
 EXPOSE 3000
 
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=10s \
+  CMD node -e "const http=require('http'); const checks=['http://localhost:3000/health','http://localhost:3001/health']; Promise.all(checks.map(url=>new Promise((resolve,reject)=>{ const req=http.get(url,res=>{ res.resume(); res.statusCode>=200&&res.statusCode<300 ? resolve() : reject(new Error(url+' -> '+res.statusCode)); }); req.setTimeout(3000,()=>{req.destroy(new Error(url+' timeout'));}); req.on('error',reject); }))).then(()=>process.exit(0),err=>{ console.error(err.message); process.exit(1); });"
+
 CMD ["./entrypoint.sh"]
 
 # ─── Stage 4: web (nginx serving React SPA) ──────────────────────────────────
@@ -127,5 +130,8 @@ COPY --chown=nginx:nginx --from=builder /app/apps/web/dist /usr/share/nginx/html
 COPY --chown=nginx:nginx nginx/default.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD wget -qO /dev/null http://localhost:8080/ || exit 1
 
 CMD ["nginx", "-g", "daemon off;"]
