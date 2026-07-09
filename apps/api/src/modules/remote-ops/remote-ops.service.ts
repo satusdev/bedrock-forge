@@ -514,7 +514,8 @@ export class RemoteOpsService {
   ) {
     const note = await this.repo.findNoteById(noteId);
     if (!note) throw new NotFoundException(`Note ${noteId} not found`);
-    const isAdmin = roles?.includes("ADMIN") ?? false;
+    const isAdmin =
+      roles?.includes("admin") || roles?.includes("ADMIN") || false;
     if (isAdmin) return; // admins can manage all notes
     if (!userId) throw new ForbiddenException("Authentication required");
     if (note.created_by_id === null || Number(note.created_by_id) !== userId) {

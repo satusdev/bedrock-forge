@@ -20,6 +20,7 @@ function makeRepo() {
     findJobExecutionById: jest.fn(),
     updateJobExecution: jest.fn(),
     findJobExecutionLog: jest.fn(),
+    hasActiveJob: jest.fn(),
   };
 }
 
@@ -51,11 +52,12 @@ function makeBackup(
 }
 
 function makeEnv(
-  overrides: Partial<{ google_drive_folder_id: string | null }> = {},
+  overrides: Partial<{ id: bigint; google_drive_folder_id: string | null; project_id: bigint }> = {},
 ) {
   return {
     id: BigInt(1),
     google_drive_folder_id: "gdrive-folder-abc",
+    project_id: BigInt(1),
     ...overrides,
   };
 }
@@ -69,6 +71,7 @@ describe("BackupsService", () => {
 
   beforeEach(async () => {
     repo = makeRepo();
+    repo.hasActiveJob.mockResolvedValue(false);
     queue = makeQueue();
 
     const module = await Test.createTestingModule({
@@ -120,6 +123,15 @@ describe("BackupsService", () => {
       expect(repo.createJobExecutionAndBackup).not.toHaveBeenCalled();
     });
 
+    it("throws BadRequestException when there is already an active job for the environment", async () => {
+      repo.findEnvironment.mockResolvedValue(makeEnv());
+      repo.hasActiveJob.mockResolvedValue(true);
+      await expect(
+        svc.enqueueCreate({ environmentId: 1, type: "full" }),
+      ).rejects.toThrow(BadRequestException);
+      expect(repo.createJobExecutionAndBackup).not.toHaveBeenCalled();
+    });
+
     it("creates job execution, backup row, and enqueues job on success", async () => {
       repo.findEnvironment.mockResolvedValue(makeEnv());
       repo.createJobExecutionAndBackup.mockResolvedValue({
@@ -165,6 +177,42 @@ describe("BackupsService", () => {
       repo.findById.mockResolvedValue(null);
       await expect(svc.enqueueRestore({ backupId: 777 })).rejects.toThrow(
         NotFoundException,
+      );
+      expect(queue.add).not.toHaveBeenCalled();
+    });
+
+    it("throws NotFoundException when target environment does not exist", async () => {
+      const backup = makeBackup({ id: BigInt(10), environment_id: BigInt(3) });
+      repo.findById.mockResolvedValue(backup);
+      repo.findEnvironment.mockResolvedValue(null); // targetEnv not found
+      await expect(
+        svc.enqueueRestore({ backupId: 10, targetEnvironmentId: 99 }),
+      ).rejects.toThrow(NotFoundException);
+      expect(queue.add).not.toHaveBeenCalled();
+    });
+
+    it("throws BadRequestException when target environment belongs to a different project", async () => {
+      const backup = makeBackup({ id: BigInt(10), environment_id: BigInt(3) });
+      repo.findById.mockResolvedValue(backup);
+      // Mock findEnvironment for target environment (returns project_id 2)
+      // and mock findEnvironment for backup environment (returns project_id 1)
+      repo.findEnvironment
+        .mockResolvedValueOnce(makeEnv({ id: BigInt(99), project_id: BigInt(2) }))
+        .mockResolvedValueOnce(makeEnv({ id: BigInt(3), project_id: BigInt(1) }));
+
+      await expect(
+        svc.enqueueRestore({ backupId: 10, targetEnvironmentId: 99 }),
+      ).rejects.toThrow(BadRequestException);
+      expect(queue.add).not.toHaveBeenCalled();
+    });
+
+    it("throws BadRequestException when target environment has an active job", async () => {
+      const backup = makeBackup({ id: BigInt(10), environment_id: BigInt(3) });
+      repo.findById.mockResolvedValue(backup);
+      repo.hasActiveJob.mockResolvedValue(true);
+
+      await expect(svc.enqueueRestore({ backupId: 10 })).rejects.toThrow(
+        BadRequestException,
       );
       expect(queue.add).not.toHaveBeenCalled();
     });

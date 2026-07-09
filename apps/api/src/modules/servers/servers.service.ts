@@ -49,7 +49,14 @@ export class ServersService {
   }
 
   async remove(id: number) {
-    await this.findOne(id);
+    const server = await this.findOne(id);
+    const count = await this.repo.countEnvironments(BigInt(id));
+    if (count > 0) {
+      throw new BadRequestException(
+        `Cannot delete server "${server.name}" because it is linked to ${count} active environment(s). ` +
+          "Decommission or delete the associated projects/environments first.",
+      );
+    }
     return this.repo.delete(BigInt(id));
   }
 

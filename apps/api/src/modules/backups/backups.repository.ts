@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
+import { QUEUES } from "@bedrock-forge/shared";
 
 export interface CreateBackupData {
   environment_id: bigint;
@@ -149,7 +150,20 @@ export class BackupsRepository {
   findEnvironment(envId: bigint) {
     return this.prisma.environment.findUnique({
       where: { id: envId },
-      select: { id: true, google_drive_folder_id: true },
+      select: { id: true, google_drive_folder_id: true, project_id: true },
     });
+  }
+
+  hasActiveJob(envId: bigint): Promise<boolean> {
+    return this.prisma.jobExecution
+      .findFirst({
+        where: {
+          environment_id: envId,
+          queue_name: QUEUES.BACKUPS,
+          status: { in: ["queued", "active"] },
+        },
+        select: { id: true },
+      })
+      .then((r) => r !== null);
   }
 }

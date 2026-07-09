@@ -129,6 +129,12 @@ export class ServersRepository {
     });
   }
 
+  countEnvironments(serverId: bigint) {
+    return this.prisma.environment.count({
+      where: { server_id: serverId },
+    });
+  }
+
   updateHostKeyFingerprint(id: bigint, fingerprint: string) {
     return this.prisma.server.update({
       where: { id },

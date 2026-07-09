@@ -46,6 +46,12 @@ export class BackupsService {
         `Environment ${dto.environmentId} has no Google Drive folder ID configured.`,
       );
     }
+    const hasActive = await this.repo.hasActiveJob(BigInt(dto.environmentId));
+    if (hasActive) {
+      throw new BadRequestException(
+        `An active backup or restore job is already running for this environment.`,
+      );
+    }
 
     const bullJobId = randomUUID();
     // Atomically create both rows so a queue.add() failure leaves no orphans.
@@ -108,7 +114,22 @@ export class BackupsService {
       if (!targetEnv) {
         throw new NotFoundException(`Target environment ${dto.targetEnvironmentId} not found`);
       }
+      
+      const backupEnv = await this.repo.findEnvironment(BigInt(backup.environment_id));
+      if (!backupEnv || targetEnv.project_id !== backupEnv.project_id) {
+        throw new BadRequestException(
+          `Target environment ${dto.targetEnvironmentId} must belong to the same project as the backup's environment.`,
+        );
+      }
+      
       targetEnvId = dto.targetEnvironmentId;
+    }
+
+    const hasActive = await this.repo.hasActiveJob(BigInt(targetEnvId));
+    if (hasActive) {
+      throw new BadRequestException(
+        `An active backup or restore job is already running for the target environment.`,
+      );
     }
 
     const bullJobId = randomUUID();
