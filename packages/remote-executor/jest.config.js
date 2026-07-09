@@ -5,5 +5,6 @@ module.exports = {
 	testMatch: ['<rootDir>/src/**/*.spec.ts'],
 	moduleNameMapper: {
 		'^@bedrock-forge/shared$': '<rootDir>/../../packages/shared/src/index.ts',
+		'^(\\.\\.?\\/.+)\\.js$': '$1',
 	},
 };

@@ -251,10 +251,22 @@ export class RemoteExecutorService {
   ): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       let settled = false;
+      let sftpRef: any = null;
+      let readStreamRef: any = null;
       const settle = (fn: () => void) => {
         if (!settled) {
           settled = true;
           clearTimeout(stallTimer);
+          if (readStreamRef) {
+            try {
+              readStreamRef.destroy();
+            } catch (_) {}
+          }
+          if (sftpRef) {
+            try {
+              sftpRef.end();
+            } catch (_) {}
+          }
           fn();
         }
       };
@@ -279,9 +291,11 @@ export class RemoteExecutorService {
 
       client.sftp((err, sftp) => {
         if (err) return settle(() => reject(err));
+        sftpRef = sftp;
 
         const chunks: Buffer[] = [];
         const readStream = sftp.createReadStream(remotePath);
+        readStreamRef = readStream;
 
         readStream.on("data", (chunk: Buffer) => {
           chunks.push(chunk);
@@ -289,13 +303,11 @@ export class RemoteExecutorService {
         });
         readStream.on("end", () => {
           settle(() => {
-            sftp.end();
             resolve(Buffer.concat(chunks));
           });
         });
         readStream.on("error", (e: Error) => {
           settle(() => {
-            sftp.end();
             reject(e);
           });
         });
@@ -323,10 +335,28 @@ export class RemoteExecutorService {
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       let settled = false;
+      let sftpRef: any = null;
+      let readStreamRef: any = null;
+      let writeStreamRef: any = null;
       const settle = (fn: () => void) => {
         if (!settled) {
           settled = true;
           clearTimeout(stallTimer);
+          if (readStreamRef) {
+            try {
+              readStreamRef.destroy();
+            } catch (_) {}
+          }
+          if (writeStreamRef) {
+            try {
+              writeStreamRef.destroy();
+            } catch (_) {}
+          }
+          if (sftpRef) {
+            try {
+              sftpRef.end();
+            } catch (_) {}
+          }
           fn();
         }
       };
@@ -352,9 +382,12 @@ export class RemoteExecutorService {
 
       client.sftp((err, sftp) => {
         if (err) return settle(() => reject(err));
+        sftpRef = sftp;
 
         const readStream = sftp.createReadStream(remotePath);
+        readStreamRef = readStream;
         const writeStream = createWriteStream(localPath);
+        writeStreamRef = writeStream;
         let totalBytes = 0;
 
         readStream.on("data", (chunk: Buffer) => {
@@ -364,17 +397,13 @@ export class RemoteExecutorService {
         });
 
         readStream.on("error", (e: Error) => {
-          writeStream.destroy();
           settle(() => {
-            sftp.end();
             reject(e);
           });
         });
 
         writeStream.on("error", (e: Error) => {
-          readStream.destroy();
           settle(() => {
-            sftp.end();
             reject(e);
           });
         });
@@ -383,7 +412,6 @@ export class RemoteExecutorService {
         // This is the correct completion signal for a file WriteStream.
         writeStream.on("close", () =>
           settle(() => {
-            sftp.end();
             resolve();
           }),
         );
@@ -407,10 +435,22 @@ export class RemoteExecutorService {
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       let settled = false;
+      let sftpRef: any = null;
+      let writeStreamRef: any = null;
       const settle = (fn: () => void) => {
         if (!settled) {
           settled = true;
           clearTimeout(stallTimer);
+          if (writeStreamRef) {
+            try {
+              writeStreamRef.destroy();
+            } catch (_) {}
+          }
+          if (sftpRef) {
+            try {
+              sftpRef.end();
+            } catch (_) {}
+          }
           fn();
         }
       };
@@ -436,10 +476,12 @@ export class RemoteExecutorService {
 
       client.sftp((err, sftp) => {
         if (err) return settle(() => reject(err));
+        sftpRef = sftp;
 
         const writeStream = sftp.createWriteStream(remotePath, {
           mode: 0o644,
         });
+        writeStreamRef = writeStream;
         let totalBytes = 0;
 
         readable.on("data", (chunk: Buffer) => {
@@ -449,16 +491,13 @@ export class RemoteExecutorService {
         });
 
         readable.on("error", (e: Error) => {
-          writeStream.destroy();
           settle(() => {
-            sftp.end();
             reject(e);
           });
         });
 
         writeStream.on("error", (e: Error) => {
           settle(() => {
-            sftp.end();
             reject(e);
           });
         });
@@ -466,7 +505,6 @@ export class RemoteExecutorService {
         // 'close' fires after all bytes are flushed to the remote fd.
         writeStream.on("close", () =>
           settle(() => {
-            sftp.end();
             resolve();
           }),
         );
