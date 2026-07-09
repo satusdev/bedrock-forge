@@ -141,7 +141,7 @@ export class SyncFilesService {
       remotePath: keyPath,
       content: Buffer.from(rawKey),
     });
-    await sourceExecutor.execute(`chmod 600 ${keyPath}`);
+    await sourceExecutor.execute(`chmod 600 ${shellQuote(keyPath)}`);
 
     // Prepend '/' to anchor each pattern to the transfer root, so rsync won't
     // strip nested directories with the same name inside plugins or themes.
@@ -160,7 +160,8 @@ export class SyncFilesService {
       "--ignore-errors",
       "--timeout=300",
       excludeFlags,
-      `-e "ssh -i ${keyPath} -p ${targetEnv.server.ssh_port} -o StrictHostKeyChecking=no -o ConnectTimeout=30"`,
+      "-e",
+      shellQuote(`ssh -i ${keyPath} -p ${targetEnv.server.ssh_port} -o StrictHostKeyChecking=no -o ConnectTimeout=30`),
       `${shellQuote(sourceRoot)}/`,
       `${shellQuote(targetEnv.server.ssh_user)}@${targetEnv.server.ip_address}:${shellQuote(targetRoot)}/`,
     ].join(" ");
@@ -177,7 +178,7 @@ export class SyncFilesService {
     const rsyncResult = await sourceExecutor.execute(rsyncCmd);
 
     // Cleanup key regardless of outcome
-    await sourceExecutor.execute(`rm -f ${keyPath}`).catch(() => {});
+    await sourceExecutor.execute(`rm -f ${shellQuote(keyPath)}`).catch(() => {});
 
     await tracker.trackCommand(
       "rsync site files",
@@ -275,7 +276,7 @@ export class SyncFilesService {
       .map((e) => `--exclude=${shellQuote("./" + e)}`)
       .join(" ");
 
-    const tarCmd = `tar -czf ${remoteTar} ${tarExcludes} -C ${shellQuote(sourceContent)} .`;
+    const tarCmd = `tar -czf ${shellQuote(remoteTar)} ${tarExcludes} -C ${shellQuote(sourceContent)} .`;
     await tracker.track({
       step: "Archiving site files on source",
       level: "info",
@@ -304,7 +305,7 @@ export class SyncFilesService {
     const localTarPath = join(localTarDir, `content_${job.id}.tar.gz`);
     try {
       await sourceExecutor.pullFileToPath(remoteTar, localTarPath);
-      await sourceExecutor.execute(`rm -f ${remoteTar}`).catch(() => {});
+      await sourceExecutor.execute(`rm -f ${shellQuote(remoteTar)}`).catch(() => {});
       const tarStat = await stat(localTarPath);
       await tracker.track({
         step: `Archive pulled (${(tarStat.size / 1024 / 1024).toFixed(1)} MB) — pushing to target`,
@@ -317,7 +318,7 @@ export class SyncFilesService {
     }
 
     await targetExecutor.execute(`mkdir -p ${shellQuote(targetContent)}`);
-    const extractCmd = `tar -xzf ${remoteTar} -C ${shellQuote(targetContent)}`;
+    const extractCmd = `tar -xzf ${shellQuote(remoteTar)} -C ${shellQuote(targetContent)}`;
     await tracker.track({
       step: "Extracting site files on target",
       level: "info",
@@ -325,7 +326,7 @@ export class SyncFilesService {
     });
     const extractStart = Date.now();
     const extractResult = await targetExecutor.execute(extractCmd);
-    await targetExecutor.execute(`rm -f ${remoteTar}`).catch(() => {});
+    await targetExecutor.execute(`rm -f ${shellQuote(remoteTar)}`).catch(() => {});
     await tracker.trackCommand(
       "tar extract on target",
       extractCmd,
@@ -406,12 +407,13 @@ export class SyncFilesService {
       const oldSed = sedEscape(oldUrl);
       const newSed = sedEscape(newUrl);
 
+      const sedExpr = `s|${oldSed}|${newSed}|g`;
       const sedCmd = [
         `find ${shellQuote(wpContentPath)} -type f`,
         `\\( -name '*.css' -o -name '*.js' -o -name '*.json' -o -name '*.html'`,
         `-o -name '*.htm' -o -name '*.svg' -o -name '*.xml' -o -name '*.txt'`,
         `-o -name '*.php' \\)`,
-        `-exec sed -i 's|${oldSed}|${newSed}|g' {} +`,
+        `-exec sed -i ${shellQuote(sedExpr)} {} +`,
       ].join(" ");
 
       const sedResult = await executor.execute(sedCmd);

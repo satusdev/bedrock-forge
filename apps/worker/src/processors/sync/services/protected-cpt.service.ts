@@ -68,7 +68,7 @@ export class ProtectedCptService {
 			ORDER BY pm.post_id, pm.meta_key
 		`;
     const result = await executor.execute(
-      `mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} -B -N -e ${shellQuote(query)}`,
+      `mysql --defaults-extra-file=${shellQuote(tgtMycnf)} ${shellQuote(creds.dbName)} -B -N -e ${shellQuote(query)}`,
     );
     if (result.code !== 0) {
       await tracker.track({
@@ -97,7 +97,7 @@ export class ProtectedCptService {
   ): Promise<string> {
     const prefixQuery = `SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${escapeMysql(creds.dbName)}' AND table_name LIKE '%options' LIMIT 1`;
     const prefixResult = await executor.execute(
-      `mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} -sN -e ${shellQuote(prefixQuery)}`,
+      `mysql --defaults-extra-file=${shellQuote(tgtMycnf)} ${shellQuote(creds.dbName)} -sN -e ${shellQuote(prefixQuery)}`,
     );
     return prefixResult.code === 0 && prefixResult.stdout.trim()
       ? prefixResult.stdout.trim()
@@ -196,7 +196,7 @@ export class ProtectedCptService {
     try {
       const prefixQuery = `SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${escapeMysql(creds.dbName)}' AND table_name LIKE '%options' LIMIT 1`;
       const prefixResult = await executor.execute(
-        `mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} -sN -e ${shellQuote(prefixQuery)}`,
+        `mysql --defaults-extra-file=${shellQuote(tgtMycnf)} ${shellQuote(creds.dbName)} -sN -e ${shellQuote(prefixQuery)}`,
       );
       if (prefixResult.code === 0 && prefixResult.stdout.trim()) {
         prefix = prefixResult.stdout.trim();
@@ -208,7 +208,7 @@ export class ProtectedCptService {
     }
 
     const tableCheck = await executor.execute(
-      `mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} -sN -e ${shellQuote(`SHOW TABLES LIKE '${prefix}posts'`)}`,
+      `mysql --defaults-extra-file=${shellQuote(tgtMycnf)} ${shellQuote(creds.dbName)} -sN -e ${shellQuote(`SHOW TABLES LIKE '${prefix}posts'`)}`,
     );
     if (tableCheck.code !== 0 || tableCheck.stdout.trim() === "") {
       await tracker.track({
@@ -221,7 +221,7 @@ export class ProtectedCptService {
     // Check if backup tables already exist. If they do, DO NOT overwrite them because
     // they contain the original target data from a previous failed sync attempt.
     const backupTableCheck = await executor.execute(
-      `mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} -sN -e ${shellQuote(`SHOW TABLES LIKE '${prefix}forge_backup_posts'`)}`,
+      `mysql --defaults-extra-file=${shellQuote(tgtMycnf)} ${shellQuote(creds.dbName)} -sN -e ${shellQuote(`SHOW TABLES LIKE '${prefix}forge_backup_posts'`)}`,
     );
     if (backupTableCheck.code === 0 && backupTableCheck.stdout.trim() !== "") {
       await tracker.track({
@@ -293,9 +293,9 @@ export class ProtectedCptService {
     });
 
     const res = await executor.execute(
-      `mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} < ${sqlFile}`,
+      `mysql --defaults-extra-file=${shellQuote(tgtMycnf)} ${shellQuote(creds.dbName)} < ${shellQuote(sqlFile)}`,
     );
-    await executor.execute(`rm -f ${sqlFile}`);
+    await executor.execute(`rm -f ${shellQuote(sqlFile)}`);
 
     if (res.code !== 0) {
       await tracker.track({
@@ -332,7 +332,7 @@ export class ProtectedCptService {
     if (safePostTypes.length === 0) return;
 
     const tableCheck = await executor.execute(
-      `mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} -sN -e ${shellQuote(`SHOW TABLES LIKE '${prefix}forge_backup_posts'`)}`,
+      `mysql --defaults-extra-file=${shellQuote(tgtMycnf)} ${shellQuote(creds.dbName)} -sN -e ${shellQuote(`SHOW TABLES LIKE '${prefix}forge_backup_posts'`)}`,
     );
     if (tableCheck.code !== 0 || tableCheck.stdout.trim() === "") {
       return;
@@ -430,9 +430,9 @@ export class ProtectedCptService {
     });
 
     const res = await executor.execute(
-      `mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} < ${sqlFile}`,
+      `mysql --defaults-extra-file=${shellQuote(tgtMycnf)} ${shellQuote(creds.dbName)} < ${shellQuote(sqlFile)}`,
     );
-    await executor.execute(`rm -f ${sqlFile}`);
+    await executor.execute(`rm -f ${shellQuote(sqlFile)}`);
 
     if (res.code !== 0) {
       await tracker.track({

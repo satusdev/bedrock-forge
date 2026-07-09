@@ -175,7 +175,7 @@ export class WpActionsProcessor extends WorkerHost {
         result = await executor.execute(cmd, { timeout: 60_000 });
       } finally {
         await executor
-          .execute(`rm -f ${remoteScript}`, { timeout: 5_000 })
+          .execute(`rm -f ${shellQuote(remoteScript)}`, { timeout: 5_000 })
           .catch(() => {});
       }
       const parsed = safeJsonParse(result.stdout);
@@ -223,13 +223,13 @@ export class WpActionsProcessor extends WorkerHost {
         remoteScript,
       );
       const actionArg = enabled ? "enable" : "disable";
-      const cmd = `php ${remoteScript} --docroot=${shellQuote(env.root_path ?? "")} --action=${actionArg}`;
+      const cmd = `php ${shellQuote(remoteScript)} --docroot=${shellQuote(env.root_path ?? "")} --action=${actionArg}`;
       let result;
       try {
         result = await executor.execute(cmd, { timeout: 30_000 });
       } finally {
         await executor
-          .execute(`rm -f ${remoteScript}`, { timeout: 5_000 })
+          .execute(`rm -f ${shellQuote(remoteScript)}`, { timeout: 5_000 })
           .catch(() => {});
       }
       const parsed = safeJsonParse(result.stdout);
@@ -302,13 +302,13 @@ export class WpActionsProcessor extends WorkerHost {
         remoteScript,
       );
       const linesArg = lines ?? 100;
-      const cmd = `php ${remoteScript} --docroot=${shellQuote(env.root_path ?? "")} --type=${shellQuote(type)} --lines=${linesArg}`;
+      const cmd = `php ${shellQuote(remoteScript)} --docroot=${shellQuote(env.root_path ?? "")} --type=${shellQuote(type)} --lines=${linesArg}`;
       let result;
       try {
         result = await executor.execute(cmd, { timeout: 30_000 });
       } finally {
         await executor
-          .execute(`rm -f ${remoteScript}`, { timeout: 5_000 })
+          .execute(`rm -f ${shellQuote(remoteScript)}`, { timeout: 5_000 })
           .catch(() => {});
       }
       const parsed = safeJsonParse(result.stdout);
@@ -340,13 +340,13 @@ export class WpActionsProcessor extends WorkerHost {
         join(scriptsPath, "wp-cron.php"),
         remoteScript,
       );
-      const cmd = `php ${remoteScript} --docroot=${shellQuote(env.root_path ?? "")}`;
+      const cmd = `php ${shellQuote(remoteScript)} --docroot=${shellQuote(env.root_path ?? "")}`;
       let result;
       try {
         result = await executor.execute(cmd, { timeout: 30_000 });
       } finally {
         await executor
-          .execute(`rm -f ${remoteScript}`, { timeout: 5_000 })
+          .execute(`rm -f ${shellQuote(remoteScript)}`, { timeout: 5_000 })
           .catch(() => {});
       }
       const parsed = safeJsonParse(result.stdout);
@@ -385,14 +385,14 @@ export class WpActionsProcessor extends WorkerHost {
       const dryRunArg = dryRun ? " --dry-run" : "";
       const keepRevisionsArg =
         keepRevisions != null ? ` --keep-revisions=${keepRevisions}` : "";
-      const cmd = `php ${remoteScript} --docroot=${shellQuote(env.root_path ?? "")}${dryRunArg}${keepRevisionsArg}`;
+      const cmd = `php ${shellQuote(remoteScript)} --docroot=${shellQuote(env.root_path ?? "")}${dryRunArg}${keepRevisionsArg}`;
       const t0 = Date.now();
       let result;
       try {
         result = await executor.execute(cmd, { timeout: 120_000 });
       } finally {
         await executor
-          .execute(`rm -f ${remoteScript}`, { timeout: 5_000 })
+          .execute(`rm -f ${shellQuote(remoteScript)}`, { timeout: 5_000 })
           .catch(() => {});
       }
       const parsed = safeJsonParse(result.stdout);
@@ -594,10 +594,9 @@ export class WpActionsProcessor extends WorkerHost {
       if (wpResult.code !== 0) {
         source = "file";
         const maintenancePath = `${wpPath}/.maintenance`;
-        const sanitizedMsg = message ? sanitizeMaintenanceMessage(message) : "Maintenance enabled by Bedrock Forge";
         const fallbackCmd = enabled
           ? `printf '%s\\n' ${shellQuote(
-              `<?php $upgrading = time(); /* ${sanitizedMsg} */`,
+              `<?php $upgrading = time();`,
             )} > ${shellQuote(maintenancePath)}`
           : `rm -f ${shellQuote(maintenancePath)}`;
         const fallback = await executor.execute(fallbackCmd, {

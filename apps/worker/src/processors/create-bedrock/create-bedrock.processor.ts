@@ -151,11 +151,12 @@ export class CreateBedrockProcessor extends WorkerHost {
           const dbName = cyberpanel.dbName; // validated above — safe for backtick quoting
           const dbUser = cyberpanel.dbUser; // validated above
           const dbPassword = escapeMysql(cyberpanel.dbPassword);
+          const sqlQuery = `CREATE DATABASE IF NOT EXISTS \`${dbName}\`; ` +
+            `CREATE USER IF NOT EXISTS '${dbUser}'@'localhost' IDENTIFIED BY '${dbPassword}'; ` +
+            `GRANT ALL PRIVILEGES ON \`${dbName}\`.* TO '${dbUser}'@'localhost'; ` +
+            `FLUSH PRIVILEGES;`;
           const mysqlResult = await executor.execute(
-            `mysql -e "CREATE DATABASE IF NOT EXISTS \`${dbName}\`; ` +
-              `CREATE USER IF NOT EXISTS '${dbUser}'@'localhost' IDENTIFIED BY '${dbPassword}'; ` +
-              `GRANT ALL PRIVILEGES ON \`${dbName}\`.* TO '${dbUser}'@'localhost'; ` +
-              `FLUSH PRIVILEGES;"`,
+            `mysql -e ${shellQuote(sqlQuery)}`,
           );
           if (mysqlResult.code !== 0) {
             throw new Error(
@@ -213,7 +214,7 @@ export class CreateBedrockProcessor extends WorkerHost {
         );
         try {
           const dumpResult = await srcExecutor.execute(
-            `mysqldump --defaults-extra-file=${srcMycnf} --single-transaction --quick ${shellQuote(srcCreds.dbName)} > ${dumpTmp}`,
+            `mysqldump --defaults-extra-file=${shellQuote(srcMycnf)} --single-transaction --quick ${shellQuote(srcCreds.dbName)} > ${shellQuote(dumpTmp)}`,
           );
           if (dumpResult.code !== 0) {
             throw new Error(
@@ -227,7 +228,7 @@ export class CreateBedrockProcessor extends WorkerHost {
 
         // ── Transfer + import ──
         const dumpBuffer = await srcExecutor.pullFile(dumpTmp);
-        await srcExecutor.execute(`rm -f ${dumpTmp}`).catch(() => {});
+        await srcExecutor.execute(`rm -f ${shellQuote(dumpTmp)}`).catch(() => {});
 
         const dbName = cyberpanel?.dbName ?? srcCreds.dbName;
         const dbUser = cyberpanel?.dbUser ?? srcCreds.dbUser;
@@ -243,7 +244,7 @@ export class CreateBedrockProcessor extends WorkerHost {
         await executor.pushFile({ remotePath: dumpTmp, content: dumpBuffer });
         try {
           const importResult = await executor.execute(
-            `mysql --defaults-extra-file=${tgtMycnf} ${shellQuote(dbName)} < ${dumpTmp}`,
+            `mysql --defaults-extra-file=${shellQuote(tgtMycnf)} ${shellQuote(dbName)} < ${shellQuote(dumpTmp)}`,
           );
           if (importResult.code !== 0) {
             throw new Error(
@@ -252,7 +253,7 @@ export class CreateBedrockProcessor extends WorkerHost {
           }
         } finally {
           await cleanupRemoteMyCnf(executor, tgtMycnf);
-          await executor.execute(`rm -f ${dumpTmp}`).catch(() => {});
+          await executor.execute(`rm -f ${shellQuote(dumpTmp)}`).catch(() => {});
         }
         await job.updateProgress({ value: 60, step: "Database imported" });
 
@@ -270,17 +271,17 @@ export class CreateBedrockProcessor extends WorkerHost {
           const srcKey = await this.sshKey.resolvePrivateKey(srcEnv.server);
           const keyTmp = `/tmp/cb_key_${job.id}`;
           await executor.pushFile({ remotePath: keyTmp, content: srcKey });
-          await executor.execute(`chmod 600 ${keyTmp}`);
+          await executor.execute(`chmod 600 ${shellQuote(keyTmp)}`);
           try {
             await executor.execute(`mkdir -p ${shellQuote(tgtPath)}`);
             const pullResult = await executor.execute(
-              `ssh -o StrictHostKeyChecking=no -i ${keyTmp} ${srcEnv.server.ssh_user}@${srcEnv.server.ip_address} "tar -cz -C ${shellQuote(srcPath)} ." | tar -xz -C ${shellQuote(tgtPath)}`,
+              `ssh -o StrictHostKeyChecking=no -i ${shellQuote(keyTmp)} ${shellQuote(srcEnv.server.ssh_user)}@${shellQuote(srcEnv.server.ip_address)} "tar -cz -C ${shellQuote(srcPath)} ." | tar -xz -C ${shellQuote(tgtPath)}`,
             );
             if (pullResult.code !== 0) {
               throw new Error(`Failed to transfer files from source server: ${pullResult.stderr}`);
             }
           } finally {
-            await executor.execute(`rm -f ${keyTmp}`).catch(() => {});
+            await executor.execute(`rm -f ${shellQuote(keyTmp)}`).catch(() => {});
           }
         }
         await job.updateProgress({ value: 70, step: "Files synced" });
@@ -305,7 +306,7 @@ export class CreateBedrockProcessor extends WorkerHost {
 
             // Auto-detect WP table prefix; fallback 'wp_'
             const prefixRes = await executor.execute(
-              `mysql --defaults-extra-file=${srMycnf} ${shellQuote(dbName)} -sN -e ${shellQuote(
+              `mysql --defaults-extra-file=${shellQuote(srMycnf)} ${shellQuote(dbName)} -sN -e ${shellQuote(
                 `SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${escapeMysql(dbName)}' AND table_name LIKE '%options' LIMIT 1`,
               )}`,
             );
@@ -338,7 +339,7 @@ export class CreateBedrockProcessor extends WorkerHost {
               content: Buffer.from(statements.join(";\n") + ";"),
             });
             const srResult = await executor.execute(
-              `mysql --defaults-extra-file=${srMycnf} ${shellQuote(dbName)} < ${srSqlFile}`,
+              `mysql --defaults-extra-file=${shellQuote(srMycnf)} ${shellQuote(dbName)} < ${shellQuote(srSqlFile)}`,
             );
             if (srResult.code !== 0) {
               this.logger.warn(
@@ -347,7 +348,7 @@ export class CreateBedrockProcessor extends WorkerHost {
             }
           } finally {
             await cleanupRemoteMyCnf(executor, srMycnf);
-            await executor.execute(`rm -f ${srSqlFile}`).catch(() => {});
+            await executor.execute(`rm -f ${shellQuote(srSqlFile)}`).catch(() => {});
           }
         }
         await job.updateProgress({
@@ -551,14 +552,15 @@ export class CreateBedrockProcessor extends WorkerHost {
     // 64-character cryptographically secure random salt per WordPress specification
     const salt = () => randomBytes(48).toString("base64url").slice(0, 64);
 
+    const escapeSingleQuote = (val: string) => val.replace(/'/g, "\\'");
     const envContent = [
-      `DB_NAME='${dbName}'`,
-      `DB_USER='${dbUser}'`,
-      `DB_PASSWORD='${dbPassword}'`,
-      `DB_HOST='${dbHost}'`,
+      `DB_NAME='${escapeSingleQuote(dbName)}'`,
+      `DB_USER='${escapeSingleQuote(dbUser)}'`,
+      `DB_PASSWORD='${escapeSingleQuote(dbPassword)}'`,
+      `DB_HOST='${escapeSingleQuote(dbHost)}'`,
       ``,
-      `WP_ENV=${wpEnv}`,
-      `WP_HOME=${wpHome}`,
+      `WP_ENV='${escapeSingleQuote(wpEnv)}'`,
+      `WP_HOME='${escapeSingleQuote(wpHome)}'`,
       `WP_SITEURL=\${WP_HOME}/wp`,
       ``,
       `AUTH_KEY='${salt()}'`,
@@ -752,22 +754,22 @@ export class CreateBedrockProcessor extends WorkerHost {
               const executor = createRemoteExecutor(sshConfig);
 
               // 1. Drop the actual database
-              await executor.execute(`mysql -e "DROP DATABASE IF EXISTS \`${dbName}\`;"`).catch((err) => {
+              await executor.execute(`mysql -e ${shellQuote(`DROP DATABASE IF EXISTS \`${dbName}\`;`)}`).catch((err) => {
                 this.logger.warn(`Failed to drop database \`${dbName}\`: ${err instanceof Error ? err.message : String(err)}`);
               });
 
               // 2. Drop the local MySQL user
-              await executor.execute(`mysql -e "DROP USER IF EXISTS '${dbUser}'@'localhost';"`).catch((err) => {
+              await executor.execute(`mysql -e ${shellQuote(`DROP USER IF EXISTS '${dbUser}'@'localhost';`)}`).catch((err) => {
                 this.logger.warn(`Failed to drop MySQL user '${dbUser}': ${err instanceof Error ? err.message : String(err)}`);
               });
 
               // 3. Delete metadata from CyberPanel's internal MySQL system database
-              await executor.execute(`mysql -e "DELETE FROM cyberpanel.databases_databases WHERE dbname='${dbName}';"`).catch((err) => {
+              await executor.execute(`mysql -e ${shellQuote(`DELETE FROM cyberpanel.databases_databases WHERE dbname='${dbName}';`)}`).catch((err) => {
                 this.logger.warn(`Failed to delete record from cyberpanel.databases_databases for '${dbName}': ${err instanceof Error ? err.message : String(err)}`);
               });
 
               // 4. Flush privileges to ensure changes take effect
-              await executor.execute(`mysql -e "FLUSH PRIVILEGES;"`).catch((err) => {
+              await executor.execute(`mysql -e ${shellQuote("FLUSH PRIVILEGES;")}`).catch((err) => {
                 this.logger.warn(`Failed to flush MySQL privileges: ${err instanceof Error ? err.message : String(err)}`);
               });
 

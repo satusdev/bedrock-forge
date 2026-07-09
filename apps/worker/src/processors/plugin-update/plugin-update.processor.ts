@@ -247,7 +247,7 @@ export class PluginUpdateProcessor extends WorkerHost {
       });
 
       const composerCmd =
-        `php ${remoteScript} --action=update-all` +
+        `php ${shellQuote(remoteScript)} --action=update-all` +
         ` --docroot=${shellQuote(env.root_path)}`;
       const composerStart = Date.now();
       const result = await executor.execute(
@@ -261,7 +261,7 @@ export class PluginUpdateProcessor extends WorkerHost {
         result,
         Date.now() - composerStart,
       );
-      await executor.execute(`rm -f "${remoteScript}"`).catch(() => {});
+      await executor.execute(`rm -f ${shellQuote(remoteScript)}`).catch(() => {});
 
       await job.updateProgress(80);
 

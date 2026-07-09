@@ -242,7 +242,7 @@ export class SyncProcessor extends WorkerHost {
       });
       const dumpStart = Date.now();
       const dumpResult = await sourceExecutor.execute(
-        `mysqldump --defaults-extra-file=${srcMycnf} --single-transaction --quick${cloneIgnoreFlags} ${sourceCreds.dbName} > ${dumpRemote}`,
+        `mysqldump --defaults-extra-file=${shellQuote(srcMycnf)} --single-transaction --quick${cloneIgnoreFlags} ${shellQuote(sourceCreds.dbName)} > ${shellQuote(dumpRemote)}`,
         { timeout: 10 * 60_000 },
       );
       await tracker.trackCommand(
@@ -276,7 +276,7 @@ export class SyncProcessor extends WorkerHost {
     try {
       await sourceExecutor.pullFileToPath(dumpRemote, localDumpPath);
       const cleanSrcResult = await sourceExecutor.execute(
-        `rm -f ${dumpRemote}`,
+        `rm -f ${shellQuote(dumpRemote)}`,
       );
       await tracker.trackCommand(
         "Source temp cleanup",
@@ -321,7 +321,7 @@ export class SyncProcessor extends WorkerHost {
           detail: `Will preserve: ${cloneSafeProtected.join(", ")}`,
         });
         const dbExistsRes = await targetExecutor.execute(
-          `mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`SHOW DATABASES LIKE '${targetCreds.dbName}';`)}`,
+          `mysql --defaults-extra-file=${shellQuote(tgtMycnf)} -e ${shellQuote(`SHOW DATABASES LIKE '${targetCreds.dbName}';`)}`,
           { timeout: 30_000 },
         );
         const dbExists =
@@ -348,7 +348,7 @@ export class SyncProcessor extends WorkerHost {
             detail: targetCreds.dbName,
           });
           const createResult = await targetExecutor.execute(
-            `mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`CREATE DATABASE \`${targetCreds.dbName}\`;`)}`,
+            `mysql --defaults-extra-file=${shellQuote(tgtMycnf)} -e ${shellQuote(`CREATE DATABASE \`${targetCreds.dbName}\`;`)}`,
             { timeout: 2 * 60_000 },
           );
           if (createResult.code !== 0) {
@@ -366,7 +366,7 @@ export class SyncProcessor extends WorkerHost {
           detail: targetCreds.dbName,
         });
         const dropCreateResult = await targetExecutor.execute(
-          `mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`DROP DATABASE IF EXISTS \`${targetCreds.dbName}\`; CREATE DATABASE \`${targetCreds.dbName}\`;`)}`,
+          `mysql --defaults-extra-file=${shellQuote(tgtMycnf)} -e ${shellQuote(`DROP DATABASE IF EXISTS \`${targetCreds.dbName}\`; CREATE DATABASE \`${targetCreds.dbName}\`;`)}`,
           { timeout: 2 * 60_000 },
         );
         if (dropCreateResult.code !== 0) {
@@ -388,7 +388,7 @@ export class SyncProcessor extends WorkerHost {
       });
       const importStart = Date.now();
       const importResult = await targetExecutor.execute(
-        `mysql --defaults-extra-file=${tgtMycnf} ${targetCreds.dbName} < ${dumpRemote}`,
+        `mysql --defaults-extra-file=${shellQuote(tgtMycnf)} ${shellQuote(targetCreds.dbName)} < ${shellQuote(dumpRemote)}`,
         { timeout: 10 * 60_000 },
       );
 
@@ -418,7 +418,7 @@ export class SyncProcessor extends WorkerHost {
     } finally {
       await cleanupRemoteMyCnf(targetExecutor, tgtMycnf);
       const cleanTgtResult = await targetExecutor.execute(
-        `rm -f ${dumpRemote}`,
+        `rm -f ${shellQuote(dumpRemote)}`,
       );
       await tracker.trackCommand(
         "Target temp cleanup",
@@ -880,7 +880,7 @@ export class SyncProcessor extends WorkerHost {
       });
       const dumpStart = Date.now();
       const dumpResult = await sourceExecutor.execute(
-        `mysqldump --defaults-extra-file=${srcMycnf} --single-transaction --quick${pushIgnoreFlags} ${sourceCreds.dbName} > ${dumpRemote}`,
+        `mysqldump --defaults-extra-file=${shellQuote(srcMycnf)} --single-transaction --quick${pushIgnoreFlags} ${shellQuote(sourceCreds.dbName)} > ${shellQuote(dumpRemote)}`,
         { timeout: 10 * 60_000 },
       );
       await tracker.trackCommand(
@@ -907,7 +907,7 @@ export class SyncProcessor extends WorkerHost {
     const localPushPath = join(localPushDir, `push_${job.id}.sql`);
     try {
       await sourceExecutor.pullFileToPath(dumpRemote, localPushPath);
-      await sourceExecutor.execute(`rm -f ${dumpRemote}`).catch(() => {});
+      await sourceExecutor.execute(`rm -f ${shellQuote(dumpRemote)}`).catch(() => {});
 
       const readStream = createReadStream(localPushPath);
       await targetExecutor.pushFileFromStream(dumpRemote, readStream);
@@ -944,7 +944,7 @@ export class SyncProcessor extends WorkerHost {
           detail: `Will preserve: ${pushSafeProtected.join(", ")}`,
         });
         const dbExistsRes = await targetExecutor.execute(
-          `mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`SHOW DATABASES LIKE '${targetCreds.dbName}';`)}`,
+          `mysql --defaults-extra-file=${shellQuote(tgtMycnf)} -e ${shellQuote(`SHOW DATABASES LIKE '${targetCreds.dbName}';`)}`,
           { timeout: 30_000 },
         );
         const dbExists =
@@ -971,7 +971,7 @@ export class SyncProcessor extends WorkerHost {
             detail: targetCreds.dbName,
           });
           const createResult = await targetExecutor.execute(
-            `mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`CREATE DATABASE \`${targetCreds.dbName}\`;`)}`,
+            `mysql --defaults-extra-file=${shellQuote(tgtMycnf)} -e ${shellQuote(`CREATE DATABASE \`${targetCreds.dbName}\`;`)}`,
             { timeout: 2 * 60_000 },
           );
           if (createResult.code !== 0) {
@@ -989,7 +989,7 @@ export class SyncProcessor extends WorkerHost {
           detail: targetCreds.dbName,
         });
         const dropCreateResult = await targetExecutor.execute(
-          `mysql --defaults-extra-file=${tgtMycnf} -e ${shellQuote(`DROP DATABASE IF EXISTS \`${targetCreds.dbName}\`; CREATE DATABASE \`${targetCreds.dbName}\`;`)}`,
+          `mysql --defaults-extra-file=${shellQuote(tgtMycnf)} -e ${shellQuote(`DROP DATABASE IF EXISTS \`${targetCreds.dbName}\`; CREATE DATABASE \`${targetCreds.dbName}\`;`)}`,
           { timeout: 2 * 60_000 },
         );
         if (dropCreateResult.code !== 0) {
@@ -1011,7 +1011,7 @@ export class SyncProcessor extends WorkerHost {
       });
       const importStart = Date.now();
       const importResult = await targetExecutor.execute(
-        `mysql --defaults-extra-file=${tgtMycnf} ${targetCreds.dbName} < ${dumpRemote}`,
+        `mysql --defaults-extra-file=${shellQuote(tgtMycnf)} ${shellQuote(targetCreds.dbName)} < ${shellQuote(dumpRemote)}`,
         { timeout: 10 * 60_000 },
       );
 
@@ -1041,7 +1041,7 @@ export class SyncProcessor extends WorkerHost {
     } finally {
       await cleanupRemoteMyCnf(targetExecutor, tgtMycnf);
       const cleanTgtResult = await targetExecutor.execute(
-        `rm -f ${dumpRemote}`,
+        `rm -f ${shellQuote(dumpRemote)}`,
       );
       await tracker.trackCommand(
         "Target temp cleanup",

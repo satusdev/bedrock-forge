@@ -237,7 +237,7 @@ export class BackupProcessor extends WorkerHost {
       }
 
       try {
-        const phpCmd = `php ${remoteScript} --docroot=${env.root_path} --type=${type} --output=${remoteOutput}${storedCredsArgs}`;
+        const phpCmd = `php ${shellQuote(remoteScript)} --docroot=${shellQuote(env.root_path)} --type=${shellQuote(type)} --output=${shellQuote(remoteOutput)}${storedCredsArgs}`;
         const maskedCmd = myCnfPath
           ? phpCmd.replace(myCnfPath, "/tmp/forge_backup_mycnf_***.cnf")
           : phpCmd;
@@ -285,7 +285,7 @@ export class BackupProcessor extends WorkerHost {
       // Pre-flight disk space check: get remote file size via stat and compare
       // against available /tmp space before committing to the SFTP download.
       try {
-        const statResult = await executor.execute(`stat -c%s ${remoteOutput}`, {
+        const statResult = await executor.execute(`stat -c%s ${shellQuote(remoteOutput)}`, {
           timeout: 10_000,
         });
         const remoteFileBytes = parseInt(statResult.stdout.trim(), 10);
@@ -381,7 +381,7 @@ export class BackupProcessor extends WorkerHost {
       await job.updateProgress({ value: 85, step: "Uploaded to Google Drive" });
 
       // ── Step E: Remote cleanup ──────────────────────────────────────────
-      const cleanCmd = `rm -f ${remoteScript} ${remoteOutput}`;
+      const cleanCmd = `rm -f ${shellQuote(remoteScript)} ${shellQuote(remoteOutput)}`;
       const cleanStart = Date.now();
       const cleanResult = await executor.execute(cleanCmd);
       await tracker.trackCommand(
@@ -426,7 +426,7 @@ export class BackupProcessor extends WorkerHost {
       }
       // Attempt remote cleanup even on failure so temp files do not accumulate
       await executor
-        .execute(`rm -f ${remoteScript} ${remoteOutput}`)
+        .execute(`rm -f ${shellQuote(remoteScript)} ${shellQuote(remoteOutput)}`)
         .catch((e) =>
           this.logger.warn(
             `[${job.id}] Remote cleanup on failure failed: ${e}`,

@@ -356,12 +356,12 @@ export class SyncDbService {
     let result;
     try {
       result = await executor.execute(
-        `mysql --defaults-extra-file=${tgtMycnf} ${creds.dbName} < ${queriesSqlFile}`,
+        `mysql --defaults-extra-file=${shellQuote(tgtMycnf)} ${shellQuote(creds.dbName)} < ${shellQuote(queriesSqlFile)}`,
         { timeout: 5 * 60_000 },
       );
     } finally {
       await cleanupRemoteMyCnf(executor, tgtMycnf);
-      await executor.execute(`rm -f ${queriesSqlFile}`).catch(() => {});
+      await executor.execute(`rm -f ${shellQuote(queriesSqlFile)}`).catch(() => {});
     }
 
     await tracker.trackCommand(
@@ -427,7 +427,7 @@ export class SyncDbService {
     let dumpResult;
     try {
       dumpResult = await targetExecutor.execute(
-        `mysqldump --defaults-extra-file=${sbMycnf} --single-transaction --quick ${targetCreds.dbName} > ${remoteTemp}`,
+        `mysqldump --defaults-extra-file=${shellQuote(sbMycnf)} --single-transaction --quick ${shellQuote(targetCreds.dbName)} > ${shellQuote(remoteTemp)}`,
       );
     } finally {
       await cleanupRemoteMyCnf(targetExecutor, sbMycnf);
@@ -447,7 +447,7 @@ export class SyncDbService {
 
     await mkdir(localDir, { recursive: true });
     const dumpBuffer = await targetExecutor.pullFile(remoteTemp);
-    await targetExecutor.execute(`rm -f ${remoteTemp}`);
+    await targetExecutor.execute(`rm -f ${shellQuote(remoteTemp)}`);
 
     await writeFile(localFile, dumpBuffer);
 
@@ -638,7 +638,7 @@ export class SyncDbService {
     let p = "wp_";
     try {
       const prefixResult = await executor.execute(
-        `mysql --defaults-extra-file=${srMycnf} ${creds.dbName} -sN -e ${shellQuote(
+        `mysql --defaults-extra-file=${shellQuote(srMycnf)} ${shellQuote(creds.dbName)} -sN -e ${shellQuote(
           `SELECT REPLACE(table_name,'options','') FROM information_schema.tables WHERE table_schema='${escapeMysql(creds.dbName)}' AND table_name LIKE '%options' LIMIT 1`,
         )}`,
       );
@@ -660,8 +660,8 @@ export class SyncDbService {
     try {
       for (const [oldUrl, newUrl] of allPairs) {
         const phpResult = await executor.execute(
-          `php ${srScript}` +
-            ` --mycnf=${srMycnf}` +
+          `php ${shellQuote(srScript)}` +
+            ` --mycnf=${shellQuote(srMycnf)}` +
             ` --db-name=${shellQuote(creds.dbName)}` +
             ` --prefix=${shellQuote(p)}` +
             ` --search=${shellQuote(oldUrl)}` +
@@ -703,7 +703,7 @@ export class SyncDbService {
       }
     } finally {
       await cleanupRemoteMyCnf(executor, srMycnf);
-      await executor.execute(`rm -f ${srScript}`).catch(() => {});
+      await executor.execute(`rm -f ${shellQuote(srScript)}`).catch(() => {});
     }
 
     if (phpSuccess) {
@@ -771,12 +771,12 @@ export class SyncDbService {
     let sqlResult;
     try {
       sqlResult = await executor.execute(
-        `mysql --defaults-extra-file=${fallbackMycnf} ${creds.dbName} < ${sqlFile}`,
+        `mysql --defaults-extra-file=${shellQuote(fallbackMycnf)} ${shellQuote(creds.dbName)} < ${shellQuote(sqlFile)}`,
         { timeout: 10 * 60_000 },
       );
     } finally {
       await cleanupRemoteMyCnf(executor, fallbackMycnf);
-      await executor.execute(`rm -f ${sqlFile}`).catch(() => {});
+      await executor.execute(`rm -f ${shellQuote(sqlFile)}`).catch(() => {});
     }
 
     await tracker.trackCommand(
@@ -1015,10 +1015,10 @@ export class SyncDbService {
       });
 
       const strategy1CacheDirs = [
-        `${shellQuote(contentPath)}/cache`,
-        `${shellQuote(contentPath)}/et-cache`,
-        `${shellQuote(contentPath)}/litespeed`,
-        ...(isBedrock ? [`${shellQuote(contentPath)}/uploads/cache`] : []),
+        shellQuote(`${contentPath}/cache`),
+        shellQuote(`${contentPath}/et-cache`),
+        shellQuote(`${contentPath}/litespeed`),
+        ...(isBedrock ? [shellQuote(`${contentPath}/uploads/cache`)] : []),
       ];
       await executor
         .execute(`rm -rf ${strategy1CacheDirs.join(" ")} 2>/dev/null; true`)
@@ -1149,7 +1149,7 @@ export class SyncDbService {
     }
     await executor
       .execute(
-        `rm -f ${shellQuote(contentPath)}/object-cache.php 2>/dev/null; true`,
+        `rm -f ${shellQuote(contentPath + "/object-cache.php")} 2>/dev/null; true`,
       )
       .catch(() => {});
     await tracker.track({
@@ -1157,15 +1157,15 @@ export class SyncDbService {
       level: "info",
     });
     const cacheRmParts = [
-      `${shellQuote(contentPath)}/cache`,
-      `${shellQuote(contentPath)}/et-cache`,
-      `${shellQuote(contentPath)}/litespeed`,
+      shellQuote(`${contentPath}/cache`),
+      shellQuote(`${contentPath}/et-cache`),
+      shellQuote(`${contentPath}/litespeed`),
       ...(!skipElementorCssFlush
-        ? [`${shellQuote(contentPath)}/uploads/elementor/css`]
+        ? [shellQuote(`${contentPath}/uploads/elementor/css`)]
         : []),
     ];
     if (isBedrock) {
-      cacheRmParts.push(`${shellQuote(contentPath)}/uploads/cache`);
+      cacheRmParts.push(shellQuote(`${contentPath}/uploads/cache`));
     }
     await executor
       .execute(`rm -rf ${cacheRmParts.join(" ")} 2>/dev/null; true`)

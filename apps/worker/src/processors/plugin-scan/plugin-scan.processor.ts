@@ -191,12 +191,12 @@ export class PluginScanProcessor extends WorkerHost {
       });
       const scanStart = Date.now();
       const result = await executor.execute(
-        `${phpCmd} ${remoteScript} --docroot=${env.root_path}`,
+        `${phpCmd} ${shellQuote(remoteScript)} --docroot=${shellQuote(env.root_path)}`,
         { timeout: 5 * 60 * 1000 },
       );
       await tracker.trackCommand(
         "plugin-scan.php",
-        `${phpCmd} ${remoteScript} --docroot=${env.root_path}`,
+        `${phpCmd} ${shellQuote(remoteScript)} --docroot=${shellQuote(env.root_path)}`,
         result,
         Date.now() - scanStart,
       );
@@ -234,7 +234,7 @@ export class PluginScanProcessor extends WorkerHost {
         level: "info",
         detail: `${plugins.length} plugins found`,
       });
-      await executor.execute(`rm -f ${remoteScript}`);
+      await executor.execute(`rm -f ${shellQuote(remoteScript)}`);
       await job.updateProgress(100);
 
       await tracker.track({
@@ -663,7 +663,7 @@ export class PluginScanProcessor extends WorkerHost {
           );
         }
 
-        await executor.execute(`rm -f ${remoteScript}`);
+        await executor.execute(`rm -f ${shellQuote(remoteScript)}`);
       } else {
         // WP-CLI Action
         let cliArgs = "";

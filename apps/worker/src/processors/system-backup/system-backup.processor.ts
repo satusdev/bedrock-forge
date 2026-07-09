@@ -3,7 +3,7 @@ import { Logger } from "@nestjs/common";
 import { Job } from "bullmq";
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { mkdir, stat, rm } from "fs/promises";
+import { mkdir, stat, rm, writeFile } from "fs/promises";
 import { join } from "path";
 import { QUEUES, JOB_TYPES } from "@bedrock-forge/shared";
 import { PrismaService } from "../../prisma/prisma.service";
@@ -247,23 +247,32 @@ export class SystemBackupProcessor extends WorkerHost {
 
     this.logger.log(`Running pg_dump → ${tmpPath}`);
 
-    await execFileAsync(
-      "pg_dump",
-      [
-        "-h",
-        dbHost,
-        "-p",
-        dbPort,
-        "-U",
-        dbUser,
-        "-d",
-        dbName,
-        "-Fc",
-        "-f",
-        tmpPath,
-      ],
-      { env: { ...process.env, PGPASSWORD: dbPassword } },
-    );
+    const pgpassFilename = `.${filename}.pgpass`;
+    const pgpassPath = join(STAGING_DIR, pgpassFilename);
+    const pgpassContent = `${dbHost}:${dbPort}:${dbName}:${dbUser}:${dbPassword}\n`;
+    await writeFile(pgpassPath, pgpassContent, { mode: 0o600 });
+
+    try {
+      await execFileAsync(
+        "pg_dump",
+        [
+          "-h",
+          dbHost,
+          "-p",
+          dbPort,
+          "-U",
+          dbUser,
+          "-d",
+          dbName,
+          "-Fc",
+          "-f",
+          tmpPath,
+        ],
+        { env: { ...process.env, PGPASSFILE: pgpassPath } },
+      );
+    } finally {
+      await rm(pgpassPath, { force: true }).catch(() => undefined);
+    }
 
     this.logger.log(`Uploading to GDrive folder ${folderId}`);
     await this.rclone.writeConfig();

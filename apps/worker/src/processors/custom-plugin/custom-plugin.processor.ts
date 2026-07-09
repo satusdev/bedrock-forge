@@ -154,7 +154,7 @@ export class CustomPluginProcessor extends WorkerHost {
         });
       } finally {
         await executor
-          .execute(`rm -f ${remoteScript}`, { timeout: 5_000 })
+          .execute(`rm -f ${shellQuote(remoteScript)}`, { timeout: 5_000 })
           .catch(() => {});
       }
       await tracker.trackCommand(
