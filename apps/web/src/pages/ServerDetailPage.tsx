@@ -89,6 +89,32 @@ function fmtUptime(seconds: number): string {
   return `${m}m`;
 }
 
+function parseCyberPanelVersion(version: string | null | undefined): string | null {
+  if (!version) return null;
+  let trimmed = version.trim();
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (typeof parsed === "string") {
+        trimmed = parsed.trim();
+      }
+    } catch {
+      // fallback
+    }
+  }
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === "object" && parsed.version) {
+        return parsed.version;
+      }
+    } catch {
+      // fallback
+    }
+  }
+  return trimmed;
+}
+
 function StatCard({
   label,
   value,
@@ -231,7 +257,7 @@ function OverviewTab({ server }: { server: ServerDetail }) {
             </p>
             <div className="flex items-center gap-2">
               <Badge variant="info">
-                CyberPanel {server.cyberpanel_version}
+                CyberPanel {parseCyberPanelVersion(server.cyberpanel_version)}
               </Badge>
             </div>
           </div>
@@ -564,7 +590,7 @@ export function ServerDetailPage() {
             <Globe className="h-4 w-4 text-muted-foreground" />
             <div>
               <p className="text-xs text-muted-foreground">CyberPanel</p>
-              <p className="text-sm font-medium">{server.cyberpanel_version}</p>
+              <p className="text-sm font-medium">{parseCyberPanelVersion(server.cyberpanel_version)}</p>
             </div>
           </div>
         )}

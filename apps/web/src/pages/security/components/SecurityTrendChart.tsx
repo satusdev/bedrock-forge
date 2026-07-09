@@ -39,12 +39,12 @@ export function SecurityTrendChart({ data }: { data: TrendData[] }) {
                 <linearGradient id="colorScore" x1="0" y1="0" x2="0" y2="1">
                   <stop
                     offset="5%"
-                    stopColor="var(--primary)"
+                    stopColor="hsl(var(--primary))"
                     stopOpacity={0.2}
                   />
                   <stop
                     offset="95%"
-                    stopColor="var(--primary)"
+                    stopColor="hsl(var(--primary))"
                     stopOpacity={0}
                   />
                 </linearGradient>
@@ -52,14 +52,14 @@ export function SecurityTrendChart({ data }: { data: TrendData[] }) {
               <CartesianGrid
                 strokeDasharray="3 3"
                 vertical={false}
-                stroke="var(--border)"
+                stroke="hsl(var(--border))"
                 opacity={0.5}
               />
               <XAxis
                 dataKey="date"
                 axisLine={false}
                 tickLine={false}
-                tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+                tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
                 minTickGap={30}
                 tickFormatter={(val) => {
                   const date = new Date(val);
@@ -73,7 +73,7 @@ export function SecurityTrendChart({ data }: { data: TrendData[] }) {
                 domain={[0, 100]}
                 axisLine={false}
                 tickLine={false}
-                tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+                tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
               />
               <Tooltip
                 content={({ active, payload }) => {
@@ -97,7 +97,7 @@ export function SecurityTrendChart({ data }: { data: TrendData[] }) {
               <Area
                 type="monotone"
                 dataKey="score"
-                stroke="var(--primary)"
+                stroke="hsl(var(--primary))"
                 strokeWidth={2}
                 fillOpacity={1}
                 fill="url(#colorScore)"

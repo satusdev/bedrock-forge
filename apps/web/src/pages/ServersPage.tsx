@@ -607,12 +607,34 @@ export function ServersPage() {
     },
     {
       header: "Panel",
-      render: (s) =>
-        s.cyberpanel_version ? (
-          <Badge variant="info">CP {s.cyberpanel_version}</Badge>
-        ) : (
-          <span className="text-muted-foreground">—</span>
-        ),
+      render: (s) => {
+        if (!s.cyberpanel_version) {
+          return <span className="text-muted-foreground">—</span>;
+        }
+        let trimmed = s.cyberpanel_version.trim();
+        if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+          try {
+            const parsed = JSON.parse(trimmed);
+            if (typeof parsed === "string") {
+              trimmed = parsed.trim();
+            }
+          } catch {
+            // fallback
+          }
+        }
+        let displayVersion = trimmed;
+        if (trimmed.startsWith("{")) {
+          try {
+            const parsed = JSON.parse(trimmed);
+            if (parsed && typeof parsed === "object" && parsed.version) {
+              displayVersion = parsed.version;
+            }
+          } catch {
+            // fallback
+          }
+        }
+        return <Badge variant="info">CP {displayVersion}</Badge>;
+      },
     },
     {
       header: "Status",
