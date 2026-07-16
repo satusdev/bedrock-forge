@@ -217,7 +217,7 @@ export function SidebarInner({ collapsed = false }: SidebarInnerProps) {
           aria-label="Main navigation"
           className={cn(
             "flex-1 py-3 overflow-y-auto",
-            collapsed ? "px-2" : "px-3",
+            collapsed ? "px-2 scrollbar-none" : "px-3 sidebar-scrollbar",
           )}
         >
           {(() => {

@@ -25,6 +25,9 @@ export function SecurityScoreGauge({
 
   const color = getColor(score);
 
+  const outerRadius = Math.floor(size * 0.45);
+  const innerRadius = Math.floor(size * 0.33);
+
   return (
     <div
       className="relative flex flex-col items-center justify-center"
@@ -38,8 +41,8 @@ export function SecurityScoreGauge({
             cy="80%"
             startAngle={180}
             endAngle={0}
-            innerRadius="65%"
-            outerRadius="90%"
+            innerRadius={innerRadius}
+            outerRadius={outerRadius}
             paddingAngle={0}
             dataKey="value"
             stroke="none"

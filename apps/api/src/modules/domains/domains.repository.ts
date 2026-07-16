@@ -26,6 +26,15 @@ export class DomainsRepository {
       .then(([items, total]) => ({ items, total, page, limit }));
   }
 
+  findAllRaw(): Promise<{ id: bigint; name: string }[]> {
+    return this.prisma.domain.findMany({
+      select: {
+        id: true,
+        name: true,
+      },
+    });
+  }
+
   findById(id: bigint) {
     return this.prisma.domain.findUnique({ where: { id } });
   }

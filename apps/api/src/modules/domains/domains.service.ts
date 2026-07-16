@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { Injectable, NotFoundException, Logger } from "@nestjs/common";
 import { InjectQueue } from "@nestjs/bullmq";
 import { Queue } from "bullmq";
+import { Cron } from "@nestjs/schedule";
 import { DomainsRepository } from "./domains.repository";
 import {
   QUEUES,
@@ -12,6 +13,8 @@ import { CreateDomainDto, UpdateDomainDto } from "./dto/domain.dto";
 
 @Injectable()
 export class DomainsService {
+  private readonly logger = new Logger(DomainsService.name);
+
   constructor(
     private readonly repo: DomainsRepository,
     @InjectQueue(QUEUES.DOMAINS) private readonly queue: Queue,
@@ -85,5 +88,40 @@ export class DomainsService {
       DEFAULT_JOB_OPTIONS,
     );
     return { bullJobId: job.id };
+  }
+
+  /**
+   * Weekly cron: refresh WHOIS and SSL lookups for all registered domains.
+   * Runs Sunday at 3:00 AM.
+   */
+  @Cron("0 3 * * 0")
+  async refreshAllDomains(): Promise<void> {
+    this.logger.log("Starting weekly cron job to refresh all domains (WHOIS & SSL)");
+    try {
+      const domains = await this.repo.findAllRaw();
+      if (domains.length === 0) {
+        this.logger.log("No domains found to refresh");
+        return;
+      }
+
+      await Promise.all(
+        domains.flatMap((d: { id: bigint; name: string }) => [
+          this.queue.add(
+            JOB_TYPES.DOMAIN_WHOIS,
+            { domainId: Number(d.id), domain: d.name },
+            DEFAULT_JOB_OPTIONS,
+          ),
+          this.queue.add(
+            JOB_TYPES.DOMAIN_SSL_CHECK,
+            { domainId: Number(d.id), domain: d.name },
+            DEFAULT_JOB_OPTIONS,
+          ),
+        ]),
+      );
+
+      this.logger.log(`Enqueued WHOIS and SSL check jobs for ${domains.length} domain(s)`);
+    } catch (err) {
+      this.logger.error(`Failed to execute weekly domain refresh: ${err}`);
+    }
   }
 }

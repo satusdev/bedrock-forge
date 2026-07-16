@@ -101,3 +101,35 @@
 			'calt' 1;
 	}
 }
+
+/* Sidebar scrollbar customization */
+.sidebar-scrollbar::-webkit-scrollbar {
+	width: 4px;
+}
+
+.sidebar-scrollbar::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.sidebar-scrollbar::-webkit-scrollbar-thumb {
+	background: hsl(var(--border) / 0.5);
+	border-radius: 4px;
+}
+
+.sidebar-scrollbar::-webkit-scrollbar-thumb:hover {
+	background: hsl(var(--border));
+}
+
+.sidebar-scrollbar {
+	scrollbar-width: thin;
+	scrollbar-color: hsl(var(--border) / 0.5) transparent;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+	display: none;
+}
+
+.scrollbar-none {
+	-ms-overflow-style: none;
+	scrollbar-width: none;
+}
