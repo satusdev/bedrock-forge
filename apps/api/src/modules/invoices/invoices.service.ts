@@ -50,6 +50,10 @@ function assertValidPeriod(
   }
 }
 
+function firstExistingPath(paths: Array<string | undefined>): string | null {
+  return paths.find((path) => path !== undefined && existsSync(path)) ?? null;
+}
+
 @Injectable()
 export class InvoicesService {
   private readonly logger = new Logger(InvoicesService.name);
@@ -92,17 +96,14 @@ export class InvoicesService {
     if (!rawInv) throw new NotFoundException(`Invoice #${id} not found`);
     const inv = this.serialise(rawInv);
 
-    const chromePath =
-      process.env.LIGHTHOUSE_CHROME_PATH ||
-      process.env.CHROME_PATH ||
-      (existsSync("/usr/bin/google-chrome-stable")
-        ? "/usr/bin/google-chrome-stable"
-        : null) ||
-      (existsSync("/usr/bin/google-chrome") ? "/usr/bin/google-chrome" : null) ||
-      (existsSync("/usr/bin/chromium-browser")
-        ? "/usr/bin/chromium-browser"
-        : null) ||
-      (existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : null);
+    const chromePath = firstExistingPath([
+      process.env.LIGHTHOUSE_CHROME_PATH,
+      process.env.CHROME_PATH,
+      "/usr/bin/google-chrome-stable",
+      "/usr/bin/google-chrome",
+      "/usr/bin/chromium-browser",
+      "/usr/bin/chromium",
+    ]);
 
     if (!chromePath) {
       throw new ServiceUnavailableException(
