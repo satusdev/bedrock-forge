@@ -48,16 +48,35 @@ export class DashboardRepository {
       runningJobs,
       failedJobs24h,
     ] = await Promise.all([
-      this.prisma.project.count(),
+      this.prisma.project.count({
+        where: { status: { not: "archived" } },
+      }),
       this.prisma.server.count(),
       this.prisma.client.count(),
       this.prisma.monitor.findMany({
+        where: {
+          environment: {
+            project: {
+              status: { not: "archived" },
+            },
+          },
+        },
         select: { last_status: true, uptime_pct: true },
       }),
       this.prisma.jobExecution.findMany({
         take: 8,
         orderBy: { created_at: "desc" },
-        where: { status: { notIn: ["active", "queued"] } },
+        where: {
+          status: { notIn: ["active", "queued"] },
+          OR: [
+            { environment: null },
+            {
+              environment: {
+                project: { status: { not: "archived" } },
+              },
+            },
+          ],
+        },
         select: {
           id: true,
           queue_name: true,
@@ -77,7 +96,17 @@ export class DashboardRepository {
         },
       }),
       this.prisma.jobExecution.findMany({
-        where: { status: { in: ["active", "queued"] } },
+        where: {
+          status: { in: ["active", "queued"] },
+          OR: [
+            { environment: null },
+            {
+              environment: {
+                project: { status: { not: "archived" } },
+              },
+            },
+          ],
+        },
         orderBy: { created_at: "desc" },
         select: jobSelect,
       }),
@@ -85,6 +114,14 @@ export class DashboardRepository {
         where: {
           status: { in: ["failed", "dead_letter"] },
           created_at: { gte: since24h },
+          OR: [
+            { environment: null },
+            {
+              environment: {
+                project: { status: { not: "archived" } },
+              },
+            },
+          ],
         },
         orderBy: { created_at: "desc" },
         take: 20,
@@ -128,13 +165,25 @@ export class DashboardRepository {
     } as const;
 
     const [environments, failedJobCounts, allDomains] = await Promise.all([
-      this.prisma.environment.findMany({ select: envSelect }),
+      this.prisma.environment.findMany({
+        where: {
+          project: {
+            status: { not: "archived" },
+          },
+        },
+        select: envSelect,
+      }),
       this.prisma.jobExecution.groupBy({
         by: ["environment_id"],
         where: {
           status: { in: ["failed", "dead_letter"] },
           created_at: { gte: since7d },
           environment_id: { not: null },
+          environment: {
+            project: {
+              status: { not: "archived" },
+            },
+          },
         },
         _count: { id: true },
       }),
@@ -268,6 +317,9 @@ export class DashboardRepository {
           queue_name: "backups",
           status: { in: ["failed", "dead_letter"] },
           created_at: { gte: since24h },
+          environment: {
+            project: { status: { not: "archived" } },
+          },
         },
         select: {
           id: true,
@@ -282,6 +334,9 @@ export class DashboardRepository {
           queue_name: "sync",
           status: { in: ["failed", "dead_letter"] },
           created_at: { gte: since24h },
+          environment: {
+            project: { status: { not: "archived" } },
+          },
         },
         select: {
           id: true,
@@ -292,7 +347,13 @@ export class DashboardRepository {
         orderBy: { created_at: "desc" },
       }),
       this.prisma.monitor.findMany({
-        where: { enabled: true, last_status: { not: null } },
+        where: {
+          enabled: true,
+          last_status: { not: null },
+          environment: {
+            project: { status: { not: "archived" } },
+          },
+        },
         select: {
           id: true,
           last_status: true,
@@ -309,6 +370,7 @@ export class DashboardRepository {
       }),
       this.prisma.environment.findMany({
         where: {
+          project: { status: { not: "archived" } },
           backups: {
             none: { status: "completed", created_at: { gte: since48h } },
           },
@@ -318,6 +380,7 @@ export class DashboardRepository {
       }),
       this.prisma.environment.findMany({
         where: {
+          project: { status: { not: "archived" } },
           plugin_scans: {
             some: { scanned_at: { lt: since30d } },
             none: { scanned_at: { gte: since30d } },
@@ -327,12 +390,18 @@ export class DashboardRepository {
         take: 20,
       }),
       this.prisma.environment.findMany({
-        where: { backup_schedule: null },
+        where: {
+          project: { status: { not: "archived" } },
+          backup_schedule: null,
+        },
         select: envSelect,
         take: 20,
       }),
       this.prisma.environment.findMany({
-        where: { monitors: { none: {} } },
+        where: {
+          project: { status: { not: "archived" } },
+          monitors: { none: {} },
+        },
         select: envSelect,
         take: 20,
       }),
@@ -494,16 +563,44 @@ export class DashboardRepository {
       pluginUpdates,
     ] = await Promise.all([
       this.prisma.backup.count({
-        where: { status: "completed", created_at: { gte: since24h } },
+        where: {
+          status: "completed",
+          created_at: { gte: since24h },
+          environment: {
+            project: { status: { not: "archived" } },
+          },
+        },
       }),
       this.prisma.backup.count({
-        where: { status: "failed", created_at: { gte: since24h } },
+        where: {
+          status: "failed",
+          created_at: { gte: since24h },
+          environment: {
+            project: { status: { not: "archived" } },
+          },
+        },
       }),
       this.prisma.monitorLog.count({
-        where: { event_type: "down", occurred_at: { gte: since24h } },
+        where: {
+          event_type: "down",
+          occurred_at: { gte: since24h },
+          monitor: {
+            environment: {
+              project: { status: { not: "archived" } },
+            },
+          },
+        },
       }),
       this.prisma.monitorLog.findMany({
-        where: { event_type: "down", occurred_at: { gte: since24h } },
+        where: {
+          event_type: "down",
+          occurred_at: { gte: since24h },
+          monitor: {
+            environment: {
+              project: { status: { not: "archived" } },
+            },
+          },
+        },
         select: { duration_seconds: true },
       }),
       this.prisma.jobExecution.count({
@@ -511,6 +608,9 @@ export class DashboardRepository {
           queue_name: "sync",
           status: "completed",
           created_at: { gte: since24h },
+          environment: {
+            project: { status: { not: "archived" } },
+          },
         },
       }),
       this.prisma.jobExecution.count({
@@ -518,6 +618,9 @@ export class DashboardRepository {
           queue_name: "plugin-updates",
           status: "completed",
           created_at: { gte: since24h },
+          environment: {
+            project: { status: { not: "archived" } },
+          },
         },
       }),
     ]);

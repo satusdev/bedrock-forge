@@ -49,24 +49,27 @@ interface NavGroup {
 
 const NAV_GROUPS: NavGroup[] = [
   {
-    label: null,
-    items: [{ to: "/dashboard", label: "Dashboard", icon: LayoutDashboard }],
+    label: "Overview",
+    items: [
+      { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+      { to: "/monitors", label: "Monitors", icon: Activity },
+      { to: "/lighthouse", label: "Lighthouse", icon: Gauge },
+      { to: "/activity", label: "Activity", icon: ClipboardList },
+    ],
   },
   {
-    label: "Infrastructure",
+    label: "Management",
     items: [
+      { to: "/projects", label: "Projects", icon: FolderKanban },
       { to: "/clients", label: "Clients", icon: Users },
       { to: "/servers", label: "Servers", icon: Server },
-      { to: "/projects", label: "Projects", icon: FolderKanban },
+      { to: "/domains", label: "Domains", icon: Globe },
     ],
   },
   {
     label: "Operations",
     items: [
       { to: "/backups", label: "Backups", icon: HardDrive },
-      { to: "/monitors", label: "Monitors", icon: Activity },
-      { to: "/lighthouse", label: "Lighthouse", icon: Gauge },
-      { to: "/domains", label: "Domains", icon: Globe },
       {
         to: "/security",
         label: "Security",
@@ -79,7 +82,6 @@ const NAV_GROUPS: NavGroup[] = [
         icon: Calendar,
         minRole: "manager",
       },
-      { to: "/activity", label: "Activity", icon: ClipboardList },
       {
         to: "/problems",
         label: "Problems",
@@ -89,7 +91,7 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: "Finance",
+    label: "Billing & Admin",
     items: [
       { to: "/packages", label: "Packages", icon: Package, minRole: "manager" },
       {
@@ -99,14 +101,11 @@ const NAV_GROUPS: NavGroup[] = [
         minRole: "manager",
       },
       { to: "/tags", label: "Tags", icon: Tag, minRole: "manager" },
+      { to: "/settings", label: "Settings", icon: Settings },
     ],
   },
   {
-    label: "System",
-    items: [{ to: "/settings", label: "Settings", icon: Settings }],
-  },
-  {
-    label: "Admin",
+    label: "System Admin",
     items: [
       { to: "/users", label: "Users & Roles", icon: Shield, minRole: "admin" },
       {

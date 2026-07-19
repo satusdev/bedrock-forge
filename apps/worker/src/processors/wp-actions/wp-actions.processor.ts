@@ -443,15 +443,19 @@ export class WpActionsProcessor extends WorkerHost {
         wpCli.buildCommand("core check-update --format=json --skip-plugins"),
         { timeout: 30_000 },
       );
-      if (checkResult.code !== 0) {
-        throw new Error(
-          `wp core check-update failed (exit ${checkResult.code}): ${checkResult.stderr}`,
-        );
-      }
+      // wp-cli exits 1 when WordPress is up to date (no updates available).
+      // Only fail on exit codes > 1 or if the output cannot be parsed as JSON at all.
       let updates: unknown[] = [];
       try {
         updates = parseWpUpdatesJson(checkResult.stdout) as unknown[];
       } catch {
+        // If we couldn't parse JSON AND exit was non-zero, treat as error
+        if (checkResult.code > 1) {
+          throw new Error(
+            `wp core check-update failed (exit ${checkResult.code}): ${checkResult.stderr}`,
+          );
+        }
+        // Otherwise (e.g. empty output, up-to-date): assume no updates
         updates = [];
       }
       const result = { current_version: currentVersion, updates };

@@ -9,6 +9,7 @@ import {
   User2,
   Pencil,
   ExternalLink,
+  FileText,
   History,
   Puzzle,
   RefreshCw,
@@ -306,6 +307,8 @@ export function ProjectDetailPage() {
   const [editingLinkIndex, setEditingLinkIndex] = useState<number | null>(null);
   const [linkLabel, setLinkLabel] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
+  const [linkType, setLinkType] = useState<"link" | "text">("link");
+  const [linkValue, setLinkValue] = useState("");
 
   const updateProjectMutation = useMutation({
     mutationFn: (data: Partial<Project>) =>
@@ -849,10 +852,10 @@ export function ProjectDetailPage() {
             </CardContent>
           </Card>
 
-          {/* Quick Links Card */}
+          {/* Quick Links & Info Card */}
           <Card className="border border-border/40 rounded-xl shadow-sm backdrop-blur-sm bg-card overflow-hidden">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 border-b border-border/20 px-5 py-4">
-              <CardTitle className="text-sm font-semibold tracking-tight">Quick Links</CardTitle>
+              <CardTitle className="text-sm font-semibold tracking-tight">Quick Links & Custom Info</CardTitle>
               <Button
                 variant="ghost"
                 size="icon"
@@ -861,6 +864,8 @@ export function ProjectDetailPage() {
                   setEditingLinkIndex(null);
                   setLinkLabel("");
                   setLinkUrl("");
+                  setLinkValue("");
+                  setLinkType("link");
                   setLinkDialogOpen(true);
                 }}
               >
@@ -870,25 +875,39 @@ export function ProjectDetailPage() {
             <CardContent className="p-5">
               {!project.links || project.links.length === 0 ? (
                 <p className="text-muted-foreground italic text-xs">
-                  No quick links added yet. Click the plus icon to save documentation, dashboard, or client links.
+                  No quick links or custom info added yet. Click the plus icon to save documentation, passwords, or instructions.
                 </p>
               ) : (
                 <div className="space-y-2.5">
-                  {project.links.map((link, idx) => (
+                  {project.links.map((link: any, idx) => (
                     <div
                       key={idx}
-                      className="group flex items-center justify-between p-2.5 rounded-lg border border-border/20 bg-muted/10 hover:bg-muted/30 transition-all"
+                      className="group flex items-center justify-between p-2.5 rounded-lg border border-border/20 bg-muted/10 hover:bg-muted/30 transition-all animate-in fade-in-50 duration-200"
                     >
-                      <a
-                        href={link.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 text-sm text-foreground hover:text-primary hover:underline font-medium min-w-0 flex-1 mr-2"
-                      >
-                        <Globe className="h-4 w-4 text-muted-foreground shrink-0" />
-                        <span className="truncate">{link.label}</span>
-                        <ExternalLink className="h-3 w-3 text-muted-foreground shrink-0 opacity-60" />
-                      </a>
+                      {link.isText ? (
+                        <div className="flex items-start gap-2.5 text-sm text-foreground font-medium min-w-0 flex-1 mr-2">
+                          <FileText className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                          <div className="min-w-0 flex-1">
+                            <span className="text-xs text-muted-foreground/70 block font-normal tracking-wide uppercase text-[10px] mb-0.5">
+                              {link.label}
+                            </span>
+                            <span className="break-all whitespace-pre-wrap select-text text-xs leading-relaxed font-mono bg-muted/40 px-1.5 py-0.5 rounded border border-border/10 inline-block w-full">
+                              {link.value}
+                            </span>
+                          </div>
+                        </div>
+                      ) : (
+                        <a
+                          href={link.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 text-sm text-foreground hover:text-primary hover:underline font-medium min-w-0 flex-1 mr-2"
+                        >
+                          <Globe className="h-4 w-4 text-muted-foreground shrink-0" />
+                          <span className="truncate">{link.label}</span>
+                          <ExternalLink className="h-3 w-3 text-muted-foreground shrink-0 opacity-60" />
+                        </a>
+                      )}
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <Button
                           variant="ghost"
@@ -897,7 +916,9 @@ export function ProjectDetailPage() {
                           onClick={() => {
                             setEditingLinkIndex(idx);
                             setLinkLabel(link.label);
-                            setLinkUrl(link.url);
+                            setLinkUrl(link.url ?? "");
+                            setLinkValue(link.value ?? "");
+                            setLinkType(link.isText ? "text" : "link");
                             setLinkDialogOpen(true);
                           }}
                         >
@@ -929,30 +950,58 @@ export function ProjectDetailPage() {
       <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{editingLinkIndex !== null ? "Edit Link" : "Add Quick Link"}</DialogTitle>
+            <DialogTitle>{editingLinkIndex !== null ? "Edit Item" : "Add Reference Info"}</DialogTitle>
             <DialogDescription>
-              Add a reference link for documentation, staging sites, client requests, or admin logins.
+              Save web URLs, custom metadata, notes, or credentials to keep everything in one place.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
-              <Label htmlFor="link-label" className="text-xs font-semibold">Link Label *</Label>
+              <Label className="text-xs font-semibold">Type *</Label>
+              <Select
+                value={linkType}
+                onValueChange={(v: "link" | "text") => setLinkType(v)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="link">Web Link / URL</SelectItem>
+                  <SelectItem value="text">Custom Info / Text Field</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="link-label" className="text-xs font-semibold">Label *</Label>
               <Input
                 id="link-label"
-                placeholder="e.g. staging phpMyAdmin, Client Portal"
+                placeholder={linkType === "link" ? "e.g. Staging phpMyAdmin, Client Portal" : "e.g. SFTP Port, Database Name"}
                 value={linkLabel}
                 onChange={(e) => setLinkLabel(e.target.value)}
               />
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="link-url" className="text-xs font-semibold">URL *</Label>
-              <Input
-                id="link-url"
-                placeholder="e.g. https://domain.com/path"
-                value={linkUrl}
-                onChange={(e) => setLinkUrl(e.target.value)}
-              />
-            </div>
+            {linkType === "link" ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="link-url" className="text-xs font-semibold">URL *</Label>
+                <Input
+                  id="link-url"
+                  placeholder="e.g. https://domain.com/path"
+                  value={linkUrl}
+                  onChange={(e) => setLinkUrl(e.target.value)}
+                />
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Label htmlFor="link-value" className="text-xs font-semibold">Value / Text Content *</Label>
+                <Textarea
+                  id="link-value"
+                  placeholder="Enter custom metadata value, credentials, or instructions..."
+                  value={linkValue}
+                  onChange={(e) => setLinkValue(e.target.value)}
+                  className="min-h-[100px] resize-y"
+                />
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button
@@ -966,20 +1015,37 @@ export function ProjectDetailPage() {
             <Button
               size="sm"
               onClick={() => {
-                if (!linkLabel.trim() || !linkUrl.trim()) {
-                  toast({ title: "Both Label and URL are required", variant: "destructive" });
+                if (!linkLabel.trim()) {
+                  toast({ title: "Label is required", variant: "destructive" });
                   return;
                 }
-                let formattedUrl = linkUrl.trim();
-                if (!/^https?:\/\//i.test(formattedUrl)) {
-                  formattedUrl = `https://${formattedUrl}`;
+                if (linkType === "link" && !linkUrl.trim()) {
+                  toast({ title: "URL is required for web links", variant: "destructive" });
+                  return;
                 }
+                if (linkType === "text" && !linkValue.trim()) {
+                  toast({ title: "Value is required for custom info", variant: "destructive" });
+                  return;
+                }
+
+                let finalItem: any = {};
+                if (linkType === "link") {
+                  let formattedUrl = linkUrl.trim();
+                  if (!/^https?:\/\//i.test(formattedUrl)) {
+                    formattedUrl = `https://${formattedUrl}`;
+                  }
+                  finalItem = { label: linkLabel.trim(), url: formattedUrl, isText: false };
+                } else {
+                  finalItem = { label: linkLabel.trim(), value: linkValue.trim(), isText: true };
+                }
+
                 const updated = [...(project.links ?? [])];
                 if (editingLinkIndex !== null) {
-                  updated[editingLinkIndex] = { label: linkLabel.trim(), url: formattedUrl };
+                  updated[editingLinkIndex] = finalItem;
                 } else {
-                  updated.push({ label: linkLabel.trim(), url: formattedUrl });
+                  updated.push(finalItem);
                 }
+
                 updateProjectMutation.mutate(
                   { links: updated },
                   { onSuccess: () => setLinkDialogOpen(false) }
@@ -990,7 +1056,7 @@ export function ProjectDetailPage() {
               {updateProjectMutation.isPending && (
                 <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
               )}
-              {editingLinkIndex !== null ? "Save Link" : "Add Link"}
+              {editingLinkIndex !== null ? "Save Changes" : "Add Item"}
             </Button>
           </DialogFooter>
         </DialogContent>
