@@ -90,4 +90,11 @@ export class CreateProjectFullDto {
   @IsString()
   @MaxLength(255)
   db_host?: string;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
+
+  @IsOptional()
+  links?: any;
 }

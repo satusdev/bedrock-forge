@@ -25,12 +25,16 @@ import {
   Clock,
   CheckCircle2,
   XCircle,
+  Plus,
+  Trash2,
 } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Card, CardHeader, CardContent, CardTitle } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
 import { EnvironmentsTab } from "./project-detail/EnvironmentsTab";
 import { BackupsTab } from "./project-detail/BackupsTab";
 import { PluginsTab } from "./project-detail/PluginsTab";
@@ -85,6 +89,11 @@ interface Environment {
   server: Server;
 }
 
+interface ProjectLink {
+  label: string;
+  url: string;
+}
+
 interface Project {
   id: number;
   name: string;
@@ -94,6 +103,8 @@ interface Project {
   support_package: { id: number; name: string; price_monthly: number } | null;
   environments: Environment[];
   created_at: string;
+  notes?: string | null;
+  links?: ProjectLink[] | null;
 }
 
 function ProjectHeader({
@@ -288,6 +299,30 @@ export function ProjectDetailPage() {
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [restoreOpen, setRestoreOpen] = useState(false);
 
+  const [isEditingNotes, setIsEditingNotes] = useState(false);
+  const [notesText, setNotesText] = useState("");
+
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  const [editingLinkIndex, setEditingLinkIndex] = useState<number | null>(null);
+  const [linkLabel, setLinkLabel] = useState("");
+  const [linkUrl, setLinkUrl] = useState("");
+
+  const updateProjectMutation = useMutation({
+    mutationFn: (data: Partial<Project>) =>
+      api.put(`/projects/${projectId}`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["project", projectId] });
+      qc.invalidateQueries({ queryKey: ["projects"] });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Failed to update project",
+        description: err.response?.data?.message || err.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   const [activeJobExecutionId, setActiveJobExecutionId] = useState<number | null>(null);
   const [activeBullJobId, setActiveBullJobId] = useState<string | null>(null);
   const [activeJobType, setActiveJobType] = useState<string | null>(null);
@@ -433,6 +468,12 @@ export function ProjectDetailPage() {
     queryFn: () => api.get<Project>(`/projects/${projectId}`),
   });
 
+  useEffect(() => {
+    if (project) {
+      setNotesText(project.notes ?? "");
+    }
+  }, [project?.notes]);
+
   const { data: clients = [] } = useQuery({
     queryKey: ["clients-list"],
     queryFn: () =>
@@ -553,17 +594,19 @@ export function ProjectDetailPage() {
         </div>
       )}
 
-      <Tabs
-        value={currentTab}
-        className="space-y-6"
-        onValueChange={(v) => {
-          setSearchParams((prev) => {
-            const next = new URLSearchParams(prev);
-            next.set("tab", v);
-            return next;
-          });
-        }}
-      >
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        <div className="lg:col-span-8 space-y-6">
+          <Tabs
+            value={currentTab}
+            className="space-y-6"
+            onValueChange={(v) => {
+              setSearchParams((prev) => {
+                const next = new URLSearchParams(prev);
+                next.set("tab", v);
+                return next;
+              });
+            }}
+          >
         <TabsList className="flex-wrap h-auto gap-1 bg-muted/60 p-1 border border-border/40 rounded-xl shadow-sm backdrop-blur-sm">
           <TabsTrigger
             value="environments"
@@ -734,6 +777,224 @@ export function ProjectDetailPage() {
           </div>
         </TabsContent>
       </Tabs>
+        </div>
+
+        <div className="lg:col-span-4 space-y-6">
+          {/* Notes Card */}
+          <Card className="border border-border/40 rounded-xl shadow-sm backdrop-blur-sm bg-card overflow-hidden">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 border-b border-border/20 px-5 py-4">
+              <CardTitle className="text-sm font-semibold tracking-tight">Project Notes</CardTitle>
+              {!isEditingNotes && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 hover:bg-muted"
+                  onClick={() => setIsEditingNotes(true)}
+                >
+                  <Pencil className="h-4 w-4 text-muted-foreground" />
+                </Button>
+              )}
+            </CardHeader>
+            <CardContent className="p-5">
+              {isEditingNotes ? (
+                <div className="space-y-3">
+                  <Textarea
+                    placeholder="Enter database credentials, production URLs, SSH keys, access info, or instructions..."
+                    value={notesText}
+                    onChange={(e) => setNotesText(e.target.value)}
+                    className="min-h-[160px] resize-y text-sm bg-muted/30 focus-visible:ring-primary/30"
+                  />
+                  <div className="flex items-center justify-end gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 text-xs"
+                      onClick={() => {
+                        setIsEditingNotes(false);
+                        setNotesText(project.notes ?? "");
+                      }}
+                      disabled={updateProjectMutation.isPending}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="h-8 text-xs gap-1.5"
+                      onClick={() => {
+                        updateProjectMutation.mutate(
+                          { notes: notesText },
+                          { onSuccess: () => setIsEditingNotes(false) }
+                        );
+                      }}
+                      disabled={updateProjectMutation.isPending}
+                    >
+                      {updateProjectMutation.isPending && (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      )}
+                      Save
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-sm leading-relaxed text-foreground">
+                  {project.notes ? (
+                    <div className="whitespace-pre-wrap select-text">{project.notes}</div>
+                  ) : (
+                    <p className="text-muted-foreground italic text-xs">
+                      No project notes recorded yet. Click the edit icon to add passwords, configurations, or credentials.
+                    </p>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Quick Links Card */}
+          <Card className="border border-border/40 rounded-xl shadow-sm backdrop-blur-sm bg-card overflow-hidden">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 border-b border-border/20 px-5 py-4">
+              <CardTitle className="text-sm font-semibold tracking-tight">Quick Links</CardTitle>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 hover:bg-muted"
+                onClick={() => {
+                  setEditingLinkIndex(null);
+                  setLinkLabel("");
+                  setLinkUrl("");
+                  setLinkDialogOpen(true);
+                }}
+              >
+                <Plus className="h-4 w-4 text-muted-foreground" />
+              </Button>
+            </CardHeader>
+            <CardContent className="p-5">
+              {!project.links || project.links.length === 0 ? (
+                <p className="text-muted-foreground italic text-xs">
+                  No quick links added yet. Click the plus icon to save documentation, dashboard, or client links.
+                </p>
+              ) : (
+                <div className="space-y-2.5">
+                  {project.links.map((link, idx) => (
+                    <div
+                      key={idx}
+                      className="group flex items-center justify-between p-2.5 rounded-lg border border-border/20 bg-muted/10 hover:bg-muted/30 transition-all"
+                    >
+                      <a
+                        href={link.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 text-sm text-foreground hover:text-primary hover:underline font-medium min-w-0 flex-1 mr-2"
+                      >
+                        <Globe className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <span className="truncate">{link.label}</span>
+                        <ExternalLink className="h-3 w-3 text-muted-foreground shrink-0 opacity-60" />
+                      </a>
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 hover:bg-muted rounded-md"
+                          onClick={() => {
+                            setEditingLinkIndex(idx);
+                            setLinkLabel(link.label);
+                            setLinkUrl(link.url);
+                            setLinkDialogOpen(true);
+                          }}
+                        >
+                          <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 hover:bg-destructive/10 rounded-md"
+                          onClick={() => {
+                            if (confirm(`Are you sure you want to delete "${link.label}"?`)) {
+                              const updated = (project.links ?? []).filter((_, i) => i !== idx);
+                              updateProjectMutation.mutate({ links: updated });
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editingLinkIndex !== null ? "Edit Link" : "Add Quick Link"}</DialogTitle>
+            <DialogDescription>
+              Add a reference link for documentation, staging sites, client requests, or admin logins.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="link-label" className="text-xs font-semibold">Link Label *</Label>
+              <Input
+                id="link-label"
+                placeholder="e.g. staging phpMyAdmin, Client Portal"
+                value={linkLabel}
+                onChange={(e) => setLinkLabel(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="link-url" className="text-xs font-semibold">URL *</Label>
+              <Input
+                id="link-url"
+                placeholder="e.g. https://domain.com/path"
+                value={linkUrl}
+                onChange={(e) => setLinkUrl(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setLinkDialogOpen(false)}
+              disabled={updateProjectMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                if (!linkLabel.trim() || !linkUrl.trim()) {
+                  toast({ title: "Both Label and URL are required", variant: "destructive" });
+                  return;
+                }
+                let formattedUrl = linkUrl.trim();
+                if (!/^https?:\/\//i.test(formattedUrl)) {
+                  formattedUrl = `https://${formattedUrl}`;
+                }
+                const updated = [...(project.links ?? [])];
+                if (editingLinkIndex !== null) {
+                  updated[editingLinkIndex] = { label: linkLabel.trim(), url: formattedUrl };
+                } else {
+                  updated.push({ label: linkLabel.trim(), url: formattedUrl });
+                }
+                updateProjectMutation.mutate(
+                  { links: updated },
+                  { onSuccess: () => setLinkDialogOpen(false) }
+                );
+              }}
+              disabled={updateProjectMutation.isPending}
+            >
+              {updateProjectMutation.isPending && (
+                <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+              )}
+              {editingLinkIndex !== null ? "Save Link" : "Add Link"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
 
       <ProjectFormDialog

@@ -58,6 +58,8 @@ export class ProjectsService {
         support_package_id: BigInt(dto.support_package_id),
       }),
       ...(dto.status && { status: dto.status }),
+      notes: dto.notes,
+      links: dto.links,
     });
   }
 
@@ -75,6 +77,8 @@ export class ProjectsService {
         support_package_id: BigInt(dto.support_package_id),
       }),
       ...(dto.status !== undefined && { status: dto.status }),
+      ...(dto.notes !== undefined && { notes: dto.notes }),
+      ...(dto.links !== undefined && { links: dto.links }),
     });
   }
 
@@ -331,6 +335,8 @@ export class ProjectsService {
         rootPath,
         queueName: QUEUES.PROJECTS,
         jobType: JOB_TYPES.PROJECT_CREATE_BEDROCK,
+        notes: dto.notes,
+        links: dto.links,
       });
 
     // Enqueue the provisioning job

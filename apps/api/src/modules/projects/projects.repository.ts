@@ -10,6 +10,8 @@ interface CreateProjectData {
   hosting_package_id?: bigint;
   support_package_id?: bigint;
   status?: string;
+  notes?: string;
+  links?: any;
 }
 
 interface UpdateProjectData {
@@ -18,6 +20,8 @@ interface UpdateProjectData {
   hosting_package_id?: bigint;
   support_package_id?: bigint;
   status?: string;
+  notes?: string;
+  links?: any;
 }
 
 interface ImportProjectData {
@@ -146,6 +150,8 @@ export class ProjectsRepository {
           support_package_id: data.support_package_id,
         }),
         ...(data.status && { status: data.status as never }),
+        notes: data.notes,
+        links: data.links,
       },
       include: PROJECT_LIST_INCLUDE,
     });
@@ -164,6 +170,8 @@ export class ProjectsRepository {
           support_package_id: data.support_package_id,
         }),
         ...(data.status !== undefined && { status: data.status as never }),
+        ...(data.notes !== undefined && { notes: data.notes }),
+        ...(data.links !== undefined && { links: data.links }),
       },
     });
   }
@@ -287,6 +295,8 @@ export class ProjectsRepository {
     rootPath: string;
     queueName: string;
     jobType: string;
+    notes?: string;
+    links?: any;
   }) {
     return this.prisma.$transaction(async (tx) => {
       const project = await tx.project.create({
@@ -296,6 +306,8 @@ export class ProjectsRepository {
           ...(data.hosting_package_id && {
             hosting_package_id: data.hosting_package_id,
           }),
+          notes: data.notes,
+          links: data.links,
         },
       });
       const environment = await tx.environment.create({

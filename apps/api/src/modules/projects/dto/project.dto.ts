@@ -18,6 +18,8 @@ export class CreateProjectDto {
   @IsOptional() @IsInt() @IsPositive() hosting_package_id?: number;
   @IsOptional() @IsInt() @IsPositive() support_package_id?: number;
   @IsOptional() @IsIn(["active", "inactive", "archived"]) status?: string;
+  @IsOptional() @IsString() notes?: string;
+  @IsOptional() links?: any;
 }
 
 export class UpdateProjectDto extends PartialType(CreateProjectDto) {}
