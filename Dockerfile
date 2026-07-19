@@ -65,13 +65,12 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 # compiled dist files and the pruned node_modules from the builder stage.
 FROM node:22-alpine AS runtime
 
-ARG INSTALL_CHROMIUM=false
+ARG INSTALL_CHROMIUM=true
 
 # rclone  — Google Drive backup uploads
 # whois   — domain WHOIS lookups
 # postgresql-client — pg_dump for Forge self-backup
-# chromium — local Lighthouse audits (disabled by default to keep the image small;
-#            set INSTALL_CHROMIUM=true in .env.deploy to enable local Lighthouse)
+# chromium — invoice PDF generation and local Lighthouse audits
 RUN apk add --no-cache rclone whois postgresql-client && \
     if [ "$INSTALL_CHROMIUM" = "true" ]; then apk add --no-cache chromium; fi && \
     mkdir -p /home/node/.config/rclone && \

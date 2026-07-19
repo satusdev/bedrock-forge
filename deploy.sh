@@ -38,7 +38,7 @@ CORS_ORIGIN="$DOMAIN"
 REMOTE_CORS_ORIGIN=$(printf '%q' "$CORS_ORIGIN")
 
 # Build customization
-INSTALL_CHROMIUM="${INSTALL_CHROMIUM:-false}"
+INSTALL_CHROMIUM="${INSTALL_CHROMIUM:-true}"
 
 # ── Image tag (defaults to git short-sha for reproducibility) ─────────────────
 # If the working tree is dirty, include a timestamp suffix so an uncommitted

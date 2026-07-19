@@ -12,6 +12,7 @@ import {
   User,
   FolderKanban,
   Download,
+  Trash2,
 } from "lucide-react";
 import { api, getValidAccessToken } from "@/lib/api-client";
 import { toast } from "@/hooks/use-toast";
@@ -19,7 +20,7 @@ import { useBillingSettings } from "@/hooks/useBillingSettings";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Separator } from "@/components/ui/separator";
+import { AlertDialog } from "@/components/ui/alert-dialog";
 
 type InvoiceStatus = "draft" | "sent" | "paid" | "overdue" | "cancelled";
 
@@ -107,6 +108,7 @@ export function InvoiceDetailPage() {
   });
 
   const [downloading, setDownloading] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const downloadPdf = async () => {
     if (!invoice) return;
@@ -153,6 +155,17 @@ export function InvoiceDetailPage() {
       toast({ title: "Invoice marked as sent" });
     },
     onError: () => toast({ title: "Failed to update", variant: "destructive" }),
+  });
+
+  const deleteInvoice = useMutation({
+    mutationFn: () => api.delete(`/invoices/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["invoices"] });
+      toast({ title: "Invoice deleted" });
+      navigate("/invoices");
+    },
+    onError: () =>
+      toast({ title: "Failed to delete invoice", variant: "destructive" }),
   });
 
   if (isLoading) {
@@ -262,6 +275,15 @@ export function InvoiceDetailPage() {
           <Button variant="outline" size="sm" onClick={() => window.print()}>
             <Printer className="h-4 w-4 mr-1.5" />
             Print
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setDeleteOpen(true)}
+            disabled={deleteInvoice.isPending}
+          >
+            <Trash2 className="h-4 w-4 mr-1.5" />
+            Delete
           </Button>
         </div>
       </div>
@@ -426,6 +448,16 @@ export function InvoiceDetailPage() {
           </Button>
         )}
       </div>
+
+      <AlertDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title="Delete Invoice"
+        description={`Invoice "${invoice.invoice_number}" will be permanently deleted.`}
+        confirmLabel="Delete"
+        onConfirm={() => deleteInvoice.mutate()}
+        isPending={deleteInvoice.isPending}
+      />
     </div>
   );
 }

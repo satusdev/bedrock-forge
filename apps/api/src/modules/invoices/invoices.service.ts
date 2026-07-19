@@ -4,6 +4,7 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  ServiceUnavailableException,
 } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import * as puppeteer from "puppeteer-core";
@@ -91,35 +92,47 @@ export class InvoicesService {
     if (!rawInv) throw new NotFoundException(`Invoice #${id} not found`);
     const inv = this.serialise(rawInv);
 
-    const chromePath = process.env.LIGHTHOUSE_CHROME_PATH || 
-                       process.env.CHROME_PATH || 
-                       (existsSync('/usr/bin/google-chrome-stable') ? '/usr/bin/google-chrome-stable' : null) ||
-                       (existsSync('/usr/bin/google-chrome') ? '/usr/bin/google-chrome' : null) ||
-                       (existsSync('/usr/bin/chromium-browser') ? '/usr/bin/chromium-browser' : null) ||
-                       (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : null);
+    const chromePath =
+      process.env.LIGHTHOUSE_CHROME_PATH ||
+      process.env.CHROME_PATH ||
+      (existsSync("/usr/bin/google-chrome-stable")
+        ? "/usr/bin/google-chrome-stable"
+        : null) ||
+      (existsSync("/usr/bin/google-chrome") ? "/usr/bin/google-chrome" : null) ||
+      (existsSync("/usr/bin/chromium-browser")
+        ? "/usr/bin/chromium-browser"
+        : null) ||
+      (existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : null);
 
     if (!chromePath) {
-      throw new Error('Chromium executable not found. Please install Chromium or set CHROME_PATH.');
+      throw new ServiceUnavailableException(
+        "Invoice PDF generation is unavailable because Chromium is not installed.",
+      );
     }
 
     const browser = await puppeteer.launch({
       executablePath: chromePath,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+      ],
       headless: true,
     });
 
     try {
       const page = await browser.newPage();
       const html = this.buildInvoiceHtml(inv);
-      await page.setContent(html, { waitUntil: 'domcontentloaded' });
+      await page.setContent(html, { waitUntil: "domcontentloaded" });
       const pdf = await page.pdf({
-        format: 'A4',
+        format: "A4",
         printBackground: true,
         margin: {
-          top: '20mm',
-          bottom: '20mm',
-          left: '20mm',
-          right: '20mm',
+          top: "20mm",
+          bottom: "20mm",
+          left: "20mm",
+          right: "20mm",
         },
       });
       return Buffer.from(pdf);
@@ -646,13 +659,9 @@ export class InvoicesService {
     return this.serialise(updated);
   }
 
-  async remove(id: number) {
+  async remove(id: number): Promise<void> {
     const inv = await this.repo.findById(id);
     if (!inv) throw new NotFoundException(`Invoice #${id} not found`);
-
-    if (inv.status !== "draft") {
-      throw new BadRequestException("Only draft invoices can be deleted");
-    }
 
     await this.repo.remove(Number(inv.id));
   }
