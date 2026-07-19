@@ -6,6 +6,9 @@ import { EnvironmentsRepository } from "./environments.repository";
 import { ServersService } from "../servers/servers.service";
 import { MonitorsService } from "../monitors/monitors.service";
 import { DomainsService } from "../domains/domains.service";
+import { PrismaService } from "../../prisma/prisma.service";
+import { BackupSchedulesService } from "../backups/backup-schedules.service";
+import { PluginUpdateSchedulesService } from "../plugin-update-schedules/plugin-update-schedules.service";
 
 jest.mock("@bedrock-forge/remote-executor", () => ({
   createRemoteExecutor: jest.fn(),
@@ -87,6 +90,33 @@ describe("EnvironmentsService", () => {
         { provide: ServersService, useValue: serversService },
         { provide: MonitorsService, useValue: monitorsService },
         { provide: DomainsService, useValue: domainsService },
+        {
+          provide: PrismaService,
+          useValue: {
+            $transaction: jest.fn().mockImplementation((cb) => (typeof cb === "function" ? cb(this) : cb)),
+            monitor: { findMany: jest.fn().mockResolvedValue([]), updateMany: jest.fn() },
+            backupSchedule: { findMany: jest.fn().mockResolvedValue([]), updateMany: jest.fn() },
+            pluginUpdateSchedule: { findMany: jest.fn().mockResolvedValue([]), updateMany: jest.fn() },
+            cleanupSchedule: { updateMany: jest.fn() },
+            securityScanSchedule: { updateMany: jest.fn() },
+            jobExecution: {
+              create: jest.fn().mockResolvedValue({ id: BigInt(1) }),
+              update: jest.fn().mockResolvedValue({}),
+            },
+          },
+        },
+        {
+          provide: BackupSchedulesService,
+          useValue: { removeRepeatableJob: jest.fn() },
+        },
+        {
+          provide: PluginUpdateSchedulesService,
+          useValue: { removeRepeatableJob: jest.fn() },
+        },
+        {
+          provide: "BullQueue_projects",
+          useValue: { add: jest.fn().mockResolvedValue({ id: "1" }) },
+        },
       ],
     }).compile();
 
@@ -258,13 +288,17 @@ describe("EnvironmentsService", () => {
       expect(repo.delete).not.toHaveBeenCalled();
     });
 
-    it("calls repo.delete after confirming existence", async () => {
+    it("enqueues ENVIRONMENT_DECOMMISSION job and returns execution details", async () => {
       repo.findById.mockResolvedValue(makeEnv());
-      repo.delete.mockResolvedValue(undefined);
 
-      await svc.remove(1);
+      const result = await svc.remove(1);
 
-      expect(repo.delete).toHaveBeenCalledWith(BigInt(1));
+      expect(result).toEqual({
+        environmentId: 1,
+        jobExecutionId: 1,
+        jobId: "1",
+        message: expect.any(String),
+      });
     });
   });
 

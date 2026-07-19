@@ -203,6 +203,13 @@ export const ProjectRestorePayloadSchema = z.object({
 });
 export type ProjectRestorePayload = z.infer<typeof ProjectRestorePayloadSchema>;
 
+export const EnvironmentDecommissionPayloadSchema = z.object({
+  environmentId: z.number().int().positive(),
+  jobExecutionId: z.number().int().positive(),
+  deleteFromCyberpanel: z.boolean().default(true),
+});
+export type EnvironmentDecommissionPayload = z.infer<typeof EnvironmentDecommissionPayloadSchema>;
+
 // ─── WS Payload Types ─────────────────────────────────────────────────────────
 
 export interface JobProgressEvent {

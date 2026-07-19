@@ -36,6 +36,10 @@ export class QueryProjectsDto extends PaginationQueryDto {
   @IsInt()
   @IsPositive()
   server_id?: number;
+
+  @IsOptional()
+  @IsString()
+  status?: string;
 }
 
 export class ArchiveProjectDto {

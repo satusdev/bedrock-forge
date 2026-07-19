@@ -8,6 +8,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 interface AlertDialogProps {
   open: boolean;
@@ -15,9 +16,11 @@ interface AlertDialogProps {
   title: string;
   description: string;
   confirmLabel?: string;
+  confirmText?: string;
   confirmVariant?: "default" | "destructive";
   onConfirm: () => void;
   isPending?: boolean;
+  requireTextConfirm?: string;
 }
 
 /**
@@ -29,17 +32,46 @@ export function AlertDialog({
   onOpenChange,
   title,
   description,
-  confirmLabel = "Confirm",
+  confirmLabel,
+  confirmText,
   confirmVariant = "destructive",
   onConfirm,
   isPending = false,
+  requireTextConfirm,
 }: AlertDialogProps) {
+  const [typedText, setTypedText] = React.useState("");
+
+  React.useEffect(() => {
+    if (!open) {
+      setTypedText("");
+    }
+  }, [open]);
+
+  const isDisabled = isPending || (!!requireTextConfirm && typedText !== requireTextConfirm);
+  const buttonLabel = confirmLabel || confirmText || "Confirm";
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
+          <DialogDescription className="space-y-4 pt-2">
+            <div>{description}</div>
+            {requireTextConfirm && (
+              <div className="space-y-2 pt-3 border-t border-border/50">
+                <p className="text-xs text-muted-foreground">
+                  To confirm deletion, type <span className="font-mono font-semibold text-foreground select-all bg-muted px-1.5 py-0.5 rounded border">{requireTextConfirm}</span> below:
+                </p>
+                <Input
+                  value={typedText}
+                  onChange={(e) => setTypedText(e.target.value)}
+                  placeholder={requireTextConfirm}
+                  className="font-mono text-sm h-9"
+                  disabled={isPending}
+                />
+              </div>
+            )}
+          </DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button
@@ -52,9 +84,9 @@ export function AlertDialog({
           <Button
             variant={confirmVariant}
             onClick={onConfirm}
-            disabled={isPending}
+            disabled={isDisabled}
           >
-            {isPending ? "Processing…" : confirmLabel}
+            {isPending ? "Processing…" : buttonLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -65,23 +65,33 @@ export class MonitorProcessor extends WorkerHost {
 
     const monitor = await this.prisma.monitor.findUnique({
       where: { id: BigInt(monitorId) },
-      include: { environment: { select: { id: true, url: true } } },
+      include: {
+        environment: {
+          select: {
+            id: true,
+            url: true,
+            project: { select: { status: true } },
+          },
+        },
+      },
     });
     if (!monitor) return;
 
-    if (!monitor.enabled) {
-      this.logger.log(`Monitor ${monitorId} is disabled — skipping check and removing repeatable job`);
+    const isProjectArchived = monitor.environment?.project?.status === "archived";
+
+    if (!monitor.enabled || isProjectArchived) {
+      this.logger.log(`Monitor ${monitorId} is disabled or project is archived (${isProjectArchived}) — skipping check and removing repeatable job`);
       const jobId = `monitor-${monitor.id}`;
       try {
         const repeatableJobs = await this.monitorsQueue.getRepeatableJobs();
         for (const rj of repeatableJobs) {
           if (rj.id === jobId) {
             await this.monitorsQueue.removeRepeatableByKey(rj.key);
-            this.logger.log(`Self-healed: removed repeatable job key ${rj.key} for disabled monitor ${monitor.id}`);
+            this.logger.log(`Self-healed: removed repeatable job key ${rj.key} for disabled/archived monitor ${monitor.id}`);
           }
         }
       } catch (err) {
-        this.logger.warn(`Failed to remove repeatable job for disabled monitor ${monitor.id}: ${err}`);
+        this.logger.warn(`Failed to remove repeatable job for disabled/archived monitor ${monitor.id}: ${err}`);
       }
       return;
     }

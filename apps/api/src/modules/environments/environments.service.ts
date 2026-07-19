@@ -10,6 +10,7 @@ import {
   CreateEnvironmentDto,
   UpdateEnvironmentDto,
   UpsertDbCredentialsDto,
+  CreateEnvironmentFullDto,
 } from "./dto/environment.dto";
 import { WpQuickLoginDto } from "./dto/wp-quick-login.dto";
 import { ServersService } from "../servers/servers.service";
@@ -20,6 +21,12 @@ import {
 } from "@bedrock-forge/remote-executor";
 import { MonitorsService } from "../monitors/monitors.service";
 import { DomainsService } from "../domains/domains.service";
+import { PrismaService } from "../../prisma/prisma.service";
+import { InjectQueue } from "@nestjs/bullmq";
+import { Queue } from "bullmq";
+import { QUEUES, JOB_TYPES, DEFAULT_JOB_OPTIONS } from "@bedrock-forge/shared";
+import { BackupSchedulesService } from "../backups/backup-schedules.service";
+import { PluginUpdateSchedulesService } from "../plugin-update-schedules/plugin-update-schedules.service";
 import { randomBytes } from "crypto";
 import { readFileSync } from "fs";
 import { join } from "path";
@@ -42,6 +49,10 @@ export class EnvironmentsService {
     private readonly serversService: ServersService,
     private readonly monitorsService: MonitorsService,
     private readonly domainsService: DomainsService,
+    private readonly prisma: PrismaService,
+    private readonly backupSchedulesService: BackupSchedulesService,
+    private readonly pluginUpdateSchedulesService: PluginUpdateSchedulesService,
+    @InjectQueue(QUEUES.PROJECTS) private readonly projectsQueue: Queue,
   ) {}
 
   existsById(id: bigint): Promise<boolean> {
@@ -127,14 +138,194 @@ export class EnvironmentsService {
     return env;
   }
 
+  async createFull(projectId: number, dto: CreateEnvironmentFullDto) {
+    const project = await this.repo.findProjectWithHostingPackage(BigInt(projectId));
+    if (project && project.hosting_package) {
+      const maxSites = project.hosting_package.max_sites;
+      const currentEnvsCount = await this.repo.countEnvironmentsForProject(BigInt(projectId));
+      if (currentEnvsCount >= maxSites) {
+        throw new BadRequestException(
+          `Environment quota reached. Your hosting package allows a maximum of ${maxSites} sites/environments for this project.`,
+        );
+      }
+    }
+
+    const { server_id, domain, admin_email } = dto;
+    const phpVersion = dto.php_version ?? "8.3";
+    const envType = dto.env_type ?? "production";
+    const rootPath = `/home/${domain}/public_html`;
+    const siteUrl = `https://${domain}`;
+
+    // Use user-provided DB credentials, or auto-generate random ones
+    const dbSuffix = randomBytes(4).toString("hex");
+    const dbName = dto.db_name?.trim() || `wp_${dbSuffix}`;
+    const dbUser = dto.db_user?.trim() || `u_${dbSuffix}`;
+    const dbPassword =
+      dto.db_password?.trim() || randomBytes(16).toString("base64url");
+    const dbHost = dto.db_host?.trim() || "localhost";
+
+    // 1. Create the Environment in the database (Prisma)
+    const env = await this.prisma.environment.create({
+      data: {
+        project_id: BigInt(projectId),
+        server_id: BigInt(server_id),
+        type: envType,
+        url: siteUrl,
+        root_path: rootPath,
+      },
+    });
+
+    // 2. Create the Job Execution record
+    const jobExecution = await this.prisma.jobExecution.create({
+      data: {
+        queue_name: QUEUES.PROJECTS,
+        bull_job_id: "0",
+        job_type: JOB_TYPES.PROJECT_CREATE_BEDROCK,
+        environment_id: env.id,
+        server_id: BigInt(server_id),
+        status: "queued",
+        payload: {
+          environmentId: Number(env.id),
+          cyberpanel: {
+            domain,
+            dbName,
+            dbUser,
+            dbPassword,
+            dbHost,
+            phpVersion,
+            adminEmail: admin_email,
+          },
+          sourceEnvironmentId: dto.source_environment_id,
+        },
+      },
+    });
+
+    // 3. Enqueue the provisioning job
+    const job = await this.projectsQueue.add(
+      JOB_TYPES.PROJECT_CREATE_BEDROCK,
+      {
+        environmentId: Number(env.id),
+        jobExecutionId: Number(jobExecution.id),
+        cyberpanel: {
+          domain,
+          dbName,
+          dbUser,
+          dbPassword,
+          dbHost,
+          phpVersion,
+          adminEmail: admin_email,
+        },
+        sourceEnvironmentId: dto.source_environment_id,
+      },
+      { ...DEFAULT_JOB_OPTIONS, attempts: 1 },
+    );
+
+    // 4. Back-fill the bull_job_id
+    await this.prisma.jobExecution.update({
+      where: { id: jobExecution.id },
+      data: { bull_job_id: String(job.id) },
+    });
+
+    return {
+      environment: { id: Number(env.id), url: siteUrl },
+      jobExecutionId: Number(jobExecution.id),
+      jobId: String(job.id),
+    };
+  }
+
   async update(id: number, dto: UpdateEnvironmentDto) {
     await this.findOne(id);
     return this.repo.update(BigInt(id), dto);
   }
 
   async remove(id: number) {
-    await this.findOne(id);
-    return this.repo.delete(BigInt(id));
+    const env = await this.findOne(id);
+
+    // 1. Fetch schedules to delete/disable them cleanly
+    const backupSchedules = await this.prisma.backupSchedule.findMany({
+      where: { environment_id: BigInt(id) },
+    });
+    const pluginUpdateSchedules = await this.prisma.pluginUpdateSchedule.findMany({
+      where: { environment_id: BigInt(id) },
+    });
+
+    // 2. Disable/clear monitor and cron schedules
+    await this.prisma.$transaction([
+      this.prisma.monitor.updateMany({
+        where: { environment_id: BigInt(id) },
+        data: { enabled: false },
+      }),
+      this.prisma.backupSchedule.updateMany({
+        where: { environment_id: BigInt(id) },
+        data: { enabled: false },
+      }),
+      this.prisma.pluginUpdateSchedule.updateMany({
+        where: { environment_id: BigInt(id) },
+        data: { enabled: false },
+      }),
+      this.prisma.cleanupSchedule.updateMany({
+        where: { environment_id: BigInt(id) },
+        data: { enabled: false },
+      }),
+      this.prisma.securityScanSchedule.updateMany({
+        where: { environment_id: BigInt(id) },
+        data: { enabled: false },
+      }),
+    ]);
+
+    // 3. Unregister repeatable jobs from BullMQ
+    const monitors = await this.prisma.monitor.findMany({
+      where: { environment_id: BigInt(id) },
+    });
+    for (const monitor of monitors) {
+      await this.monitorsService.unregisterRepeatable(monitor);
+    }
+    for (const bs of backupSchedules) {
+      await this.backupSchedulesService.removeRepeatableJob(Number(bs.id));
+    }
+    for (const pus of pluginUpdateSchedules) {
+      await this.pluginUpdateSchedulesService.removeRepeatableJob(Number(pus.id));
+    }
+
+    // 4. Create job execution for decommissioning tracking
+    const jobExecution = await this.prisma.jobExecution.create({
+      data: {
+        queue_name: QUEUES.PROJECTS,
+        bull_job_id: "0",
+        job_type: JOB_TYPES.ENVIRONMENT_DECOMMISSION,
+        environment_id: BigInt(id),
+        server_id: env.server_id,
+        status: "queued",
+        payload: {
+          environmentId: id,
+          deleteFromCyberpanel: true,
+        },
+      },
+    });
+
+    // 5. Enqueue the BullMQ decommissioning job
+    const job = await this.projectsQueue.add(
+      JOB_TYPES.ENVIRONMENT_DECOMMISSION,
+      {
+        environmentId: id,
+        jobExecutionId: Number(jobExecution.id),
+        deleteFromCyberpanel: true,
+      },
+      DEFAULT_JOB_OPTIONS,
+    );
+
+    // Update job execution with bull job id
+    await this.prisma.jobExecution.update({
+      where: { id: jobExecution.id },
+      data: { bull_job_id: String(job.id) },
+    });
+
+    return {
+      environmentId: id,
+      jobExecutionId: Number(jobExecution.id),
+      jobId: String(job.id),
+      message: "Environment decommissioning job queued. The environment will be fully deleted once remote server resources are cleaned up.",
+    };
   }
 
   async getDbCredentials(id: number) {

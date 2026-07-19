@@ -21,6 +21,7 @@ import {
   CreateEnvironmentDto,
   UpdateEnvironmentDto,
   UpsertDbCredentialsDto,
+  CreateEnvironmentFullDto,
 } from "./dto/environment.dto";
 import { ScanServerForEnvDto } from "./dto/scan-server-for-env.dto";
 import { WpQuickLoginDto } from "./dto/wp-quick-login.dto";
@@ -66,6 +67,15 @@ export class EnvironmentsController {
     @Body() dto: CreateEnvironmentDto,
   ) {
     return this.svc.create(projectId, dto);
+  }
+
+  @Post("clone")
+  @Roles(ROLES.MANAGER)
+  clone(
+    @Param("projectId", ParseIntPipe) projectId: number,
+    @Body() dto: CreateEnvironmentFullDto,
+  ) {
+    return this.svc.createFull(projectId, dto);
   }
 
   @Put(":id")

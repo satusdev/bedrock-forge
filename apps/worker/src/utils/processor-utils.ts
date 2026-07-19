@@ -243,18 +243,33 @@ export async function buildWpCliPrefix(
     }
   }
 
-  if (lsphpBin) {
-    try {
-      const wpResult = await executor.execute(`which wp 2>/dev/null`);
-      const bin = wpResult.stdout.trim();
-      // Strict path validation — only absolute paths, no metacharacters
-      if (bin && /^\/[a-zA-Z0-9_.\/-]+$/.test(bin)) {
-        wpBin = bin;
+  try {
+    const wpResult = await executor.execute(`which wp 2>/dev/null`);
+    const bin = wpResult.stdout.trim();
+    // Strict path validation — only absolute paths, no metacharacters
+    if (bin && /^\/[a-zA-Z0-9_.\/-]+$/.test(bin)) {
+      wpBin = bin;
+    }
+  } catch {
+    // wp not in PATH — fallback to checking common paths
+  }
+
+  if (!wpBin) {
+    for (const path of ["/usr/local/bin/wp", "/usr/bin/wp"]) {
+      try {
+        const check = await executor.execute(
+          `[ -x ${shellQuote(path)} ] && echo yes || echo no`,
+        );
+        if (check.stdout.trim() === "yes") {
+          wpBin = path;
+          break;
+        }
+      } catch {
+        // ignore
       }
-    } catch {
-      // wp not in PATH — lsphpBin alone will be used with WP_CLI_PHP fallback
     }
   }
+
   return { prefix, allowRootFlag, lsphpBin, wpBin };
 }
 
@@ -366,7 +381,7 @@ export class WpCliBuilder {
     } else if (this.lsphpBin) {
       phpAndWp = `env WP_CLI_PHP=${shellQuote(this.lsphpBin)} wp`;
     } else {
-      phpAndWp = "wp";
+      phpAndWp = this.wpBin ? shellQuote(this.wpBin) : "wp";
     }
 
     let finalArgs = args.trim();
@@ -382,7 +397,8 @@ export class WpCliBuilder {
   }
 
   buildCdCommand(args: string): string {
-    const parts = ["wp", args.trim(), this.allowRootFlag].filter(Boolean);
+    const wp = this.wpBin ? shellQuote(this.wpBin) : "wp";
+    const parts = [wp, args.trim(), this.allowRootFlag].filter(Boolean);
     return `cd ${shellQuote(this.rootPath)} && ${parts.join(" ")} 2>&1`;
   }
 }

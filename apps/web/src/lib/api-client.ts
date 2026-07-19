@@ -101,6 +101,14 @@ async function refreshTokens(): Promise<string | null> {
   return _refreshPromise;
 }
 
+export async function getValidAccessToken(): Promise<string | null> {
+  let { accessToken } = useAuthStore.getState();
+  if (accessToken !== null && isTokenExpired(accessToken)) {
+    accessToken = await refreshTokens();
+  }
+  return accessToken;
+}
+
 export async function apiFetch<T>(
   path: string,
   init: RequestInit = {},

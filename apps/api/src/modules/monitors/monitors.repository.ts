@@ -29,13 +29,16 @@ export class MonitorsRepository {
 
   async findAll(opts: { page: number; limit: number; search?: string }) {
     const skip = (opts.page - 1) * opts.limit;
-    const where: Prisma.MonitorWhereInput = opts.search
-      ? {
-          environment: {
-            url: { contains: opts.search, mode: "insensitive" },
-          },
-        }
-      : {};
+    const where: Prisma.MonitorWhereInput = {
+      environment: {
+        project: {
+          status: { not: "archived" },
+        },
+        ...(opts.search && {
+          url: { contains: opts.search, mode: "insensitive" },
+        }),
+      },
+    };
 
     const [items, total] = await Promise.all([
       this.prisma.monitor.findMany({

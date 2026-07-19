@@ -114,6 +114,13 @@ export class ProjectsRepository {
     if (query.client_id) where.client_id = BigInt(query.client_id);
     if (query.server_id)
       where.environments = { some: { server_id: BigInt(query.server_id) } };
+    if (query.status) {
+      if (query.status === "exclude:archived") {
+        where.status = { not: "archived" };
+      } else {
+        where.status = query.status;
+      }
+    }
 
     const [items, total] = await this.prisma.$transaction([
       this.prisma.project.findMany({

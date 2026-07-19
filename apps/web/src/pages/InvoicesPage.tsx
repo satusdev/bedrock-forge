@@ -14,7 +14,7 @@ import {
   Download,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth.store";
-import { api } from "@/lib/api-client";
+import { api, getValidAccessToken } from "@/lib/api-client";
 import { toast } from "@/hooks/use-toast";
 import { useBillingSettings } from "@/hooks/useBillingSettings";
 import { Badge } from "@/components/ui/badge";
@@ -652,10 +652,10 @@ export function InvoicesPage() {
   const downloadInvoicePdf = async (id: number, invoiceNumber: string) => {
     setDownloadingIds((prev) => ({ ...prev, [id]: true }));
     try {
-      const { accessToken } = useAuthStore.getState();
+      const token = await getValidAccessToken();
       const res = await fetch(`/api/invoices/${id}/pdf`, {
         headers: {
-          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
       });
       if (!res.ok) throw new Error("Failed to download PDF");

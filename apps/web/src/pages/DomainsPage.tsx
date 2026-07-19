@@ -613,6 +613,7 @@ export function DomainsPage() {
         confirmLabel="Delete"
         confirmVariant="destructive"
         isPending={deleteMutation.isPending}
+        requireTextConfirm={deleteTarget?.name}
       />
 
       <AlertDialog

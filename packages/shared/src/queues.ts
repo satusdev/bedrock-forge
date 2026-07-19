@@ -56,6 +56,7 @@ export const JOB_TYPES = {
   PROJECT_CREATE_BEDROCK: "project:create-bedrock",
   PROJECT_ARCHIVE: "project:archive",
   PROJECT_RESTORE: "project:restore",
+  ENVIRONMENT_DECOMMISSION: "environment:decommission",
 
   // Notifications
   NOTIFICATION_SEND: "notification:send",

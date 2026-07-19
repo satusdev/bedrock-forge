@@ -456,6 +456,7 @@ export function UsersPage() {
         confirmLabel="Delete"
         onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
         isPending={deleteMutation.isPending}
+        requireTextConfirm={deleteTarget?.name}
       />
 
       <AlertDialog

@@ -1,4 +1,6 @@
 import { Module } from "@nestjs/common";
+import { BullModule } from "@nestjs/bullmq";
+import { QUEUES } from "@bedrock-forge/shared";
 import { EnvironmentsController } from "./environments.controller";
 import { EnvironmentsListController } from "./environments-list.controller";
 import { EnvironmentsService } from "./environments.service";
@@ -6,9 +8,20 @@ import { EnvironmentsRepository } from "./environments.repository";
 import { ServersModule } from "../servers/servers.module";
 import { MonitorsModule } from "../monitors/monitors.module";
 import { DomainsModule } from "../domains/domains.module";
+import { PrismaModule } from "../../prisma/prisma.module";
+import { BackupsModule } from "../backups/backups.module";
+import { PluginUpdateSchedulesModule } from "../plugin-update-schedules/plugin-update-schedules.module";
 
 @Module({
-  imports: [ServersModule, MonitorsModule, DomainsModule],
+  imports: [
+    BullModule.registerQueue({ name: QUEUES.PROJECTS }),
+    ServersModule,
+    MonitorsModule,
+    DomainsModule,
+    PrismaModule,
+    BackupsModule,
+    PluginUpdateSchedulesModule,
+  ],
   controllers: [EnvironmentsController, EnvironmentsListController],
   providers: [EnvironmentsService, EnvironmentsRepository],
   exports: [EnvironmentsService],

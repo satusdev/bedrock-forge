@@ -12,6 +12,7 @@ import {
   CreateBedrockPayloadSchema,
   ProjectArchivePayloadSchema,
   ProjectRestorePayloadSchema,
+  EnvironmentDecommissionPayloadSchema,
   BACKUP_JOB_OPTIONS,
 } from "@bedrock-forge/shared";
 import { callCpApi, CpCreds, escapeMysql } from "../../utils/cyberpanel-http";
@@ -47,6 +48,9 @@ export class CreateBedrockProcessor extends WorkerHost {
     }
     if (job.name === JOB_TYPES.PROJECT_RESTORE) {
       return this.handleProjectRestore(job);
+    }
+    if (job.name === JOB_TYPES.ENVIRONMENT_DECOMMISSION) {
+      return this.handleEnvironmentDecommission(job);
     }
   }
 
@@ -753,27 +757,35 @@ export class CreateBedrockProcessor extends WorkerHost {
               const sshConfig = await this.sshKey.getSshConfig(server);
               const executor = createRemoteExecutor(sshConfig);
 
-              // 1. Drop the actual database
-              await executor.execute(`mysql -e ${shellQuote(`DROP DATABASE IF EXISTS \`${dbName}\`;`)}`).catch((err) => {
-                this.logger.warn(`Failed to drop database \`${dbName}\`: ${err instanceof Error ? err.message : String(err)}`);
-              });
+              this.logger.log(`Attempting CyberPanel CLI database deletion for ${dbName}`);
+              const cpCliResult = await executor.execute(`cyberpanel deleteDatabase --databaseName ${shellQuote(dbName)}`);
+              if (cpCliResult.code === 0) {
+                this.logger.log(`Successfully deleted database ${dbName} via CyberPanel CLI`);
+              } else {
+                this.logger.warn(`CyberPanel CLI database deletion failed (code ${cpCliResult.code}): ${cpCliResult.stderr || cpCliResult.stdout}. Falling back to manual MySQL cleanup.`);
 
-              // 2. Drop the local MySQL user
-              await executor.execute(`mysql -e ${shellQuote(`DROP USER IF EXISTS '${dbUser}'@'localhost';`)}`).catch((err) => {
-                this.logger.warn(`Failed to drop MySQL user '${dbUser}': ${err instanceof Error ? err.message : String(err)}`);
-              });
+                // 1. Drop the actual database
+                await executor.execute(`mysql -e ${shellQuote(`DROP DATABASE IF EXISTS \`${dbName}\`;`)}`).catch((err) => {
+                  this.logger.warn(`Failed to drop database \`${dbName}\`: ${err instanceof Error ? err.message : String(err)}`);
+                });
 
-              // 3. Delete metadata from CyberPanel's internal MySQL system database
-              await executor.execute(`mysql -e ${shellQuote(`DELETE FROM cyberpanel.databases_databases WHERE dbname='${dbName}';`)}`).catch((err) => {
-                this.logger.warn(`Failed to delete record from cyberpanel.databases_databases for '${dbName}': ${err instanceof Error ? err.message : String(err)}`);
-              });
+                // 2. Drop the local MySQL user
+                await executor.execute(`mysql -e ${shellQuote(`DROP USER IF EXISTS '${dbUser}'@'localhost';`)}`).catch((err) => {
+                  this.logger.warn(`Failed to drop MySQL user '${dbUser}': ${err instanceof Error ? err.message : String(err)}`);
+                });
 
-              // 4. Flush privileges to ensure changes take effect
-              await executor.execute(`mysql -e ${shellQuote("FLUSH PRIVILEGES;")}`).catch((err) => {
-                this.logger.warn(`Failed to flush MySQL privileges: ${err instanceof Error ? err.message : String(err)}`);
-              });
+                // 3. Delete metadata from CyberPanel's internal MySQL system database
+                await executor.execute(`mysql -e ${shellQuote(`DELETE FROM cyberpanel.databases_databases WHERE dbname='${dbName}';`)}`).catch((err) => {
+                  this.logger.warn(`Failed to delete record from cyberpanel.databases_databases for '${dbName}': ${err instanceof Error ? err.message : String(err)}`);
+                });
 
-              this.logger.log(`Successfully completed MySQL cleanup for database ${dbName} and user ${dbUser} on server ${server.id}`);
+                // 4. Flush privileges to ensure changes take effect
+                await executor.execute(`mysql -e ${shellQuote("FLUSH PRIVILEGES;")}`).catch((err) => {
+                  this.logger.warn(`Failed to flush MySQL privileges: ${err instanceof Error ? err.message : String(err)}`);
+                });
+              }
+
+              this.logger.log(`Successfully completed cleanup for database ${dbName} and user ${dbUser} on server ${server.id}`);
             } catch (dbErr) {
               this.logger.error(`Database/user deletion failed for env ${env.id}: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`);
             }
@@ -994,4 +1006,132 @@ export class CreateBedrockProcessor extends WorkerHost {
       throw err;
     }
   }
+
+  private async handleEnvironmentDecommission(job: Job) {
+    const data = EnvironmentDecommissionPayloadSchema.parse(job.data);
+    const { environmentId, jobExecutionId, deleteFromCyberpanel } = data;
+
+    await this.prisma.jobExecution.update({
+      where: { id: BigInt(jobExecutionId) },
+      data: { status: "active", started_at: new Date() },
+    });
+
+    try {
+      const env = await this.prisma.environment.findUnique({
+        where: { id: BigInt(environmentId) },
+        include: {
+          server: true,
+          wp_db_credentials: true,
+        },
+      });
+
+      if (!env) {
+        this.logger.warn(`Environment ${environmentId} already deleted or not found`);
+      } else {
+        if (deleteFromCyberpanel) {
+          const server = env.server;
+          const domain = this.getDomainFromUrl(env.url);
+
+          // 1. Delete CyberPanel Website
+          if (server.cyberpanel_login) {
+            const raw = this.encryption.decrypt(server.cyberpanel_login as string);
+            const cpCreds = JSON.parse(raw) as CpCreds;
+
+            this.logger.log(`Deleting CyberPanel website ${domain} for env ${env.id}`);
+            try {
+              await callCpApi(cpCreds, "/api/deleteWebsite", {
+                domainName: domain,
+              });
+            } catch (apiErr) {
+              this.logger.error(`CyberPanel deleteWebsite API call failed for domain ${domain}: ${apiErr instanceof Error ? apiErr.message : String(apiErr)}`);
+            }
+          } else {
+            this.logger.warn(`Server ${server.id} has no CyberPanel credentials — website deletion skipped`);
+          }
+
+          // 2. Drop database & database user
+          if (env.wp_db_credentials) {
+            try {
+              const dbName = this.encryption.decrypt(env.wp_db_credentials.db_name_encrypted);
+              const dbUser = this.encryption.decrypt(env.wp_db_credentials.db_user_encrypted);
+
+              const safeIdentifier = /^[a-zA-Z0-9_-]{1,64}$/;
+              if (!safeIdentifier.test(dbName)) {
+                throw new Error(`Database name '${dbName}' contains unsafe characters`);
+              }
+              if (!safeIdentifier.test(dbUser)) {
+                throw new Error(`Database user '${dbUser}' contains unsafe characters`);
+              }
+
+              this.logger.log(`Dropping database ${dbName} and user ${dbUser} on server ${server.id}`);
+              const sshConfig = await this.sshKey.getSshConfig(server);
+              const executor = createRemoteExecutor(sshConfig);
+
+              this.logger.log(`Attempting CyberPanel CLI database deletion for ${dbName}`);
+              const cpCliResult = await executor.execute(`cyberpanel deleteDatabase --databaseName ${shellQuote(dbName)}`);
+              if (cpCliResult.code === 0) {
+                this.logger.log(`Successfully deleted database ${dbName} via CyberPanel CLI`);
+              } else {
+                this.logger.warn(`CyberPanel CLI database deletion failed (code ${cpCliResult.code}): ${cpCliResult.stderr || cpCliResult.stdout}. Falling back to manual MySQL cleanup.`);
+
+                // 1. Drop the actual database
+                await executor.execute(`mysql -e ${shellQuote(`DROP DATABASE IF EXISTS \`${dbName}\`;`)}`).catch((err) => {
+                  this.logger.warn(`Failed to drop database \`${dbName}\`: ${err instanceof Error ? err.message : String(err)}`);
+                });
+
+                // 2. Drop the local MySQL user
+                await executor.execute(`mysql -e ${shellQuote(`DROP USER IF EXISTS '${dbUser}'@'localhost';`)}`).catch((err) => {
+                  this.logger.warn(`Failed to drop MySQL user '${dbUser}': ${err instanceof Error ? err.message : String(err)}`);
+                });
+
+                // 3. Delete metadata from CyberPanel's internal MySQL system database
+                await executor.execute(`mysql -e ${shellQuote(`DELETE FROM cyberpanel.databases_databases WHERE dbname='${dbName}';`)}`).catch((err) => {
+                  this.logger.warn(`Failed to delete record from cyberpanel.databases_databases for '${dbName}': ${err instanceof Error ? err.message : String(err)}`);
+                });
+
+                // 4. Flush privileges to ensure changes take effect
+                await executor.execute(`mysql -e ${shellQuote("FLUSH PRIVILEGES;")}`).catch((err) => {
+                  this.logger.warn(`Failed to flush MySQL privileges: ${err instanceof Error ? err.message : String(err)}`);
+                });
+              }
+
+              this.logger.log(`Successfully completed cleanup for database ${dbName} and user ${dbUser} on server ${server.id}`);
+            } catch (dbErr) {
+              this.logger.error(`Database/user deletion failed for env ${env.id}: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`);
+            }
+          }
+        }
+
+        // 3. Delete from DB (Prisma)
+        this.logger.log(`EnvironmentDecommission job: Purging environment ${environmentId} from DB`);
+        await this.prisma.environment.delete({
+          where: { id: BigInt(environmentId) },
+        });
+      }
+
+      await this.prisma.jobExecution.update({
+        where: { id: BigInt(jobExecutionId) },
+        data: {
+          status: "completed",
+          completed_at: new Date(),
+          progress: 100,
+        },
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`EnvironmentDecommission job failed: ${msg}`);
+
+      await this.prisma.jobExecution.update({
+        where: { id: BigInt(jobExecutionId) },
+        data: {
+          status: "failed",
+          last_error: msg,
+          completed_at: new Date(),
+        },
+      });
+
+      throw err;
+    }
+  }
 }
+

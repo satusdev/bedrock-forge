@@ -14,11 +14,14 @@ describe("SecurityDataRetentionService", () => {
       monitorResult: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
       monitorLog: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
       systemBackup: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      auditLog: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      notificationLog: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      userNotification: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
     };
     service = new SecurityDataRetentionService(prismaMock);
   });
 
-  it("calls deleteMany on all 8 tables", async () => {
+  it("calls deleteMany on all 11 tables", async () => {
     await service.runRetentionPurge();
 
     expect(prismaMock.jobExecution.deleteMany).toHaveBeenCalledTimes(1);
@@ -29,6 +32,9 @@ describe("SecurityDataRetentionService", () => {
     expect(prismaMock.monitorResult.deleteMany).toHaveBeenCalledTimes(1);
     expect(prismaMock.monitorLog.deleteMany).toHaveBeenCalledTimes(1);
     expect(prismaMock.systemBackup.deleteMany).toHaveBeenCalledTimes(1);
+    expect(prismaMock.auditLog.deleteMany).toHaveBeenCalledTimes(1);
+    expect(prismaMock.notificationLog.deleteMany).toHaveBeenCalledTimes(1);
+    expect(prismaMock.userNotification.deleteMany).toHaveBeenCalledTimes(1);
   });
 
   it("only deletes terminal-status job_executions", async () => {

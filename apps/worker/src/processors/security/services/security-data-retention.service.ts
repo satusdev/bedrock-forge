@@ -52,6 +52,9 @@ export class SecurityDataRetentionService {
       this.purgeMonitorResults(cutoff),
       this.purgeMonitorLogs(cutoff),
       this.purgeSystemBackups(cutoff),
+      this.purgeAuditLogs(cutoff),
+      this.purgeNotificationLogs(cutoff),
+      this.purgeUserNotifications(cutoff),
     ]);
 
     let totalDeleted = 0;
@@ -169,6 +172,42 @@ export class SecurityDataRetentionService {
     });
     if (count > 0) {
       this.logger.log(`[Retention] system_backups: deleted ${count} row(s)`);
+    }
+    return count;
+  }
+
+  private async purgeAuditLogs(cutoff: Date): Promise<number> {
+    const { count } = await this.prisma.auditLog.deleteMany({
+      where: {
+        created_at: { lt: cutoff },
+      },
+    });
+    if (count > 0) {
+      this.logger.log(`[Retention] audit_logs: deleted ${count} row(s)`);
+    }
+    return count;
+  }
+
+  private async purgeNotificationLogs(cutoff: Date): Promise<number> {
+    const { count } = await this.prisma.notificationLog.deleteMany({
+      where: {
+        created_at: { lt: cutoff },
+      },
+    });
+    if (count > 0) {
+      this.logger.log(`[Retention] notification_logs: deleted ${count} row(s)`);
+    }
+    return count;
+  }
+
+  private async purgeUserNotifications(cutoff: Date): Promise<number> {
+    const { count } = await this.prisma.userNotification.deleteMany({
+      where: {
+        created_at: { lt: cutoff },
+      },
+    });
+    if (count > 0) {
+      this.logger.log(`[Retention] user_notifications: deleted ${count} row(s)`);
     }
     return count;
   }

@@ -748,6 +748,9 @@ export function ProjectsPage() {
   const [serverFilter, setServerFilter] = useState(
     searchParams.get("server_id") ?? "",
   );
+  const [statusFilter, setStatusFilter] = useState(
+    searchParams.get("status") ?? "exclude:archived",
+  );
   const [createOpen, setCreateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [bedrockOpen, setBedrockOpen] = useState(false);
@@ -761,12 +764,13 @@ export function ProjectsPage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
   const { data, isLoading } = useQuery({
-    queryKey: ["projects", page, search, clientFilter, serverFilter],
+    queryKey: ["projects", page, search, clientFilter, serverFilter, statusFilter],
     queryFn: () => {
       const qs = new URLSearchParams({ page: String(page), limit: "10" });
       if (search) qs.set("search", search);
       if (clientFilter) qs.set("client_id", clientFilter);
       if (serverFilter) qs.set("server_id", serverFilter);
+      if (statusFilter && statusFilter !== "all") qs.set("status", statusFilter);
       return api.get<{ items: Project[]; total: number }>(`/projects?${qs}`);
     },
   });
@@ -985,6 +989,27 @@ export function ProjectsPage() {
               ))}
             </SelectContent>
           </Select>
+          <Select
+            value={statusFilter}
+            onValueChange={(v) => {
+              setStatusFilter(v);
+              setSearchParams((prev) => {
+                if (v && v !== "exclude:archived") prev.set("status", v);
+                else prev.delete("status");
+                return prev;
+              });
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="w-[160px] h-9">
+              <SelectValue placeholder="Active Projects" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="exclude:archived">Active Only</SelectItem>
+              <SelectItem value="archived">Archived Only</SelectItem>
+              <SelectItem value="all">All Statuses</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </SearchBar>
 
@@ -1089,6 +1114,7 @@ export function ProjectsPage() {
         confirmVariant="destructive"
         onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
         isPending={deleteMutation.isPending}
+        requireTextConfirm={deleteTarget?.name}
       />
 
       <BulkActionsBar
