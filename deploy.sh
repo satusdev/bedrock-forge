@@ -265,16 +265,18 @@ else
   PROGRESS_PIPE="cat"
 fi
 
-# Helper: upload one image; skips if the tag is already present on the server.
+# Helper: upload one image. By default this overwrites the remote tag with the
+# local build, because direct Docker image streaming has no registry digest check.
 ship_image() {
   local image="$1"
   local label="$2"
 
-  # Check if this exact tag is already loaded on the remote host.
-  if ssh "${SSH_OPTS[@]}" "${SERVER_USER}@${SERVER_HOST}" \
-       "docker image inspect '${image}' > /dev/null 2>&1"; then
-    ok "${label} already on server — skipping upload"
-    return 0
+  if [[ "${DEPLOY_SKIP_EXISTING_IMAGE_UPLOAD:-false}" == "true" ]]; then
+    if ssh "${SSH_OPTS[@]}" "${SERVER_USER}@${SERVER_HOST}" \
+         "docker image inspect '${image}' > /dev/null 2>&1"; then
+      ok "${label} already on server — skipping upload"
+      return 0
+    fi
   fi
 
   info "Uploading ${label} (${image})…"
