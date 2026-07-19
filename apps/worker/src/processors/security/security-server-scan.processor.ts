@@ -6,12 +6,16 @@ import { SecurityAttackWatcherService } from "./security-attack-watcher.service"
 import { SecurityScanRunnerService } from "./services/security-scan-runner.service";
 import { SecuritySchedulerService } from "./services/security-scheduler.service";
 import { SecurityHardeningService } from "./services/security-hardening.service";
+import { SecurityDataRetentionService } from "./services/security-data-retention.service";
 import { QUEUES, JOB_TYPES } from "@bedrock-forge/shared";
 
 const TICK_JOB_ID = "security-schedule-tick";
 const TICK_EVERY_MS = 15 * 60 * 1_000;
 const ALERT_TICK_JOB_ID = "security-alert-poll-tick";
 const ALERT_TICK_EVERY_MS = 60 * 1_000;
+/** Nightly data-retention purge — every 24 h */
+const RETENTION_TICK_JOB_ID = "security-data-retention-tick";
+const RETENTION_TICK_EVERY_MS = 24 * 60 * 60 * 1_000;
 
 @Processor(QUEUES.SECURITY, { concurrency: 4, lockDuration: 20 * 60 * 1_000 })
 export class SecurityScanProcessor
@@ -26,6 +30,7 @@ export class SecurityScanProcessor
     private readonly scanRunner: SecurityScanRunnerService,
     private readonly scheduler: SecuritySchedulerService,
     private readonly hardening: SecurityHardeningService,
+    private readonly retention: SecurityDataRetentionService,
     @InjectQueue(QUEUES.SECURITY) private readonly securityQueue: Queue,
   ) {
     super();
@@ -62,8 +67,19 @@ export class SecurityScanProcessor
         removeOnFail: 5,
       },
     );
+    await this.securityQueue.add(
+      JOB_TYPES.SECURITY_DATA_RETENTION,
+      {},
+      {
+        repeat: { every: RETENTION_TICK_EVERY_MS },
+        jobId: RETENTION_TICK_JOB_ID,
+        removeOnComplete: 5,
+        removeOnFail: 5,
+      },
+    );
     this.logger.log("Security attack watcher registered (every 5 min)");
     this.logger.log("Security alert poller registered (every 1 min)");
+    this.logger.log("Security data retention purge registered (every 24 h)");
   }
 
   async process(job: Job) {
@@ -82,6 +98,8 @@ export class SecurityScanProcessor
         return this.attackWatcher.processAttackWatcher();
       case JOB_TYPES.SECURITY_ALERT_POLL:
         return this.alertPoller.processAlertPoll(job);
+      case JOB_TYPES.SECURITY_DATA_RETENTION:
+        return this.retention.runRetentionPurge();
       default:
         this.logger.warn(`Unknown security job type: ${job.name}`);
     }

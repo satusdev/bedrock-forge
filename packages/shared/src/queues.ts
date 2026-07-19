@@ -91,6 +91,7 @@ export const JOB_TYPES = {
   SECURITY_ENVIRONMENT_HARDEN: "security:environment-harden",
   SECURITY_ATTACK_WATCH: "security:attack-watch",
   SECURITY_ALERT_POLL: "security:alert-poll",
+  SECURITY_DATA_RETENTION: "security:data-retention",
 } as const;
 
 // ─── Default Job Options ──────────────────────────────────────────────────────

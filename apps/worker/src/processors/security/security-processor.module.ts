@@ -7,6 +7,7 @@ import { SecurityAttackWatcherService } from "./security-attack-watcher.service"
 import { SecurityScanRunnerService } from "./services/security-scan-runner.service";
 import { SecuritySchedulerService } from "./services/security-scheduler.service";
 import { SecurityHardeningService } from "./services/security-hardening.service";
+import { SecurityDataRetentionService } from "./services/security-data-retention.service";
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { SecurityHardeningService } from "./services/security-hardening.service"
     SecurityScanRunnerService,
     SecuritySchedulerService,
     SecurityHardeningService,
+    SecurityDataRetentionService,
   ],
 })
 export class SecurityProcessorModule {}

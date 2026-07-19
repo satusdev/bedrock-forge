@@ -10,6 +10,7 @@ describe("SecurityHardeningService", () => {
   let service: SecurityHardeningService;
   let prismaMock: any;
   let sshKeyMock: any;
+  let securityQueueMock: any;
 
   beforeEach(() => {
     prismaMock = {
@@ -23,7 +24,16 @@ describe("SecurityHardeningService", () => {
         findUnique: jest.fn().mockResolvedValue(null),
       },
       jobExecution: {
+        create: jest.fn().mockResolvedValue({ id: 200n }),
         update: jest.fn().mockResolvedValue({}),
+      },
+      securityScan: {
+        create: jest.fn().mockResolvedValue({ id: 300n }),
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      securityFindingAck: {
+        findMany: jest.fn().mockResolvedValue([]),
       },
     };
     sshKeyMock = {
@@ -35,7 +45,10 @@ describe("SecurityHardeningService", () => {
         privateKey: "fake-key",
       })),
     };
-    service = new SecurityHardeningService(prismaMock, sshKeyMock);
+    securityQueueMock = {
+      add: jest.fn().mockResolvedValue({ id: "bull-job-verify" }),
+    };
+    service = new SecurityHardeningService(prismaMock, sshKeyMock, securityQueueMock);
     jest.clearAllMocks();
   });
 
@@ -76,7 +89,7 @@ describe("SecurityHardeningService", () => {
         data: { status: "active", started_at: expect.any(Date) },
       });
       expect(hardeningActions.applyServerHardeningActions).toHaveBeenCalled();
-      expect(prismaMock.jobExecution.update).toHaveBeenLastCalledWith(
+      expect(prismaMock.jobExecution.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: BigInt(100) },
           data: expect.objectContaining({
@@ -136,6 +149,7 @@ describe("SecurityHardeningService", () => {
 
       const env = {
         id: 2,
+        server_id: 1,
         root_path: "/var/www",
         server: {
           id: 1,
@@ -167,7 +181,7 @@ describe("SecurityHardeningService", () => {
       expect(
         hardeningActions.applyEnvironmentHardeningActions,
       ).toHaveBeenCalled();
-      expect(prismaMock.jobExecution.update).toHaveBeenLastCalledWith(
+      expect(prismaMock.jobExecution.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: BigInt(101) },
           data: expect.objectContaining({
