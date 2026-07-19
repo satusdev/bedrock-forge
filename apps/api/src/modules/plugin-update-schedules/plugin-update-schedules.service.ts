@@ -1,4 +1,10 @@
-import { Injectable, Logger, NotFoundException } from "@nestjs/common";
+import {
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+  forwardRef,
+} from "@nestjs/common";
 import { InjectQueue } from "@nestjs/bullmq";
 import { Queue } from "bullmq";
 import { QUEUES, JOB_TYPES } from "@bedrock-forge/shared";
@@ -12,6 +18,7 @@ export class PluginUpdateSchedulesService {
 
   constructor(
     private readonly repo: PluginUpdateSchedulesRepository,
+    @Inject(forwardRef(() => EnvironmentsService))
     private readonly envService: EnvironmentsService,
     @InjectQueue(QUEUES.PLUGIN_UPDATES)
     private readonly pluginUpdatesQueue: Queue,

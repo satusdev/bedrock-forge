@@ -1,9 +1,11 @@
 import {
   BadRequestException,
+  Inject,
   InternalServerErrorException,
   Injectable,
   Logger,
   NotFoundException,
+  forwardRef,
 } from "@nestjs/common";
 import { EnvironmentsRepository } from "./environments.repository";
 import {
@@ -50,7 +52,9 @@ export class EnvironmentsService {
     private readonly monitorsService: MonitorsService,
     private readonly domainsService: DomainsService,
     private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => BackupSchedulesService))
     private readonly backupSchedulesService: BackupSchedulesService,
+    @Inject(forwardRef(() => PluginUpdateSchedulesService))
     private readonly pluginUpdateSchedulesService: PluginUpdateSchedulesService,
     @InjectQueue(QUEUES.PROJECTS) private readonly projectsQueue: Queue,
   ) {}

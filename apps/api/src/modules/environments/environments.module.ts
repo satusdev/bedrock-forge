@@ -1,4 +1,4 @@
-import { Module } from "@nestjs/common";
+import { Module, forwardRef } from "@nestjs/common";
 import { BullModule } from "@nestjs/bullmq";
 import { QUEUES } from "@bedrock-forge/shared";
 import { EnvironmentsController } from "./environments.controller";
@@ -19,7 +19,7 @@ import { PluginUpdateSchedulesModule } from "../plugin-update-schedules/plugin-u
     MonitorsModule,
     DomainsModule,
     PrismaModule,
-    BackupsModule,
+    forwardRef(() => BackupsModule),
     PluginUpdateSchedulesModule,
   ],
   controllers: [EnvironmentsController, EnvironmentsListController],

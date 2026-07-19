@@ -41,7 +41,16 @@ REMOTE_CORS_ORIGIN=$(printf '%q' "$CORS_ORIGIN")
 INSTALL_CHROMIUM="${INSTALL_CHROMIUM:-false}"
 
 # ── Image tag (defaults to git short-sha for reproducibility) ─────────────────
-IMAGE_TAG="${IMAGE_TAG:-$(git rev-parse --short HEAD 2>/dev/null || echo "latest")}"
+# If the working tree is dirty, include a timestamp suffix so an uncommitted
+# hotfix never reuses an already-loaded remote image tag.
+if [[ -z "${IMAGE_TAG:-}" ]]; then
+  BASE_IMAGE_TAG="$(git rev-parse --short HEAD 2>/dev/null || echo "latest")"
+  if [[ -n "$(git status --porcelain=v1 2>/dev/null)" ]]; then
+    IMAGE_TAG="${BASE_IMAGE_TAG}-dirty-$(date -u +%Y%m%d%H%M%S)"
+  else
+    IMAGE_TAG="${BASE_IMAGE_TAG}"
+  fi
+fi
 FORGE_IMAGE="bedrock-forge/forge:${IMAGE_TAG}"
 WEB_IMAGE="bedrock-forge/web:${IMAGE_TAG}"
 

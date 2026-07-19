@@ -1,4 +1,4 @@
-import { Module } from "@nestjs/common";
+import { Module, forwardRef } from "@nestjs/common";
 import { BullModule } from "@nestjs/bullmq";
 import { QUEUES } from "@bedrock-forge/shared";
 import { BackupsController } from "./backups.controller";
@@ -12,7 +12,7 @@ import { EnvironmentsModule } from "../environments/environments.module";
 @Module({
   imports: [
     BullModule.registerQueue({ name: QUEUES.BACKUPS }),
-    EnvironmentsModule,
+    forwardRef(() => EnvironmentsModule),
   ],
   controllers: [BackupsController, BackupSchedulesController],
   providers: [
