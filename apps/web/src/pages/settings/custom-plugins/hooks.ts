@@ -131,3 +131,93 @@ export function useDeletePlugin() {
       }),
   });
 }
+
+export function useInstallCustomPlugin() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ envId, pluginId }: { envId: number; pluginId: number }) =>
+      customPluginsApi.installPlugin(envId, pluginId),
+    onSuccess: (_, { pluginId }) => {
+      queryClient.invalidateQueries({ queryKey: ["custom-plugins"] });
+      queryClient.invalidateQueries({ queryKey: ["custom-plugin-inventory", pluginId] });
+      toast({ title: "Installation queued" });
+    },
+    onError: (err: any) =>
+      toast({
+        title: "Installation failed",
+        description: err?.message,
+        variant: "destructive",
+      }),
+  });
+}
+
+export function useUninstallCustomPlugin() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ envId, pluginId }: { envId: number; pluginId: number }) =>
+      customPluginsApi.uninstallPlugin(envId, pluginId),
+    onSuccess: (_, { pluginId }) => {
+      queryClient.invalidateQueries({ queryKey: ["custom-plugins"] });
+      queryClient.invalidateQueries({ queryKey: ["custom-plugin-inventory", pluginId] });
+      toast({ title: "Uninstallation queued" });
+    },
+    onError: (err: any) =>
+      toast({
+        title: "Uninstallation failed",
+        description: err?.message,
+        variant: "destructive",
+      }),
+  });
+}
+
+export function useBulkInstallCustomPlugins() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ envIds, pluginId }: { envIds: number[]; pluginId: number }) => {
+      const promises = envIds.map((envId) =>
+        customPluginsApi.installPlugin(envId, pluginId)
+      );
+      return Promise.all(promises);
+    },
+    onSuccess: (data, { pluginId }) => {
+      queryClient.invalidateQueries({ queryKey: ["custom-plugins"] });
+      queryClient.invalidateQueries({ queryKey: ["custom-plugin-inventory", pluginId] });
+      toast({
+        title: "Bulk installation queued",
+        description: `Successfully queued installation on ${data.length} environment${data.length === 1 ? "" : "s"}.`,
+      });
+    },
+    onError: (err: any) =>
+      toast({
+        title: "Bulk installation failed",
+        description: err?.message,
+        variant: "destructive",
+      }),
+  });
+}
+
+export function useBulkUninstallCustomPlugins() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ envIds, pluginId }: { envIds: number[]; pluginId: number }) => {
+      const promises = envIds.map((envId) =>
+        customPluginsApi.uninstallPlugin(envId, pluginId)
+      );
+      return Promise.all(promises);
+    },
+    onSuccess: (data, { pluginId }) => {
+      queryClient.invalidateQueries({ queryKey: ["custom-plugins"] });
+      queryClient.invalidateQueries({ queryKey: ["custom-plugin-inventory", pluginId] });
+      toast({
+        title: "Bulk uninstallation queued",
+        description: `Successfully queued uninstallation on ${data.length} environment${data.length === 1 ? "" : "s"}.`,
+      });
+    },
+    onError: (err: any) =>
+      toast({
+        title: "Bulk uninstallation failed",
+        description: err?.message,
+        variant: "destructive",
+      }),
+  });
+}

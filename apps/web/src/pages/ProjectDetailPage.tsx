@@ -215,64 +215,6 @@ function ProjectHeader({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 mt-2">
-        {project.hosting_package && (
-          <div className="flex items-center gap-3.5 rounded-xl border bg-card/45 hover:bg-card/85 transition-all duration-200 shadow-sm p-4 backdrop-blur-sm group">
-            <div className="p-2.5 rounded-xl bg-info/10 text-info border border-info/20 group-hover:scale-105 transition-transform duration-200">
-              <Package className="h-5 w-5" />
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground font-medium">
-                Hosting Package
-              </p>
-              <p className="text-sm font-semibold tracking-tight mt-0.5">
-                {project.hosting_package.name}
-              </p>
-              <p className="text-xs text-muted-foreground/80 mt-0.5">
-                ${project.hosting_package.price_monthly}/mo
-              </p>
-            </div>
-          </div>
-        )}
-        {project.support_package && (
-          <div className="flex items-center gap-3.5 rounded-xl border bg-card/45 hover:bg-card/85 transition-all duration-200 shadow-sm p-4 backdrop-blur-sm group">
-            <div className="p-2.5 rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900 group-hover:scale-105 transition-transform duration-200">
-              <Shield className="h-5 w-5" />
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground font-medium">
-                Support Package
-              </p>
-              <p className="text-sm font-semibold tracking-tight mt-0.5">
-                {project.support_package.name}
-              </p>
-              <p className="text-xs text-muted-foreground/80 mt-0.5">
-                ${project.support_package.price_monthly}/mo
-              </p>
-            </div>
-          </div>
-        )}
-        <div className="flex items-center gap-3.5 rounded-xl border bg-card/45 hover:bg-card/85 transition-all duration-200 shadow-sm p-4 backdrop-blur-sm group">
-          <div className="p-2.5 rounded-xl bg-purple-50 text-purple-600 dark:bg-purple-950/30 dark:text-purple-400 border border-purple-100 dark:border-purple-900 group-hover:scale-105 transition-transform duration-200">
-            <Globe className="h-5 w-5" />
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground font-medium">
-              Environments
-            </p>
-            <p className="text-sm font-semibold tracking-tight mt-0.5">
-              {project.environments.length}{" "}
-              {project.environments.length === 1
-                ? "Environment"
-                : "Environments"}
-            </p>
-            <p className="text-xs text-muted-foreground/80 mt-0.5 truncate max-w-[200px]">
-              {project.environments.map((e) => e.type).join(", ") ||
-                "None configured"}
-            </p>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
@@ -503,7 +445,7 @@ export function ProjectDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="container mx-auto py-8 px-4 max-w-6xl space-y-6">
+      <div className="container mx-auto py-8 px-4 max-w-full space-y-6">
         <HeaderSkeleton />
         <Skeleton className="h-10 w-full rounded-lg" />
         <Skeleton className="h-64 w-full rounded-xl" />
@@ -526,7 +468,7 @@ export function ProjectDetailPage() {
   const environments = project.environments ?? [];
 
   return (
-    <div className="container mx-auto py-8 px-4 max-w-6xl space-y-6">
+    <div className="container mx-auto py-8 px-4 max-w-full space-y-6">
       <ProjectHeader
         project={project}
         onEdit={() => setEditOpen(true)}
@@ -597,19 +539,248 @@ export function ProjectDetailPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        <div className="lg:col-span-8 space-y-6">
-          <Tabs
-            value={currentTab}
-            className="space-y-6"
-            onValueChange={(v) => {
-              setSearchParams((prev) => {
-                const next = new URLSearchParams(prev);
-                next.set("tab", v);
-                return next;
-              });
-            }}
-          >
+      {/* Top Details, Notes & Links Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch">
+        {/* Info Column */}
+        <div className="flex flex-col gap-4">
+          {project.hosting_package && (
+            <div className="flex items-center gap-3.5 rounded-xl border bg-card/45 hover:bg-card/85 transition-all duration-200 shadow-sm p-4 backdrop-blur-sm group flex-1">
+              <div className="p-2.5 rounded-xl bg-info/10 text-info border border-info/20 group-hover:scale-105 transition-transform duration-200">
+                <Package className="h-5 w-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs text-muted-foreground font-medium">
+                  Hosting Package
+                </p>
+                <p className="text-sm font-semibold tracking-tight mt-0.5 truncate">
+                  {project.hosting_package.name}
+                </p>
+                <p className="text-xs text-muted-foreground/80 mt-0.5">
+                  ${project.hosting_package.price_monthly}/mo
+                </p>
+              </div>
+            </div>
+          )}
+          {project.support_package && (
+            <div className="flex items-center gap-3.5 rounded-xl border bg-card/45 hover:bg-card/85 transition-all duration-200 shadow-sm p-4 backdrop-blur-sm group flex-1">
+              <div className="p-2.5 rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900 group-hover:scale-105 transition-transform duration-200">
+                <Shield className="h-5 w-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs text-muted-foreground font-medium">
+                  Support Package
+                </p>
+                <p className="text-sm font-semibold tracking-tight mt-0.5 truncate">
+                  {project.support_package.name}
+                </p>
+                <p className="text-xs text-muted-foreground/80 mt-0.5">
+                  ${project.support_package.price_monthly}/mo
+                </p>
+              </div>
+            </div>
+          )}
+          <div className="flex items-center gap-3.5 rounded-xl border bg-card/45 hover:bg-card/85 transition-all duration-200 shadow-sm p-4 backdrop-blur-sm group flex-1">
+            <div className="p-2.5 rounded-xl bg-purple-50 text-purple-600 dark:bg-purple-950/30 dark:text-purple-400 border border-purple-100 dark:border-purple-900 group-hover:scale-105 transition-transform duration-200">
+              <Globe className="h-5 w-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs text-muted-foreground font-medium">
+                Environments
+              </p>
+              <p className="text-sm font-semibold tracking-tight mt-0.5">
+                {project.environments.length}{" "}
+                {project.environments.length === 1
+                  ? "Environment"
+                  : "Environments"}
+              </p>
+              <p className="text-xs text-muted-foreground/80 mt-0.5 truncate">
+                {project.environments.map((e) => e.type).join(", ") ||
+                  "None configured"}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Project Notes Column */}
+        <div className="flex w-full">
+          <Card className="border border-border/40 rounded-xl shadow-sm backdrop-blur-sm bg-card overflow-hidden w-full flex flex-col h-full">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 border-b border-border/20 px-5 py-4 shrink-0">
+              <CardTitle className="text-sm font-semibold tracking-tight">Project Notes</CardTitle>
+              {!isEditingNotes && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 hover:bg-muted"
+                  onClick={() => setIsEditingNotes(true)}
+                >
+                  <Pencil className="h-4 w-4 text-muted-foreground" />
+                </Button>
+              )}
+            </CardHeader>
+            <CardContent className="p-5 flex-1 overflow-y-auto min-h-[160px]">
+              {isEditingNotes ? (
+                <div className="space-y-3 h-full flex flex-col">
+                  <Textarea
+                    placeholder="Enter database credentials, production URLs, SSH keys, access info, or instructions..."
+                    value={notesText}
+                    onChange={(e) => setNotesText(e.target.value)}
+                    className="flex-1 min-h-[100px] resize-none text-sm bg-muted/30 focus-visible:ring-primary/30"
+                  />
+                  <div className="flex items-center justify-end gap-2 shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 text-xs"
+                      onClick={() => {
+                        setIsEditingNotes(false);
+                        setNotesText(project.notes ?? "");
+                      }}
+                      disabled={updateProjectMutation.isPending}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="h-8 text-xs gap-1.5"
+                      onClick={() => {
+                        updateProjectMutation.mutate(
+                          { notes: notesText },
+                          { onSuccess: () => setIsEditingNotes(false) }
+                        );
+                      }}
+                      disabled={updateProjectMutation.isPending}
+                    >
+                      {updateProjectMutation.isPending && (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      )}
+                      Save
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-sm leading-relaxed text-foreground h-full flex flex-col">
+                  {project.notes ? (
+                    <div className="whitespace-pre-wrap select-text">{project.notes}</div>
+                  ) : (
+                    <p className="text-muted-foreground italic text-xs">
+                      No project notes recorded yet. Click the edit icon to add passwords, configurations, or credentials.
+                    </p>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Quick Links Column */}
+        <div className="flex w-full">
+          <Card className="border border-border/40 rounded-xl shadow-sm backdrop-blur-sm bg-card overflow-hidden w-full flex flex-col h-full">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 border-b border-border/20 px-5 py-4 shrink-0">
+              <CardTitle className="text-sm font-semibold tracking-tight">Quick Links & Custom Info</CardTitle>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 hover:bg-muted"
+                onClick={() => {
+                  setEditingLinkIndex(null);
+                  setLinkLabel("");
+                  setLinkUrl("");
+                  setLinkValue("");
+                  setLinkType("link");
+                  setLinkDialogOpen(true);
+                }}
+              >
+                <Plus className="h-4 w-4 text-muted-foreground" />
+              </Button>
+            </CardHeader>
+            <CardContent className="p-5 flex-1 overflow-y-auto min-h-[160px]">
+              {!project.links || project.links.length === 0 ? (
+                <p className="text-muted-foreground italic text-xs">
+                  No quick links or custom info added yet. Click the plus icon to save documentation, passwords, or instructions.
+                </p>
+              ) : (
+                <div className="space-y-2.5">
+                  {project.links.map((link: any, idx) => (
+                    <div
+                      key={idx}
+                      className="group flex items-center justify-between p-2.5 rounded-lg border border-border/20 bg-muted/10 hover:bg-muted/30 transition-all animate-in fade-in-50 duration-200"
+                    >
+                      {link.isText ? (
+                        <div className="flex items-start gap-2.5 text-sm text-foreground font-medium min-w-0 flex-1 mr-2">
+                          <FileText className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                          <div className="min-w-0 flex-1">
+                            <span className="text-xs text-muted-foreground/70 block font-normal tracking-wide uppercase text-[10px] mb-0.5">
+                              {link.label}
+                            </span>
+                            <span className="break-all whitespace-pre-wrap select-text text-xs leading-relaxed font-mono bg-muted/40 px-1.5 py-0.5 rounded border border-border/10 inline-block w-full">
+                              {link.value}
+                            </span>
+                          </div>
+                        </div>
+                      ) : (
+                        <a
+                          href={link.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 text-sm text-foreground hover:text-primary hover:underline font-medium min-w-0 flex-1 mr-2"
+                        >
+                          <Globe className="h-4 w-4 text-muted-foreground shrink-0" />
+                          <span className="truncate">{link.label}</span>
+                          <ExternalLink className="h-3 w-3 text-muted-foreground shrink-0 opacity-60" />
+                        </a>
+                      )}
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 hover:bg-muted rounded-md"
+                          onClick={() => {
+                            setEditingLinkIndex(idx);
+                            setLinkLabel(link.label);
+                            setLinkUrl(link.url ?? "");
+                            setLinkValue(link.value ?? "");
+                            setLinkType(link.isText ? "text" : "link");
+                            setLinkDialogOpen(true);
+                          }}
+                        >
+                          <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 hover:bg-destructive/10 rounded-md"
+                          onClick={() => {
+                            if (confirm(`Are you sure you want to delete "${link.label}"?`)) {
+                              const updated = (project.links ?? []).filter((_, i) => i !== idx);
+                              updateProjectMutation.mutate({ links: updated });
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* Tabs Container - takes full width now */}
+      <div className="w-full">
+        <Tabs
+          value={currentTab}
+          className="space-y-6 w-full"
+          onValueChange={(v) => {
+            setSearchParams((prev) => {
+              const next = new URLSearchParams(prev);
+              next.set("tab", v);
+              return next;
+            });
+          }}
+        >
         <TabsList className="flex-wrap h-auto gap-1 bg-muted/60 p-1 border border-border/40 rounded-xl shadow-sm backdrop-blur-sm">
           <TabsTrigger
             value="environments"
@@ -774,178 +945,13 @@ export function ProjectDetailPage() {
         </TabsContent>
 
         <TabsContent value="activity">
-          <div className="border rounded-xl p-5">
+          <div className="border rounded-xl p-5 bg-card shadow-sm">
             <h3 className="text-sm font-semibold mb-4 text-muted-foreground uppercase tracking-wide">Project Activity Log</h3>
             <ResourceActivityFeed resourceType="project" resourceId={projectId} />
           </div>
         </TabsContent>
       </Tabs>
-        </div>
-
-        <div className="lg:col-span-4 space-y-6">
-          {/* Notes Card */}
-          <Card className="border border-border/40 rounded-xl shadow-sm backdrop-blur-sm bg-card overflow-hidden">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 border-b border-border/20 px-5 py-4">
-              <CardTitle className="text-sm font-semibold tracking-tight">Project Notes</CardTitle>
-              {!isEditingNotes && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 hover:bg-muted"
-                  onClick={() => setIsEditingNotes(true)}
-                >
-                  <Pencil className="h-4 w-4 text-muted-foreground" />
-                </Button>
-              )}
-            </CardHeader>
-            <CardContent className="p-5">
-              {isEditingNotes ? (
-                <div className="space-y-3">
-                  <Textarea
-                    placeholder="Enter database credentials, production URLs, SSH keys, access info, or instructions..."
-                    value={notesText}
-                    onChange={(e) => setNotesText(e.target.value)}
-                    className="min-h-[160px] resize-y text-sm bg-muted/30 focus-visible:ring-primary/30"
-                  />
-                  <div className="flex items-center justify-end gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 text-xs"
-                      onClick={() => {
-                        setIsEditingNotes(false);
-                        setNotesText(project.notes ?? "");
-                      }}
-                      disabled={updateProjectMutation.isPending}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      size="sm"
-                      className="h-8 text-xs gap-1.5"
-                      onClick={() => {
-                        updateProjectMutation.mutate(
-                          { notes: notesText },
-                          { onSuccess: () => setIsEditingNotes(false) }
-                        );
-                      }}
-                      disabled={updateProjectMutation.isPending}
-                    >
-                      {updateProjectMutation.isPending && (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      )}
-                      Save
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <div className="text-sm leading-relaxed text-foreground">
-                  {project.notes ? (
-                    <div className="whitespace-pre-wrap select-text">{project.notes}</div>
-                  ) : (
-                    <p className="text-muted-foreground italic text-xs">
-                      No project notes recorded yet. Click the edit icon to add passwords, configurations, or credentials.
-                    </p>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Quick Links & Info Card */}
-          <Card className="border border-border/40 rounded-xl shadow-sm backdrop-blur-sm bg-card overflow-hidden">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 border-b border-border/20 px-5 py-4">
-              <CardTitle className="text-sm font-semibold tracking-tight">Quick Links & Custom Info</CardTitle>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 hover:bg-muted"
-                onClick={() => {
-                  setEditingLinkIndex(null);
-                  setLinkLabel("");
-                  setLinkUrl("");
-                  setLinkValue("");
-                  setLinkType("link");
-                  setLinkDialogOpen(true);
-                }}
-              >
-                <Plus className="h-4 w-4 text-muted-foreground" />
-              </Button>
-            </CardHeader>
-            <CardContent className="p-5">
-              {!project.links || project.links.length === 0 ? (
-                <p className="text-muted-foreground italic text-xs">
-                  No quick links or custom info added yet. Click the plus icon to save documentation, passwords, or instructions.
-                </p>
-              ) : (
-                <div className="space-y-2.5">
-                  {project.links.map((link: any, idx) => (
-                    <div
-                      key={idx}
-                      className="group flex items-center justify-between p-2.5 rounded-lg border border-border/20 bg-muted/10 hover:bg-muted/30 transition-all animate-in fade-in-50 duration-200"
-                    >
-                      {link.isText ? (
-                        <div className="flex items-start gap-2.5 text-sm text-foreground font-medium min-w-0 flex-1 mr-2">
-                          <FileText className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
-                          <div className="min-w-0 flex-1">
-                            <span className="text-xs text-muted-foreground/70 block font-normal tracking-wide uppercase text-[10px] mb-0.5">
-                              {link.label}
-                            </span>
-                            <span className="break-all whitespace-pre-wrap select-text text-xs leading-relaxed font-mono bg-muted/40 px-1.5 py-0.5 rounded border border-border/10 inline-block w-full">
-                              {link.value}
-                            </span>
-                          </div>
-                        </div>
-                      ) : (
-                        <a
-                          href={link.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-2 text-sm text-foreground hover:text-primary hover:underline font-medium min-w-0 flex-1 mr-2"
-                        >
-                          <Globe className="h-4 w-4 text-muted-foreground shrink-0" />
-                          <span className="truncate">{link.label}</span>
-                          <ExternalLink className="h-3 w-3 text-muted-foreground shrink-0 opacity-60" />
-                        </a>
-                      )}
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 hover:bg-muted rounded-md"
-                          onClick={() => {
-                            setEditingLinkIndex(idx);
-                            setLinkLabel(link.label);
-                            setLinkUrl(link.url ?? "");
-                            setLinkValue(link.value ?? "");
-                            setLinkType(link.isText ? "text" : "link");
-                            setLinkDialogOpen(true);
-                          }}
-                        >
-                          <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 hover:bg-destructive/10 rounded-md"
-                          onClick={() => {
-                            if (confirm(`Are you sure you want to delete "${link.label}"?`)) {
-                              const updated = (project.links ?? []).filter((_, i) => i !== idx);
-                              updateProjectMutation.mutate({ links: updated });
-                            }
-                          }}
-                        >
-                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+    </div>
 
       <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>
         <DialogContent className="sm:max-w-md">

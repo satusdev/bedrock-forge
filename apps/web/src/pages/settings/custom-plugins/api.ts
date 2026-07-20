@@ -29,4 +29,15 @@ export const customPluginsApi = {
     api.put<CustomPlugin>(`/custom-plugins/${id}`, data),
 
   deletePlugin: (id: number) => api.delete(`/custom-plugins/${id}`),
+
+  installPlugin: (envId: number, customPluginId: number) =>
+    api.post<{ jobExecutionId: number; bullJobId: string }>(
+      `/plugin-scans/environment/${envId}/custom-plugins/${customPluginId}`,
+      {},
+    ),
+
+  uninstallPlugin: (envId: number, customPluginId: number) =>
+    api.delete<{ jobExecutionId: number; bullJobId: string }>(
+      `/plugin-scans/environment/${envId}/custom-plugins/${customPluginId}`,
+    ),
 };

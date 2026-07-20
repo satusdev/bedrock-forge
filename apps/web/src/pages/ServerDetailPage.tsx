@@ -16,6 +16,11 @@ import {
   Cpu,
   MemoryStick,
   History,
+  Copy,
+  Eye,
+  EyeOff,
+  Lock,
+  User,
 } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { toast } from "@/hooks/use-toast";
@@ -26,6 +31,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ServerFormDialog } from "./ServersPage";
 import { ResourceActivityFeed } from "@/components/ResourceActivityFeed";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 
 interface Environment {
@@ -409,6 +424,13 @@ export function ServerDetailPage() {
     (s) => s.user?.roles?.includes("admin") ?? false,
   );
   const [editOpen, setEditOpen] = useState(false);
+  const [credsDialogOpen, setCredsDialogOpen] = useState(false);
+  const [creds, setCreds] = useState<{
+    url?: string;
+    username: string;
+    password?: string;
+  } | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
   const {
     data: server,
@@ -441,25 +463,21 @@ export function ServerDetailPage() {
 
   async function handleOpenPanel() {
     try {
-      const creds = await api.get<{
+      const credsData = await api.get<{
         url?: string;
         username: string;
         password?: string;
       }>(`/servers/${id}/cyberpanel/credentials`);
-      if (creds?.url) window.open(creds.url, "_blank", "noopener,noreferrer");
-      if (creds?.password) {
+      setCreds(credsData);
+      setShowPassword(false);
+      setCredsDialogOpen(true);
+      if (credsData?.password) {
         try {
-          await navigator.clipboard.writeText(creds.password);
+          await navigator.clipboard.writeText(credsData.password);
         } catch {
           /* clipboard not available */
         }
       }
-      toast({
-        title: creds?.url ? "Opening control panel" : "No panel URL configured",
-        description: creds?.password
-          ? "Password copied to clipboard"
-          : undefined,
-      });
     } catch {
       toast({
         title: "No panel credentials configured",
@@ -641,6 +659,129 @@ export function ServerDetailPage() {
             qc.invalidateQueries({ queryKey: ["servers"] });
           }}
         />
+      )}
+
+      {/* Credentials Dialog */}
+      {creds && (
+        <Dialog open={credsDialogOpen} onOpenChange={setCredsDialogOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Lock className="h-5 w-5 text-primary" />
+                Control Panel Credentials
+              </DialogTitle>
+              <DialogDescription>
+                Credentials for accessing the control panel on {server.name}.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-3">
+              {creds.url && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="panel-creds-url" className="text-xs font-semibold text-muted-foreground">Panel URL</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="panel-creds-url"
+                      value={creds.url}
+                      readOnly
+                      className="font-mono text-xs bg-muted/40 select-all"
+                    />
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="shrink-0"
+                      onClick={() => {
+                        navigator.clipboard.writeText(creds.url || "");
+                        toast({ title: "URL copied to clipboard" });
+                      }}
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-1.5">
+                <Label htmlFor="panel-creds-user" className="text-xs font-semibold text-muted-foreground">Username</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="panel-creds-user"
+                    value={creds.username}
+                    readOnly
+                    className="font-mono text-xs bg-muted/40 select-all"
+                  />
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="shrink-0"
+                    onClick={() => {
+                      navigator.clipboard.writeText(creds.username);
+                      toast({ title: "Username copied to clipboard" });
+                    }}
+                  >
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+
+              {creds.password && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="panel-creds-pass" className="text-xs font-semibold text-muted-foreground">Password</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="panel-creds-pass"
+                      type={showPassword ? "text" : "password"}
+                      value={creds.password}
+                      readOnly
+                      className="font-mono text-xs bg-muted/40 select-all"
+                    />
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="shrink-0"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="shrink-0"
+                      onClick={() => {
+                        navigator.clipboard.writeText(creds.password || "");
+                        toast({ title: "Password copied to clipboard" });
+                      }}
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+            <DialogFooter className="flex sm:justify-between items-center gap-2">
+              <div className="text-xs text-muted-foreground italic sm:text-left flex-1">
+                Copy credentials before proceeding.
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <Button variant="ghost" size="sm" onClick={() => setCredsDialogOpen(false)}>
+                  Dismiss
+                </Button>
+                {creds.url && (
+                  <Button
+                    size="sm"
+                    className="gap-1.5 bg-gradient-to-r from-primary to-primary/95 hover:from-primary/95 hover:to-primary/90 text-primary-foreground border-0 transition-all duration-200"
+                    onClick={() => {
+                      window.open(creds.url, "_blank", "noopener,noreferrer");
+                      setCredsDialogOpen(false);
+                    }}
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    Go to Panel
+                  </Button>
+                )}
+              </div>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );

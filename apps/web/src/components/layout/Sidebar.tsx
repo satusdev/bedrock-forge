@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth.store";
 import { useUiStore } from "@/store/ui.store";
@@ -142,18 +142,19 @@ function NavItem({
   collapsed: boolean;
   minRole?: string;
 }) {
+  const location = useLocation();
+  const isActive = to === "/" ? location.pathname === "/" : location.pathname.startsWith(to);
+
   const link = (
     <NavLink
       to={to}
-      className={({ isActive }) =>
-        cn(
-          "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors relative group",
-          collapsed ? "justify-center px-2" : "",
-          isActive
-            ? "bg-primary text-primary-foreground"
-            : "text-muted-foreground hover:bg-accent hover:text-foreground",
-        )
-      }
+      className={cn(
+        "flex items-center text-sm font-medium transition-colors relative group w-full",
+        collapsed ? "justify-center px-0 py-3 rounded-none" : "rounded-md gap-3 px-3 py-2",
+        isActive
+          ? "bg-primary text-primary-foreground"
+          : "text-muted-foreground hover:bg-accent hover:text-foreground",
+      )}
     >
       <Icon className="h-4 w-4 shrink-0" />
       {!collapsed && <span>{label}</span>}
@@ -196,10 +197,10 @@ export function SidebarInner({ collapsed = false }: SidebarInnerProps) {
         <div
           className={cn(
             "h-14 flex items-center border-b shrink-0",
-            collapsed ? "justify-center px-2" : "px-5",
+            collapsed ? "justify-center px-0" : "px-5",
           )}
         >
-          <div className="flex items-center gap-2.5 min-w-0">
+          <div className={cn("flex items-center min-w-0", collapsed ? "justify-center" : "gap-2.5")}>
             <div className="w-7 h-7 rounded-lg bg-primary text-primary-foreground flex items-center justify-center font-bold text-sm shrink-0">
               B
             </div>
@@ -211,12 +212,11 @@ export function SidebarInner({ collapsed = false }: SidebarInnerProps) {
           </div>
         </div>
 
-        {/* Nav */}
         <nav
           aria-label="Main navigation"
           className={cn(
             "flex-1 py-3 overflow-y-auto",
-            collapsed ? "px-2 scrollbar-none" : "px-3 sidebar-scrollbar",
+            collapsed ? "px-0 scrollbar-none" : "px-3 sidebar-scrollbar",
           )}
         >
           {(() => {
@@ -262,8 +262,8 @@ export function SidebarInner({ collapsed = false }: SidebarInnerProps) {
         {/* Dark mode toggle */}
         <div
           className={cn(
-            "flex items-center py-3 gap-2",
-            collapsed ? "justify-center px-2" : "px-4",
+            "flex items-center py-3 w-full",
+            collapsed ? "justify-center px-0" : "gap-2 px-4",
           )}
         >
           {collapsed ? (
@@ -308,8 +308,8 @@ export function SidebarInner({ collapsed = false }: SidebarInnerProps) {
         {/* User info */}
         <div
           className={cn(
-            "flex items-center gap-3 py-3",
-            collapsed ? "justify-center px-2" : "px-4",
+            "flex items-center py-3 w-full",
+            collapsed ? "justify-center px-0" : "gap-3 px-4",
           )}
         >
           <div className="w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold shrink-0">
